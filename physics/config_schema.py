@@ -20,7 +20,7 @@ from __future__ import annotations
 import math
 import uuid
 from dataclasses import dataclass, field, fields, is_dataclass
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
 
 __all__ = [
     "G0", "R_AIR", "R_VAPOR", "MU0_ISA", "T0_ISA", "P0_ISA", "LAPSE_RATE_ISA",
@@ -99,25 +99,74 @@ def utc_now_iso() -> str:
 # --------------------------------------------------------------------------
 # (De)serialisation contract
 # --------------------------------------------------------------------------
+_HINT_CACHE: Dict[type, Dict[str, Any]] = {}
+
+
+def _resolved_hints(cls: type) -> Dict[str, Any]:
+    """Resolve a dataclass's annotations to real types.
+
+    ``from __future__ import annotations`` turns every ``__annotations__``
+    entry into a string, so ``Field.type`` cannot be compared against the
+    builtin types directly.  ``typing.get_type_hints`` evaluates them once and
+    the result is cached, which is what makes the coercion in
+    :func:`_coerce` (and therefore the type safety of the whole API) work.
+    """
+    cached = _HINT_CACHE.get(cls)
+    if cached is None:
+        import typing
+
+        try:
+            cached = typing.get_type_hints(cls)
+        except Exception:  # pragma: no cover - defensive
+            cached = {}
+        _HINT_CACHE[cls] = cached
+    return cached
+
+
 def _coerce(value: Any, annotation: Any, name: str) -> Any:
     """Best effort conversion of a JSON value into the annotated type."""
-    origin = getattr(annotation, "__origin__", None)
-    if annotation in (Any, None):
+    if annotation in (Any, None, "", "Any"):
         return value
-    if origin is not None:  # Optional[...] / List[...] / Tuple[...]
-        args = [a for a in getattr(annotation, "__args__", ()) if a is not type(None)]  # noqa: E721
+
+    origin = getattr(annotation, "__origin__", None)
+    args = tuple(getattr(annotation, "__args__", ()))
+
+    # Optional[X] / Union[X, None] -> unwrap to X
+    if origin is Union or str(origin) == "typing.Union" or origin is getattr(__import__("types"), "UnionType", None):
+        candidates = [a for a in args if a is not type(None)]  # noqa: E721
+        if len(candidates) == 1:
+            return _coerce(value, candidates[0], name)
+        return value
+
+    if origin is not None:
         if origin is tuple:
             if not args:
                 return tuple(value)
             if len(args) == 2 and args[1] is Ellipsis:
                 return tuple(_coerce(v, args[0], name) for v in value)
             return tuple(_coerce(v, a, name) for v, a in zip(value, args))
-        inner = args[0] if args else Any
-        if inner is Any:
-            return value
-        if isinstance(value, list):
+        if origin is list:
+            inner = args[0] if args else Any
+            if not isinstance(value, (list, tuple)):
+                return value
             return [_coerce(v, inner, name) for v in value]
-        return _coerce(value, inner, name)
+        if origin is dict:
+            key_type = args[0] if len(args) == 2 else Any
+            value_type = args[1] if len(args) == 2 else Any
+            if not isinstance(value, dict):
+                return value
+            return {
+                _coerce(k, key_type, name): _coerce(v, value_type, name)
+                for k, v in value.items()
+            }
+        if origin is set:
+            inner = args[0] if args else Any
+            if not isinstance(value, (list, tuple, set)):
+                return value
+            return {_coerce(v, inner, name) for v in value}
+        # Unknown generic container: leave the payload untouched.
+        return value
+
     if annotation is float:
         return float(value)
     if annotation is int:
@@ -161,9 +210,10 @@ def from_dict(cls: Any, data: Optional[Dict[str, Any]], strict: bool = False) ->
                 f"allowed: {', '.join(sorted(known))}"
             )
     kwargs: Dict[str, Any] = {}
+    hints = _resolved_hints(cls)
     for name, spec in known.items():
         if name in payload:
-            kwargs[name] = _coerce(payload[name], spec.type, name)
+            kwargs[name] = _coerce(payload[name], hints.get(name, spec.type), name)
     return cls(**kwargs)
 
 
@@ -195,11 +245,16 @@ class AircraftConfig:
     fold_trailing_deg: float = 15.0
     fold_tip_deg: float = 0.0
     fold_center_deg: float = 0.0
-    elevon_deg: float = 8.0
+    elevon_deg: float = 2.0
     elevon_chord_ratio: float = 0.22
 
     # --- section / lift curve -------------------------------------------
-    cL0: float = 0.10
+    # cL0 / cm0 are calibrated together so the default airframe trims at a
+    # *positive* angle of attack with positive lift (cm0 > 0 and cm_alpha < 0
+    # give alpha_trim = -cm0/cm_alpha > 0).  With cL0 = 0.10 / cm0 = -0.06 the
+    # trim sat at -3.8 deg, where the lift coefficient is negative and the
+    # glider cannot recover -- it dived into the ground in ~0.7 s.
+    cL0: float = 0.12
     cLalpha_per_rad: float = 0.0  # 0 -> Helmbold triangular-wing estimate
     cd0: float = 0.0200
     oswald_e: float = 0.75
@@ -210,21 +265,23 @@ class AircraftConfig:
     re_cd0_exponent: float = 0.15
 
     # --- moments & stability --------------------------------------------
-    cm0: float = -0.060
+    cm0: float = 0.040
     cm_alpha: float = -0.90
     cm_q: float = -12.0
     cy_beta: float = -0.25
     cl_beta: float = -0.03
     cn_beta: float = 0.08
-    cl_roll_rate: float = 0.10
+    # Rate derivatives are *damping* terms: C_lp and C_nr must be negative or
+    # the roll/yaw modes become anti-damped and the airframe tumbles.
+    cl_roll_rate: float = -0.10
     cm_roll_rate: float = -0.02
     cn_roll_rate: float = -0.08
     cl_pitch_rate: float = -0.06
     cm_pitch_rate: float = 0.05
     cn_pitch_rate: float = -0.12
-    cl_yaw_rate: float = 0.08
+    cl_yaw_rate: float = -0.08
     cm_yaw_rate: float = 0.0
-    cn_yaw_rate: float = 0.15
+    cn_yaw_rate: float = -0.15
     static_margin: float = 0.12
     cg_offset_x: float = 0.0  # metres, + = aft
 
@@ -682,8 +739,12 @@ def derived_properties(cfg: AircraftConfig) -> Dict[str, float]:
     aspect = max(aspect, 1.0e-3)
     mean_chord = area / span
     taper = clamp(float(cfg.taper_ratio), 0.05, 1.0)
-    # mean aerodynamic chord of a linearly tapered wing
-    mac = (2.0 * span / 3.0) * (1.0 + taper + taper * taper) / (1.0 + taper)
+    # Mean aerodynamic chord of a linearly tapered wing:
+    #   MAC = (2/3) * b * c_root * (1 + L + L^2) / (1 + L)
+    # The root chord is not a config field, so it is recovered from the
+    # trapezoid area S = b * c_root * (1 + L) / 2.
+    root_chord = 2.0 * area / (span * (1.0 + taper))
+    mac = (2.0 * span / 3.0) * root_chord * (1.0 + taper + taper * taper) / (1.0 + taper)
     sheet_area = max(float(cfg.sheet_area_m2), 1.0e-9)
     mass = max(float(cfg.mass_kg), 1.0e-9)
     inertia_roll = mass * (span * span) / 12.0

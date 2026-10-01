@@ -1,0 +1,1022 @@
+"""Flask REST API for the 3D paper-airplane simulator.
+
+Integrates every physics domain behind the endpoints declared in AGENTS.md
+section 10 / prompt.md section 7.  All handlers follow the same contract:
+
+* a malformed or missing field yields HTTP 400 with a descriptive JSON body;
+* an unexpected failure yields HTTP 500 with the traceback written to the
+  server log;
+* every successful response is JSON and carries the ``backend`` field that
+  actually executed the computation (``"numpy"`` when no GPU is present).
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import logging
+import os
+import threading
+import traceback
+from typing import Any, Callable, Dict, Optional, Tuple
+
+from flask import Flask, Response, jsonify, request
+from werkzeug.utils import secure_filename
+
+from physics.config_schema import (
+    ALGORITHM_NAMES,
+    AIRCRAFT_SCHEMA,
+    DESIGN_VARIABLE_CATALOGUE,
+    ENVIRONMENT_SCHEMA,
+    LaunchConfig,
+    OBJECTIVE_DIRECTIONS,
+    OptimizerConfig,
+    SimulationSettings,
+    AircraftConfig,
+    EnvironmentConfig,
+    as_dict,
+    from_dict,
+    utc_now_iso,
+)
+from physics import job_manager as job_manager_module
+from physics import mesh_domain
+from physics import storage_domain
+from physics.job_manager import JOB_MANAGER
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)-8s %(name)s :: %(message)s",
+)
+log = logging.getLogger("paper_airplane")
+
+app = Flask(__name__, static_folder="static", template_folder="templates")
+app.config["JSON_SORT_KEYS"] = False
+app.config["MAX_CONTENT_LENGTH"] = 64 * 1024 * 1024
+
+
+# ---------------------------------------------------------------------------
+# Lazy domain access
+# ---------------------------------------------------------------------------
+_DOMAINS: Dict[str, Any] = {}
+
+
+def _domain(name: str) -> Any:
+    """Import a domain module on first use so a missing optional dependency
+    never breaks the whole application."""
+    if name in _DOMAINS:
+        return _DOMAINS[name]
+    import importlib
+
+    try:
+        module = importlib.import_module(f"physics.{name}")
+    except Exception as exc:  # pragma: no cover - surfaced as HTTP 503
+        log.error("domain '%s' unavailable: %s", name, exc)
+        raise ServiceUnavailable(f"physics domain '{name}' is unavailable: {exc}") from exc
+    _DOMAINS[name] = module
+    return module
+
+
+class ServiceUnavailable(RuntimeError):
+    """Raised when an optional backend module cannot be imported."""
+
+
+class BadRequest(ValueError):
+    """Raised by handlers for any client-side input problem."""
+
+
+# ---------------------------------------------------------------------------
+# Error handling
+# ---------------------------------------------------------------------------
+def _error(message: str, status: int = 400) -> Tuple[Response, int]:
+    return jsonify({"error": str(message), "status": status, "timestamp": utc_now_iso()}), status
+
+
+@app.errorhandler(BadRequest)
+def _handle_bad_request(exc: BadRequest):
+    return _error(exc, 400)
+
+
+@app.errorhandler(ServiceUnavailable)
+def _handle_unavailable(exc: ServiceUnavailable):
+    return _error(exc, 503)
+
+
+@app.errorhandler(404)
+def _handle_404(_exc):
+    return _error("resource not found", 404)
+
+
+@app.errorhandler(405)
+def _handle_405(_exc):
+    return _error("method not allowed for this endpoint", 405)
+
+
+@app.errorhandler(Exception)
+def _handle_unexpected(exc: Exception):
+    log.error("unhandled error on %s: %s\n%s", request.path, exc, traceback.format_exc())
+    return _error(f"internal server error: {exc}", 500)
+
+
+# ---------------------------------------------------------------------------
+# Request helpers
+# ---------------------------------------------------------------------------
+def body() -> Dict[str, Any]:
+    """Parse the JSON body, tolerating an absent or non-object payload."""
+    if not request.data:
+        return {}
+    try:
+        payload = request.get_json(force=True, silent=False)
+    except Exception as exc:
+        raise BadRequest(f"request body is not valid JSON: {exc}") from exc
+    if payload is None:
+        return {}
+    if not isinstance(payload, dict):
+        raise BadRequest("request body must be a JSON object")
+    return payload
+
+
+def require(payload: Dict[str, Any], key: str) -> Any:
+    if key not in payload:
+        raise BadRequest(f"missing required field '{key}'")
+    return payload[key]
+
+
+def as_float(value: Any, key: str) -> float:
+    try:
+        out = float(value)
+    except (TypeError, ValueError) as exc:
+        raise BadRequest(f"field '{key}' must be a number, got {value!r}") from exc
+    if out != out or out in (float("inf"), float("-inf")):
+        raise BadRequest(f"field '{key}' must be finite")
+    return out
+
+
+def build(cfg_cls, payload: Optional[Dict[str, Any]], base: Any = None):
+    """Merge a partial payload onto ``base`` (or the class defaults)."""
+    current = as_dict(base) if base is not None else {}
+    current.update(payload or {})
+    try:
+        return from_dict(cfg_cls, current, strict=False)
+    except Exception as exc:
+        raise BadRequest(f"invalid {cfg_cls.__name__} payload: {exc}") from exc
+
+
+# ---------------------------------------------------------------------------
+# Session state
+# ---------------------------------------------------------------------------
+class Session:
+    """Server-side simulation state shared by the step/reset endpoints."""
+
+    def __init__(self) -> None:
+        self.lock = threading.RLock()
+        self.aircraft = AircraftConfig()
+        self.environment = EnvironmentConfig()
+        self.launch = LaunchConfig()
+        self.settings = SimulationSettings()
+        self.simulator: Any = None
+        self.mesh_model_id: str = ""
+        self.selected_mesh: Any = None
+
+    # -- configuration ---------------------------------------------------
+    def set_aircraft(self, cfg: AircraftConfig) -> None:
+        self.aircraft = cfg
+        self.simulator = None
+
+    def set_environment(self, cfg: EnvironmentConfig) -> None:
+        self.environment = cfg
+        if self.simulator is not None:
+            try:
+                self.simulator.environment = cfg
+            except Exception:  # pragma: no cover
+                self.simulator = None
+
+    def set_launch(self, cfg: LaunchConfig) -> None:
+        self.launch = cfg
+        self.simulator = None
+
+    def set_settings(self, cfg: SimulationSettings) -> None:
+        self.settings = cfg
+        if self.simulator is not None:
+            try:
+                self.simulator.settings = cfg
+            except Exception:  # pragma: no cover
+                self.simulator = None
+
+    # -- simulator -------------------------------------------------------
+    def simulator_instance(self):
+        with self.lock:
+            if self.simulator is None:
+                flight = _domain("flight_sim")
+                self.simulator = flight.FlightSimulator(
+                    aircraft=self.aircraft,
+                    environment=self.environment,
+                    launch=self.launch,
+                    settings=self.settings,
+                )
+            return self.simulator
+
+    def reset(self) -> Any:
+        with self.lock:
+            sim = self.simulator_instance()
+            return sim.reset(launch=self.launch)
+
+    def current_snapshot(self) -> Dict[str, Any]:
+        return {
+            "aircraft": as_dict(self.aircraft),
+            "environment": as_dict(self.environment),
+            "launch": as_dict(self.launch),
+            "simulation": as_dict(self.settings),
+            "selected_mesh_model_id": self.mesh_model_id,
+        }
+
+
+SESSION = Session()
+
+#: In-process store of optimiser results, keyed by job_id, so
+#: ``GET /api/v1/optimizer/result/<job_id>`` can serve the full payload.
+RESULT_CACHE: Dict[str, Dict[str, Any]] = {}
+RESULT_CACHE_LIMIT = 32
+
+
+# ---------------------------------------------------------------------------
+# Schema / metadata
+# ---------------------------------------------------------------------------
+@app.get("/api/v1/meta/schemas")
+def meta_schemas():
+    """Single source of truth for the UI sliders, objective list and ranges."""
+    return jsonify(
+        {
+            "aircraft": AIRCRAFT_SCHEMA,
+            "environment": ENVIRONMENT_SCHEMA,
+            "objectives": [
+                {"name": name, "direction": direction}
+                for name, direction in OBJECTIVE_DIRECTIONS.items()
+            ],
+            "algorithms": list(ALGORITHM_NAMES),
+            "design_variables": [as_dict(v) for v in DESIGN_VARIABLE_CATALOGUE],
+            "design_variable_catalogue": [as_dict(v) for v in DESIGN_VARIABLE_CATALOGUE],
+            "backend": "numpy",
+        }
+    )
+
+
+@app.get("/api/v1/meta/health")
+def meta_health():
+    domains = {}
+    for name in (
+        "aero_domain",
+        "atmosphere_domain",
+        "wind_domain",
+        "stress_domain",
+        "mesh_domain",
+        "flight_sim",
+        "parallel_engine",
+        "optimizer_domain",
+        "job_manager",
+        "storage_domain",
+    ):
+        try:
+            _domain(name)
+            domains[name] = "ok"
+        except ServiceUnavailable as exc:
+            domains[name] = str(exc)
+    return jsonify({"status": "ok", "domains": domains, "timestamp": utc_now_iso()})
+
+
+# ---------------------------------------------------------------------------
+# 1. Aerodynamics
+# ---------------------------------------------------------------------------
+@app.post("/api/v1/aerodynamics/calculate")
+def aerodynamics_calculate():
+    aero = _domain("aero_domain")
+    payload = body()
+    cfg = build(AircraftConfig, payload.get("aircraft"), SESSION.aircraft)
+    env = merge_environment(payload.get("environment"), SESSION.environment)
+
+    speed = as_float(payload.get("speed_mps", 10.0), "speed_mps")
+    if speed < 0.0:
+        raise BadRequest("field 'speed_mps' must be >= 0")
+    alpha = as_float(payload.get("alpha_deg", 0.0), "alpha_deg")
+    beta = as_float(payload.get("beta_deg", 0.0), "beta_deg")
+    mach = as_float(payload.get("mach", 0.0), "mach")
+    reynolds = payload.get("reynolds")
+    reynolds = None if reynolds is None else as_float(reynolds, "reynolds")
+    ground_height = as_float(payload.get("ground_height_m", 1.0), "ground_height_m")
+    angular_rate = payload.get("angular_rate", (0.0, 0.0, 0.0))
+
+    result = aero.evaluate_aero(
+        cfg=cfg,
+        env=env,
+        speed_mps=speed,
+        alpha_deg=alpha,
+        beta_deg=beta,
+        mach=mach,
+        reynolds=reynolds,
+        ground_height_m=ground_height,
+        angular_rate=tuple(angular_rate),
+    )
+    payload_out = as_dict(result)
+    payload_out["backend"] = "numpy"
+    payload_out["aircraft"] = as_dict(cfg)
+    return jsonify(payload_out)
+
+
+@app.post("/api/v1/aerodynamics/polar")
+def aerodynamics_polar():
+    aero = _domain("aero_domain")
+    payload = body()
+    cfg = build(AircraftConfig, payload.get("aircraft"), SESSION.aircraft)
+
+    alpha_min = as_float(payload.get("alpha_min_deg", -8.0), "alpha_min_deg")
+    alpha_max = as_float(payload.get("alpha_max_deg", 20.0), "alpha_max_deg")
+    if alpha_max <= alpha_min:
+        raise BadRequest("'alpha_max_deg' must be greater than 'alpha_min_deg'")
+    points = int(payload.get("points", 57))
+    if points < 2 or points > 2001:
+        raise BadRequest("'points' must be between 2 and 2001")
+    reynolds = as_float(payload.get("reynolds", 1.0e4), "reynolds")
+
+    result = aero.drag_polar(
+        cfg=cfg,
+        alpha_min_deg=alpha_min,
+        alpha_max_deg=alpha_max,
+        points=points,
+        reynolds=reynolds,
+    )
+    out = dict(result)
+    out["backend"] = "numpy"
+    return jsonify(out)
+
+
+# ---------------------------------------------------------------------------
+# 2. Environment / atmosphere
+# ---------------------------------------------------------------------------
+def _atmosphere_payload(env: EnvironmentConfig, chord: float) -> Dict[str, Any]:
+    atmosphere = _domain("atmosphere_domain")
+    data = dict(atmosphere.evaluate_atmosphere(env, reference_chord_m=chord))
+    data.setdefault("backend", "numpy")
+    data["environment"] = as_dict(env)
+    return data
+
+
+def merge_environment(payload: Optional[Dict[str, Any]], base: EnvironmentConfig) -> EnvironmentConfig:
+    """Merge a partial environment update onto ``base`` and clamp the result.
+
+    Supplying ``temperature_K`` or ``pressure_Pa`` implicitly switches
+    ``isa_mode`` off unless the caller states it explicitly, so a UI slider
+    move always reaches the next integration step instead of being silently
+    overridden by the ISA profile (prompt.md 2.1).
+    """
+    payload = dict(payload or {})
+    merged = as_dict(base)
+    if not payload.get("isa_mode") and (
+        "temperature_K" in payload or "pressure_Pa" in payload
+    ):
+        payload["isa_mode"] = False
+    merged.update(payload)
+    try:
+        env = from_dict(EnvironmentConfig, merged, strict=False)
+    except Exception as exc:
+        raise BadRequest(f"invalid EnvironmentConfig payload: {exc}") from exc
+    return env.clamp_ranges()
+
+
+@app.post("/api/v1/environment/atmosphere")
+def environment_atmosphere():
+    env = merge_environment(body(), SESSION.environment)
+    SESSION.set_environment(env)
+    derived = _domain("aero_domain").derived_properties(SESSION.aircraft)
+    return jsonify(_atmosphere_payload(env, derived["ref_length_m"]))
+
+
+@app.get("/api/v1/environment/current")
+def environment_current():
+    derived = _domain("aero_domain").derived_properties(SESSION.aircraft)
+    return jsonify(_atmosphere_payload(SESSION.environment, derived["ref_length_m"]))
+
+
+@app.post("/api/v1/environment/config")
+def environment_config():
+    """Persist the airframe / launch / integrator configuration."""
+    payload = body()
+    with SESSION.lock:
+        if "aircraft" in payload:
+            SESSION.set_aircraft(build(AircraftConfig, payload["aircraft"]))
+        if "environment" in payload:
+            SESSION.set_environment(
+                merge_environment(payload["environment"], SESSION.environment)
+            )
+        if "launch" in payload:
+            SESSION.set_launch(build(LaunchConfig, payload["launch"]))
+        if "simulation" in payload:
+            SESSION.set_settings(build(SimulationSettings, payload["simulation"]))
+        return jsonify(SESSION.current_snapshot())
+
+
+# ---------------------------------------------------------------------------
+# 3. Wind field
+# ---------------------------------------------------------------------------
+@app.post("/api/v1/wind/field")
+def wind_field():
+    wind = _domain("wind_domain")
+    payload = body()
+
+    bounds_min = payload.get("bounds_min", [-2.0, -2.0, -0.5])
+    bounds_max = payload.get("bounds_max", [2.0, 2.0, 1.5])
+    if not (isinstance(bounds_min, (list, tuple)) and len(bounds_min) == 3):
+        raise BadRequest("'bounds_min' must be a 3-element list")
+    if not (isinstance(bounds_max, (list, tuple)) and len(bounds_max) == 3):
+        raise BadRequest("'bounds_max' must be a 3-element list")
+    if any(float(b) <= float(a) for a, b in zip(bounds_min, bounds_max)):
+        raise BadRequest("every entry of 'bounds_max' must exceed 'bounds_min'")
+
+    resolution = payload.get("resolution", 16)
+    if isinstance(resolution, (list, tuple)):
+        resolution = [int(v) for v in resolution]
+        if len(resolution) != 3 or any(v < 2 or v > 128 for v in resolution):
+            raise BadRequest("'resolution' list must hold 3 integers in [2, 128]")
+    else:
+        resolution = int(resolution)
+        if resolution < 2 or resolution > 64:
+            raise BadRequest("'resolution' must be an int in [2, 64] or a 3-list")
+
+    time_s = as_float(payload.get("time_s", 0.0), "time_s")
+    backend = str(payload.get("backend", "auto"))
+    if backend not in ("auto", "cupy", "torch", "numpy"):
+        raise BadRequest("'backend' must be one of auto, cupy, torch, numpy")
+
+    env = merge_environment(payload.get("environment"), SESSION.environment)
+    data = dict(
+        wind.wind_field(
+            bounds_min=bounds_min,
+            bounds_max=bounds_max,
+            resolution=resolution,
+            env=env,
+            time_s=time_s,
+            backend=backend,
+        )
+    )
+    data.setdefault("backend", wind.active_backend())
+    return jsonify(data)
+
+
+# ---------------------------------------------------------------------------
+# 4. Structural stress
+# ---------------------------------------------------------------------------
+@app.post("/api/v1/stress/analysis")
+def stress_analysis():
+    stress = _domain("stress_domain")
+    payload = body()
+    cfg = build(AircraftConfig, payload.get("aircraft"), SESSION.aircraft)
+    env = merge_environment(payload.get("environment"), SESSION.environment)
+
+    speed = as_float(payload.get("speed_mps", 10.0), "speed_mps")
+    if speed < 0.0:
+        raise BadRequest("field 'speed_mps' must be >= 0")
+    density = as_float(payload.get("density_kgm3", 1.225), "density_kgm3")
+    if density <= 0.0:
+        raise BadRequest("field 'density_kgm3' must be > 0")
+    spanwise = int(payload.get("spanwise", 24))
+    chordwise = int(payload.get("chordwise", 16))
+    if not (2 <= spanwise <= 256 and 2 <= chordwise <= 256):
+        raise BadRequest("'spanwise' and 'chordwise' must be within [2, 256]")
+    beta_deg = as_float(payload.get("beta_deg", 0.0), "beta_deg")
+    load = payload.get("load_factor")
+    load = None if load is None else as_float(load, "load_factor")
+
+    data = dict(
+        stress.analyse(
+            cfg=cfg,
+            env=env,
+            speed_mps=speed,
+            density_kgm3=density,
+            load_factor=load,
+            spanwise=spanwise,
+            chordwise=chordwise,
+            beta_deg=beta_deg,
+        )
+    )
+    data.setdefault("backend", "numpy")
+    return jsonify(data)
+
+
+# ---------------------------------------------------------------------------
+# 5. Simulation control
+# ---------------------------------------------------------------------------
+@app.post("/api/v1/simulation/step")
+def simulation_step():
+    flight = _domain("flight_sim")
+    payload = body()
+    dt = payload.get("dt")
+    if dt is not None:
+        dt = as_float(dt, "dt")
+        if not (1.0e-5 <= dt <= 2.0e-1):
+            raise BadRequest("'dt' must lie within [1e-5, 2e-1]")
+    substeps = payload.get("substeps")
+    substeps = None if substeps is None else int(substeps)
+
+    if payload.get("aircraft"):
+        SESSION.set_aircraft(build(AircraftConfig, payload["aircraft"]))
+    if payload.get("environment"):
+        SESSION.set_environment(
+            merge_environment(payload["environment"], SESSION.environment)
+        )
+    if payload.get("launch"):
+        SESSION.set_launch(build(LaunchConfig, payload["launch"]))
+    if payload.get("simulation"):
+        SESSION.set_settings(build(SimulationSettings, payload["simulation"]))
+
+    with SESSION.lock:
+        simulator = SESSION.simulator_instance()
+        result = simulator.step(dt=dt, substeps=substeps)
+    out = dict(result)
+    out.setdefault("backend", "numpy")
+    return jsonify(out)
+
+
+@app.post("/api/v1/simulation/reset")
+def simulation_reset():
+    payload = body()
+    with SESSION.lock:
+        if payload.get("aircraft"):
+            SESSION.set_aircraft(build(AircraftConfig, payload["aircraft"]))
+        if payload.get("environment"):
+            SESSION.set_environment(
+                merge_environment(payload["environment"], SESSION.environment)
+            )
+        if payload.get("launch"):
+            SESSION.set_launch(build(LaunchConfig, payload["launch"]))
+        if payload.get("simulation"):
+            SESSION.set_settings(build(SimulationSettings, payload["simulation"]))
+        SESSION.simulator = None
+        state = SESSION.reset()
+    return jsonify(
+        {
+            "state": as_dict(state),
+            **SESSION.current_snapshot(),
+            "backend": "numpy",
+            "timestamp": utc_now_iso(),
+        }
+    )
+
+
+@app.get("/api/v1/simulation/history")
+def simulation_history():
+    with SESSION.lock:
+        simulator = SESSION.simulator
+        if simulator is None:
+            raise BadRequest("no simulation has been started; POST /api/v1/simulation/reset first")
+        samples = [as_dict(s) for s in simulator.history()]
+        metrics = simulator.metrics()
+    return jsonify({"samples": samples, "metrics": metrics, "backend": "numpy"})
+
+
+@app.get("/api/v1/simulation/history/<int:index>")
+def simulation_history_frame(index: int):
+    with SESSION.lock:
+        simulator = SESSION.simulator
+        if simulator is None:
+            raise BadRequest("no simulation has been started")
+        sample = simulator.seek_frame(index)
+    if sample is None:
+        raise BadRequest(f"frame {index} is outside the ring buffer")
+    return jsonify({"sample": as_dict(sample), "backend": "numpy"})
+
+
+@app.post("/api/v1/simulation/batch")
+def simulation_batch():
+    parallel = _domain("parallel_engine")
+    payload = body()
+    cases = payload.get("cases")
+    if not isinstance(cases, list) or not cases:
+        raise BadRequest("'cases' must be a non-empty list of configurations")
+    if len(cases) > 512:
+        raise BadRequest("'cases' may contain at most 512 entries")
+    normalised = []
+    for index, case in enumerate(cases):
+        if not isinstance(case, dict):
+            raise BadRequest(f"cases[{index}] must be a JSON object")
+        normalised.append(
+            {
+                "aircraft": build(AircraftConfig, case.get("aircraft"), SESSION.aircraft).__dict__,
+                "environment": build(
+                    EnvironmentConfig, case.get("environment"), SESSION.environment
+                ).clamp_ranges().__dict__,
+                "launch": build(LaunchConfig, case.get("launch"), SESSION.launch).__dict__,
+                "duration_s": as_float(case.get("duration_s", 5.0), f"cases[{index}].duration_s"),
+                "dt_max": as_float(case.get("dt_max", 0.02), f"cases[{index}].dt_max"),
+            }
+        )
+    processes = int(payload.get("processes", 0))
+    results = parallel.parallel_evaluate(normalised, processes=processes)
+    return jsonify(
+        {
+            "count": len(results),
+            "results": results,
+            "backend": parallel.backend_name(processes),
+        }
+    )
+
+
+# ---------------------------------------------------------------------------
+# 6. Mesh import
+# ---------------------------------------------------------------------------
+@app.post("/api/v1/mesh/import")
+def mesh_import():
+    payload: Dict[str, Any] = {}
+    if request.files:
+        uploaded = request.files.get("file")
+        if uploaded is None or not uploaded.filename:
+            raise BadRequest("multipart upload must contain a 'file' field")
+        data = uploaded.read()
+        filename = secure_filename(uploaded.filename) or "model.glb"
+        metrics = mesh_domain.MESH_LIBRARY.import_model_bytes(
+            data=data,
+            filename=filename,
+            scale_hint=request.form.get("scale_hint", "m"),
+            cg_mode=request.form.get("cg_mode", "volume"),
+            paper_gsm=float(request.form.get("paper_gsm", 100.0)),
+        )
+    else:
+        payload = body()
+        if "url" in payload and payload["url"]:
+            url = str(payload["url"])
+            if not url.lower().startswith(("http://", "https://")):
+                raise BadRequest("'url' must start with http:// or https://")
+            metrics = mesh_domain.MESH_LIBRARY.import_model_url(
+                url=url,
+                scale_hint=str(payload.get("scale_hint", "m")),
+                cg_mode=str(payload.get("cg_mode", "volume")),
+                paper_gsm=float(payload.get("paper_gsm", 100.0)),
+                overrides=payload.get("overrides"),
+            )
+        else:
+            data = payload.get("data_base64")
+            if not data:
+                raise BadRequest("provide a multipart 'file', a 'url', or 'data_base64'")
+            import base64
+
+            try:
+                raw = base64.b64decode(data, validate=True)
+            except Exception as exc:
+                raise BadRequest(f"'data_base64' is not valid base64: {exc}") from exc
+            metrics = mesh_domain.MESH_LIBRARY.import_model_bytes(
+                data=raw,
+                filename=str(payload.get("filename", "model.glb")),
+                scale_hint=str(payload.get("scale_hint", "m")),
+                cg_mode=str(payload.get("cg_mode", "volume")),
+                paper_gsm=float(payload.get("paper_gsm", 100.0)),
+                overrides=payload.get("overrides"),
+            )
+    with SESSION.lock:
+        SESSION.mesh_model_id = metrics.model_id
+        SESSION.selected_mesh = metrics
+        SESSION.set_aircraft(mesh_domain.MESH_LIBRARY.to_aircraft_config(metrics.model_id, SESSION.aircraft))
+    return jsonify(as_dict(metrics))
+
+
+@app.get("/api/v1/mesh/models")
+def mesh_models():
+    models = mesh_domain.MESH_LIBRARY.list_models()
+    selected = mesh_domain.MESH_LIBRARY.selected()
+    return jsonify(
+        {
+            "models": models,
+            "count": len(models),
+            "selected": selected.model_id if selected else None,
+        }
+    )
+
+
+@app.post("/api/v1/mesh/select")
+def mesh_select():
+    payload = body()
+    model_id = str(require(payload, "model_id"))
+    try:
+        metrics = mesh_domain.MESH_LIBRARY.select(model_id)
+    except KeyError as exc:
+        raise BadRequest(f"unknown model_id '{model_id}'") from exc
+    with SESSION.lock:
+        SESSION.mesh_model_id = metrics.model_id
+        SESSION.selected_mesh = metrics
+        SESSION.set_aircraft(mesh_domain.MESH_LIBRARY.to_aircraft_config(model_id, SESSION.aircraft))
+    return jsonify(as_dict(metrics))
+
+
+@app.get("/api/v1/mesh/metrics/<model_id>")
+def mesh_metrics(model_id: str):
+    try:
+        metrics = mesh_domain.MESH_LIBRARY.get_metrics(model_id)
+    except KeyError as exc:
+        raise BadRequest(f"unknown model_id '{model_id}'") from exc
+    return jsonify(as_dict(metrics))
+
+
+@app.post("/api/v1/mesh/overrides/<model_id>")
+def mesh_overrides(model_id: str):
+    payload = body()
+    overrides = payload.get("overrides", payload)
+    if not isinstance(overrides, dict):
+        raise BadRequest("'overrides' must be a JSON object")
+    try:
+        metrics = mesh_domain.MESH_LIBRARY.apply_overrides(model_id, overrides)
+    except KeyError as exc:
+        raise BadRequest(f"unknown model_id '{model_id}'") from exc
+    return jsonify(as_dict(metrics))
+
+
+# ---------------------------------------------------------------------------
+# 7. Optimizer
+# ---------------------------------------------------------------------------
+def _optimizer_config(payload: Dict[str, Any]) -> OptimizerConfig:
+    raw = dict(payload)
+    objectives: list[Dict[str, Any]] = raw.get("objectives") or []
+    names: list[str] = []
+    weights: Dict[str, float] = {}
+    if isinstance(objectives, list):
+        for item in objectives:
+            if isinstance(item, str):
+                names.append(item)
+                weights.setdefault(item, 1.0)
+            elif isinstance(item, dict):
+                name = str(item.get("name", ""))
+                if name:
+                    names.append(name)
+                    weights[name] = float(item.get("weight", 1.0))
+    elif isinstance(objectives, dict):
+        for name, weight in objectives.items():
+            names.append(str(name))
+            weights[str(name)] = float(weight)
+
+    unknown = [n for n in names if n not in OBJECTIVE_DIRECTIONS]
+    if unknown:
+        raise BadRequest(f"unknown objective(s): {', '.join(unknown)}")
+    if not names:
+        raise BadRequest("at least one objective is required")
+
+    algorithm = str(raw.get("algorithm", "differential-evolution"))
+    if algorithm not in ALGORITHM_NAMES:
+        raise BadRequest(f"'algorithm' must be one of {', '.join(ALGORITHM_NAMES)}")
+
+    base = as_dict(SESSION.aircraft)
+    base.update(raw.get("aircraft", {}) or {})
+    env = as_dict(SESSION.environment)
+    env.update(raw.get("environment", {}) or {})
+    launch = as_dict(SESSION.launch)
+    launch.update(raw.get("launch", {}) or {})
+
+    variable_bounds = raw.get("variable_bounds") or {}
+    if not isinstance(variable_bounds, dict):
+        raise BadRequest("'variable_bounds' must be a JSON object")
+    for key, bounds in variable_bounds.items():
+        if not (isinstance(bounds, (list, tuple)) and len(bounds) == 2):
+            raise BadRequest(f"variable_bounds['{key}'] must be a [low, high] pair")
+        if float(bounds[0]) > float(bounds[1]):
+            raise BadRequest(f"variable_bounds['{key}'] low must not exceed high")
+
+    try:
+        cfg = OptimizerConfig(
+            objectives=names,
+            weights=weights,
+            algorithm=algorithm,
+            design_variables=list(raw.get("design_variables") or []),
+            variable_bounds={k: (float(v[0]), float(v[1])) for k, v in variable_bounds.items()},
+            max_evaluations=int(raw.get("max_evaluations", 200)),
+            population_size=int(raw.get("population_size", 40)),
+            seed=int(raw.get("seed", 7)),
+            processes=int(raw.get("processes", 0)),
+            sim_duration_s=float(raw.get("sim_duration_s", 6.0)),
+            dt_max=float(raw.get("dt_max", 0.02)),
+            aircraft=from_dict(AircraftConfig, base, strict=False),
+            environment=from_dict(EnvironmentConfig, env, strict=False).clamp_ranges(),
+            launch=from_dict(LaunchConfig, launch, strict=False),
+        )
+    except BadRequest:
+        raise
+    except Exception as exc:
+        raise BadRequest(f"invalid optimizer configuration: {exc}") from exc
+
+    if cfg.max_evaluations < 1 or cfg.max_evaluations > 200000:
+        raise BadRequest("'max_evaluations' must be within [1, 200000]")
+    if cfg.design_variables:
+        try:
+            cfg.resolved_variables()
+        except KeyError as exc:
+            raise BadRequest(f"unknown design variable: {exc}") from exc
+    return cfg
+
+
+@app.post("/api/v1/optimizer/run")
+def optimizer_run():
+    payload = body()
+    cfg = _optimizer_config(payload)
+
+    optimizer = _domain("optimizer_domain")
+    dispatch = optimizer.ALGORITHM_DISPATCH
+    total = max(1, int(cfg.max_evaluations))
+    job = JOB_MANAGER.create(
+        name=f"{cfg.algorithm} optimizer",
+        total_evaluations=total,
+        backend=_domain("parallel_engine").backend_name(cfg.processes),
+        objectives=list(cfg.objectives),
+        algorithm=cfg.algorithm,
+        model_id=SESSION.mesh_model_id,
+    )
+    JOB_MANAGER.start(job.job_id)
+    cfg_dict = as_dict(cfg)
+
+    def progress_cb(evaluated: int, _total: int, _best: float) -> None:
+        try:
+            JOB_MANAGER.update(job.job_id, evaluated, total_evaluations=total)
+        except KeyError:
+            pass
+
+    def cancel_cb() -> bool:
+        return JOB_MANAGER.is_cancel_requested(job.job_id)
+
+    def worker() -> None:
+        try:
+            runner = dispatch[cfg_dict["algorithm"]]
+            result = runner(
+                optimizer.from_dict(OptimizerConfig, cfg_dict), progress_cb, cancel_cb
+            )
+            result["job_id"] = job.job_id
+            RESULT_CACHE[job.job_id] = result
+            while len(RESULT_CACHE) > RESULT_CACHE_LIMIT:
+                RESULT_CACHE.pop(next(iter(RESULT_CACHE)))
+            JOB_MANAGER.finish(job.job_id, message=f"{result['evaluations']} evaluations")
+        except Exception as exc:
+            log.error("optimizer job %s failed: %s\n%s", job.job_id, exc, traceback.format_exc())
+            try:
+                JOB_MANAGER.fail(job.job_id, str(exc))
+            except KeyError:
+                pass
+
+    thread = threading.Thread(target=worker, name=f"optimizer-{job.job_id}", daemon=True)
+    thread.start()
+    return jsonify(as_dict(JOB_MANAGER.get(job.job_id))), 202
+
+
+@app.get("/api/v1/optimizer/status/<job_id>")
+def optimizer_status(job_id: str):
+    try:
+        return jsonify(JOB_MANAGER.snapshot(job_id))
+    except KeyError as exc:
+        raise BadRequest(f"unknown job_id '{job_id}'") from exc
+
+
+@app.post("/api/v1/optimizer/cancel/<job_id>")
+def optimizer_cancel(job_id: str):
+    try:
+        JOB_MANAGER.request_cancel(job_id)
+        record = JOB_MANAGER.cancel(job_id)
+    except KeyError as exc:
+        raise BadRequest(f"unknown job_id '{job_id}'") from exc
+    return jsonify(as_dict(record))
+
+
+@app.get("/api/v1/optimizer/result/<job_id>")
+def optimizer_result(job_id: str):
+    try:
+        record = JOB_MANAGER.get(job_id)
+    except KeyError as exc:
+        raise BadRequest(f"unknown job_id '{job_id}'") from exc
+    if record.status not in ("completed", "cancelled"):
+        raise BadRequest(f"job '{job_id}' is {record.status}; no result available yet")
+
+    payload = RESULT_CACHE.get(job_id)
+    if payload is None:
+        payload = {
+            "job_id": job_id,
+            "algorithm": record.algorithm,
+            "status": record.status,
+            "message": record.message,
+            "note": "result payload is no longer retained in process; re-run to regenerate",
+        }
+    fmt = str(request.args.get("format", "json")).lower()
+    if fmt == "csv":
+        text, mimetype, filename = storage_domain.export_optimizer_result(payload, "csv")
+        return Response(text, mimetype=mimetype, headers={"Content-Disposition": f"attachment; filename={filename}"})
+    if fmt != "json":
+        raise BadRequest("'format' must be json or csv")
+    return jsonify(payload)
+
+
+@app.get("/api/v1/jobs")
+def jobs_list():
+    status = request.args.get("status")
+    records = JOB_MANAGER.list_jobs(status=status)
+    return jsonify(
+        {
+            "jobs": [JOB_MANAGER.snapshot(r.job_id) for r in records],
+            "count": len(records),
+            "active": JOB_MANAGER.active_count(),
+        }
+    )
+
+
+@app.post("/api/v1/jobs/join/<job_id>")
+def jobs_join(job_id: str):
+    timeout = as_float(request.args.get("timeout", 30.0), "timeout")
+    try:
+        record = JOB_MANAGER.join(job_id, timeout)
+    except KeyError as exc:
+        raise BadRequest(f"unknown job_id '{job_id}'") from exc
+    return jsonify(JOB_MANAGER.snapshot(record.job_id))
+
+
+# ---------------------------------------------------------------------------
+# 8. Data export / import
+# ---------------------------------------------------------------------------
+@app.post("/api/v1/data/export")
+def data_export():
+    payload = body()
+    kind = str(payload.get("kind", "flight")).lower()
+    fmt = str(payload.get("format", "csv")).lower()
+    if fmt not in ("csv", "json"):
+        raise BadRequest("'format' must be csv or json")
+
+    if kind == "flight":
+        samples = payload.get("samples")
+        if samples is None:
+            with SESSION.lock:
+                if SESSION.simulator is None:
+                    raise BadRequest(
+                        "no simulation history available; start one or pass 'samples' explicitly"
+                    )
+                samples = [as_dict(s) for s in SESSION.simulator.history()]
+        if not isinstance(samples, list):
+            raise BadRequest("'samples' must be a list of flight-log records")
+        text, mimetype, filename = storage_domain.export_flight_log(samples, fmt)
+    elif kind == "optimizer":
+        result = payload.get("result")
+        if result is None:
+            raise BadRequest("an optimizer 'result' payload is required for kind='optimizer'")
+        text, mimetype, filename = storage_domain.export_optimizer_result(result, fmt)
+    elif kind == "config":
+        bundle = payload.get("bundle") or SESSION.current_snapshot()
+        text, mimetype, filename = storage_domain.export_config(bundle, fmt)
+    else:
+        raise BadRequest("'kind' must be one of flight, optimizer, config")
+
+    if request.args.get("download") in ("1", "true", "yes"):
+        return Response(
+            text, mimetype=mimetype, headers={"Content-Disposition": f"attachment; filename={filename}"}
+        )
+    return jsonify({"filename": filename, "mimetype": mimetype, "payload": text})
+
+
+@app.post("/api/v1/data/import")
+def data_import():
+    payload = body()
+    bundle = payload.get("bundle", payload)
+    if not isinstance(bundle, dict):
+        raise BadRequest("'bundle' must be a JSON object")
+    try:
+        normalised = storage_domain.validate_config_bundle(bundle)
+    except ValueError as exc:
+        raise BadRequest(str(exc)) from exc
+
+    with SESSION.lock:
+        SESSION.set_aircraft(from_dict(AircraftConfig, normalised["aircraft"], strict=False))
+        SESSION.set_environment(
+            from_dict(EnvironmentConfig, normalised["environment"], strict=False).clamp_ranges()
+        )
+        SESSION.set_launch(from_dict(LaunchConfig, normalised["launch"], strict=False))
+        SESSION.set_settings(from_dict(SimulationSettings, normalised["simulation"], strict=False))
+        snapshot = SESSION.current_snapshot()
+    return jsonify({"ok": True, "bundle": snapshot})
+
+
+# ---------------------------------------------------------------------------
+# 9. UI entry point
+# ---------------------------------------------------------------------------
+@app.get("/")
+def index():
+    from flask import render_template
+
+    return render_template("index.html")
+
+
+@app.get("/healthz")
+def healthz():
+    return jsonify({"status": "ok"})
+
+
+# ---------------------------------------------------------------------------
+def create_app() -> Flask:
+    return app
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description="Paper airplane CFD simulator API")
+    parser.add_argument("--host", default="127.0.0.1")
+    parser.add_argument("--port", type=int, default=5000)
+    parser.add_argument("--debug", action="store_true")
+    args = parser.parse_args()
+    log.info("starting on http://%s:%d", args.host, args.port)
+    app.run(host=args.host, port=args.port, debug=args.debug, threaded=True)
+
+
+if __name__ == "__main__":
+    main()
