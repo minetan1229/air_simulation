@@ -1,0 +1,30 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.env
+
+node_modules/
+package-lock.json
+
+# Imported 3D assets and cached models
+models/
+*.glb
+*.gltf
+*.stl
+*.obj
+*.fbx
+
+# Simulation artefacts
+runs/
+jobs/
+*.csv
+!tests/**/*.csv
+smoke_*.json
+
+.pytest_cache/
+.coverage
+htmlcov/
+.vscode/
+.idea/
