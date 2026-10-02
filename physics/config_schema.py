@@ -261,7 +261,11 @@ class AircraftConfig:
     cl_max: float = 0.90
     stall_alpha_deg: float = 14.0
     stall_sharpness: float = 1.40
-    post_stall_slope: float = -0.35
+    # Post-stall lift falls from ~cl_max at the stall angle towards zero over
+    # the next ~30 deg, i.e. a slope of order -0.03 /deg.  A much steeper value
+    # (e.g. -0.35) drives |C_L| past 7 by 40 deg past stall, which is not
+    # physical and lets a tumbling airframe generate multi-weight forces.
+    post_stall_slope: float = -0.03
     re_cd0_exponent: float = 0.15
 
     # --- moments & stability --------------------------------------------

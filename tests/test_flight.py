@@ -669,7 +669,11 @@ def test_trajectory_responds_to_every_environment_change(glider_flight: dict):
     # energy is ever dissipated) and that it ends up higher than the baseline,
     # because it converted its excess kinetic energy into potential energy.
     assert dragless["status"] in ("flying", "timeout")
-    assert dragless["flight_time_s"] >= glider_flight["flight_time_s"]
+    # Both runs stop at the same `duration_s` cap, so compare with a tolerance
+    # rather than a bare >= (a 1-ULP round-off difference is not a regression).
+    assert dragless["flight_time_s"] == pytest.approx(
+        glider_flight["flight_time_s"], abs=1.0e-6
+    )
     assert dragless["max_altitude_m"] > glider_flight["max_altitude_m"]
 
 

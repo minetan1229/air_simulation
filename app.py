@@ -16,6 +16,7 @@ import argparse
 import json
 import logging
 import os
+import struct
 import threading
 import traceback
 from typing import Any, Callable, Dict, Optional, Tuple
@@ -111,6 +112,29 @@ def _handle_405(_exc):
     return _error("method not allowed for this endpoint", 405)
 
 
+@app.errorhandler(ValueError)
+def _handle_value_error(exc: ValueError):
+    """A domain raising ValueError means the payload was not usable.
+
+    Logged at WARNING so a genuine internal bug is still visible, but reported
+    to the client as 400 -- never as a 500.
+    """
+    log.warning("ValueError on %s: %s", request.path, exc)
+    return _error(f"invalid input: {exc}", 400)
+
+
+@app.errorhandler(OverflowError)
+def _handle_overflow(exc: OverflowError):
+    log.warning("OverflowError on %s: %s", request.path, exc)
+    return _error(f"numeric overflow for the given input: {exc}", 400)
+
+
+@app.errorhandler(ZeroDivisionError)
+def _handle_zero_division(exc: ZeroDivisionError):
+    log.warning("ZeroDivisionError on %s: %s", request.path, exc)
+    return _error(f"degenerate input caused a division by zero: {exc}", 400)
+
+
 @app.errorhandler(Exception)
 def _handle_unexpected(exc: Exception):
     log.error("unhandled error on %s: %s\n%s", request.path, exc, traceback.format_exc())
@@ -149,6 +173,34 @@ def as_float(value: Any, key: str) -> float:
     if out != out or out in (float("inf"), float("-inf")):
         raise BadRequest(f"field '{key}' must be finite")
     return out
+
+
+def as_int(value: Any, key: str) -> int:
+    """Parse an integer field, rejecting floats with a fractional part."""
+    if isinstance(value, bool):
+        return int(value)
+    try:
+        as_float(value, key)
+    except BadRequest as exc:
+        raise BadRequest(f"field '{key}' must be an integer, got {value!r}") from exc
+    out = int(float(value))
+    if float(value) != out:
+        raise BadRequest(f"field '{key}' must be a whole number, got {value!r}")
+    return out
+
+
+def as_vec3(value: Any, key: str) -> Tuple[float, float, float]:
+    if not isinstance(value, (list, tuple)) or len(value) != 3:
+        raise BadRequest(f"field '{key}' must be a 3-element list of numbers")
+    return tuple(as_float(v, f"{key}[{i}]") for i, v in enumerate(value))  # type: ignore[return-value]
+
+
+#: Physical sanity ceilings.  Values beyond these overflow the double-precision
+#: dynamic-pressure term (``0.5*rho*V**2``) and raise instead of returning a
+#: finite answer, so they are rejected as bad input rather than 500-ing.
+MAX_SPEED_MPS = 1500.0
+MAX_MACH = 0.99
+MAX_DENSITY = 50.0
 
 
 def build(cfg_cls, payload: Optional[Dict[str, Any]], base: Any = None):
@@ -296,13 +348,17 @@ def aerodynamics_calculate():
     speed = as_float(payload.get("speed_mps", 10.0), "speed_mps")
     if speed < 0.0:
         raise BadRequest("field 'speed_mps' must be >= 0")
+    if speed > MAX_SPEED_MPS:
+        raise BadRequest(f"field 'speed_mps' must be <= {MAX_SPEED_MPS:g} m/s")
     alpha = as_float(payload.get("alpha_deg", 0.0), "alpha_deg")
     beta = as_float(payload.get("beta_deg", 0.0), "beta_deg")
     mach = as_float(payload.get("mach", 0.0), "mach")
+    if not (0.0 <= mach <= MAX_MACH):
+        raise BadRequest(f"field 'mach' must lie within [0, {MAX_MACH:g}]")
     reynolds = payload.get("reynolds")
     reynolds = None if reynolds is None else as_float(reynolds, "reynolds")
     ground_height = as_float(payload.get("ground_height_m", 1.0), "ground_height_m")
-    angular_rate = payload.get("angular_rate", (0.0, 0.0, 0.0))
+    angular_rate = as_vec3(payload.get("angular_rate", (0.0, 0.0, 0.0)), "angular_rate")
 
     result = aero.evaluate_aero(
         cfg=cfg,
@@ -331,7 +387,7 @@ def aerodynamics_polar():
     alpha_max = as_float(payload.get("alpha_max_deg", 20.0), "alpha_max_deg")
     if alpha_max <= alpha_min:
         raise BadRequest("'alpha_max_deg' must be greater than 'alpha_min_deg'")
-    points = int(payload.get("points", 57))
+    points = as_int(payload.get("points", 57), "points")
     if points < 2 or points > 2001:
         raise BadRequest("'points' must be between 2 and 2001")
     reynolds = as_float(payload.get("reynolds", 1.0e4), "reynolds")
@@ -432,11 +488,13 @@ def wind_field():
 
     resolution = payload.get("resolution", 16)
     if isinstance(resolution, (list, tuple)):
-        resolution = [int(v) for v in resolution]
-        if len(resolution) != 3 or any(v < 2 or v > 128 for v in resolution):
+        if len(resolution) != 3:
+            raise BadRequest("'resolution' list must hold exactly 3 integers")
+        resolution = [as_int(v, "resolution") for v in resolution]
+        if any(v < 2 or v > 128 for v in resolution):
             raise BadRequest("'resolution' list must hold 3 integers in [2, 128]")
     else:
-        resolution = int(resolution)
+        resolution = as_int(resolution, "resolution")
         if resolution < 2 or resolution > 64:
             raise BadRequest("'resolution' must be an int in [2, 64] or a 3-list")
 
@@ -473,11 +531,15 @@ def stress_analysis():
     speed = as_float(payload.get("speed_mps", 10.0), "speed_mps")
     if speed < 0.0:
         raise BadRequest("field 'speed_mps' must be >= 0")
+    if speed > MAX_SPEED_MPS:
+        raise BadRequest(f"field 'speed_mps' must be <= {MAX_SPEED_MPS:g} m/s")
     density = as_float(payload.get("density_kgm3", 1.225), "density_kgm3")
     if density <= 0.0:
         raise BadRequest("field 'density_kgm3' must be > 0")
-    spanwise = int(payload.get("spanwise", 24))
-    chordwise = int(payload.get("chordwise", 16))
+    if density > MAX_DENSITY:
+        raise BadRequest(f"field 'density_kgm3' must be <= {MAX_DENSITY:g} kg/m3")
+    spanwise = as_int(payload.get("spanwise", 24), "spanwise")
+    chordwise = as_int(payload.get("chordwise", 16), "chordwise")
     if not (2 <= spanwise <= 256 and 2 <= chordwise <= 256):
         raise BadRequest("'spanwise' and 'chordwise' must be within [2, 256]")
     beta_deg = as_float(payload.get("beta_deg", 0.0), "beta_deg")
@@ -513,7 +575,9 @@ def simulation_step():
         if not (1.0e-5 <= dt <= 2.0e-1):
             raise BadRequest("'dt' must lie within [1e-5, 2e-1]")
     substeps = payload.get("substeps")
-    substeps = None if substeps is None else int(substeps)
+    substeps = None if substeps is None else as_int(substeps, "substeps")
+    if substeps is not None and not (1 <= substeps <= 4096):
+        raise BadRequest("'substeps' must lie within [1, 4096]")
 
     if payload.get("aircraft"):
         SESSION.set_aircraft(build(AircraftConfig, payload["aircraft"]))
@@ -623,6 +687,17 @@ def simulation_batch():
 # ---------------------------------------------------------------------------
 @app.post("/api/v1/mesh/import")
 def mesh_import():
+    try:
+        return _mesh_import_inner()
+    except BadRequest:
+        raise
+    except (ValueError, KeyError, UnicodeDecodeError, IndexError, struct.error) as exc:
+        # Parsers reject malformed payloads with ValueError; that is a client
+        # input problem, not a server fault.
+        raise BadRequest(f"could not import model: {exc}") from exc
+
+
+def _mesh_import_inner():
     payload: Dict[str, Any] = {}
     if request.files:
         uploaded = request.files.get("file")

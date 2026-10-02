@@ -17,6 +17,7 @@ from dataclasses import fields
 
 import pytest
 
+from physics import aero_domain
 from physics.aero_domain import (
     ELEVON_LIFT_PER_DEG,
     ELEVON_MOMENT_PER_DEG,
@@ -34,6 +35,7 @@ from physics.aero_domain import (
     elevon_effects,
     evaluate_aero,
     evaluate_aero_state,
+    flat_plate_lift_coefficient,
     ground_effect_factor,
     helmbold_cl_alpha,
     lift_coefficient,
@@ -839,3 +841,69 @@ def test_result_polar_minima_match_the_closed_form(cfg: AircraftConfig, env: Env
     minima = drag_polar_minima(cfg, result.reynolds, zero_lift, free_slope)
     assert result.cd_min == pytest.approx(minima["cd_min"], rel=1e-12)
     assert result.alpha_ld_max_deg == pytest.approx(minima["alpha_ld_max_deg"], rel=1e-12)
+
+# ==========================================================================
+# 15. Post-stall boundedness (regression: unbounded lift reached the solver)
+# ==========================================================================
+def test_flat_plate_lift_is_bounded_and_vanishes_at_ninety_degrees():
+    # Hoerner flat plate 2 sin a cos^2 a: zero at +-90 deg (broadside), and an
+    # exact interior peak at tan(a) = 1/sqrt(2), i.e. a = 35.264 deg, where the
+    # value is 2*sin*cos^2 = 0.76980.
+    assert flat_plate_lift_coefficient(90.0) == pytest.approx(0.0, abs=1e-12)
+    assert flat_plate_lift_coefficient(-90.0) == pytest.approx(0.0, abs=1e-12)
+    peak_alpha, peak_value = max(
+        ((alpha, flat_plate_lift_coefficient(alpha)) for alpha in range(0, 91)),
+        key=lambda pair: pair[1],
+    )
+    assert 33 <= peak_alpha <= 38
+    assert peak_value == pytest.approx(0.7698, abs=2.0e-3)
+    # Closed form: with tan(a) = 1/sqrt(2), sin = 1/sqrt(3), cos^2 = 2/3.
+    assert peak_value == pytest.approx(2.0 * (1.0 / math.sqrt(3.0)) * (2.0 / 3.0), abs=2e-3)
+
+
+def test_lift_coefficient_is_bounded_for_every_attitude():
+    # A tumbling airframe used to reach |C_L| ~ 56 (a 4x-weight lift force),
+    # which cancelled gravity in vertical free fall and let the optimiser
+    # exploit "fly backwards for free lift".
+    for slope in (-0.35, -0.03):
+        airframe = AircraftConfig(post_stall_slope=slope)
+        for tenth in range(-7200, 7201):
+            alpha = tenth / 10.0
+            assert abs(lift_coefficient(alpha, airframe)) <= (
+                aero_domain.MAX_ABS_LIFT_COEFFICIENT + 1e-9
+            )
+
+
+def test_post_stall_stays_bounded_under_the_steepest_slope():
+    # post_stall_slope = -0.35/deg is far steeper than physical; the tanh
+    # saturation must keep it finite *and* strictly monotonic so the
+    # "lift strictly decreases past stall" property is preserved.
+    airframe = AircraftConfig(post_stall_slope=-0.35)
+    values = [lift_coefficient(19.0 + i * 0.25, airframe, compressible=False) for i in range(80)]
+    assert all(later < earlier for earlier, later in zip(values, values[1:]))
+    assert abs(values[-1]) <= aero_domain.MAX_ABS_LIFT_COEFFICIENT + 1e-9
+
+
+def test_zero_lift_airframe_stays_zero_past_stall():
+    # A deliberately quiescent airframe (cl_max=0, no slope) must not acquire
+    # lift from the deep-stall flat-plate term.
+    quiescent = AircraftConfig(
+        cL0=0.0, cLalpha_per_rad=1.0e-9, cd0=0.0, cl_max=0.0, post_stall_slope=0.0
+    )
+    worst = max(abs(lift_coefficient(t / 2.0, quiescent)) for t in range(-1440, 1441))
+    assert worst < 1.0e-6, f"quiescent airframe produced |C_L|={worst:.3e}"
+
+
+def test_post_stall_is_continuous_with_the_linear_branch():
+    airframe = AircraftConfig()
+    stall = airframe.stall_alpha_deg
+    below = lift_coefficient(stall - 0.05, airframe, compressible=False)
+    above = lift_coefficient(stall + 0.05, airframe, compressible=False)
+    # No jump: the stall break must be a slope change, not a discontinuity.
+    assert abs(above - below) < 0.05 * abs(below) + 1.0e-3
+    assert lift_coefficient(stall, airframe, compressible=False) == pytest.approx(
+        airframe.cL0 + helmbold_cl_alpha(
+            derived_properties(airframe)["aspect_ratio"], airframe.taper_ratio
+        ) * math.radians(stall),
+        rel=2.0e-2,
+    )

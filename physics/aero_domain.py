@@ -288,6 +288,69 @@ def stall_blend_weight(alpha_deg: float, cfg: AircraftConfig) -> float:
     return _logistic(sharpness * offset) ** STALL_BLEND_ORDER
 
 
+def flat_plate_lift_coefficient(alpha_deg: float) -> float:
+    """Hoerner fully-separated flat-plate lift coefficient ``2 sin a cos^2 a``.
+
+    This is the correct limit once the flow is completely separated: the lift
+    peaks at ``2*sin(35.26 deg)*cos^2(35.26 deg) = 0.7698`` and returns to
+    **zero** at 90 deg, because a plate broadside to the flow carries no normal
+    force.  Unlike a linear post-stall ramp it is bounded, which is what keeps
+    the force model finite when the airframe tumbles (a body in vertical free
+    fall sits at alpha=90).
+    """
+    a = deg2rad(_finite(alpha_deg))
+    return 2.0 * math.sin(a) * math.cos(a) * math.cos(a)
+
+
+#: Beyond this |alpha| the unbounded linear post-stall ramp is progressively
+#: replaced by the flat-plate curve; by 85 deg only the flat plate remains.
+POST_STALL_BLEND_START_DEG = 45.0
+POST_STALL_BLEND_END_DEG = 85.0
+
+#: Hard ceiling on |C_L|.  A thin aerofoil section cannot exceed roughly
+#: 2*sin(a)*cos^2(a) + a modest attached-flow contribution, so anything beyond
+#: this is numerical, not physical, and is clipped.
+MAX_ABS_LIFT_COEFFICIENT = 4.0
+
+
+def _post_stall_lift_coefficient(alpha: float, cfg: AircraftConfig, linear_at_stall: float) -> float:
+    """Bounded post-stall lift, anchored to the airframe's own lift curve.
+
+    Both post-stall branches start from ``linear_at_stall`` -- the value of the
+    attached-flow line ``cL0 + C_Lalpha alpha`` evaluated at the stall angle --
+    so the post-stall model is continuous with the linear one *and* inherits the
+    airframe's lift scale.  Anchoring on ``cfg.cl_max`` instead would hand a
+    configured ``cl_max=0`` airframe a large lift as soon as it left the linear
+    regime, which is not physical and silently animates "quiescent" test cases.
+
+    The ramp is compressed with a ``tanh`` saturation, which is strictly
+    monotonic (so "lift strictly decreases after stall" survives) yet caps the
+    magnitude at :data:`MAX_ABS_LIFT_COEFFICIENT`.  Deep in stall it is handed
+    over to :func:`flat_plate_lift_coefficient`, scaled to pass through the same
+    value at the stall angle so the join stays continuous.
+    """
+    stall_alpha = _finite(cfg.stall_alpha_deg, 14.0)
+    raw = linear_at_stall + _finite(cfg.post_stall_slope, -0.03) * (alpha - stall_alpha)
+    ceiling = MAX_ABS_LIFT_COEFFICIENT
+    ramp = ceiling * math.tanh(raw / ceiling)
+    magnitude = abs(alpha)
+    if magnitude <= POST_STALL_BLEND_START_DEG:
+        return ramp
+    # Scale the fully-separated plate curve so it meets the ramp at the stall
+    # angle; a zero-lift airframe therefore stays exactly zero out there.
+    plate_reference = flat_plate_lift_coefficient(stall_alpha)
+    if abs(plate_reference) < 1.0e-9:
+        plate = 0.0
+    else:
+        plate = flat_plate_lift_coefficient(alpha) * (linear_at_stall / plate_reference)
+    if magnitude >= POST_STALL_BLEND_END_DEG:
+        return plate
+    span = POST_STALL_BLEND_END_DEG - POST_STALL_BLEND_START_DEG
+    t = (magnitude - POST_STALL_BLEND_START_DEG) / span
+    weight = t * t * (3.0 - 2.0 * t)  # smoothstep, C1 continuous
+    return (1.0 - weight) * ramp + weight * plate
+
+
 def lift_coefficient(
     alpha_deg: float,
     cfg: AircraftConfig,
@@ -298,20 +361,25 @@ def lift_coefficient(
     """Lift coefficient including the stall break, elevon offset and gust-free flow.
 
     Below the stall this is exactly ``cL0 + cLalpha alpha`` (the blend weight
-    is ~1e-29 there); through the stall it transitions smoothly onto
-    ``cl_max + post_stall_slope (alpha - stall_alpha_deg)`` whose negative slope
-    guarantees the post-stall branch lies below the linear extrapolation.
-    ``cl_offset`` carries the elevon lift increment so callers keep one coherent
-    ``C_L``; the default zero reproduces the pure airfoil relation.
+    is ~1e-29 there); through the stall it transitions smoothly onto the
+    post-stall branch ``cl_max + post_stall_slope (alpha - stall_alpha_deg)``,
+    whose negative slope keeps it below the linear extrapolation.  Deep in
+    stall that unbounded ramp is blended into :func:`flat_plate_lift_coefficient`
+    and the result is clipped to :data:`MAX_ABS_LIFT_COEFFICIENT`, so no
+    attitude can produce an infinite lift (or drag) force.
+    ``cl_offset`` carries the elevon lift increment so callers keep one
+    coherent ``C_L``; the default zero reproduces the pure airfoil relation.
     """
     alpha = _finite(alpha_deg)
     slope = lift_slope_per_rad(cfg, compressible=compressible, mach=mach)
+    stall_alpha = _finite(cfg.stall_alpha_deg, 14.0)
     linear = _finite(cfg.cL0, 0.0) + slope * deg2rad(alpha)
-    post_stall = _finite(cfg.cl_max, 0.9) + _finite(cfg.post_stall_slope, -0.35) * (
-        alpha - _finite(cfg.stall_alpha_deg, 14.0)
-    )
+    linear_at_stall = _finite(cfg.cL0, 0.0) + slope * deg2rad(stall_alpha)
+    post_stall = _post_stall_lift_coefficient(alpha, cfg, linear_at_stall)
     weight = stall_blend_weight(alpha, cfg)
-    return (1.0 - weight) * linear + weight * post_stall + _finite(cl_offset)
+    value = (1.0 - weight) * linear + weight * post_stall + _finite(cl_offset)
+    ceiling = MAX_ABS_LIFT_COEFFICIENT + abs(_finite(cl_offset))
+    return clamp(value, -ceiling, ceiling)
 
 
 def drag_coefficient(
