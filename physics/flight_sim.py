@@ -52,7 +52,7 @@ import threading
 import time
 import types
 import typing
-from collections import deque
+from collections import OrderedDict, deque
 from dataclasses import fields, is_dataclass, replace
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
@@ -568,6 +568,17 @@ def _local_atmosphere(env: EnvironmentConfig, altitude_m: float, chord_m: float)
     }
 
 
+#: Cache for :func:`atmosphere_state`.  Air density falls by ~12% per km, i.e.
+#: ~1.2e-5 % per millimetre, while a 20 ms integration step moves the airframe
+#: far less than a millimetre vertically.  Quantising the altitude to 1 mm
+#: therefore makes the four RK4 stages of a step (and the step-rejection
+#: retries) share one evaluation, removing ~75% of the atmosphere work from the
+#: inner loop without any loss of accuracy.
+_ATMOSPHERE_CACHE: "OrderedDict[tuple, Dict[str, float]]" = OrderedDict()
+_ATMOSPHERE_CACHE_LIMIT = 256
+_ATMOSPHERE_QUANTUM_M = 1.0e-3
+
+
 def atmosphere_state(
     env: EnvironmentConfig, altitude_m: float = 0.0, reference_chord_m: float = 0.1
 ) -> Dict[str, float]:
@@ -575,18 +586,50 @@ def atmosphere_state(
 
     Primary path: ``atmosphere_domain.evaluate_atmosphere``; fallback: the local
     ISA / humidity / Sutherland implementation :func:`_local_atmosphere`.
+
+    Results are memoised on a quantised (altitude, chord, environment) key --
+    see :data:`_ATMOSPHERE_CACHE`.
     """
+    altitude = _finite(altitude_m)
+    chord = max(abs(_finite(reference_chord_m)), 1.0e-4)
+    key = (
+        round(altitude / _ATMOSPHERE_QUANTUM_M),
+        round(chord, 9),
+        _finite(env.temperature_K),
+        _finite(env.pressure_Pa),
+        _finite(env.humidity_rel),
+        bool(env.isa_mode),
+        _finite(env.sea_level_temperature_K),
+        _finite(env.sea_level_pressure_Pa),
+        _finite(env.lapse_rate_K_per_m),
+        _finite(env.gravity),
+        bool(env.compressibility_enabled),
+    )
+    cached = _ATMOSPHERE_CACHE.get(key)
+    if cached is not None:
+        _ATMOSPHERE_CACHE.move_to_end(key)
+        return cached
+
+    result = _atmosphere_state_uncached(env, altitude, chord)
+    _ATMOSPHERE_CACHE[key] = result
+    if len(_ATMOSPHERE_CACHE) > _ATMOSPHERE_CACHE_LIMIT:
+        _ATMOSPHERE_CACHE.popitem(last=False)
+    return result
+
+
+def _atmosphere_state_uncached(
+    env: EnvironmentConfig, altitude: float, chord: float
+) -> Dict[str, float]:
     module = atmosphere_module()
     func = _resolve_callable(module, ("evaluate_atmosphere", "atmosphere", "evaluate"))
     if func is not None:
-        chord = max(abs(_finite(reference_chord_m)), 1.0e-4)
         out = _call_upstream(
             func,
             {
                 "env": env,
                 "environment": env,
-                "altitude_m": _finite(altitude_m),
-                "height_m": _finite(altitude_m),
+                "altitude_m": altitude,
+                "height_m": altitude,
                 "reference_chord_m": chord,
                 "chord_m": chord,
             },
@@ -621,7 +664,7 @@ def atmosphere_state(
                         "reference_chord_m": chord,
                         "backend": "upstream",
                     }
-    return _local_atmosphere(env, altitude_m, reference_chord_m)
+    return _local_atmosphere(env, altitude, chord)
 
 
 def _local_wind(env: EnvironmentConfig, position: Sequence[float], time_s: float) -> np.ndarray:
@@ -664,7 +707,20 @@ def wind_vector(position: Sequence[float], env: EnvironmentConfig, time_s: float
     negated back into the z-down world frame used by the integrator.  Fallback:
     :func:`_local_wind`, which returns the exact zero vector for a calm
     atmosphere so the coupling is perfectly inert.
+
+    When the resulting wind field is provably the zero vector the upstream call
+    is skipped outright: the mean wind and the turbulence amplitude both scale
+    with ``wind_speed``, and the thermal plume with ``thermal_strength``.  Note
+    ``gust_intensity`` alone does *not* create flow, so a default-calmed
+    atmosphere (``wind_speed=0`` with the default ``gust_intensity=0.2``) still
+    short-circuits instead of paying for a simplex evaluation whose amplitude is
+    identically zero -- that is the shipped default, evaluated four times per
+    RK4 stage.
     """
+    if not env.wind_tunnel_enabled and _finite(env.wind_speed) == 0.0 and (
+        _finite(env.thermal_strength) == 0.0
+    ):
+        return np.zeros(3, dtype=np.float64)
     module = wind_module()
     func = _resolve_callable(module, ("wind_velocity", "velocity_at", "sample_wind"))
     if func is not None:

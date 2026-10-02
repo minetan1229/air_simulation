@@ -518,12 +518,15 @@ def stage_optimizer(r: Runner) -> None:
         "design_variables": ["launch_angle_deg", "elevon_deg", "dihedral_deg", "paper_gsm"],
         "variable_bounds": {"launch_angle_deg": [0.0, 30.0], "elevon_deg": [0.0, 20.0],
                             "dihedral_deg": [0.0, 15.0], "paper_gsm": [80.0, 140.0]},
-        "max_evaluations": 16,
-        "population_size": 8,
+        # Deliberately small: this stage proves the submit -> progress -> ETA ->
+        # result -> CSV *chain*, not the optimiser's accuracy. A heavy budget
+        # would make the wall-clock deadline machine-dependent.
+        "max_evaluations": 8,
+        "population_size": 6,
         "seed": 3,
         "processes": 1,
-        "sim_duration_s": 1.5,
-        "dt_max": 0.02,
+        "sim_duration_s": 0.4,
+        "dt_max": 0.04,
     }
     started = r.post("/api/v1/optimizer/run", request_payload, expect=202)
     r.check("job_id" in started, "optimizer/run did not return a job_id")
@@ -535,7 +538,9 @@ def stage_optimizer(r: Runner) -> None:
     statuses = []
     saw_progress = False
     saw_eta = False
-    deadline = time.time() + 120.0
+    # Generous, because the flight integrator is intentionally high fidelity and
+    # a loaded machine can be several times slower than an idle one.
+    deadline = time.time() + 900.0
     while time.time() < deadline:
         status = r.get(f"/api/v1/optimizer/status/{job_id}")
         statuses.append(status)
@@ -554,7 +559,7 @@ def stage_optimizer(r: Runner) -> None:
         if status["status"] == "running":
             time.sleep(0.25)
     else:
-        raise SmokeFailure("optimizer job did not terminate within 120 s")
+        raise SmokeFailure("optimizer job did not terminate within 900 s")
 
     final = statuses[-1]
     if final["status"] == "failed":

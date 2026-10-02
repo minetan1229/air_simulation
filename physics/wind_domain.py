@@ -266,14 +266,25 @@ class _Ops:
 # ==========================================================================
 # Vectorised 3D simplex noise (Gustavson / Ashima formulation)
 # ==========================================================================
+_SIMPLEX_SEED_TABLE_CACHE: Dict[int, Tuple[float, ...]] = {}
+
+
 def _simplex_seed_table(seed: int) -> Tuple[float, ...]:
     """Per-axis affine lattice relabelling ``i -> (A i + B) mod 289``.
 
     ``A`` is forced coprime with 289 so the map is a bijection of the lattice,
     keeping the gradient distribution of the untouched simplex noise while fully
     decorrelating the field from the unseeded one.  Deterministic in ``seed``.
+
+    Memoised: the table depends only on ``seed``, and the flight integrator asks
+    for it on every RK4 stage (thousands of times per simulated second), where
+    rebuilding the RNG was the single largest cost in the wind inner loop.
     """
-    rng = np.random.default_rng(int(seed) & 0xFFFFFFFF)
+    key = int(seed) & 0xFFFFFFFF
+    cached = _SIMPLEX_SEED_TABLE_CACHE.get(key)
+    if cached is not None:
+        return cached
+    rng = np.random.default_rng(key)
     multipliers: List[float] = []
     offsets: List[float] = []
     for _ in range(3):
@@ -283,7 +294,9 @@ def _simplex_seed_table(seed: int) -> Tuple[float, ...]:
                 multipliers.append(float(candidate))
                 break
         offsets.append(float(rng.integers(0, int(_SIMPLEX_MOD))))
-    return (multipliers[0], offsets[0], multipliers[1], offsets[1], multipliers[2], offsets[2])
+    table = (multipliers[0], offsets[0], multipliers[1], offsets[1], multipliers[2], offsets[2])
+    _SIMPLEX_SEED_TABLE_CACHE[key] = table
+    return table
 
 
 def _mod289(values, xp):
