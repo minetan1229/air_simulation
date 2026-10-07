@@ -329,11 +329,14 @@ def test_ground_effect_factor_increases_with_height() -> None:
     assert all(later > earlier for earlier, later in zip(values, values[1:]))
 
 
-def test_ground_effect_factor_matches_closed_form_and_disables_to_zero() -> None:
+def test_ground_effect_factor_matches_closed_form_and_disables_to_free_air() -> None:
     span, height = 0.3, 0.12
     ratio = 16.0 * (height / span) ** 2
     assert ground_effect_factor(height, span) == pytest.approx(ratio / (1.0 + ratio), rel=1e-12)
-    assert ground_effect_factor(height, span, enabled=False) == 0.0
+    # The value *multiplies* the free-air induced drag, so switching the model
+    # off must return the free-air multiplier 1.0, never 0.0 (which would delete
+    # the induced-drag term altogether).
+    assert ground_effect_factor(height, span, enabled=False) == 1.0
 
 
 def test_ground_effect_reduces_induced_drag_only(cfg: AircraftConfig) -> None:
@@ -505,8 +508,10 @@ def test_stall_flag_and_margin(cfg: AircraftConfig) -> None:
     assert at_stall.stalled is False
     assert at_stall.stall_margin == pytest.approx(0.0, abs=1e-12)
 
-    # the flag trips strictly beyond one degree past the stall angle
-    assert evaluate_aero(cfg, env, 9.0, cfg.stall_alpha_deg + 1.0).stalled is False
+    # the flag trips exactly where the margin reaches zero, i.e. at the stall
+    # angle the lift-curve blend breaks (stall_blend_weight == 1/2)
+    assert evaluate_aero(cfg, env, 9.0, cfg.stall_alpha_deg + 1.0e-3).stalled is True
+    assert evaluate_aero(cfg, env, 9.0, cfg.stall_alpha_deg - 1.0e-3).stalled is False
     past = evaluate_aero(cfg, env, 9.0, cfg.stall_alpha_deg + 2.0)
     assert past.stalled is True
     assert past.stall_margin == pytest.approx(-2.0 / cfg.stall_alpha_deg, rel=1e-12)
@@ -565,7 +570,7 @@ def test_evaluate_aero_forces_match_their_definitions(cfg: AircraftConfig, env: 
     assert result.ld_ratio == pytest.approx(safe_div(result.cl, result.cd), rel=1e-12)
 
 
-def test_cg_offset_adds_a_nose_down_pitching_moment(cfg: AircraftConfig, geom: dict) -> None:
+def test_cg_offset_adds_a_nose_up_pitching_moment(cfg: AircraftConfig, geom: dict) -> None:
     env = EnvironmentConfig()
     offset_cfg = AircraftConfig(**{**as_dict(cfg), "cg_offset_x": 0.01})
     nominal = evaluate_aero(cfg, env, 9.0, 5.0)
@@ -573,16 +578,16 @@ def test_cg_offset_adds_a_nose_down_pitching_moment(cfg: AircraftConfig, geom: d
     # the aerodynamic coefficients themselves are untouched by the CG offset
     assert shifted.cl == pytest.approx(nominal.cl, rel=1e-12)
     assert shifted.cd == pytest.approx(nominal.cd, rel=1e-12)
-    assert shifted.pitching_moment_nm < nominal.pitching_moment_nm
+    assert shifted.pitching_moment_nm > nominal.pitching_moment_nm
     # with the default cg_offset_x = 0 the pitching moment is exactly q S c C_m
     assert nominal.pitching_moment_nm == pytest.approx(
         nominal.dynamic_pressure_pa * geom["ref_area_m2"] * geom["ref_length_m"] * nominal.cm,
         rel=1e-12,
     )
-    assert pitching_moment_offset_nm(offset_cfg, nominal.lift_n) == pytest.approx(-0.01 * nominal.lift_n, rel=1e-12)
+    assert pitching_moment_offset_nm(offset_cfg, nominal.lift_n) == pytest.approx(0.01 * nominal.lift_n, rel=1e-12)
     assert pitching_moment_offset_nm(cfg, nominal.lift_n) == 0.0
     assert shifted.pitching_moment_nm == pytest.approx(
-        nominal.pitching_moment_nm - 0.01 * nominal.lift_n, rel=1e-12
+        nominal.pitching_moment_nm + 0.01 * nominal.lift_n, rel=1e-12
     )
 
 
@@ -724,16 +729,30 @@ def test_lift_scale_scales_lift_exactly(cfg: AircraftConfig) -> None:
     assert doubled.circulation_m2ps == pytest.approx(2.0 * base.circulation_m2ps, rel=1e-15)
 
 
-def test_ground_effect_disabled_removes_height_dependence(cfg: AircraftConfig) -> None:
+def test_ground_effect_disabled_restores_the_free_air_polar(cfg: AircraftConfig) -> None:
     off = EnvironmentConfig(ground_effect_enabled=False)
     near = evaluate_aero(cfg, off, 9.0, 5.0, ground_height_m=0.005)
     far = evaluate_aero(cfg, off, 9.0, 5.0, ground_height_m=250.0)
+    # Disabling the model removes the *height dependence* ...
     assert near.cd == far.cd
     assert near.drag_n == far.drag_n
-    assert near.ground_effect_ratio == 0.0
-    assert far.ground_effect_ratio == 0.0
+    # ... and leaves the full free-air induced drag in place.
+    assert near.ground_effect_ratio == 1.0
+    assert far.ground_effect_ratio == 1.0
     parasite = parasite_drag_coefficient(cfg, near.reynolds)
-    assert near.cd == pytest.approx(parasite, rel=1e-12)
+    induced_free = near.cl * near.cl / _polar_constant(cfg)
+    assert near.cd > parasite
+    assert near.cd - parasite == pytest.approx(induced_free, rel=1e-12)
+    # and it matches the free-air polar of drag_coefficient exactly
+    free = drag_coefficient(
+        5.0,
+        cfg,
+        reynolds=near.reynolds,
+        ground_height_m=None,
+        mach=near.mach,
+        cl_offset=elevon_effects(cfg.elevon_deg, cfg)["dcl"],
+    )
+    assert near.cd == pytest.approx(free, rel=1e-12)
 
 
 def test_ground_effect_enabled_keeps_height_dependence(cfg: AircraftConfig) -> None:

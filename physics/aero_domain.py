@@ -26,8 +26,10 @@ Model chain
 3.  Prandtl-Glauert compressibility on the slope plus a wave-drag increment
     once the flow approaches transonic.
 4.  Parasite drag ``C_D0(Re) = cd0 (1e5 / Re) ** re_cd0_exponent`` plus induced
-    drag ``C_L^2 / (pi e AR)``, the latter attenuated by the ground-effect
-    factor ``16 (h/b)^2 / (1 + 16 (h/b)^2)``.
+    drag ``C_L^2 / (pi e AR)``, the latter multiplied by the ground-effect
+    factor ``16 (h/b)^2 / (1 + 16 (h/b)^2)`` (which is ``1.0`` in free air and
+    ``1.0`` again when the model is switched off, so disabling it restores the
+    free-air polar instead of deleting the induced drag).
 5.  Elevon deflection adds lift and a nose-down pitching increment, hence
     shifts the trimmed angle of attack.
 6.  Static / dynamic stability derivatives assembled into ``C_m``, ``C_l`` and
@@ -36,6 +38,11 @@ Model chain
     ``M = q S c C_m``, ``l = q S b C_l``, ``n = q S b C_n`` with
     ``q = 0.5 rho V^2`` and reference quantities from
     :func:`~physics.config_schema.derived_properties`.
+
+``c`` in the moment and rate derivatives and in ``Re = V c / nu`` is the **mean
+aerodynamic chord** ``derived_properties(cfg)["ref_length_m"]``; the whole
+airframe is referred to it, so a slider that moves span or area moves ``Re``,
+the parasite drag, the pitch inertia and the reference moment arm together.
 """
 
 from __future__ import annotations
@@ -50,6 +57,7 @@ from .config_schema import (
     MU_SUTHERLAND,
     R_AIR,
     R_VAPOR,
+    SUTHERLAND_T0,
     T0_ISA,
     AircraftConfig,
     AeroResult,
@@ -62,7 +70,7 @@ from .config_schema import (
     rad2deg,
     safe_div,
 )
-from .geometry_utils import cross, normalize, vec3
+from .geometry_utils import cross, vec3
 
 __all__ = [
     "helmbold_cl_alpha",
@@ -94,6 +102,7 @@ __all__ = [
     "MACH_TRANSONIC",
     "MACH_CRITICAL",
     "RE_REFERENCE",
+    "DEFAULT_REFERENCE_CHORD_M",
     "AERO_BACKEND",
 ]
 
@@ -132,6 +141,11 @@ _WAVE_DRAG_GAIN: float = 0.25
 _SUPERSONIC_DRAG_GAIN: float = 0.15
 _CD_FLOOR: float = 1.0e-12
 _TOLERANCE_CM: float = 1.0e-6
+
+#: Fallback Reynolds reference chord (m) for the geometry-free callers of
+#: :func:`atmosphere_state`.  Every caller that owns an :class:`AircraftConfig`
+#: must override it with the airframe's mean aerodynamic chord.
+DEFAULT_REFERENCE_CHORD_M: float = 0.1
 
 try:  # the atmosphere worker owns that module; the fallback below is functional
     from . import atmosphere_domain as _ATMOSPHERE
@@ -237,12 +251,19 @@ def lift_slope_per_rad(cfg: AircraftConfig, compressible: bool = True, mach: flo
 def ground_effect_factor(height_m: float, span_m: float, enabled: bool = True) -> float:
     """Induced-drag retention ``16 (h/b)^2 / (1 + 16 (h/b)^2)``.
 
-    ``0.0`` when ``enabled`` is false (the caller then applies no ground-effect
-    model at all), strictly inside ``(0, 1)`` for finite positive height and
-    span, and exactly ``1.0`` once ``h / b`` exceeds ~2.4e7.
+    The returned value is the **multiplier applied to the free-air induced
+    drag**, so it is ``1.0`` in free air, ``0.0`` at the surface, strictly
+    inside ``(0, 1]`` for finite positive height and span, and exactly ``1.0``
+    once ``h / b`` exceeds ~2.4e7.
+
+    Disabling the model returns ``1.0`` -- *no* ground-effect reduction, i.e. the
+    full free-air induced drag -- not ``0.0``.  Returning zero would silently
+    delete the induced-drag term (the caller multiplies, it does not skip), which
+    would inflate ``L/D`` by ~30 % on the default airframe the moment a user
+    unticked ``ground_effect_enabled``.
     """
     if not bool(enabled):
-        return 0.0
+        return 1.0
     height = max(_finite(height_m), 0.0)
     span = max(_finite(span_m, 0.2), 1.0e-9)
     ratio = 16.0 * (height / span) ** 2
@@ -634,16 +655,20 @@ def pitching_moment_offset_nm(
 ) -> float:
     """Nose-up moment from the CG offset of the aerodynamic centre.
 
-    ``M_offset = -(r x F)_y`` with ``r = (cg_offset_x, 0, 0)``.  Exactly zero for
-    the default ``cg_offset_x = 0`` (after which the pitching moment is
-    precisely ``q S c C_m``) and a stabilising nose-down term for an aft CG.
+    ``M_offset = (r x F)_y`` with the arm ``r = (offset, 0, 0)`` representing
+    the vector from CG to AC. With ``cg_offset_x`` (+ = aft), an aft CG places
+    the CG behind the AC, so the AC is ahead of the CG (r_x = +offset). Lift
+    acts in the -z direction (-L), giving a pitching moment of:
+        (r x F)_y = -r_x * F_z = -offset * (-L) = +offset * L
+    This represents a destabilising nose-up pitching moment (+offset * L) for an
+    aft CG and a stabilising nose-down pitching moment (-|offset| * L) for a
+    forward CG. Exactly zero for the default ``cg_offset_x = 0``.
     """
     offset = _finite(cfg.cg_offset_x)
     if offset == 0.0:
         return 0.0
-    arm = normalize(vec3((offset, 0.0, 0.0)))
-    moment = cross(arm * offset, aerodynamic_force_body(drag_n, side_n, lift_n))
-    return -float(moment[1])
+    moment = cross(vec3((offset, 0.0, 0.0)), aerodynamic_force_body(drag_n, side_n, lift_n))
+    return float(moment[1])
 
 
 # --------------------------------------------------------------------------
@@ -672,24 +697,35 @@ def _fallback_atmosphere(env: EnvironmentConfig) -> Tuple[float, float, float, f
     celsius = temperature - 273.15
     p_sat = 610.94 * math.exp(clamp(17.625 * celsius / (celsius + 243.04), -60.0, 60.0))
     p_vapour = clamp(humidity * p_sat, 0.0, 0.999999 * pressure)
-    r_moist = ((pressure - p_vapour) * R_AIR + p_vapour * R_VAPOR) / pressure
+    r_moist = pressure / (((pressure - p_vapour) / R_AIR) + (p_vapour / R_VAPOR))
     density = pressure / (r_moist * temperature)
-    ratio_t = temperature / T0_ISA
-    viscosity = MU0_ISA * (ratio_t ** 1.5) * ((T0_ISA + MU_SUTHERLAND) / (temperature + MU_SUTHERLAND))
+    ratio_t = temperature / SUTHERLAND_T0
+    viscosity = MU0_ISA * (ratio_t ** 1.5) * ((SUTHERLAND_T0 + MU_SUTHERLAND) / (temperature + MU_SUTHERLAND))
     return density, viscosity / density, math.sqrt(GAMMA_AIR * R_AIR * temperature), temperature
 
 
-def atmosphere_state(env: EnvironmentConfig, speed_mps: float = 0.0) -> Dict[str, float]:
+def atmosphere_state(
+    env: EnvironmentConfig, speed_mps: float = 0.0, reference_chord_m: float = DEFAULT_REFERENCE_CHORD_M
+) -> Dict[str, float]:
     """``(rho, nu, a, T, Re, M)`` resolved from the runtime environment.
 
+    ``Re = V c / nu`` is referred to ``reference_chord_m``.  That must be the
+    airframe's **mean aerodynamic chord** -- callers holding an
+    :class:`AircraftConfig` should pass ``derived_properties(cfg)["ref_length_m"]``
+    (which is exactly what :func:`evaluate_aero` does), otherwise the parasite
+    drag of a slider-driven airframe is evaluated at a chord that never moves.
+    ``DEFAULT_REFERENCE_CHORD_M`` is only the stand-in for the geometry-free
+    callers.
+
     Delegates to :mod:`physics.atmosphere_domain` when importable (that worker
-    owns ISA / Sutherland / moist-air) and otherwise evaluates the identical
+    owns ISA / Sutherland / moist air) and otherwise evaluates the identical
     self-contained formulation, so this domain never hard-depends on it.
     """
     speed = abs(_finite(speed_mps))
+    chord = max(_finite(reference_chord_m, DEFAULT_REFERENCE_CHORD_M), 1.0e-9)
     if _ATMOSPHERE is not None:
         try:
-            payload = _ATMOSPHERE.evaluate_atmosphere(env, reference_chord_m=0.075)
+            payload = _ATMOSPHERE.evaluate_atmosphere(env, reference_chord_m=chord)
             density = float(payload["density_kgm3"])
             kinematic = float(payload["kinematic_viscosity_m2s"])
             sound = float(payload["sound_speed_mps"])
@@ -703,7 +739,7 @@ def atmosphere_state(env: EnvironmentConfig, speed_mps: float = 0.0) -> Dict[str
         "kinematic_viscosity_m2s": kinematic,
         "sound_speed_mps": sound,
         "temperature_K": temperature,
-        "reynolds": safe_div(speed * 0.075, kinematic, 0.0) if kinematic > 0.0 else 0.0,
+        "reynolds": safe_div(speed * chord, kinematic, 0.0) if kinematic > 0.0 else 0.0,
         "mach": safe_div(speed, sound, 0.0) if sound > 0.0 else 0.0,
     }
 
@@ -737,7 +773,7 @@ def evaluate_aero(
     speed = abs(_finite(speed_mps))
     alpha = _finite(alpha_deg)
     beta = _finite(beta_deg)
-    state = atmosphere_state(env, speed)
+    state = atmosphere_state(env, speed, reference_chord_m=chord)
     density = max(state["density_kgm3"], 1.0e-6)
 
     re_value = abs(_finite(reynolds, 0.0)) if reynolds is not None else float(state["reynolds"])
@@ -799,7 +835,11 @@ def evaluate_aero(
     yawing_nm = dynamic_pressure * area * span * yaw_coeff
 
     stall_angle = _finite(cfg.stall_alpha_deg, 14.0)
-    stalled = bool(alpha > stall_angle + 1.0)
+    # The lift curve breaks exactly at ``stall_alpha_deg`` (see
+    # :func:`stall_blend_weight`), so the flag and ``stall_margin`` share the
+    # same threshold: the margin is 0 there and the airframe counts as stalled
+    # strictly beyond it.
+    stalled = bool(alpha > stall_angle)
     stall_margin = safe_div(stall_angle - alpha, abs(stall_angle) if stall_angle != 0.0 else 1.0, 0.0)
 
     zero_lift = _finite(cfg.cL0) * lift_scale + elevon["dcl"] * lift_scale

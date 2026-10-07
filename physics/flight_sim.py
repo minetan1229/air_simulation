@@ -53,7 +53,7 @@ import time
 import types
 import typing
 from collections import OrderedDict, deque
-from dataclasses import fields, is_dataclass, replace
+from dataclasses import dataclass, field, fields, is_dataclass, replace
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
@@ -73,6 +73,8 @@ from .config_schema import (
     from_dict,
     rad2deg,
     safe_div,
+    throw_style,
+    THROW_STYLE_CATALOGUE,
     FLIGHT_LOG_COLUMNS,
 )
 from .geometry_utils import (
@@ -99,6 +101,7 @@ __all__ = [
     "EVALUATE_KEYS",
     "STATUS_VALUES",
     "FlightSimulator",
+    "ThrowSolution",
     "aero_forces",
     "atmosphere_state",
     "active_backends",
@@ -111,8 +114,10 @@ __all__ = [
     "initial_state",
     "log_row",
     "prandtl_glauert",
+    "resolve_throw",
     "stress_metrics",
     "total_energy",
+    "throw_profile_catalogue",
     "wind_vector",
 ]
 
@@ -483,12 +488,19 @@ def prandtl_glauert(mach: float) -> float:
 
 
 def ground_effect_factor(height_m: float, span_m: float, enabled: bool = True) -> float:
-    """Induced-drag ground-effect factor ``16(h/b)^2 / (1 + 16(h/b)^2)``."""
+    """Induced-drag ground-effect factor ``16(h/b)^2 / (1 + 16(h/b)^2)``.
+
+    The value multiplies the free-air induced drag, so it is ``1.0`` when the
+    model is disabled (full free-air induced drag) and ``1.0`` again far above the
+    ground.  Matches :func:`physics.aero_domain.ground_effect_factor`.
+    """
     if not enabled:
-        return 0.0
+        return 1.0
     height = max(_finite(height_m), 0.0)
     span = max(abs(_finite(span_m)), 1.0e-6)
     ratio = 16.0 * (height / span) ** 2
+    if not math.isfinite(ratio):
+        return 1.0
     return ratio / (1.0 + ratio)
 
 
@@ -552,7 +564,7 @@ def _local_atmosphere(env: EnvironmentConfig, altitude_m: float, chord_m: float)
     mixing = 0.62198 * p_sat / max(pressure - p_sat, 1.0e-6) * clamp(_finite(env.humidity_rel), 0.0, 1.0)
     virtual = (1.0 + mixing * (r_air / r_vapour - 1.0)) / (1.0 + mixing)
     density = pressure / (r_air * temperature) * virtual
-    mu0, sutherland, t_ref = 1.716e-5, 110.4, 288.15
+    mu0, sutherland, t_ref = 1.716e-5, 110.4, 273.15
     mu = mu0 * (temperature / t_ref) ** 1.5 * (t_ref + sutherland) / (temperature + sutherland)
     kinematic = safe_div(mu, density, 1.5e-5)
     sound = math.sqrt(gamma * r_air * temperature)
@@ -584,13 +596,20 @@ def atmosphere_state(
 ) -> Dict[str, float]:
     """Air density, kinematic viscosity and sound speed at ``altitude_m``.
 
+    ``altitude_m`` is the height **above the ground plane** (the integrator
+    measures ``-z - ground_level_m``).  The ISA barometric column is a function
+    of the geometric altitude **above sea level**, so
+    ``env.altitude_m + altitude_m`` is handed to the solver; otherwise a scene
+    placed on a plateau (``ground_level_m = 1000``) would be flown at sea-level
+    density.
+
     Primary path: ``atmosphere_domain.evaluate_atmosphere``; fallback: the local
     ISA / humidity / Sutherland implementation :func:`_local_atmosphere`.
 
     Results are memoised on a quantised (altitude, chord, environment) key --
     see :data:`_ATMOSPHERE_CACHE`.
     """
-    altitude = _finite(altitude_m)
+    altitude = _finite(altitude_m) + _finite(getattr(env, "altitude_m", 0.0))
     chord = max(abs(_finite(reference_chord_m)), 1.0e-4)
     key = (
         round(altitude / _ATMOSPHERE_QUANTUM_M),
@@ -670,15 +689,19 @@ def _atmosphere_state_uncached(
 def _local_wind(env: EnvironmentConfig, position: Sequence[float], time_s: float) -> np.ndarray:
     """Mean wind with a logarithmic boundary layer (exact zero when calm).
 
-    ``wind_direction_deg`` is the direction the wind blows *towards*, measured
-    from +x towards +y, and the profile is
-    ``u(z)/u(z_ref) = ln(z/z0)/ln(z_ref/z0)`` clamped to ``(0, 1]``.
+    ``wind_direction_deg`` follows the same meteorological convention as
+    :mod:`physics.wind_domain`: it is the bearing the wind blows **FROM**,
+    clockwise from north, with ``north = +y`` and ``east = +x``, so the flow
+    vector is ``-(sin theta, cos theta, 0)``.  The profile is
+    ``u(z)/u(z_ref) = ln(z/z0)/ln(z_ref/z0)`` clamped to ``[0, 1]`` (the upstream
+    solver does not bound it above 1 because it is the same log law; the two agree
+    exactly at and below the reference height, which is the whole flight regime).
     """
     speed = _finite(env.wind_speed)
     out = np.zeros(3, dtype=np.float64)
     if speed == 0.0:
         return out
-    direction = deg2rad(clamp(_finite(env.wind_direction_deg), 0.0, 360.0))
+    bearing = deg2rad(clamp(_finite(env.wind_direction_deg), 0.0, 360.0))
     altitude = max(-_finite(position[2]) - _finite(env.ground_level_m), 0.0)
     factor = 1.0
     if bool(env.boundary_layer_enabled):
@@ -686,13 +709,11 @@ def _local_wind(env: EnvironmentConfig, position: Sequence[float], time_s: float
         z_ref = max(_finite(env.reference_height_m, 1.0), z0 * 1.001)
         denominator = math.log(z_ref / z0)
         if abs(denominator) > 1.0e-9:
-            # The log law grows above the reference height and vanishes at the
-            # surface; it is bounded above so a very high sample cannot explode.
-            factor = clamp(math.log(max(altitude, z0 * 1.001) / z0) / denominator, 0.0, 4.0)
+            factor = clamp(math.log(max(altitude, z0 * 1.001) / z0) / denominator, 0.0, 1.0)
     gust = 1.0 + _finite(env.gust_intensity) * 0.1 * math.sin(0.7 * _finite(time_s))
     magnitude = speed * factor * gust
-    out[0] = magnitude * math.cos(direction)
-    out[1] = magnitude * math.sin(direction)
+    out[0] = -magnitude * math.sin(bearing)
+    out[1] = -magnitude * math.cos(bearing)
     return out
 
 
@@ -724,7 +745,7 @@ def wind_vector(position: Sequence[float], env: EnvironmentConfig, time_s: float
     module = wind_module()
     func = _resolve_callable(module, ("wind_velocity", "velocity_at", "sample_wind"))
     if func is not None:
-        height = _finite(env.ground_level_m) - _finite(position[2])
+        height = -_finite(position[2]) - _finite(env.ground_level_m)
         query = np.array([_finite(position[0]), _finite(position[1]), height], dtype=np.float64)
         out = _call_upstream(
             func,
@@ -855,7 +876,7 @@ def _local_aero(
         reynolds=re_eff,
         mach=_finite(mach),
         stall_margin=(stall_alpha - alpha) / abs(stall_alpha) if abs(stall_alpha) > 1.0e-9 else 0.0,
-        stalled=alpha > stall_alpha + 1.0,
+        stalled=alpha > stall_alpha,
         cd_min=cd0,
         alpha_ld_max_deg=rad2deg(safe_div(_finite(aircraft.cL0) + cl, cl_alpha, 0.0)),
         circulation_m2ps=safe_div(2.0 * area * cl, rho * speed * span, 0.0),
@@ -1180,40 +1201,363 @@ def total_energy(state: StateVector, gravity: float) -> float:
     return 0.5 * float(np.dot(velocity, velocity)) + _finite(gravity) * altitude
 
 
-def initial_state(launch: LaunchConfig, environment: EnvironmentConfig) -> StateVector:
+# --------------------------------------------------------------------------
+# Throw model ("投げ方" / "力の入れ方")
+# --------------------------------------------------------------------------
+#: Physical ceilings on the body rates a hand can impart at release.  A paper
+#: airframe is essentially rate-limited by the hand/wrist: measured release
+#: rates for indoor record throws are of order 1-3 rad/s in pitch and up to
+#: +-20 rad/s in roll, so the model clamps well below any value that would
+#: make the 6-DoF integration meaningless.
+MAX_RELEASE_PITCH_RATE_RADPS = 8.0
+MAX_RELEASE_ROLL_RATE_RADPS = 45.0
+MAX_RELEASE_YAW_RATE_RADPS = 14.0
+#: Ceiling on a release speed produced by the hand model.  A hand can reach
+#: roughly 25-30 m/s on a light airframe (the 98 m distance record is a
+#: ~20 m/s throw); beyond that the model refuses to extrapolate.
+MAX_RELEASE_SPEED_MPS = 60.0
+
+
+def _velocity_from_elevation_azimuth(
+    speed: float, elevation_deg: float, azimuth_deg: float
+) -> np.ndarray:
+    """Release velocity vector from a speed and a flight-path direction.
+
+    ``elevation_deg`` is measured up from the horizon (positive climbs) and
+    ``azimuth_deg`` from the nose axis towards the right wing, matching
+    ``launch_angle_deg`` / ``launch_yaw_deg``.  ``+z`` points **down**, so the
+    vertical component carries the opposite sign.
+    """
+    elevation = deg2rad(elevation_deg)
+    azimuth = deg2rad(azimuth_deg)
+    return np.array(
+        [
+            speed * math.cos(elevation) * math.cos(azimuth),
+            speed * math.cos(elevation) * math.sin(azimuth),
+            -speed * math.sin(elevation),
+        ],
+        dtype=np.float64,
+    )
+
+
+@dataclass
+class ThrowSolution:
+    """Resolved hand impulse and the release state it produces.
+
+    Attributes are plain JSON-friendly values so the REST layer can hand the
+    object straight to :func:`physics.config_schema.as_dict`.
+    """
+
+    style: str = "direct"
+    style_label: str = ""
+    impulse_active: bool = False
+    speed_source: str = "direct"
+    force_n: float = 0.0
+    duration_s: float = 0.0
+    impulse_ns: float = 0.0
+    mass_kg: float = 0.0
+    peak_acceleration_mps2: float = 0.0
+    force_direction_body: Tuple[float, float, float] = (1.0, 0.0, 0.0)
+    grip_point_m: Tuple[float, float, float] = (0.0, 0.0, 0.0)
+    moment_nm: Tuple[float, float, float] = (0.0, 0.0, 0.0)
+    torque_rate_radps: Tuple[float, float, float] = (0.0, 0.0, 0.0)
+    angular_rate_radps: Tuple[float, float, float] = (0.0, 0.0, 0.0)
+    speed_mps: float = 0.0
+    velocity_mps: Tuple[float, float, float] = (0.0, 0.0, 0.0)
+    flight_path_deg: Tuple[float, float] = (0.0, 0.0)
+    release_alpha_deg: float = 0.0
+    release_euler_deg: Tuple[float, float, float] = (0.0, 0.0, 0.0)
+    quaternion: Tuple[float, float, float, float] = (1.0, 0.0, 0.0, 0.0)
+    release_height_m: float = 0.0
+    position_m: Tuple[float, float, float] = (0.0, 0.0, 0.0)
+    kinetic_energy_j: float = 0.0
+    impulse_to_weight: float = 0.0
+    runup_m: float = 0.0
+    warnings: List[str] = field(default_factory=list)
+
+
+def _resolve_throw_style_key(launch: LaunchConfig) -> Tuple[str, Any]:
+    """Return ``(style key, ThrowStyle)`` tolerating an unknown string.
+
+    An unknown key never raises: it degrades to the neutral ``direct`` profile
+    and adds a warning, so a stale client cannot break the simulation.
+    """
+    key = str(getattr(launch, "throw_style", "direct") or "direct")
+    try:
+        return key, throw_style(key)
+    except KeyError:
+        return "direct", throw_style("direct")
+
+
+def throw_profile_catalogue() -> List[Dict[str, Any]]:
+    """JSON payload describing every selectable throwing technique."""
+    out: List[Dict[str, Any]] = []
+    for style in THROW_STYLE_CATALOGUE:
+        out.append(
+            {
+                "key": style.key,
+                "label": style.label,
+                "label_ja": style.label_ja,
+                "description": style.description,
+                "notes": style.notes,
+                "speed_source": "direct" if style.key == "direct" else "impulse",
+                "overrides": style.launch_overrides(),
+            }
+        )
+    return out
+
+
+def resolve_throw(
+    launch: Any,
+    aircraft: Any = None,
+    environment: Any = None,
+) -> ThrowSolution:
+    """Resolve a launch condition into a hand impulse and a release state.
+
+    Model
+    -----
+    The hand delivers a force ``F`` for a time ``dt`` along a direction that
+    is tilted away from the nose axis by ``(force_pitch, force_yaw)``:
+
+    1. **Impulse**  ``J = F * dt``  (Ns).
+    2. **Release speed**  ``|v| = |J| / m`` when ``throw_speed_source`` is
+       ``"impulse"``, otherwise the explicitly requested ``launch_speed``.
+    3. **Flight path vs. attitude**  the airframe leaves the hand along
+       ``(launch_angle_deg + throw_force_pitch_deg, launch_yaw_deg +
+       throw_force_yaw_deg)`` in impulse mode -- the force direction is
+       ``throw_force_*`` above the nose axis -- and along ``(launch_angle_deg,
+       launch_yaw_deg)`` in direct mode.  The **attitude** is always
+       ``(launch_roll + release_roll, launch_angle + release_pitch,
+       launch_yaw + release_yaw)``, so ``release_pitch_deg`` is the angle of
+       attack left on the wing at the instant of release (reported as
+       :attr:`ThrowSolution.release_alpha_deg`).  With every offset at zero and
+       no force tilt this is exactly the historical "velocity along the nose
+       axis raised by ``launch_angle_deg``" rule.
+    4. **Release rotation**  the contact force acts at the grip point
+       ``r = (grip_x * MAC, grip_y * semispan, 0)`` relative to the centre of
+       gravity, so the impulsive moment is ``M = r x F`` and the rate it would
+       produce is ``w = I^-1 M dt``.  A finite contact time plus the compliance
+       of the hand and forearm absorb most of that rotation, so the surviving
+       fraction is ``throw_torque_efficiency`` (default 0.15); the wrist /
+       forearm rates are then added and the total clamped to the release
+       ceilings above.
+
+    Parameters
+    ----------
+    launch, aircraft, environment:
+        Contract dataclasses or plain dictionaries; ``aircraft`` is optional
+        and only needed when the impulsive rotation has to be resolved.
+    """
+    cfg = _config_from(LaunchConfig, launch)
+    air = _config_from(AircraftConfig, aircraft if aircraft is not None else AircraftConfig())
+    env = (
+        _config_from(EnvironmentConfig, environment)
+        if environment is not None
+        else EnvironmentConfig()
+    )
+
+    key, style = _resolve_throw_style_key(cfg)
+    derived = derived_properties(air)
+    mass = max(_finite(derived["mass_kg"]), 1.0e-9)
+    mac = max(_finite(derived["mac_m"]), 1.0e-4)
+    semispan = max(_finite(derived["wingspan_m"]), 1.0e-6) * 0.5
+    inertia = np.diag(
+        [
+            max(_finite(derived["roll_inertia_kgm2"]), 1.0e-14),
+            max(_finite(derived["pitch_inertia_kgm2"]), 1.0e-14),
+            max(_finite(derived["yaw_inertia_kgm2"]), 1.0e-14),
+        ]
+    )
+
+    warnings: List[str] = []
+    if key != str(getattr(cfg, "throw_style", "direct")):
+        warnings.append(
+            f"unknown throw style '{cfg.throw_style}'; falling back to 'direct'"
+        )
+
+    force = abs(_finite(cfg.throw_force_n))
+    duration = abs(_finite(cfg.throw_duration_s))
+    pitch_tilt = deg2rad(_finite(cfg.throw_force_pitch_deg))
+    yaw_tilt = deg2rad(_finite(cfg.throw_force_yaw_deg))
+    active = bool(cfg.impulse_active)
+
+    # --- force direction and magnitude (body frame, +z is down) ----------
+    direction_body = np.array(
+        [
+            math.cos(pitch_tilt) * math.cos(yaw_tilt),
+            math.cos(pitch_tilt) * math.sin(yaw_tilt),
+            -math.sin(pitch_tilt),
+        ],
+        dtype=np.float64,
+    )
+    force_body = force * direction_body
+    impulse_ns = force * duration
+    if force <= 0.0 and active:
+        warnings.append("impulse mode is on but 'throw_force_n' is 0; release speed is 0")
+    if duration <= 0.0 and active:
+        warnings.append("impulse mode is on but 'throw_duration_s' is 0; release speed is 0")
+
+    # --- release attitude vs. flight path ---------------------------------
+    # ``(flight_pitch_deg, flight_yaw_deg)`` is the **flight path** the airframe
+    # is thrown along.  The ``release_*`` fields then rotate the **attitude**
+    # away from it, so ``release_pitch_deg`` is exactly the angle of attack the
+    # hand leaves on the wing (see the :class:`LaunchConfig` contract).  Adding
+    # the offsets to the velocity as well would pin alpha to zero at release and
+    # leave any airframe trimmed at a positive alpha with the full residual
+    # ``cm(0) = -cm_alpha * alpha_trim``; because the pitch mode is fast
+    # (omega_sp ~ 200 rad/s on a 4 g paper airframe) that residual pitches the
+    # nose over the top and loops the glider inside 0.2 s.
+    flight_pitch_deg = _finite(cfg.launch_angle_deg)
+    flight_yaw_deg = _finite(cfg.launch_yaw_deg)
+    release_pitch_deg = _finite(cfg.release_pitch_deg)
+    release_yaw_deg = _finite(cfg.release_yaw_deg)
+    roll_total = _finite(cfg.launch_roll_deg) + _finite(cfg.release_roll_deg)
+    pitch_total = flight_pitch_deg + release_pitch_deg
+    yaw_total = flight_yaw_deg + release_yaw_deg
+    quaternion = quaternion_from_euler(roll_total, pitch_total, yaw_total)
+
+    # --- release speed and direction -------------------------------------
+    if active:
+        speed = impulse_ns / mass
+        if not math.isfinite(speed) or speed > MAX_RELEASE_SPEED_MPS:
+            speed = min(speed if math.isfinite(speed) else MAX_RELEASE_SPEED_MPS, MAX_RELEASE_SPEED_MPS)
+            warnings.append(
+                f"release speed clamped to {MAX_RELEASE_SPEED_MPS:g} m/s (hand impulse too large)"
+            )
+        # The impulsive hand pushes along the force direction, which sits
+        # ``throw_force_pitch_deg`` / ``throw_force_yaw_deg`` above the nose
+        # axis, so it is that direction -- not the nominal flight path -- that
+        # the airframe leaves the hand along.
+        velocity_pitch_deg = flight_pitch_deg + rad2deg(pitch_tilt)
+        velocity_yaw_deg = flight_yaw_deg + rad2deg(yaw_tilt)
+    else:
+        speed = abs(_finite(cfg.launch_speed))
+        velocity_pitch_deg = flight_pitch_deg
+        velocity_yaw_deg = flight_yaw_deg
+    velocity = _velocity_from_elevation_azimuth(speed, velocity_pitch_deg, velocity_yaw_deg)
+
+    # --- release rotation ------------------------------------------------
+    grip = np.array(
+        [
+            _finite(cfg.throw_grip_x) * mac + _finite(air.cg_offset_x),
+            _finite(cfg.throw_grip_y) * semispan,
+            0.0,
+        ],
+        dtype=np.float64,
+    )
+    moment = np.cross(grip, force_body)
+    efficiency = clamp(_finite(cfg.throw_torque_efficiency, 0.15), 0.0, 1.0)
+    torque_rate = np.linalg.solve(inertia, moment * duration * efficiency)
+    rates = np.array(
+        [
+            clamp(
+                _finite(torque_rate[0] + _finite(cfg.throw_wrist_spin_radps)),
+                -MAX_RELEASE_ROLL_RATE_RADPS,
+                MAX_RELEASE_ROLL_RATE_RADPS,
+            ),
+            clamp(
+                _finite(torque_rate[1] + _finite(cfg.throw_pitch_rate_radps)),
+                -MAX_RELEASE_PITCH_RATE_RADPS,
+                MAX_RELEASE_PITCH_RATE_RADPS,
+            ),
+            clamp(
+                _finite(torque_rate[2] + _finite(cfg.throw_yaw_rate_radps)),
+                -MAX_RELEASE_YAW_RATE_RADPS,
+                MAX_RELEASE_YAW_RATE_RADPS,
+            ),
+        ],
+        dtype=np.float64,
+    )
+    if not active:
+        # The neutral entry point keeps the historical behaviour exactly:
+        # no force, no grip, no wrist rotation.
+        grip = np.zeros(3, dtype=np.float64)
+        moment = np.zeros(3, dtype=np.float64)
+        torque_rate = np.zeros(3, dtype=np.float64)
+        if any(abs(_finite(v)) > 0.0 for v in (cfg.throw_wrist_spin_radps, cfg.throw_pitch_rate_radps, cfg.throw_yaw_rate_radps)):
+            rates = np.array(
+                [
+                    clamp(_finite(cfg.throw_wrist_spin_radps), -MAX_RELEASE_ROLL_RATE_RADPS, MAX_RELEASE_ROLL_RATE_RADPS),
+                    clamp(_finite(cfg.throw_pitch_rate_radps), -MAX_RELEASE_PITCH_RATE_RADPS, MAX_RELEASE_PITCH_RATE_RADPS),
+                    clamp(_finite(cfg.throw_yaw_rate_radps), -MAX_RELEASE_YAW_RATE_RADPS, MAX_RELEASE_YAW_RATE_RADPS),
+                ],
+                dtype=np.float64,
+            )
+            warnings.append(
+                "explicit release rates are applied even though 'throw_speed_source' is 'direct'"
+            )
+        else:
+            rates = np.zeros(3, dtype=np.float64)
+
+    height = abs(_finite(cfg.launch_height_m))
+    position = np.array(
+        [
+            _finite(cfg.launch_position_m[0]),
+            _finite(cfg.launch_position_m[1]),
+            -height,
+        ],
+        dtype=np.float64,
+    )
+    gravity = abs(_finite(env.gravity, 9.80665))
+    kinetic_energy = 0.5 * mass * speed * speed
+
+    return ThrowSolution(
+        style=key,
+        style_label=style.label,
+        impulse_active=active,
+        speed_source=str(cfg.throw_speed_source),
+        force_n=float(force),
+        duration_s=float(duration),
+        impulse_ns=float(impulse_ns),
+        mass_kg=float(mass),
+        peak_acceleration_mps2=float(safe_div(force, mass, 0.0)),
+        force_direction_body=tuple(float(v) for v in direction_body),  # type: ignore[arg-type]
+        grip_point_m=tuple(float(v) for v in grip),  # type: ignore[arg-type]
+        moment_nm=tuple(float(v) for v in moment),  # type: ignore[arg-type]
+        torque_rate_radps=tuple(float(v) for v in torque_rate),  # type: ignore[arg-type]
+        angular_rate_radps=tuple(float(v) for v in rates),  # type: ignore[arg-type]
+        speed_mps=float(speed),
+        velocity_mps=tuple(float(v) for v in velocity),  # type: ignore[arg-type]
+        flight_path_deg=(float(velocity_pitch_deg), float(velocity_yaw_deg)),
+        # +z is down, so a nose-up attitude relative to a shallower flight path
+        # is a positive angle of attack, and the force tilt adds to it.
+        release_alpha_deg=float(velocity_pitch_deg - pitch_total),
+        release_euler_deg=(float(roll_total), float(pitch_total), float(yaw_total)),
+        quaternion=tuple(float(v) for v in quaternion),  # type: ignore[arg-type]
+        release_height_m=float(height),
+        position_m=tuple(float(v) for v in position),  # type: ignore[arg-type]
+        kinetic_energy_j=float(kinetic_energy),
+        impulse_to_weight=float(safe_div(impulse_ns, mass * gravity, 0.0)),
+        runup_m=float(clamp(_finite(cfg.throw_runup_m), 0.0, 3.04)),
+        warnings=warnings,
+    )
+
+
+def initial_state(
+    launch: LaunchConfig,
+    environment: EnvironmentConfig,
+    aircraft: Optional[AircraftConfig] = None,
+) -> StateVector:
     """Build the launch state from a launch condition.
 
-    The velocity points along the body x axis raised by ``launch_angle_deg``
-    above the horizon (a positive angle climbs) and turned by
-    ``launch_yaw_deg``; ``launch_roll_deg`` only tilts the attitude about the
-    velocity vector.  The position is ``(x, y, -launch_height_m)`` because +z
-    points **down**, so the initial altitude above
-    ``environment.ground_level_m`` is exactly ``launch_height_m``.
+    The release condition is produced by :func:`resolve_throw`, which
+    reconstructs the hand impulse ("力の入れ方") that creates it.  With the
+    neutral ``direct`` style the velocity points along the body x axis raised
+    by ``launch_angle_deg`` above the horizon (a positive angle climbs) and
+    turned by ``launch_yaw_deg``, ``launch_roll_deg`` tilts the attitude about
+    the velocity vector, and the angular rate is zero -- exactly the original
+    convention.  The position is ``(x, y, -launch_height_m)`` because +z points
+    **down**, so the initial altitude above the environment ground level is
+    exactly ``launch_height_m``.
     """
-    launch = _config_from(LaunchConfig, launch)
-    environment = (
-        _config_from(EnvironmentConfig, environment)
-    )
-    speed = _finite(launch.launch_speed)
-    elevation = deg2rad(_finite(launch.launch_angle_deg))
-    heading = deg2rad(_finite(launch.launch_yaw_deg))
-    cos_e, sin_e = math.cos(elevation), math.sin(elevation)
-    velocity = (speed * cos_e * math.cos(heading), speed * cos_e * math.sin(heading), -speed * sin_e)
-    quaternion = quaternion_from_euler(
-        _finite(launch.launch_roll_deg), _finite(launch.launch_angle_deg), _finite(launch.launch_yaw_deg)
-    )
-    position = (
-        _finite(launch.launch_position_m[0]),
-        _finite(launch.launch_position_m[1]),
-        -abs(_finite(launch.launch_height_m)),
-    )
+    throw = resolve_throw(launch, aircraft, environment)
     return StateVector(
         time_s=0.0,
-        position_m=position,
-        velocity_mps=velocity,
-        quaternion=tuple(float(value) for value in quaternion),
-        angular_velocity_radps=(0.0, 0.0, 0.0),
-        acceleration_mps2=(0.0, 0.0, _finite(environment.gravity)),
+        position_m=tuple(float(v) for v in throw.position_m),  # type: ignore[arg-type]
+        velocity_mps=tuple(float(v) for v in throw.velocity_mps),  # type: ignore[arg-type]
+        quaternion=tuple(float(v) for v in throw.quaternion),  # type: ignore[arg-type]
+        angular_velocity_radps=tuple(float(v) for v in throw.angular_rate_radps),  # type: ignore[arg-type]
+        acceleration_mps2=(0.0, 0.0, _finite(_config_from(EnvironmentConfig, environment).gravity)),
         angular_accel_radps2=(0.0, 0.0, 0.0),
         landed=False,
         crashed=False,
@@ -1293,7 +1637,7 @@ class FlightSimulator:
         )
         self._launch: LaunchConfig = _config_from(LaunchConfig, launch)
         self._history: deque = deque(maxlen=max(1, int(self.settings.ring_buffer_capacity)))
-        self._state: StateVector = initial_state(self._launch, self.environment)
+        self._state: StateVector = initial_state(self._launch, self.environment, self.aircraft)
         self._diverged = False
         self._rolled_back = False
         self._bounce_count = 0
@@ -1414,7 +1758,7 @@ class FlightSimulator:
         """
         if launch is not None:
             self._launch = _config_from(LaunchConfig, launch)
-        self._state = initial_state(self._launch, self.environment)
+        self._state = initial_state(self._launch, self.environment, self.aircraft)
         self._diverged = False
         self._rolled_back = False
         self._bounce_count = 0

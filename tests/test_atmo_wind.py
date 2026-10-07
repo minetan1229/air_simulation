@@ -6,7 +6,7 @@ Every check that has a closed-form solution is compared against it:
 * the ISA barometric formula against a ``scipy.integrate.quad`` integration of
   the hydrostatic equation ``dp/dh = -rho g``,
 * Sutherland viscosity against its closed form (and against ``MU0_ISA`` exactly
-  at the ISA reference temperature),
+  at Sutherland's own reference temperature, 0 degC),
 * moist air density against the mixing-ratio blend and the Tetens vapour
   pressure law,
 * the speed of sound / Mach / Reynolds identities,
@@ -50,6 +50,7 @@ from physics.config_schema import (  # noqa: E402
     LAPSE_RATE_ISA,
     MU0_ISA,
     MU_SUTHERLAND,
+    SUTHERLAND_T0,
     P0_ISA,
     R_AIR,
     R_VAPOR,
@@ -170,17 +171,23 @@ def test_isa_scale_altitude():
 # ==========================================================================
 # Sutherland viscosity
 # ==========================================================================
-def test_sutherland_equals_mu0_at_isa_temperature():
-    assert atmo.sutherland_viscosity(T0_ISA) == MU0_ISA
-    assert relative_error(atmo.sutherland_viscosity(T0_ISA), MU0_ISA) < 1.0e-12
+def test_sutherland_equals_mu0_at_its_reference_temperature():
+    # MU0_ISA = 1.716e-5 Pa s is Sutherland's reference viscosity, tabulated at
+    # 0 degC (SUTHERLAND_T0 = 273.15 K) -- *not* at the ISA sea-level 15 degC.
+    assert atmo.sutherland_viscosity(SUTHERLAND_T0) == MU0_ISA
+    assert relative_error(atmo.sutherland_viscosity(SUTHERLAND_T0), MU0_ISA) < 1.0e-12
+    # The real viscosity at 15 degC is 1.789e-5 Pa s, ~4 % above MU0_ISA; this is
+    # exactly the error that appears when the law is referenced to T0_ISA.
+    assert atmo.sutherland_viscosity(T0_ISA) == pytest.approx(1.7894e-5, rel=1e-3)
+    assert atmo.sutherland_viscosity(T0_ISA) > MU0_ISA
 
 
 @pytest.mark.parametrize("temperature", [200.0, 250.0, 273.15, 300.0, 350.0, 400.0])
 def test_sutherland_matches_closed_form(temperature):
     expected = (
         MU0_ISA
-        * (temperature / T0_ISA) ** 1.5
-        * (T0_ISA + MU_SUTHERLAND)
+        * (temperature / SUTHERLAND_T0) ** 1.5
+        * (SUTHERLAND_T0 + MU_SUTHERLAND)
         / (temperature + MU_SUTHERLAND)
     )
     assert relative_error(atmo.sutherland_viscosity(temperature), expected) < 1.0e-12
@@ -200,7 +207,8 @@ def test_kinematic_viscosity_is_mu_over_rho():
     assert atmo.kinematic_viscosity(288.15, density) == pytest.approx(expected, rel=1.0e-15)
     assert atmo.kinematic_viscosity(288.15, 0.0) == 0.0
     assert atmo.kinematic_viscosity(288.15, -1.0) == 0.0
-    assert atmo.kinematic_viscosity(288.15, density) == pytest.approx(1.4008e-5, rel=1.0e-4)
+    # mu(15 degC) = 1.7894e-5 Pa s over rho = 1.2250 kg/m^3
+    assert atmo.kinematic_viscosity(288.15, density) == pytest.approx(1.4608e-5, rel=1.0e-3)
 
 
 # ==========================================================================
@@ -246,7 +254,7 @@ def test_moist_air_gas_constant_blend():
     phi = 0.6
     p_v = atmo.vapour_partial_pressure_Pa(temperature, phi, pressure)
     p_d = pressure - p_v
-    expected = (p_d * R_AIR + p_v * R_VAPOR) / pressure
+    expected = pressure / ((p_d / R_AIR) + (p_v / R_VAPOR))
     assert atmo.moist_air_gas_constant(temperature, pressure, phi) == pytest.approx(expected, rel=1.0e-15)
     assert atmo.moist_air_gas_constant(temperature, pressure, 0.0) == pytest.approx(R_AIR, rel=1.0e-15)
     assert R_VAPOR > R_AIR  # the reason humid air is lighter

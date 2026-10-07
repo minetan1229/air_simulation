@@ -34,7 +34,11 @@ Models implemented (prompt.md 2.1 / AGENTS.md 8.1):
 
 * **Sutherland viscosity**::
 
-      mu(T) = MU0 (T/T0)**1.5 (T0 + S) / (T + S)
+      mu(T) = MU0 (T/T_ref)^1.5 (T_ref + S) / (T + S)
+
+  with the reference pair ``MU0 = 1.716e-5`` Pa s at ``T_ref = 273.15 K`` (0 degC)
+  and ``S = 110.4 K`` -- the ICAO constants, and *not* the ISA sea-level
+  temperature.
 
 * **Derived transport / compressibility quantities** ``nu = mu / rho``,
   ``a = sqrt(gamma R T)``, ``Re = V c / nu`` and ``M = V / a``.
@@ -57,6 +61,7 @@ from .config_schema import (
     P0_ISA,
     R_AIR,
     R_VAPOR,
+    SUTHERLAND_T0,
     T0_ISA,
     EnvironmentConfig,
     clamp,
@@ -202,13 +207,23 @@ def vapour_partial_pressure_Pa(temperature_K: float, humidity_rel: float, total_
 
 
 def moist_air_gas_constant(temperature_K: float, pressure_Pa: float, humidity_rel: float) -> float:
-    """Specific gas constant of moist air ``R_moist = (p_d R_air + p_v R_v)/p``."""
+    """Specific gas constant of moist air from Dalton's law.
+
+    The total density of moist air is the sum of partial densities:
+        rho = rho_d + rho_v = p_d / (R_air * T) + p_v / (R_v * T) = p / (R_moist * T)
+    hence the specific gas constant is the harmonic mean:
+        1 / R_moist = (p_d / p) / R_air + (p_v / p) / R_v
+        R_moist = p / (p_d / R_air + p_v / R_v)
+    """
     total = float(pressure_Pa)
     if total <= 0.0:
         return R_AIR
     p_v = vapour_partial_pressure_Pa(temperature_K, humidity_rel, total)
     p_d = total - p_v
-    return (p_d * R_AIR + p_v * R_VAPOR) / total
+    denom = (p_d / R_AIR) + (p_v / R_VAPOR)
+    if denom <= 0.0:
+        return R_AIR
+    return total / denom
 
 
 def air_density(temperature_K: float, pressure_Pa: float, humidity_rel: float = 0.0) -> float:
@@ -229,10 +244,17 @@ def air_density(temperature_K: float, pressure_Pa: float, humidity_rel: float = 
 # Transport properties
 # --------------------------------------------------------------------------
 def sutherland_viscosity(temperature_K: float) -> float:
-    """Dynamic viscosity of air from Sutherland's law (Pa s)."""
+    """Dynamic viscosity of air from Sutherland's law (Pa s).
+
+    ``mu(T) = MU0 (T/T_ref)^1.5 (T_ref + S) / (T + S)`` with the reference pair
+    ``MU0 = 1.716e-5`` Pa s at ``T_ref = 273.15 K`` (0 degC) and ``S = 110.4 K``
+    -- the ICAO / Sutherland (1895) constants.  ``T_ref`` is *not* the ISA sea
+    level temperature :data:`config_schema.T0_ISA` (15 degC); pairing it with
+    that would bias the viscosity ~4 % low across the whole atmosphere.
+    """
     temperature = max(float(temperature_K), 1.0)
-    ratio = temperature / T0_ISA
-    return MU0_ISA * (ratio ** 1.5) * ((T0_ISA + MU_SUTHERLAND) / (temperature + MU_SUTHERLAND))
+    ratio = temperature / SUTHERLAND_T0
+    return MU0_ISA * (ratio ** 1.5) * ((SUTHERLAND_T0 + MU_SUTHERLAND) / (temperature + MU_SUTHERLAND))
 
 
 def kinematic_viscosity(temperature_K: float, density_kgm3: float) -> float:
