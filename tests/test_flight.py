@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import math
 import time
+from dataclasses import replace
 
 import numpy as np
 import pytest
@@ -651,17 +652,27 @@ def test_trajectory_responds_to_every_environment_change(glider_flight: dict):
         assert result["status"] in flight_sim.STATUS_VALUES
         assert abs(result["distance_m"] - baseline) > 1.0e-3, f"{name} did not change the trajectory"
     # Doubling gravity must shorten the flight, removing drag must lengthen it.
+    # The gravity comparison is made on the *completed* flight (a horizon long
+    # enough for the heavy and the nominal airframe both to touch down) and on
+    # the landing range, not on the 3 s `glider_flight` snapshot: at 3 s the
+    # nominal glider is still airborne and climbing out of its apogee, so a
+    # truncated ground track there says nothing about how far it would have gone.
     heavy = flight_sim.evaluate_flight(
         as_dict(GLIDER),
         as_dict(EnvironmentConfig(gravity=2.0 * STANDARD_GRAVITY)),
         as_dict(FLIGHT_LAUNCH),
-        3.0,
+        12.0,
         0.02,
+    )
+    nominal = flight_sim.evaluate_flight(
+        as_dict(GLIDER), as_dict(EnvironmentConfig()), as_dict(FLIGHT_LAUNCH), 12.0, 0.02
     )
     dragless = flight_sim.evaluate_flight(
         as_dict(GLIDER), as_dict(EnvironmentConfig(drag_scale=0.0)), as_dict(FLIGHT_LAUNCH), 3.0, 0.02
     )
-    assert heavy["distance_m"] < baseline
+    assert nominal["status"] == "landed" and heavy["status"] in ("landed", "crashed")
+    assert heavy["flight_time_s"] < nominal["flight_time_s"]
+    assert heavy["landing_distance_m"] < nominal["landing_distance_m"]
     # Removing drag does NOT necessarily shorten the *ground track* inside a
     # fixed time budget: with no drag the airframe never decelerates, so the
     # surplus lift is spent on a sustained zoom instead of forward translation.
@@ -898,3 +909,88 @@ def test_suite_runs_well_inside_the_time_budget():
         as_dict(GLIDER), as_dict(EnvironmentConfig()), as_dict(FLIGHT_LAUNCH), 1.0, 0.02
     )
     assert time.perf_counter() - started < 10.0
+
+
+def test_keel_depth_grip_z_moment_transmission():
+    """Verify keel depth (+0.015 m) transmits pitch and roll moments from hand push."""
+    # 1. Forward thrust (+x): grip below CG creates positive pitch moment (nose up)
+    launch_fwd = LaunchConfig(
+        throw_style="overhand",
+        throw_speed_source="impulse",
+        throw_force_n=2.0,
+        throw_duration_s=0.1,
+        throw_force_pitch_deg=0.0,
+        throw_force_yaw_deg=0.0,
+        throw_grip_x=0.0,
+        throw_grip_y=0.0,
+        throw_grip_z=0.015,
+        throw_torque_efficiency=0.2,
+    )
+    sol_fwd = flight_sim.resolve_throw(launch_fwd, GLIDER, EnvironmentConfig())
+    # r = (0, 0, 0.015), F = (2.0, 0, 0) -> moment = r x F = (0, 0.015 * 2.0, 0) = (0, +0.030, 0)
+    assert sol_fwd.grip_point_m[2] == pytest.approx(0.015, abs=1e-5)
+    assert sol_fwd.moment_nm[1] > 0.025  # Positive pitch moment (nose-up)
+    assert sol_fwd.angular_rate_radps[1] > 0.0  # Positive pitch rate
+
+    # 2. Lateral push (+y): grip below CG creates negative roll moment (left roll)
+    launch_side = LaunchConfig(
+        throw_style="overhand",
+        throw_speed_source="impulse",
+        throw_force_n=1.5,
+        throw_duration_s=0.1,
+        throw_force_pitch_deg=0.0,
+        throw_force_yaw_deg=90.0,  # Side push along +y
+        throw_grip_x=0.0,
+        throw_grip_y=0.0,
+        throw_grip_z=0.015,
+        throw_torque_efficiency=0.2,
+    )
+    sol_side = flight_sim.resolve_throw(launch_side, GLIDER, EnvironmentConfig())
+    # r = (0, 0, 0.015), F = (0, 1.5, 0) -> moment = r x F = (-0.015 * 1.5, 0, 0) = (-0.0225, 0, 0)
+    assert sol_side.moment_nm[0] < -0.015  # Negative roll moment
+    assert sol_side.angular_rate_radps[0] < 0.0  # Negative roll rate
+
+
+def test_asymmetry_and_aileron_3d_6dof_bank_and_turn():
+    """Verify 3D 6DoF banking and turning motion induced by aileron_deg and asymmetry_cl."""
+    launch = LaunchConfig(
+        launch_speed=8.0,
+        launch_angle_deg=5.0,
+        launch_roll_deg=0.0,
+        launch_yaw_deg=0.0,
+        launch_height_m=5.0,
+    )
+    settings = SimulationSettings(dt_max=0.01, record_interval_s=0.05)
+
+    # 1. Symmetric baseline airframe
+    glider_sym = replace(GLIDER, aileron_deg=0.0, asymmetry_cl=0.0)
+    sim_sym = FlightSimulator(glider_sym, EnvironmentConfig(), launch, settings)
+    summary_sym = sim_sym.simulate(duration_s=1.5, record=True)
+    history_sym = sim_sym.history()
+    last_sym = history_sym[-1]
+    # Symmetric glider stays essentially wings level and flies straight (y displacement ~ 0)
+    assert abs(last_sym.roll_deg) < 3.0
+    assert abs(last_sym.y_m) < 0.2
+
+    # 2. Airframe with positive aileron deflection (right roll bias)
+    glider_aileron = replace(GLIDER, aileron_deg=0.4, asymmetry_cl=0.0)
+    sim_ail = FlightSimulator(glider_aileron, EnvironmentConfig(), launch, settings)
+    summary_ail = sim_ail.simulate(duration_s=1.0, record=True)
+    history_ail = sim_ail.history()
+    last_ail = history_ail[-1]
+    # Positive aileron develops positive roll (banking right) and turns right (+y displacement)
+    assert last_ail.roll_deg > 10.0
+    assert last_ail.y_m > 0.1  # Curved trajectory along +y
+    assert last_ail.yaw_deg > 5.0  # Heading turns right
+
+    # 3. Airframe with lift asymmetry
+    glider_asym = replace(GLIDER, aileron_deg=0.0, asymmetry_cl=0.005)
+    sim_asym = FlightSimulator(glider_asym, EnvironmentConfig(), launch, settings)
+    summary_asym = sim_asym.simulate(duration_s=1.0, record=True)
+    history_asym = sim_asym.history()
+    last_asym = history_asym[-1]
+    # Lift asymmetry also induces positive bank and turn
+    assert last_asym.roll_deg > 5.0
+    assert last_asym.y_m > 0.05
+    assert last_asym.yaw_deg > 2.0
+

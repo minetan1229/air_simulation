@@ -844,14 +844,21 @@ def _local_aero(
         + _finite(aircraft.cm_pitch_rate) * float(rate[1]) * rate_time_mac
         + _finite(aircraft.cm_yaw_rate) * float(rate[2]) * rate_time_mac
     )
+    aileron = _finite(getattr(aircraft, "aileron_deg", 0.0))
+    asym_cl = _finite(getattr(aircraft, "asymmetry_cl", 0.0))
+    cl_control = 0.0035 * aileron + 0.25 * asym_cl
     cl_roll = (
         _finite(aircraft.cl_beta) * beta_rad
+        + cl_control
         + _finite(aircraft.cl_roll_rate) * float(rate[0]) * rate_time_span
         + _finite(aircraft.cl_pitch_rate) * float(rate[1]) * rate_time_span
         + _finite(aircraft.cl_yaw_rate) * float(rate[2]) * rate_time_span
     )
+    rudder = _finite(getattr(aircraft, "rudder_deg", 0.0))
+    cn_control = 0.0025 * rudder
     cn = (
         _finite(aircraft.cn_beta) * beta_rad
+        + cn_control
         + _finite(aircraft.cn_roll_rate) * float(rate[0]) * rate_time_span
         + _finite(aircraft.cn_pitch_rate) * float(rate[1]) * rate_time_span
         + _finite(aircraft.cn_yaw_rate) * float(rate[2]) * rate_time_span
@@ -883,12 +890,15 @@ def _local_aero(
         trim_alpha_deg=elevon["dalpha_trim_deg"],
         trim_elevon_deg=_finite(aircraft.elevon_deg),
         ground_effect_ratio=effect,
+        lift_left_n=0.5 * lift,
+        lift_right_n=0.5 * lift,
     )
 
 
 def _normalise_aero_result(out: Any, speed_mps: float, density: float, kinematic_viscosity: float) -> AeroResult:
     """Coerce any upstream aerodynamics payload into a full :class:`AeroResult`."""
     stalled = bool(out.get("stalled", False)) if isinstance(out, dict) else bool(getattr(out, "stalled", False))
+    total_lift = _result_field(out, "lift_n", "lift")
     return AeroResult(
         cl=_result_field(out, "cl"),
         cd=_result_field(out, "cd"),
@@ -897,7 +907,7 @@ def _normalise_aero_result(out: Any, speed_mps: float, density: float, kinematic
         cl_roll=_result_field(out, "cl_roll"),
         cm_roll=_result_field(out, "cm_roll"),
         cn_roll=_result_field(out, "cn_roll"),
-        lift_n=_result_field(out, "lift_n", "lift"),
+        lift_n=total_lift,
         drag_n=_result_field(out, "drag_n", "drag"),
         side_n=_result_field(out, "side_n", "side", "side_force_n", "y_n"),
         pitching_moment_nm=_result_field(out, "pitching_moment_nm", "pitching_moment"),
@@ -915,6 +925,8 @@ def _normalise_aero_result(out: Any, speed_mps: float, density: float, kinematic
         trim_alpha_deg=_result_field(out, "trim_alpha_deg"),
         trim_elevon_deg=_result_field(out, "trim_elevon_deg"),
         ground_effect_ratio=_result_field(out, "ground_effect_ratio", default=1.0),
+        lift_left_n=_result_field(out, "lift_left_n", default=0.5 * total_lift),
+        lift_right_n=_result_field(out, "lift_right_n", default=0.5 * total_lift),
     )
 
 
@@ -1437,11 +1449,13 @@ def resolve_throw(
     velocity = _velocity_from_elevation_azimuth(speed, velocity_pitch_deg, velocity_yaw_deg)
 
     # --- release rotation ------------------------------------------------
+    grip_z_val = getattr(cfg, "throw_grip_z", getattr(cfg, "grip_z", None))
+    grip_z = 0.015 if grip_z_val is None else _finite(grip_z_val, 0.015)
     grip = np.array(
         [
             _finite(cfg.throw_grip_x) * mac + _finite(air.cg_offset_x),
             _finite(cfg.throw_grip_y) * semispan,
-            0.0,
+            grip_z,
         ],
         dtype=np.float64,
     )

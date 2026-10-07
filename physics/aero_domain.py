@@ -814,7 +814,17 @@ def evaluate_aero(
     cn_roll = _finite(cfg.cn_roll_rate) * p_hat
 
     cy = _finite(cfg.cy_beta) * beta_rad
-    roll_coeff = _finite(cfg.cl_beta) * beta_rad + cl_roll + _finite(cfg.cl_pitch_rate) * q_hat + _finite(cfg.cl_yaw_rate) * r_hat
+    aileron = _finite(getattr(cfg, "aileron_deg", 0.0))
+    asym_cl = _finite(getattr(cfg, "asymmetry_cl", 0.0))
+    rudder = _finite(getattr(cfg, "rudder_deg", 0.0))
+    cl_control = 0.015 * aileron + 0.25 * asym_cl
+    roll_coeff = (
+        _finite(cfg.cl_beta) * beta_rad
+        + cl_roll
+        + cl_control
+        + _finite(cfg.cl_pitch_rate) * q_hat
+        + _finite(cfg.cl_yaw_rate) * r_hat
+    )
     cm = (
         _finite(cfg.cm0)
         + _finite(cfg.cm_alpha) * deg2rad(alpha)
@@ -824,10 +834,23 @@ def evaluate_aero(
         + _finite(cfg.cm_pitch_rate) * q_hat
         + _finite(cfg.cm_yaw_rate) * r_hat
     )
-    yaw_coeff = _finite(cfg.cn_beta) * beta_rad + cn_roll + _finite(cfg.cn_pitch_rate) * q_hat + _finite(cfg.cn_yaw_rate) * r_hat
+    # Adverse yaw from aileron + rudder effect
+    cn_control = 0.010 * rudder - 0.002 * aileron
+    yaw_coeff = (
+        _finite(cfg.cn_beta) * beta_rad
+        + cn_roll
+        + cn_control
+        + _finite(cfg.cn_pitch_rate) * q_hat
+        + _finite(cfg.cn_yaw_rate) * r_hat
+    )
 
     dynamic_pressure = 0.5 * density * speed * speed
     lift_n = dynamic_pressure * area * cl
+    # Left and right wing lift partitioning based on total lift and roll moment
+    # rolling_nm = (lift_left_n - lift_right_n) * (span / 4) approx, or partition from roll_coeff / cl_control
+    d_lift = dynamic_pressure * area * cl_control
+    lift_left_n = max(0.0, 0.5 * lift_n + 0.5 * d_lift)
+    lift_right_n = max(0.0, 0.5 * lift_n - 0.5 * d_lift)
     drag_n = dynamic_pressure * area * cd
     side_n = dynamic_pressure * area * cy
     pitching_nm = dynamic_pressure * area * chord * cm + pitching_moment_offset_nm(cfg, lift_n, drag_n, side_n)
@@ -882,6 +905,8 @@ def evaluate_aero(
         trim_alpha_deg=trim_alpha_from_elevon(cfg, _finite(cfg.elevon_deg)),
         trim_elevon_deg=elevon_for_trim(cfg, alpha),
         ground_effect_ratio=float(ground_ratio),
+        lift_left_n=float(lift_left_n),
+        lift_right_n=float(lift_right_n),
     )
 
 

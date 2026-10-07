@@ -23,7 +23,7 @@ from dataclasses import dataclass, field, fields, is_dataclass
 from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
 
 __all__ = [
-    "G0", "R_AIR", "R_VAPOR", "MU0_ISA", "T0_ISA", "P0_ISA", "LAPSE_RATE_ISA",
+    "G0", "R_AIR", "R_VAPOR", "MU0_ISA", "SUTHERLAND_T0", "T0_ISA", "P0_ISA", "LAPSE_RATE_ISA",
     "GAMMA_AIR", "VON_KARMAN", "MU_SUTHERLAND", "STANDARD_GRAVITY",
     "clamp", "deg2rad", "rad2deg", "safe_div", "as_dict", "from_dict",
     "make_uuid", "utc_now_iso", "AircraftConfig", "EnvironmentConfig",
@@ -32,9 +32,10 @@ __all__ = [
     "DesignVariable",     "JobRecord", "FlightLogSample", "WindSample",
     "derived_properties", "default_config_bundle",
     "FLIGHT_LOG_COLUMNS", "MESH_METRIC_KEYS", "OBJECTIVE_DIRECTIONS",
-    "AIRCRAFT_SCHEMA", "ENVIRONMENT_SCHEMA", "OBJECTIVE_DIRECTIONS",
+    "AIRCRAFT_SCHEMA", "ENVIRONMENT_SCHEMA", "LAUNCH_SCHEMA",
     "ALGORITHM_NAMES", "DESIGN_VARIABLE_CATALOGUE", "OptimizerDomain",
-    "MeshStatus",
+    "MeshStatus", "ThrowStyle", "THROW_STYLE_CATALOGUE", "throw_style",
+    "THROW_SPEED_SOURCES",
 ]
 
 # --------------------------------------------------------------------------
@@ -44,7 +45,15 @@ STANDARD_GRAVITY: float = 9.80665
 G0: float = STANDARD_GRAVITY
 R_AIR: float = 287.05
 R_VAPOR: float = 461.5
+#: Sutherland's reference dynamic viscosity of dry air, ``1.716e-5`` Pa s.  It is
+#: tabulated at **0 degC**, i.e. at :data:`SUTHERLAND_T0`, *not* at
+#: :data:`T0_ISA` (15 degC, where the real value is 1.789e-5 Pa s).  Pairing the
+#: constant with the ISA sea-level temperature makes Sutherland's law understate
+#: the viscosity by ~4 % at every altitude -- 3.8 % low at 0 degC -- which flows
+#: straight into nu, Re and the Reynolds-corrected C_D0.
 MU0_ISA: float = 1.716e-5
+#: Reference temperature of the Sutherland law, 273.15 K = 0 degC.
+SUTHERLAND_T0: float = 273.15
 MU_SUTHERLAND: float = 110.4
 T0_ISA: float = 288.15
 P0_ISA: float = 101325.0
@@ -247,6 +256,10 @@ class AircraftConfig:
     fold_center_deg: float = 0.0
     elevon_deg: float = 2.0
     elevon_chord_ratio: float = 0.22
+    aileron_deg: float = 0.0  # differential elevon / aileron angle in degrees (+ = roll right)
+    asymmetry_cl: float = 0.0  # intrinsic aerodynamic lift asymmetry between left and right wings
+    rudder_deg: float = 0.0  # rudder / vertical crease angle in degrees (+ = yaw right)
+
 
     # --- section / lift curve -------------------------------------------
     # cL0 / cm0 are calibrated together so the default airframe trims at a
@@ -291,7 +304,7 @@ class AircraftConfig:
 
     # --- reference quantities -------------------------------------------
     ref_area_m2: float = 0.0  # 0 -> wing_area_m2
-    ref_length_m: float = 0.0  # 0 -> mean chord
+    ref_length_m: float = 0.0  # 0 -> mean aerodynamic chord
     ref_span_m: float = 0.0  # 0 -> wingspan_m
     roll_inertia_kgm2: float = 0.0  # 0 -> derived from geometry
     pitch_inertia_kgm2: float = 0.0
@@ -344,6 +357,8 @@ class EnvironmentConfig:
     # --- wind tunnel -----------------------------------------------------
     wind_tunnel_enabled: bool = False
     wind_tunnel_speed: float = 12.0
+    wind_tunnel_alpha_deg: float = 4.0  # Angle of attack on test bench (degrees)
+    wind_tunnel_beta_deg: float = 0.0   # Sideslip angle on test bench (degrees)
 
     def clamp_ranges(self) -> "EnvironmentConfig":
         """Return a copy with every scalar forced inside its legal range."""
@@ -374,20 +389,417 @@ class EnvironmentConfig:
             compressibility_enabled=bool(self.compressibility_enabled),
             wind_tunnel_enabled=bool(self.wind_tunnel_enabled),
             wind_tunnel_speed=clamp(self.wind_tunnel_speed, 0.0, 200.0),
+            wind_tunnel_alpha_deg=clamp(self.wind_tunnel_alpha_deg, -90.0, 90.0),
+            wind_tunnel_beta_deg=clamp(self.wind_tunnel_beta_deg, -90.0, 90.0),
         )
 
 
 # --------------------------------------------------------------------------
 # Launch condition & integrator settings
 # --------------------------------------------------------------------------
+THROW_SPEED_SOURCES: Tuple[str, ...] = ("direct", "impulse")
+
+
+@dataclass
+class ThrowStyle:
+    """A named throwing technique ("投げ方") with its hand-load parameters.
+
+    Every field is a *hand/arm* quantity, never an airframe quantity, so a
+    style can be applied to any airframe: the release speed follows from
+    ``impulse = force * duration`` divided by the airframe mass.
+    """
+
+    key: str
+    label: str
+    label_ja: str
+    description: str
+    force_n: float
+    duration_s: float
+    force_pitch_deg: float
+    force_yaw_deg: float
+    grip_x: float
+    grip_y: float
+    wrist_spin_radps: float
+    pitch_rate_radps: float
+    yaw_rate_radps: float
+    release_pitch_deg: float
+    release_yaw_deg: float
+    release_roll_deg: float
+    runup_m: float
+    grip_z: float = 0.015
+    notes: str = ""
+
+    def launch_overrides(self) -> Dict[str, Any]:
+        """The :class:`LaunchConfig` fields this style writes.
+
+        Applying a style always re-states ``throw_speed_source`` so that
+        selecting a technique cannot leave the previous "direct" source in
+        place (and vice versa).
+        """
+        return {
+            "throw_style": self.key,
+            "throw_speed_source": "direct" if self.key == "direct" else "impulse",
+            "throw_force_n": self.force_n,
+            "throw_duration_s": self.duration_s,
+            "throw_force_pitch_deg": self.force_pitch_deg,
+            "throw_force_yaw_deg": self.force_yaw_deg,
+            "throw_grip_x": self.grip_x,
+            "throw_grip_y": self.grip_y,
+            "throw_grip_z": self.grip_z,
+            "throw_wrist_spin_radps": self.wrist_spin_radps,
+            "throw_pitch_rate_radps": self.pitch_rate_radps,
+            "throw_yaw_rate_radps": self.yaw_rate_radps,
+            "release_pitch_deg": self.release_pitch_deg,
+            "release_yaw_deg": self.release_yaw_deg,
+            "release_roll_deg": self.release_roll_deg,
+            "throw_runup_m": self.runup_m,
+        }
+
+
+#: Throwing techniques offered by the UI and the optimiser.  ``direct`` is the
+#: neutral entry: it leaves ``launch_speed``/``launch_angle_deg`` untouched and
+#: switches the impulse model off, so the pre-existing behaviour of the
+#: simulator is bit-for-bit preserved.  Every other entry activates the
+#: impulsive model implemented by :func:`physics.flight_sim.resolve_throw`.
+THROW_STYLE_CATALOGUE: Tuple[ThrowStyle, ...] = (
+    ThrowStyle(
+        key="direct",
+        label="Direct (explicit speed/attitude)",
+        label_ja="直接指定（速度・姿勢を数値で指定）",
+        description=(
+            "The impulsive hand model is bypassed: the release speed is "
+            "launch_speed and the release attitude is (launch_roll_deg, "
+            "launch_angle_deg, launch_yaw_deg)."
+        ),
+        force_n=0.0,
+        duration_s=0.12,
+        force_pitch_deg=0.0,
+        force_yaw_deg=0.0,
+        grip_x=0.0,
+        grip_y=0.0,
+        wrist_spin_radps=0.0,
+        pitch_rate_radps=0.0,
+        yaw_rate_radps=0.0,
+        release_pitch_deg=0.0,
+        release_yaw_deg=0.0,
+        release_roll_deg=0.0,
+        runup_m=0.0,
+        notes="Neutral entry point; identical to the pre-v5 behaviour.",
+    ),
+    ThrowStyle(
+        key="overhand",
+        label="Overhand (javelin)",
+        label_ja="オーバー投（ジャベリン投）",
+        description=(
+            "Forward-upward push from behind the CG, grip slightly ahead of "
+            "the CG; the classic indoor glide throw."
+        ),
+        force_n=0.35,
+        duration_s=0.12,
+        force_pitch_deg=10.0,
+        force_yaw_deg=0.0,
+        grip_x=0.10,
+        grip_y=0.0,
+        wrist_spin_radps=0.0,
+        pitch_rate_radps=0.0,
+        yaw_rate_radps=0.0,
+        release_pitch_deg=0.0,
+        release_yaw_deg=0.0,
+        release_roll_deg=0.0,
+        runup_m=0.0,
+    ),
+    ThrowStyle(
+        key="underhand",
+        label="Underhand (push off)",
+        label_ja="アンダーハンド（下方から押す）",
+        description=(
+            "Push delivered from below with the nose slightly down; keeps the "
+            "airframe flat and produces a shallow, fast glide."
+        ),
+        force_n=0.30,
+        duration_s=0.12,
+        force_pitch_deg=-8.0,
+        force_yaw_deg=0.0,
+        grip_x=0.05,
+        grip_y=0.0,
+        wrist_spin_radps=0.0,
+        pitch_rate_radps=0.0,
+        yaw_rate_radps=0.0,
+        release_pitch_deg=0.0,
+        release_yaw_deg=0.0,
+        release_roll_deg=0.0,
+        runup_m=0.0,
+    ),
+    ThrowStyle(
+        key="sidearm",
+        label="Sidearm (lateral sweep)",
+        label_ja="サイドアーム（横から振り抜く）",
+        description=(
+            "Lateral sweep with the grip outboard of the CG; imparts a yaw "
+            "rate that curves the track -- how record gliders are aimed around "
+            "an arena."
+        ),
+        force_n=0.40,
+        duration_s=0.10,
+        force_pitch_deg=8.0,
+        force_yaw_deg=-40.0,
+        grip_x=0.0,
+        grip_y=0.25,
+        wrist_spin_radps=0.0,
+        pitch_rate_radps=0.0,
+        yaw_rate_radps=2.5,
+        release_pitch_deg=0.0,
+        release_yaw_deg=0.0,
+        release_roll_deg=0.0,
+        runup_m=0.0,
+    ),
+    ThrowStyle(
+        key="level_push",
+        label="Level push (long, low)",
+        label_ja="水平押し（低く長く）",
+        description=(
+            "Straight, level push with a wide grip; maximises the release "
+            "speed for a given hand force, which is what the 98 m distance "
+            "record throws need."
+        ),
+        force_n=0.45,
+        duration_s=0.15,
+        force_pitch_deg=0.0,
+        force_yaw_deg=0.0,
+        grip_x=0.20,
+        grip_y=0.0,
+        wrist_spin_radps=0.0,
+        pitch_rate_radps=0.0,
+        yaw_rate_radps=0.0,
+        release_pitch_deg=0.0,
+        release_yaw_deg=0.0,
+        release_roll_deg=0.0,
+        runup_m=3.0,
+        notes="3.0 m run-up, inside the 10 ft (3.04 m) Guinness allowance.",
+    ),
+    ThrowStyle(
+        key="reverse_flick",
+        label="Reverse flick (wrist snap)",
+        label_ja="リバースフリック（手首を返す）",
+        description=(
+            "Forward push with a pronating wrist snap; puts a strong roll rate "
+            "into the airframe so it settles wings-level after release."
+        ),
+        force_n=0.30,
+        duration_s=0.10,
+        force_pitch_deg=6.0,
+        force_yaw_deg=0.0,
+        grip_x=0.10,
+        grip_y=0.0,
+        wrist_spin_radps=18.0,
+        pitch_rate_radps=0.0,
+        yaw_rate_radps=0.0,
+        release_pitch_deg=0.0,
+        release_yaw_deg=0.0,
+        release_roll_deg=0.0,
+        runup_m=0.0,
+    ),
+    ThrowStyle(
+        key="boomerang_curve",
+        label="Boomerang curve",
+        label_ja="ブーメラン投じ（曲線飛行）",
+        description=(
+            "Deliberately asymmetric: roll plus yaw spin it back towards the "
+            "thrower.  Maximum endurance, minimum straight-line distance."
+        ),
+        force_n=0.35,
+        duration_s=0.11,
+        force_pitch_deg=12.0,
+        force_yaw_deg=18.0,
+        grip_x=0.05,
+        grip_y=-0.30,
+        wrist_spin_radps=12.0,
+        pitch_rate_radps=0.0,
+        yaw_rate_radps=3.0,
+        release_pitch_deg=0.0,
+        release_yaw_deg=0.0,
+        release_roll_deg=0.0,
+        runup_m=0.0,
+    ),
+    ThrowStyle(
+        key="high_release",
+        label="Gentle loft (high release)",
+        label_ja="ソフトなロフト（高い位置から静かに放つ）",
+        description=(
+            "A long, low-force push: the airframe leaves the hand slowly but "
+            "high, trading speed for the altitude that dominates indoor "
+            "duration flights."
+        ),
+        force_n=0.18,
+        duration_s=0.30,
+        force_pitch_deg=5.0,
+        force_yaw_deg=0.0,
+        grip_x=0.10,
+        grip_y=0.0,
+        wrist_spin_radps=0.0,
+        pitch_rate_radps=0.0,
+        yaw_rate_radps=0.0,
+        release_pitch_deg=0.0,
+        release_yaw_deg=0.0,
+        release_roll_deg=0.0,
+        runup_m=0.0,
+    ),
+    ThrowStyle(
+        key="record_overhand",
+        label="Record overhand (indoor duration)",
+        label_ja="記録更新オーバ投（室内滞空）",
+        description=(
+            "The technique behind the indoor duration records: hard, steep, "
+            "flat-spun loft with a legal 3.0 m run-up."
+        ),
+        force_n=0.55,
+        duration_s=0.14,
+        force_pitch_deg=14.0,
+        force_yaw_deg=0.0,
+        grip_x=0.12,
+        grip_y=0.0,
+        wrist_spin_radps=6.0,
+        pitch_rate_radps=0.0,
+        yaw_rate_radps=0.0,
+        release_pitch_deg=2.0,
+        release_yaw_deg=0.0,
+        release_roll_deg=0.0,
+        runup_m=3.0,
+        notes="Run-up 3.0 m <= the 10 ft (3.04 m) permitted by the rules.",
+    ),
+    ThrowStyle(
+        key="record_loft",
+        label="Record loft (steep, endurance)",
+        label_ja="記録更新ロフト（急角度・長滞空）",
+        description=(
+            "Maximum loft angle with the largest legal run-up: trades the "
+            "initial climb rate for the apex height a 30 s flight needs."
+        ),
+        force_n=0.60,
+        duration_s=0.16,
+        force_pitch_deg=24.0,
+        force_yaw_deg=0.0,
+        grip_x=0.12,
+        grip_y=0.0,
+        wrist_spin_radps=4.0,
+        pitch_rate_radps=0.0,
+        yaw_rate_radps=0.0,
+        release_pitch_deg=3.0,
+        release_yaw_deg=0.0,
+        release_roll_deg=0.0,
+        runup_m=3.0,
+    ),
+)
+
+
+def throw_style(key: str) -> ThrowStyle:
+    """Look a :class:`ThrowStyle` up by key (raises ``KeyError`` if unknown)."""
+    for style in THROW_STYLE_CATALOGUE:
+        if style.key == key:
+            return style
+    raise KeyError(
+        f"unknown throw style '{key}'; expected one of "
+        f"{', '.join(s.key for s in THROW_STYLE_CATALOGUE)}"
+    )
+
+
 @dataclass
 class LaunchConfig:
+    """Release condition plus the full hand/arm model of the throw.
+
+    ``launch_speed``/``launch_angle_deg``/``launch_roll_deg``/``launch_yaw_deg``
+    describe the *resolved* release condition in the world frame and remain the
+    authoritative values whenever the impulsive model is inactive
+    (``throw_style == "direct"`` or ``throw_speed_source == "direct"``).
+
+    The throw-model fields describe *how* the hand delivers that state:
+
+    * ``throw_force_n`` x ``throw_duration_s`` is the hand impulse, so the
+      release speed of an impulsive throw is ``F*dt/m``;
+    * ``throw_force_pitch_deg`` / ``throw_force_yaw_deg`` tilt that impulse away
+      from the nose axis ("力の入れ方向");
+    * ``throw_grip_x`` / ``throw_grip_y`` place the contact point relative to
+      the centre of gravity in mean-chord / semi-span fractions, which is what
+      converts the off-axis force into a rotation rate (``r x F``);
+    * ``throw_wrist_spin_radps`` / ``throw_pitch_rate_radps`` /
+      ``throw_yaw_rate_radps`` are the residual rates the forearm and wrist add
+      at release;
+    * ``release_pitch_deg`` / ``release_yaw_deg`` / ``release_roll_deg`` are the
+      attitude offsets from the flight path at the instant the hand lets go.
+    """
+
     launch_speed: float = 12.0
     launch_angle_deg: float = 12.0
     launch_roll_deg: float = 0.0
     launch_yaw_deg: float = 0.0
     launch_height_m: float = 1.20
     launch_position_m: Tuple[float, float, float] = (0.0, 0.0, 0.0)
+
+    # --- throwing technique ("投げ方") -----------------------------------
+    throw_style: str = "direct"
+    throw_speed_source: str = "direct"  # "direct" -> launch_speed, "impulse" -> F*dt/m
+
+    # --- hand load ("力の入れ方") ----------------------------------------
+    throw_force_n: float = 0.35
+    throw_duration_s: float = 0.12
+    throw_force_pitch_deg: float = 10.0
+    throw_force_yaw_deg: float = 0.0
+    throw_grip_x: float = 0.10
+    throw_grip_y: float = 0.0
+    throw_grip_z: float = 0.015  # metres below CG (+z is downward along keel)
+    throw_torque_efficiency: float = 0.15
+    throw_runup_m: float = 0.0
+
+    # --- wrist / forearm rotation at release ----------------------------
+    throw_wrist_spin_radps: float = 0.0
+    throw_pitch_rate_radps: float = 0.0
+    throw_yaw_rate_radps: float = 0.0
+
+    # --- attitude offsets from the flight path ---------------------------
+    release_pitch_deg: float = 0.0
+    release_yaw_deg: float = 0.0
+    release_roll_deg: float = 0.0
+
+    def clamp_ranges(self) -> "LaunchConfig":
+        """Return a copy with every throw/launch scalar forced into range."""
+        from dataclasses import replace as _replace
+
+        return _replace(
+            self,
+            launch_speed=clamp(self.launch_speed, 0.0, 150.0),
+            launch_angle_deg=clamp(self.launch_angle_deg, -89.0, 89.0),
+            launch_roll_deg=clamp(self.launch_roll_deg, -180.0, 180.0),
+            launch_yaw_deg=clamp(self.launch_yaw_deg, -360.0, 360.0),
+            launch_height_m=clamp(self.launch_height_m, 0.0, 200.0),
+            throw_speed_source=(
+                self.throw_speed_source
+                if self.throw_speed_source in THROW_SPEED_SOURCES
+                else "direct"
+            ),
+            throw_force_n=clamp(self.throw_force_n, 0.0, 5.0),
+            throw_duration_s=clamp(self.throw_duration_s, 0.005, 1.0),
+            throw_force_pitch_deg=clamp(self.throw_force_pitch_deg, -90.0, 90.0),
+            throw_force_yaw_deg=clamp(self.throw_force_yaw_deg, -90.0, 90.0),
+            throw_grip_x=clamp(self.throw_grip_x, -1.0, 1.0),
+            throw_grip_y=clamp(self.throw_grip_y, -1.0, 1.0),
+            throw_grip_z=clamp(self.throw_grip_z, -0.5, 0.5),
+            throw_torque_efficiency=clamp(self.throw_torque_efficiency, 0.0, 1.0),
+            throw_runup_m=clamp(self.throw_runup_m, 0.0, 3.04),
+            throw_wrist_spin_radps=clamp(self.throw_wrist_spin_radps, -60.0, 60.0),
+            throw_pitch_rate_radps=clamp(self.throw_pitch_rate_radps, -12.0, 12.0),
+            throw_yaw_rate_radps=clamp(self.throw_yaw_rate_radps, -20.0, 20.0),
+            release_pitch_deg=clamp(self.release_pitch_deg, -90.0, 90.0),
+            release_yaw_deg=clamp(self.release_yaw_deg, -90.0, 90.0),
+            release_roll_deg=clamp(self.release_roll_deg, -180.0, 180.0),
+        )
+
+    @property
+    def impulse_active(self) -> bool:
+        """True when the impulsive hand model drives the release speed."""
+        return (
+            self.throw_speed_source == "impulse"
+            and str(self.throw_style) not in ("", "direct")
+        )
 
 
 @dataclass
@@ -464,6 +876,8 @@ class AeroResult:
     trim_alpha_deg: float = 0.0
     trim_elevon_deg: float = 0.0
     ground_effect_ratio: float = 1.0
+    lift_left_n: float = 0.0
+    lift_right_n: float = 0.0
 
 
 # --------------------------------------------------------------------------
@@ -593,6 +1007,12 @@ DESIGN_VARIABLE_CATALOGUE: Tuple[DesignVariable, ...] = (
     DesignVariable("launch_angle_deg", -10.0, 45.0, 5.0, "launch", "Launch angle", "deg"),
     DesignVariable("launch_roll_deg", -45.0, 45.0, 5.0, "launch", "Launch roll", "deg"),
     DesignVariable("launch_speed", 4.0, 30.0, 1.0, "launch", "Launch speed", "m/s"),
+    DesignVariable("throw_force_n", 0.05, 1.20, 0.05, "throw", "Hand force", "N"),
+    DesignVariable("throw_duration_s", 0.05, 0.30, 0.01, "throw", "Push duration", "s"),
+    DesignVariable("throw_force_pitch_deg", -15.0, 45.0, 5.0, "throw", "Force tilt (pitch)", "deg"),
+    DesignVariable("throw_grip_x", -0.30, 0.60, 0.05, "throw", "Grip station / MAC", "-"),
+    DesignVariable("throw_grip_y", -0.60, 0.60, 0.10, "throw", "Grip offset / semispan", "-"),
+    DesignVariable("throw_wrist_spin_radps", -30.0, 30.0, 5.0, "throw", "Wrist roll rate", "rad/s"),
 )
 
 
@@ -743,12 +1163,16 @@ def derived_properties(cfg: AircraftConfig) -> Dict[str, float]:
     aspect = max(aspect, 1.0e-3)
     mean_chord = area / span
     taper = clamp(float(cfg.taper_ratio), 0.05, 1.0)
-    # Mean aerodynamic chord of a linearly tapered wing:
-    #   MAC = (2/3) * b * c_root * (1 + L + L^2) / (1 + L)
-    # The root chord is not a config field, so it is recovered from the
-    # trapezoid area S = b * c_root * (1 + L) / 2.
+    # Mean aerodynamic chord of a linearly tapered wing (Raymer, "Aircraft
+    # Design: A Conceptual Approach", eq. 12.10; Shevell, eq. 6.1-6.2):
+    #   MAC = (2/3) * c_root * (1 + L + L^2) / (1 + L)
+    # It is a **length**: from MAC = (2/S) * integral c(y)^2 dy with
+    # c(y) = c_root (1 - (1 - L) y / (b/2)) the b cancels against the 1/b in
+    # dA = c dy.  The root chord is not a config field, so it is recovered from
+    # the trapezoid area S = b * c_root * (1 + L) / 2.  Consistency check: a
+    # rectangular wing (L = 1) must give MAC = c_root = S / b.
     root_chord = 2.0 * area / (span * (1.0 + taper))
-    mac = (2.0 * span / 3.0) * root_chord * (1.0 + taper + taper * taper) / (1.0 + taper)
+    mac = (2.0 / 3.0) * root_chord * (1.0 + taper + taper * taper) / (1.0 + taper)
     sheet_area = max(float(cfg.sheet_area_m2), 1.0e-9)
     mass = max(float(cfg.mass_kg), 1.0e-9)
     inertia_roll = mass * (span * span) / 12.0
@@ -764,6 +1188,10 @@ def derived_properties(cfg: AircraftConfig) -> Dict[str, float]:
         "sheet_area_m2": sheet_area,
         "mass_kg": mass,
         "ref_area_m2": float(cfg.ref_area_m2) if cfg.ref_area_m2 > 0.0 else area,
+        # The aerodynamic reference length is the mean aerodynamic chord, the
+        # length the moment / rate derivatives are referred to.  For the
+        # trapezoids a paper airframe is folded into it agrees with the geometric
+        # mean chord S / b to better than 1 %.
         "ref_length_m": float(cfg.ref_length_m) if cfg.ref_length_m > 0.0 else mac,
         "ref_span_m": float(cfg.ref_span_m) if cfg.ref_span_m > 0.0 else span,
         "roll_inertia_kgm2": float(cfg.roll_inertia_kgm2)
@@ -819,6 +1247,52 @@ ENVIRONMENT_SCHEMA: Dict[str, Any] = {
         "drag_scale": [0.0, 5.0],
         "lift_scale": [0.0, 5.0],
     },
+}
+
+#: Slider ranges for the launch / throw panel.  The UI reads these instead of
+#: hard-coding limits, which keeps the browser and the server in step when the
+#: contract changes.
+LAUNCH_RANGES: Dict[str, Tuple[float, float]] = {
+    "launch_speed": [0.0, 40.0],
+    "launch_angle_deg": [-45.0, 85.0],
+    "launch_roll_deg": [-90.0, 90.0],
+    "launch_yaw_deg": [-90.0, 90.0],
+    "launch_height_m": [0.0, 30.0],
+    "throw_force_n": [0.0, 1.2],
+    "throw_duration_s": [0.02, 0.6],
+    "throw_force_pitch_deg": [-60.0, 80.0],
+    "throw_force_yaw_deg": [-80.0, 80.0],
+    "throw_grip_x": [-0.5, 1.0],
+    "throw_grip_y": [-1.0, 1.0],
+    "throw_torque_efficiency": [0.0, 1.0],
+    "throw_runup_m": [0.0, 3.04],
+    "throw_wrist_spin_radps": [-40.0, 40.0],
+    "throw_pitch_rate_radps": [-8.0, 8.0],
+    "throw_yaw_rate_radps": [-12.0, 12.0],
+    "release_pitch_deg": [-45.0, 45.0],
+    "release_yaw_deg": [-45.0, 45.0],
+    "release_roll_deg": [-90.0, 90.0],
+}
+
+LAUNCH_SCHEMA: Dict[str, Any] = {
+    "group": "launch",
+    "fields": {
+        f.name: _field_entry(f, LaunchConfig.__dataclass_fields__[f.name].default)
+        for f in fields(LaunchConfig)
+    },
+    "ranges": {name: list(bounds) for name, bounds in LAUNCH_RANGES.items()},
+    "throw_styles": [
+        {
+            "key": style.key,
+            "label": style.label,
+            "label_ja": style.label_ja,
+            "description": style.description,
+            "notes": style.notes,
+            "overrides": style.launch_overrides(),
+        }
+        for style in THROW_STYLE_CATALOGUE
+    ],
+    "speed_sources": list(THROW_SPEED_SOURCES),
 }
 
 

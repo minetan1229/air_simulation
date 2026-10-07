@@ -68,6 +68,7 @@ __all__ = [
     "evaluate_case",
     "parallel_evaluate",
     "evaluate_flight_surrogate",
+    "gpu_ensemble_simulation",
     "isa_air_density",
     "worker_id",
     "worker_pid",
@@ -587,6 +588,403 @@ def parallel_evaluate(
         return results
     emit()
     return results
+
+
+# --------------------------------------------------------------------------
+# GPU ensemble batch simulation (CuPy with NumPy fallback)
+# --------------------------------------------------------------------------
+def gpu_ensemble_simulation(
+    aircraft: Optional[Any] = None,
+    environment: Optional[Any] = None,
+    launch: Optional[Any] = None,
+    settings: Optional[Any] = None,
+    n_trajectories: int = 128,
+    noise_config: Optional[Dict[str, float]] = None,
+    force_cpu: bool = False,
+    random_seed: Optional[int] = 42,
+) -> Dict[str, Any]:
+    """GPU-accelerated ensemble Monte Carlo batch flight simulator with CPU fallback.
+
+    Simulates N parallel flight trajectories simultaneously using CuPy (CUDA GPU)
+    when available, or pure vectorized NumPy on CPU. Micro-variations (Gaussian noise)
+    are applied to launch velocity, release angles, launch height, and wind conditions
+    to evaluate aerodynamic stability, landing dispersion, and trajectory confidence envelopes.
+
+    Parameters
+    ----------
+    aircraft : AircraftConfig or dict, optional
+        Airframe configuration (mass, wingspan, planform, lift curve, drag polar).
+    environment : EnvironmentConfig or dict, optional
+        Atmospheric and wind parameters (density, gravity, wind speed/direction).
+    launch : LaunchConfig or dict, optional
+        Nominal launch conditions (speed, elevation, roll, yaw, height).
+    settings : SimulationSettings or dict, optional
+        Integration limits (time step, max duration).
+    n_trajectories : int, default 128
+        Number of parallel trajectories to simulate (clamped between 16 and 4096).
+    noise_config : dict of str -> float, optional
+        Standard deviations for launch perturbations:
+        ``speed_std`` (m/s), ``pitch_std`` (deg), ``roll_std`` (deg),
+        ``yaw_std`` (deg), ``height_std`` (m), ``wind_speed_std`` (m/s),
+        ``wind_dir_std`` (deg).
+    force_cpu : bool, default False
+        If True, forces NumPy execution even if CuPy/CUDA is present.
+    random_seed : int, optional
+        Seed for pseudo-random perturbation reproducibility.
+
+    Returns
+    -------
+    dict
+        Ensemble statistics, confidence envelopes, sample trajectories, and backend info.
+    """
+    import numpy as np
+
+    air_cfg = aircraft if isinstance(aircraft, AircraftConfig) else from_dict(AircraftConfig, aircraft or {})
+    env_cfg = environment if isinstance(environment, EnvironmentConfig) else from_dict(EnvironmentConfig, environment or {})
+    lnc_cfg = launch if isinstance(launch, LaunchConfig) else from_dict(LaunchConfig, launch or {})
+    derived = derived_properties(air_cfg)
+
+    # 1. Decide execution backend (CuPy GPU vs NumPy CPU)
+    xp = np
+    backend = "numpy"
+    if not force_cpu:
+        try:
+            import cupy as cp
+            if cp.cuda.runtime.getDeviceCount() > 0:
+                xp = cp
+                backend = "cupy"
+        except Exception:
+            xp = np
+            backend = "numpy"
+
+    # Clamp trajectory count
+    N = int(clamp(n_trajectories, 16, 4096))
+
+    if random_seed is not None:
+        xp.random.seed(int(random_seed))
+
+    # 2. Extract noise parameters
+    nc = dict(noise_config or {})
+    speed_std = float(nc.get("speed_std", nc.get("launch_speed_std", 0.25)))
+    pitch_std = float(nc.get("pitch_std", nc.get("launch_angle_deg_std", 0.8)))
+    roll_std = float(nc.get("roll_std", nc.get("launch_roll_deg_std", 1.2)))
+    yaw_std = float(nc.get("yaw_std", nc.get("launch_yaw_deg_std", 0.5)))
+    height_std = float(nc.get("height_std", nc.get("launch_height_m_std", 0.05)))
+    wind_spd_std = float(nc.get("wind_speed_std", 0.20))
+    wind_dir_std = float(nc.get("wind_dir_std", nc.get("wind_direction_deg_std", 5.0)))
+
+    # 3. Generate perturbed initial conditions
+    v0_base = float(lnc_cfg.launch_speed)
+    pitch0_base = float(lnc_cfg.launch_angle_deg)
+    roll0_base = float(lnc_cfg.launch_roll_deg)
+    yaw0_base = float(lnc_cfg.launch_yaw_deg)
+    h0_base = max(float(lnc_cfg.launch_height_m), 0.1)
+
+    v0 = xp.maximum(v0_base + xp.random.normal(0.0, speed_std, size=N), 0.1)
+    pitch_deg = pitch0_base + xp.random.normal(0.0, pitch_std, size=N)
+    roll_deg = roll0_base + xp.random.normal(0.0, roll_std, size=N)
+    yaw_deg = yaw0_base + xp.random.normal(0.0, yaw_std, size=N)
+    h0 = xp.maximum(h0_base + xp.random.normal(0.0, height_std, size=N), 0.02)
+
+    pitch_rad = xp.deg2rad(pitch_deg)
+    yaw_rad = xp.deg2rad(yaw_deg)
+    roll_rad = xp.deg2rad(roll_deg)
+
+    # Initial velocities (+x forward, +y right, +z down)
+    vx = v0 * xp.cos(pitch_rad) * xp.cos(yaw_rad)
+    vy = v0 * xp.cos(pitch_rad) * xp.sin(yaw_rad)
+    vz = -v0 * xp.sin(pitch_rad)
+    vel = xp.stack([vx, vy, vz], axis=1)
+
+    # Initial positions (+z down, so ground is z=0, starting at -h0)
+    pos = xp.stack([xp.zeros(N, dtype=xp.float64), xp.zeros(N, dtype=xp.float64), -h0], axis=1)
+
+    # Wind conditions
+    w_speed_base = float(env_cfg.wind_speed)
+    w_dir_base = float(env_cfg.wind_direction_deg)
+    w_speed = xp.maximum(w_speed_base + xp.random.normal(0.0, wind_spd_std, size=N), 0.0)
+    w_dir_rad = xp.deg2rad(w_dir_base + xp.random.normal(0.0, wind_dir_std, size=N))
+    wx = w_speed * xp.cos(w_dir_rad)
+    wy = w_speed * xp.sin(w_dir_rad)
+    wz = xp.zeros(N, dtype=xp.float64)
+    wind = xp.stack([wx, wy, wz], axis=1)
+
+    # 4. Aerodynamic constants
+    mass = max(float(derived["mass_kg"]), 1e-4)
+    area = max(float(derived["wing_area_m2"]), 1e-4)
+    span = max(float(derived["wingspan_m"]), 1e-3)
+    aspect_ratio = max(float(derived["aspect_ratio"]), 0.5)
+    rho = float(isa_air_density(float(env_cfg.altitude_m)))
+    gravity = abs(float(env_cfg.gravity))
+
+    cL0 = float(air_cfg.cL0)
+    cl_max = float(air_cfg.cl_max)
+    cd0 = max(float(air_cfg.cd0), 0.015)
+    oswald_e = clamp(float(air_cfg.oswald_e), 0.4, 0.95)
+    k_induced = 1.0 / (math.pi * oswald_e * aspect_ratio)
+
+    cl_alpha = float(air_cfg.cLalpha_per_rad)
+    if cl_alpha <= 0.0:
+        cl_alpha = (2.0 * math.pi * aspect_ratio) / (2.0 + math.sqrt(aspect_ratio**2 + 4.0))
+
+    # Control asymmetries
+    aileron = float(getattr(air_cfg, "aileron_deg", 0.0))
+    asym_cl = float(getattr(air_cfg, "asymmetry_cl", 0.0))
+    cl_asym = 0.0035 * aileron + 0.25 * asym_cl
+
+    # Dihedral and roll damping
+    dihedral_rad = math.radians(max(float(air_cfg.dihedral_deg), 0.0))
+    roll_damping = max(abs(float(air_cfg.cl_roll_rate)), 0.08)
+
+    # 5. Integration settings
+    dt = 0.01
+    duration_s = 20.0
+    if settings is not None:
+        if isinstance(settings, dict):
+            duration_s = float(settings.get("duration_s", 20.0))
+        elif hasattr(settings, "max_flight_time_s"):
+            duration_s = float(settings.max_flight_time_s)
+    duration_s = float(clamp(duration_s, 1.0, 60.0))
+    max_steps = int(duration_s / dt)
+    sample_stride = max(1, int(0.05 / dt))  # Sample every 50ms for smooth envelopes
+
+    # State tracking arrays
+    active = xp.ones(N, dtype=bool)
+    landing_time = xp.full(N, duration_s, dtype=xp.float64)
+    landing_pos = xp.zeros((N, 3), dtype=xp.float64)
+    phi = xp.copy(roll_rad)
+    p_rate = xp.zeros(N, dtype=xp.float64)
+
+    history_times: List[float] = []
+    history_altitudes = []
+    history_distances = []
+    sample_indices = list(range(min(8, N)))
+    sample_tracks: List[List[Tuple[float, float, float]]] = [[] for _ in sample_indices]
+
+    # Pre-record t = 0
+    history_times.append(0.0)
+    history_altitudes.append(xp.maximum(-pos[:, 2], 0.0))
+    history_distances.append(xp.sqrt(pos[:, 0] ** 2 + pos[:, 1] ** 2))
+    for k, idx in enumerate(sample_indices):
+        p_row = pos[idx]
+        sample_tracks[k].append((float(p_row[0]), float(p_row[1]), max(float(-p_row[2]), 0.0)))
+
+    # 6. Time integration loop
+    t = 0.0
+    for step in range(1, max_steps + 1):
+        t = step * dt
+
+        # Relative airspeed
+        v_rel = vel - wind
+        v_horiz = xp.sqrt(v_rel[:, 0] ** 2 + v_rel[:, 1] ** 2)
+        speed = xp.sqrt(v_horiz ** 2 + v_rel[:, 2] ** 2)
+        speed_safe = xp.maximum(speed, 0.2)
+
+        # Unit velocity vectors
+        u_x = v_rel[:, 0] / speed_safe
+        u_y = v_rel[:, 1] / speed_safe
+        u_z = v_rel[:, 2] / speed_safe
+
+        # Flight path angle gamma (positive up, so -u_z)
+        gamma = xp.arctan2(-u_z, xp.maximum(v_horiz, 1e-4))
+
+        # Alpha relaxation towards trim
+        alpha_trim = 0.06  # ~3.5 deg trim AoA
+        decay = math.exp(-3.5 * min(t, 2.0))
+        alpha = xp.clip(alpha_trim + (pitch_rad - gamma) * decay, -0.25, 0.40)
+
+        # Aerodynamic coefficients
+        cl = xp.clip(cL0 + cl_alpha * alpha, -0.4, cl_max)
+        cd = cd0 + k_induced * (cl ** 2)
+        q = 0.5 * rho * (speed_safe ** 2)
+
+        lift_mag = q * area * cl
+        drag_mag = q * area * cd
+
+        # Drag vector opposes relative wind
+        drag_x = -drag_mag * u_x
+        drag_y = -drag_mag * u_y
+        drag_z = -drag_mag * u_z
+
+        # Pitch-plane lift unit vector (perpendicular to airspeed, pointing up in -z)
+        h_safe = xp.maximum(v_horiz / speed_safe, 1e-4)
+        l0_x = u_z * (u_x / h_safe)
+        l0_y = u_z * (u_y / h_safe)
+        l0_z = -h_safe
+
+        # Side unit vector for roll banking
+        s_x = -u_y / h_safe
+        s_y = u_x / h_safe
+        s_z = xp.zeros(N, dtype=xp.float64)
+
+        # Update roll angle and rate
+        # Roll moment from asymmetry and damping
+        roll_torque_coeff = cl_asym - roll_damping * (p_rate * span / (2.0 * speed_safe))
+        roll_accel = (q * area * span * roll_torque_coeff - 0.2 * dihedral_rad * phi) / max(mass * span * span * 0.1, 1e-6)
+        p_rate = xp.clip(p_rate + roll_accel * dt, -15.0, 15.0)
+        phi = xp.clip(phi + p_rate * dt, -math.pi / 2.5, math.pi / 2.5)
+
+        cos_phi = xp.cos(phi)
+        sin_phi = xp.sin(phi)
+
+        # Banked lift unit vector
+        l_x = cos_phi * l0_x + sin_phi * s_x
+        l_y = cos_phi * l0_y + sin_phi * s_y
+        l_z = cos_phi * l0_z + sin_phi * s_z
+
+        lift_x = lift_mag * l_x
+        lift_y = lift_mag * l_y
+        lift_z = lift_mag * l_z
+
+        # Acceleration (aerodynamic + gravity along +z)
+        ax = (lift_x + drag_x) / mass
+        ay = (lift_y + drag_y) / mass
+        az = (lift_z + drag_z) / mass + gravity
+
+        accel = xp.clip(xp.stack([ax, ay, az], axis=1), -150.0, 150.0)
+
+        # Update state
+        new_vel = xp.clip(vel + accel * dt, -80.0, 80.0)
+        new_pos = pos + 0.5 * (vel + new_vel) * dt
+
+        # Ground intersection detection (ground is at z >= 0)
+        just_landed = active & (new_pos[:, 2] >= 0.0)
+        if xp.any(just_landed):
+            dz = xp.maximum(new_pos[:, 2] - pos[:, 2], 1e-6)
+            frac = xp.clip((-pos[:, 2]) / dz, 0.0, 1.0)
+            t_impact = (t - dt) + frac * dt
+            landing_time = xp.where(just_landed, t_impact, landing_time)
+
+            p_impact = pos + (new_pos - pos) * frac[:, None]
+            p_impact[:, 2] = 0.0
+            landing_pos = xp.where(just_landed[:, None], p_impact, landing_pos)
+            active = active & ~just_landed
+
+        pos = xp.where(active[:, None], new_pos, pos)
+        vel = xp.where(active[:, None], new_vel, vel)
+
+        # History sampling
+        if step % sample_stride == 0 or not xp.any(active) or step == max_steps:
+            history_times.append(round(float(t), 4))
+            history_altitudes.append(xp.maximum(-pos[:, 2], 0.0))
+            history_distances.append(xp.sqrt(pos[:, 0] ** 2 + pos[:, 1] ** 2))
+            for k, idx in enumerate(sample_indices):
+                p_row = pos[idx]
+                sample_tracks[k].append(
+                    (round(float(p_row[0]), 3), round(float(p_row[1]), 3), round(max(float(-p_row[2]), 0.0), 3))
+                )
+
+        if not xp.any(active):
+            break
+
+    # Record unlanded positions at end
+    if xp.any(active):
+        landing_pos = xp.where(active[:, None], pos, landing_pos)
+
+    # 7. Convert arrays back to CPU / NumPy for statistical processing
+    if backend == "cupy":
+        import cupy as cp
+
+        landing_time_np = cp.asnumpy(landing_time)
+        landing_pos_np = cp.asnumpy(landing_pos)
+        hist_alt_np = [cp.asnumpy(h) for h in history_altitudes]
+        hist_dist_np = [cp.asnumpy(h) for h in history_distances]
+    else:
+        landing_time_np = np.asarray(landing_time)
+        landing_pos_np = np.asarray(landing_pos)
+        hist_alt_np = [np.asarray(h) for h in history_altitudes]
+        hist_dist_np = [np.asarray(h) for h in history_distances]
+
+    landing_distances_np = np.sqrt(landing_pos_np[:, 0] ** 2 + landing_pos_np[:, 1] ** 2)
+
+    # 8. Compute envelope percentiles across sampling points
+    n_sample_points = len(history_times)
+    alt_p10, alt_p25, alt_p50, alt_p75, alt_p90 = [], [], [], [], []
+    alt_min, alt_max = [], []
+    dist_mean, dist_p10, dist_p90 = [], [], []
+
+    for s_idx in range(n_sample_points):
+        alts = hist_alt_np[s_idx]
+        dists = hist_dist_np[s_idx]
+
+        alt_p10.append(round(float(np.percentile(alts, 10)), 3))
+        alt_p25.append(round(float(np.percentile(alts, 25)), 3))
+        alt_p50.append(round(float(np.percentile(alts, 50)), 3))
+        alt_p75.append(round(float(np.percentile(alts, 75)), 3))
+        alt_p90.append(round(float(np.percentile(alts, 90)), 3))
+        alt_min.append(round(float(np.min(alts)), 3))
+        alt_max.append(round(float(np.max(alts)), 3))
+
+        dist_mean.append(round(float(np.mean(dists)), 3))
+        dist_p10.append(round(float(np.percentile(dists, 10)), 3))
+        dist_p90.append(round(float(np.percentile(dists, 90)), 3))
+
+    # Format sample trajectories for visualization
+    sample_trajectories = [
+        {
+            "id": idx,
+            "points": [{"x": pt[0], "y": pt[1], "z": pt[2]} for pt in sample_tracks[k]],
+            "landing_distance_m": round(float(landing_distances_np[idx]), 3),
+            "flight_time_s": round(float(landing_time_np[idx]), 3),
+        }
+        for k, idx in enumerate(sample_indices)
+    ]
+
+    # Summary metrics
+    mean_t = float(np.mean(landing_time_np))
+    std_t = float(np.std(landing_time_np))
+    min_t = float(np.min(landing_time_np))
+    max_t = float(np.max(landing_time_np))
+    median_t = float(np.median(landing_time_np))
+
+    mean_d = float(np.mean(landing_distances_np))
+    std_d = float(np.std(landing_distances_np))
+    min_d = float(np.min(landing_distances_np))
+    max_d = float(np.max(landing_distances_np))
+    median_d = float(np.median(landing_distances_np))
+
+    return {
+        "backend": backend,
+        "trajectories_count": N,
+        "evaluated_count": N,
+        "duration_s": duration_s,
+        "mean_flight_time_s": round(mean_t, 3),
+        "mean_distance_m": round(mean_d, 3),
+        "max_flight_time_s": round(max_t, 3),
+        "max_distance_m": round(max_d, 3),
+        "min_flight_time_s": round(min_t, 3),
+        "min_distance_m": round(min_d, 3),
+        "statistics": {
+            "flight_time": {
+                "mean": round(mean_t, 3),
+                "std": round(std_t, 3),
+                "min": round(min_t, 3),
+                "max": round(max_t, 3),
+                "median": round(median_t, 3),
+            },
+            "distance": {
+                "mean": round(mean_d, 3),
+                "std": round(std_d, 3),
+                "min": round(min_d, 3),
+                "max": round(max_d, 3),
+                "median": round(median_d, 3),
+            },
+        },
+        "envelope": {
+            "time_s": history_times,
+            "altitude_p10": alt_p10,
+            "altitude_p25": alt_p25,
+            "altitude_p50": alt_p50,
+            "altitude_p75": alt_p75,
+            "altitude_p90": alt_p90,
+            "altitude_min": alt_min,
+            "altitude_max": alt_max,
+            "distance_mean": dist_mean,
+            "distance_p10": dist_p10,
+            "distance_p90": dist_p90,
+        },
+        "sample_trajectories": sample_trajectories,
+    }
 
 
 # --------------------------------------------------------------------------

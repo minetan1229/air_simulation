@@ -29,6 +29,7 @@ from physics.config_schema import (
     AIRCRAFT_SCHEMA,
     DESIGN_VARIABLE_CATALOGUE,
     ENVIRONMENT_SCHEMA,
+    LAUNCH_SCHEMA,
     LaunchConfig,
     OBJECTIVE_DIRECTIONS,
     OptimizerConfig,
@@ -300,6 +301,7 @@ def meta_schemas():
         {
             "aircraft": AIRCRAFT_SCHEMA,
             "environment": ENVIRONMENT_SCHEMA,
+            "launch": LAUNCH_SCHEMA,
             "objectives": [
                 {"name": name, "direction": direction}
                 for name, direction in OBJECTIVE_DIRECTIONS.items()
@@ -682,6 +684,36 @@ def simulation_batch():
     )
 
 
+@app.post("/api/v1/simulation/ensemble")
+def simulation_ensemble():
+    parallel = _domain("parallel_engine")
+    payload = body()
+    aircraft = build(AircraftConfig, payload.get("aircraft"), SESSION.aircraft)
+    environment = build(EnvironmentConfig, payload.get("environment"), SESSION.environment).clamp_ranges()
+    launch = build(LaunchConfig, payload.get("launch"), SESSION.launch)
+    settings = build(SimulationSettings, payload.get("settings"), SESSION.settings)
+
+    n_trajectories = int(payload.get("n_trajectories", 128))
+    noise_config = payload.get("noise_config")
+    force_cpu = bool(payload.get("force_cpu", False))
+    random_seed = payload.get("random_seed", 42)
+    if random_seed is not None:
+        random_seed = int(random_seed)
+
+    result = parallel.gpu_ensemble_simulation(
+        aircraft=aircraft,
+        environment=environment,
+        launch=launch,
+        settings=settings,
+        n_trajectories=n_trajectories,
+        noise_config=noise_config,
+        force_cpu=force_cpu,
+        random_seed=random_seed,
+    )
+    return jsonify(result)
+
+
+
 # ---------------------------------------------------------------------------
 # 6. Mesh import
 # ---------------------------------------------------------------------------
@@ -1061,6 +1093,71 @@ def data_import():
         SESSION.set_settings(from_dict(SimulationSettings, normalised["simulation"], strict=False))
         snapshot = SESSION.current_snapshot()
     return jsonify({"ok": True, "bundle": snapshot})
+
+
+# ---------------------------------------------------------------------------
+# 8b. Record presets & throw techniques
+# ---------------------------------------------------------------------------
+@app.get("/api/v1/records/presets")
+def get_record_presets():
+    from physics import records_domain
+    category = request.args.get("category")
+    presets = records_domain.list_presets(category=category)
+    return jsonify({"presets": presets, "count": len(presets)})
+
+
+@app.get("/api/v1/records/presets/<key>")
+def get_record_preset(key: str):
+    from physics import records_domain
+    try:
+        data = records_domain.preset_payload(key)
+    except KeyError:
+        raise NotFound(f"Unknown preset key: '{key}'")
+    return jsonify(data)
+
+
+@app.post("/api/v1/records/apply")
+def apply_record_preset():
+    from physics import records_domain
+    payload = body()
+    key = payload.get("key")
+    if not key:
+        raise BadRequest("'key' is required")
+    apply_throw_only = bool(payload.get("throw_only", False))
+    apply_aircraft_only = bool(payload.get("aircraft_only", False))
+
+    with SESSION.lock:
+        try:
+            entry = records_domain.preset(key)
+        except KeyError:
+            raise NotFound(f"Unknown preset key: '{key}'")
+
+        if not apply_throw_only:
+            SESSION.set_aircraft(entry.aircraft_config(SESSION.aircraft))
+        if not apply_aircraft_only:
+            SESSION.set_launch(entry.launch_config(SESSION.launch))
+            SESSION.set_environment(entry.environment_config(SESSION.environment))
+
+        SESSION.simulator = None
+        state = SESSION.reset()
+        snapshot = SESSION.current_snapshot()
+
+    return jsonify({
+        "ok": True,
+        "key": key,
+        "preset_name": entry.name,
+        "throw": as_dict(entry.throw),
+        "state": state,
+        **snapshot,
+    })
+
+
+@app.get("/api/v1/records/throw_techniques")
+def get_throw_techniques():
+    from physics import records_domain
+    rules = [dict(rule) for rule in records_domain.THROW_RULES]
+    comp_rules = records_domain.competition_rules()
+    return jsonify({"throw_rules": rules, "competition_rules": comp_rules})
 
 
 # ---------------------------------------------------------------------------
