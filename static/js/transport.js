@@ -315,27 +315,29 @@ export class Transport extends Emitter {
 
   async _pollWind() {
     const frame = this.lastFrame;
-    const half = this.tunnelMode ? 1.4 : 2.6;
-    let centreX = 0;
-    let centreY = 0;
-    let altitudeM = 1.2;
-
+    let min, max, resolution;
     if (this.tunnelMode) {
-      centreX = 0;
-      centreY = 0;
-      altitudeM = 1.2;
-    } else if (frame && frame.position_m) {
-      centreX = Number(frame.position_m[0]) || 0;
-      centreY = Number(frame.position_m[1]) || 0;
-      altitudeM = Math.max(-Number(frame.position_m[2]) || 1.2, 0.1);
+      // Full wind-tunnel test chamber domain: spans ±5m along stream, ±3.2m laterally, 0.05-3.2m vertically
+      min = [-5.0, -3.2, 0.05];
+      max = [5.0, 3.2, 3.2];
+      resolution = [17, 11, 9];
+    } else {
+      const half = 2.6;
+      let centreX = 0;
+      let centreY = 0;
+      let altitudeM = 1.2;
+      if (frame && frame.position_m) {
+        centreX = Number(frame.position_m[0]) || 0;
+        centreY = Number(frame.position_m[1]) || 0;
+        altitudeM = Math.max(-Number(frame.position_m[2]) || 1.2, 0.1);
+      }
+      const minZ = Math.max(altitudeM - 0.9, 0.05);
+      const maxZ = altitudeM + 1.1;
+      min = [centreX - half, centreY - half, minZ];
+      max = [centreX + half, centreY + half, maxZ];
+      resolution = [11, 11, 7];
     }
-
-    const minZ = Math.max(altitudeM - 0.9, 0.05);
-    const maxZ = altitudeM + 1.1;
-    const min = [centreX - half, centreY - half, minZ];
-    const max = [centreX + half, centreY + half, maxZ];
     this.windDomain = { min, max };
-    const resolution = this.tunnelMode ? [9, 9, 6] : [11, 11, 7];
     const time = frame ? Number(frame.time_s) || 0 : 0;
     const payload = await this.api
       .wind({

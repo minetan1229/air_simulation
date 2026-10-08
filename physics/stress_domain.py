@@ -548,13 +548,29 @@ def heatmap_colour(index: float) -> Tuple[int, int, int]:
     return (red, green, blue)
 
 
-def active_backend() -> str:
+def _probe_cupy():
+    """Probe whether CuPy is usable on an available CUDA GPU."""
+    try:
+        import cupy as cp
+        if int(cp.cuda.runtime.getDeviceCount()) > 0:
+            return cp
+    except Exception:
+        pass
+    return None
+
+
+_CUPY_MODULE = _probe_cupy()
+
+
+def active_backend(force_cpu: bool = False) -> str:
     """Return the array backend actually used for the stress grid.
 
-    Always ``"numpy"``: the grid is at most 256 x 256 cells, so a CUDA
-    kernel launch would cost more in latency than the whole computation.
+    Returns ``"cupy"`` when CUDA GPU hardware is available, else ``"numpy"``.
     """
-    return "numpy"
+    if force_cpu:
+        return "numpy"
+    return "cupy" if _CUPY_MODULE is not None else "numpy"
+
 
 
 def critical_point_body(
@@ -606,24 +622,22 @@ def stress_field(
     spanwise: int = 24,
     chordwise: int = 16,
     beta_deg: float = 0.0,
+    backend: str = "auto",
 ) -> Dict[str, Any]:
     """Build the ``chordwise x spanwise`` wing stress heat map.
 
-    The exact formula, every constant and the calibration reasoning are in
-    the module docstring.  Returns a dict with the keys ``stress_index``,
-    ``stress_pa``, ``spanwise``, ``chordwise``, ``max_stress_index``,
-    ``min_stress_index``, ``max_stress_pa``, ``mean_stress_pa``,
-    ``wing_root_moment_nm``, ``load_factor``, ``dynamic_pressure_pa``,
-    ``allowable_stress_pa``, ``failure_index``, ``status``,
-    ``dihedral_rad``, ``semispan_m``, ``colours``,
-    ``critical_spanwise_frac`` and ``critical_chordwise_frac``.
-
-    Every value is finite for every input, including ``q = 0`` (which yields
-    a zero field, a ``0.5`` neutral index and ``status == "ok"``).
+    Accelerated on CUDA GPU via CuPy when available.
     """
     derived = derived_properties(cfg)
     ns = int(clamp(int(spanwise), 2, 256))
     nc = int(clamp(int(chordwise), 2, 256))
+
+    # Decide backend (cupy GPU vs numpy CPU)
+    xp = np
+    actual_backend = "numpy"
+    if backend in ("auto", "cupy") and _CUPY_MODULE is not None:
+        xp = _CUPY_MODULE
+        actual_backend = "cupy"
 
     q = max(_finite_or(dynamic_pressure_pa, 0.0), 0.0)
     nz = max(_finite_or(load_factor, 0.0), 0.0)
@@ -658,51 +672,52 @@ def stress_field(
     # --- spanwise axis (full span, centre-line at i_c) ---------------------
     centre = (ns - 1) * 0.5
     half_index = max(centre, 1.0)
-    i_axis = np.arange(ns, dtype=float)
+    i_axis = xp.arange(ns, dtype=float)
     y_signed = (i_axis - centre) / half_index
-    y_abs = np.abs(y_signed)
+    y_abs = xp.abs(y_signed)
 
     # span-loading exponent: 1 = uniform load, 2 = triangular tip load
     exponent = 1.0 + SPAN_SHIFT_GAIN * abs(tilt)
     tip_moment = root_moment * TIP_MOMENT_GAIN * tip_factor
-    moment = 0.5 * root_moment * np.power(np.clip(1.0 - y_abs, 0.0, 1.0), exponent)
-    moment = moment + tip_moment * np.power(y_abs, 3.0)
+    moment = 0.5 * root_moment * xp.power(xp.clip(1.0 - y_abs, 0.0, 1.0), exponent)
+    moment = moment + tip_moment * xp.power(y_abs, 3.0)
 
     # dihedral roll couple + span load transfer + sideslip side load
     load_mult = 1.0 - DIHEDRAL_LOAD_COUPLING * tilt * y_signed
     couple_mult = 1.0 + DIHEDRAL_MOMENT_COUPLING * tilt * y_signed
     side_mult = 1.0 + SIDELOAD_COUPLING * side * y_signed
-    moment = moment * np.maximum(load_mult, 0.05) * np.maximum(couple_mult, 0.05) * np.maximum(
+    moment = moment * xp.maximum(load_mult, 0.05) * xp.maximum(couple_mult, 0.05) * xp.maximum(
         side_mult, 0.05
     )
 
     local_chord = chord_root * (1.0 - (1.0 - taper) * y_abs) * chord_scale
 
     # --- chordwise axis ----------------------------------------------------
-    j_axis = np.arange(nc, dtype=float)
+    j_axis = xp.arange(nc, dtype=float)
     x_axis = j_axis / max(nc - 1, 1)
     arm = ELEVON_ARM_GAIN * (
         abs(deg2rad(_finite_or(float(cfg.elevon_deg), 0.0)))
         + abs(deg2rad(_finite_or(float(cfg.fold_trailing_deg), 0.0)))
     )
-    shape = np.power(np.clip(1.0 - x_axis, 0.0, 1.0), CHORDWISE_EXPONENT)
-    shape = shape + ELEVON_TE_GAIN * arm * np.power(x_axis, 4.0)
+    shape = xp.power(xp.clip(1.0 - x_axis, 0.0, 1.0), CHORDWISE_EXPONENT)
+    shape = shape + ELEVON_TE_GAIN * arm * xp.power(x_axis, 4.0)
 
     # --- cell bending stress [Pa] -----------------------------------------
-    # Built span-major then transposed so the payload is chordwise x spanwise
-    # (row 0 = leading edge, column 0 = port tip).
     panel_width = max(span / ns, _EPS)
     scale = KAPPA_SIGMA * 6.0 / (panel_width * thickness * thickness * z_gain)
-    stress = (moment[:, np.newaxis] * local_chord[:, np.newaxis]) * shape[np.newaxis, :]
+    stress = (moment[:, xp.newaxis] * local_chord[:, xp.newaxis]) * shape[xp.newaxis, :]
     stress = stress * scale
-    stress = np.nan_to_num(stress.T, nan=0.0, posinf=0.0, neginf=0.0)
-    stress = np.maximum(stress, 0.0)
+    stress = xp.nan_to_num(stress.T, nan=0.0, posinf=0.0, neginf=0.0)
+    stress = xp.maximum(stress, 0.0)
 
-    max_stress = float(stress.max())
-    mean_stress = float(stress.mean())
+    # Convert to NumPy for host formatting if computed on GPU
+    stress_np = stress.get() if hasattr(stress, "get") else np.asarray(stress)
+
+    max_stress = float(stress_np.max())
+    mean_stress = float(stress_np.mean())
 
     # --- heat-map index ----------------------------------------------------
-    shape_index = normalise_heatmap(stress)
+    shape_index = normalise_heatmap(stress_np)
     head = clamp(max_stress / INDEX_REFERENCE_PA, 0.0, 1.0)
     index_grid = shape_index * head
     index_grid = np.clip(np.nan_to_num(index_grid, nan=0.0), 0.0, 1.0)
@@ -712,6 +727,7 @@ def stress_field(
     j_arg = int(np.argmax(index_grid[:, i_arg]))
     critical_span = clamp(abs(i_arg - centre) / half_index, 0.0, 1.0)
     critical_chord = clamp(j_arg / max(nc - 1, 1), 0.0, 1.0)
+
 
     allowable = paper_allowable_stress(gsm, stiffness)
     fi = failure_index(max_stress, allowable)
@@ -753,6 +769,7 @@ def analyse(
     spanwise: int = 24,
     chordwise: int = 16,
     beta_deg: float = 0.0,
+    backend: str = "auto",
 ) -> Dict[str, Any]:
     """End-to-end structural analysis for the REST layer.
 
@@ -780,12 +797,14 @@ def analyse(
         spanwise=spanwise,
         chordwise=chordwise,
         beta_deg=beta_deg,
+        backend=backend,
     )
     out["speed_mps"] = float(speed)
     out["density_kgm3"] = float(density)
-    out["backend"] = active_backend()
+    out["backend"] = out.get("backend", active_backend())
     return out
 
 
 #: US spelling alias.
 analyze = analyse
+

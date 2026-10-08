@@ -43,6 +43,7 @@ uniform float uTime;
 uniform float uSeed;
 uniform float uSpeedScale;
 uniform float uSwirl;
+uniform float uTunnel;
 varying vec2 vUv;
 
 vec3 hash3(vec2 p, float seed) {
@@ -55,7 +56,14 @@ vec3 hash3(vec2 p, float seed) {
 void main() {
   vec4 state;
   if (uSeed > 0.5) {
-    state = vec4(hash3(vUv, uSeed), 0.0);
+    if (uTunnel > 0.5) {
+      // Wind tunnel nozzle seeding: regular stream lanes with slight jitter
+      vec2 grid = floor(vUv * vec2(36.0, 24.0)) / vec2(36.0, 24.0);
+      vec3 j = (hash3(vUv * 19.3, 1.0) - 0.5) * 0.04;
+      state = vec4(fract(vUv.x + j.x), fract(grid.y + j.y), fract(grid.x + j.z), hash3(vUv, 3.1).x);
+    } else {
+      state = vec4(hash3(vUv, uSeed), 0.0);
+    }
   } else {
     state = texture2D(uPositions, vUv);
   }
@@ -63,15 +71,26 @@ void main() {
   vec3 uvw = clamp(state.xyz, 0.0, 1.0);
   vec3 flow = texture(uWind, vec3(uvw.x, uvw.z, uvw.y)).xyz;
 
-  // Cheap divergence-reduced swirl so the streamlines read as air, not smoke.
   vec3 jitter = (hash3(vUv * 7.3 + uTime * 0.05, uSeed) - 0.5);
   vec3 swirl = cross(flow, jitter) * uSwirl;
 
   vec3 velocity = flow * uSpeedScale + swirl;
   vec3 next = state.xyz + velocity * uDt / uBoxSize;
-  next = fract(next);
 
-  float life = fract(state.w + uDt * 0.12);
+  float life = fract(state.w + uDt * (uTunnel > 0.5 ? 0.22 : 0.12));
+
+  if (uTunnel > 0.5) {
+    // Respawn along the upstream nozzle wall as organized smoke filament lines
+    if (next.x < 0.005 || next.x > 0.995 || next.y < 0.005 || next.y > 0.995 || next.z < 0.005 || next.z > 0.995 || life < 0.02) {
+      vec2 grid = floor(vUv * vec2(36.0, 24.0)) / vec2(36.0, 24.0);
+      vec3 j = (hash3(vUv * 43.1 + life * 17.0, 2.0) - 0.5) * 0.03;
+      next = vec3(0.99, clamp(grid.y + j.y, 0.05, 0.95), clamp(grid.x + j.z, 0.05, 0.95));
+      life = fract(hash3(vUv, 7.3).x * 0.2);
+    }
+  } else {
+    next = fract(next);
+  }
+
   gl_FragColor = vec4(next, life);
 }
 `;
@@ -85,6 +104,7 @@ uniform vec3 uBoxMin;
 uniform vec3 uBoxSize;
 uniform float uScale;
 uniform float uFade;
+uniform float uTunnel;
 attribute vec2 ref;
 varying float vSpeed;
 varying float vFade;
@@ -94,11 +114,13 @@ void main() {
   vec3 uvw = clamp(state.xyz, 0.0, 1.0);
   vec3 world = uBoxMin + uvw * uBoxSize;
   vSpeed = length(texture(uWind, vec3(uvw.x, uvw.z, uvw.y)).xyz);
-  vFade = smoothstep(0.0, 0.15, state.w) * (1.0 - smoothstep(0.75, 1.0, state.w));
+  vFade = smoothstep(0.0, 0.12, state.w) * (1.0 - smoothstep(0.82, 1.0, state.w));
 
   vec4 mv = modelViewMatrix * vec4(world, 1.0);
   gl_Position = projectionMatrix * mv;
-  gl_PointSize = clamp(uScale / max(-mv.z, 0.05), 1.0, 5.0);
+  float minPt = (uTunnel > 0.5) ? 2.2 : 1.0;
+  float maxPt = (uTunnel > 0.5) ? 6.0 : 5.0;
+  gl_PointSize = clamp(uScale / max(-mv.z, 0.05), minPt, maxPt);
 }
 `;
 
@@ -108,6 +130,7 @@ uniform vec3 uSlow;
 uniform vec3 uFast;
 uniform float uMaxSpeed;
 uniform float uFade;
+uniform float uTunnel;
 varying float vSpeed;
 varying float vFade;
 
@@ -115,10 +138,13 @@ void main() {
   vec2 offset = gl_PointCoord - vec2(0.5);
   float radius = dot(offset, offset);
   if (radius > 0.25) discard;
-  float alpha = smoothstep(0.25, 0.02, radius) * uFade * vFade;
+  float alphaMul = (uTunnel > 0.5) ? 0.70 : 0.32;
+  float alpha = smoothstep(0.25, 0.02, radius) * uFade * vFade * alphaMul;
   float t = clamp(vSpeed / max(uMaxSpeed, 0.05), 0.0, 1.0);
-  vec3 colour = mix(uSlow, uFast, t);
-  gl_FragColor = vec4(colour, alpha * 0.3);
+  vec3 slowCol = (uTunnel > 0.5) ? vec3(0.72, 0.88, 1.0) : uSlow;
+  vec3 fastCol = (uTunnel > 0.5) ? vec3(0.12, 0.58, 0.98) : uFast;
+  vec3 colour = mix(slowCol, fastCol, t);
+  gl_FragColor = vec4(colour, alpha);
 }
 `;
 
@@ -359,6 +385,7 @@ export class WindParticles {
       uSeed: { value: 1 },
       uSpeedScale: { value: 1 },
       uSwirl: { value: this.swirl },
+      uTunnel: { value: 0 },
     };
     this.simMaterial = new THREE.ShaderMaterial({
       uniforms: this.simUniforms,
@@ -393,6 +420,7 @@ export class WindParticles {
       uBoxSize: this.simUniforms.uBoxSize,
       uScale: { value: 110 },
       uFade: { value: 1 },
+      uTunnel: { value: 0 },
       uSlow: { value: new THREE.Color(0.72, 0.78, 0.85) },
       uFast: { value: new THREE.Color(0.24, 0.45, 0.7) },
       uMaxSpeed: { value: 1 },
@@ -445,10 +473,14 @@ export class WindParticles {
 
   setField(field) {
     this.field = field;
-    // Visual gain: real air speeds are centimetres per second, so the advection
-    // is scaled to a readable rate.  The HUD reports the *unscaled* field speed.
+    const isTunnel = Boolean(field.tunnelMode);
+    // Visual gain: real air speeds are metres per second, advection is scaled for readability
     const peak = Math.max(field.maxSpeed, 0.02);
-    this.speedScale = Math.min(40, Math.max(1, 0.85 / peak));
+    if (isTunnel) {
+      this.speedScale = Math.min(25, Math.max(2, 4.5 / Math.sqrt(peak)));
+    } else {
+      this.speedScale = Math.min(40, Math.max(1, 0.85 / peak));
+    }
     if (this.gpuSupported) {
       if (field.ready) {
         if (this.volumeTexture && this.volumeTexture !== this.blankVolume) {
@@ -461,11 +493,14 @@ export class WindParticles {
       const box = field.boxCorners();
       this.simUniforms.uBoxMin.value.copy(box.min);
       this.simUniforms.uBoxSize.value.subVectors(box.max, box.min);
+      this.simUniforms.uTunnel.value = isTunnel ? 1 : 0;
+      this.pointUniforms.uTunnel.value = isTunnel ? 1 : 0;
       this.pointUniforms.uMaxSpeed.value = Math.max(field.maxSpeed, 0.05);
       this.mode = "gpgpu";
     } else {
       const box = field.boxCorners();
       this.box = box;
+      this.pointMaterial.opacity = isTunnel ? 0.75 : 0.45;
       this.mode = "cpu";
     }
   }

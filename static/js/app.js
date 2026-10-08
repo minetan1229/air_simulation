@@ -280,6 +280,7 @@ class ConsoleApp {
       "hud-cd",
       "hud-ld",
       "hud-cm",
+      "hud-tunnel-status",
       "tunnel-hud",
       "tunnel-toggle",
       "tp-launch",
@@ -1020,6 +1021,19 @@ class ConsoleApp {
       this.dom["hud-speed"].textContent = `${fmt(speed, 1)} m/s`;
       this.dom["hud-flow"].textContent = `${fmt(speed, 1)} m/s`;
       this.dom["hud-q"].textContent = `${fmt(payload.dynamic_pressure_pa, 1)} Pa`;
+      const statusEl = this.dom["hud-tunnel-status"];
+      if (statusEl) {
+        if (speed < 0.1) {
+          statusEl.textContent = "風速ゼロ・静止";
+          statusEl.style.color = "#5f6368";
+        } else if (alpha > 14.0 || alpha < -8.0) {
+          statusEl.textContent = "失速バフェッティング";
+          statusEl.style.color = "#ea4335";
+        } else {
+          statusEl.textContent = "動的空力バフェッティング";
+          statusEl.style.color = "#1a73e8";
+        }
+      }
       this._updateTunnelPose();
     }
     return payload;
@@ -1030,15 +1044,22 @@ class ConsoleApp {
     const env = this.store.data.environment || {};
     const alpha = Number(env.wind_tunnel_alpha_deg ?? 4.0);
     const beta = Number(env.wind_tunnel_beta_deg ?? 0.0);
-    // In wind tunnel bench:
-    // Nose-up alpha is negative rotation about body y axis in NED
-    // Yaw is -beta (sideslip)
-    const deg2rad = Math.PI / 180;
-    const pitchRad = alpha * deg2rad;
-    const yawRad = -beta * deg2rad;
-    const euler = new THREE.Euler(0, -pitchRad, yawRad, "ZYX");
-    const q = new THREE.Quaternion().setFromEuler(euler);
-    this.viewport.setPose([0, 0, -1.2], [q.w, q.x, q.y, q.z]);
+    const speed = Number(env.wind_tunnel_speed ?? 12.0);
+    const aero = this.aeroPayload || {};
+    const q = Number(aero.dynamic_pressure_pa ?? (0.5 * 1.225 * speed * speed));
+    const cl = Number(aero.cl ?? 0.35);
+    const cd = Number(aero.cd ?? 0.08);
+    const cm = Number(aero.cm ?? 0.0);
+
+    this.viewport.updateTunnelParams({
+      speed,
+      alpha,
+      beta,
+      q,
+      cl,
+      cd,
+      cm,
+    });
   }
 
   async _launchFlight() {
@@ -1477,6 +1498,11 @@ class ConsoleApp {
     this.dom["tunnel-hud"].hidden = !this.tunnelMode;
     this.transport.tunnelMode = this.tunnelMode;
     if (this.viewport) {
+      const env = this.store.data.environment || {};
+      const speed = Number(env.wind_tunnel_speed ?? 12.0);
+      const alpha = Number(env.wind_tunnel_alpha_deg ?? 4.0);
+      const beta = Number(env.wind_tunnel_beta_deg ?? 0.0);
+      this.viewport.setTunnelMode(this.tunnelMode, { speed, alpha, beta });
       this.viewport.resetCamera();
       if (this.tunnelMode) {
         this.viewport.setLaunchVectorVisible(false);

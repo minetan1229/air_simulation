@@ -584,8 +584,8 @@ def test_sideslip_adds_a_side_load_contribution(cfg):
 def test_analyse_end_to_end(cfg, env):
     out = sd.analyse(cfg, env, 12.0, 1.225)
     assert set(out) == REQUIRED_KEYS | {"speed_mps", "density_kgm3", "backend"}
-    assert out["backend"] == "numpy"
-    assert sd.active_backend() == "numpy"
+    assert out["backend"] in ("numpy", "cupy")
+    assert sd.active_backend() in ("numpy", "cupy")
     assert out["speed_mps"] == 12.0
     assert out["density_kgm3"] == 1.225
     assert _all_finite(out)
@@ -700,4 +700,4 @@ def test_payload_is_json_safe_and_finite(cfg, env):
     assert isinstance(out["stress_index"], list)
     assert isinstance(out["stress_pa"], list)
     assert all(isinstance(row, list) for row in out["stress_pa"])
-    assert json.loads(json.dumps(out))["backend"] == "numpy"
+    assert json.loads(json.dumps(out))["backend"] in ("numpy", "cupy")

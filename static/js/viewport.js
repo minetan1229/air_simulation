@@ -118,6 +118,11 @@ export class Viewport {
     this._buildEnvironment();
     this._buildAirframe();
     this._buildTracks();
+    this._buildWindTunnel();
+
+    this.tunnelMode = false;
+    this.tunnelParams = { speed: 12.0, alpha: 4.0, beta: 0.0, q: 0, cl: 0, cd: 0, cm: 0 };
+    this.tunnelTime = 0;
 
     this.particles = new WindParticles(this.scene, this.renderer);
 
@@ -407,6 +412,218 @@ export class Viewport {
     );
     this.launchArrow.visible = false;
     this.scene.add(this.launchArrow);
+  }
+
+  _buildWindTunnel() {
+    this.tunnelGroup = new THREE.Group();
+    this.tunnelGroup.name = "windTunnel";
+
+    // 1. Test section glass/wire frame (L: 6.0m, W: 3.2m, H: 2.2m)
+    // Box centered at (0, 1.2, 0)
+    const x0 = -3.0, x1 = 3.0;
+    const y0 = 0.1, y1 = 2.3;
+    const z0 = -1.6, z1 = 1.6;
+
+    const frameVerts = [
+      // Bottom rectangle
+      x0, y0, z0,  x1, y0, z0,
+      x1, y0, z0,  x1, y0, z1,
+      x1, y0, z1,  x0, y0, z1,
+      x0, y0, z1,  x0, y0, z0,
+      // Top rectangle
+      x0, y1, z0,  x1, y1, z0,
+      x1, y1, z0,  x1, y1, z1,
+      x1, y1, z1,  x0, y1, z1,
+      x0, y1, z1,  x0, y1, z0,
+      // 4 vertical posts
+      x0, y0, z0,  x0, y1, z0,
+      x1, y0, z0,  x1, y1, z0,
+      x1, y0, z1,  x1, y1, z1,
+      x0, y0, z1,  x0, y1, z1,
+      // Intermediate ribs for realistic test section feel
+      0, y0, z0,  0, y1, z0,
+      0, y0, z1,  0, y1, z1,
+      0, y0, z0,  0, y0, z1,
+      0, y1, z0,  0, y1, z1,
+    ];
+    const frameGeo = new THREE.BufferGeometry();
+    frameGeo.setAttribute("position", new THREE.Float32BufferAttribute(frameVerts, 3));
+    const frameMat = new THREE.LineBasicMaterial({
+      color: 0x1a73e8,
+      transparent: true,
+      opacity: 0.45,
+      linewidth: 1,
+    });
+    this.tunnelGroup.add(new THREE.LineSegments(frameGeo, frameMat));
+
+    // 2. Upstream contraction nozzle (cone expanding from +3.0m to +4.5m)
+    const nozzleX = 4.5;
+    const ny0 = -0.1, ny1 = 2.5, nz0 = -2.2, nz1 = 2.2;
+    const nozzleVerts = [
+      x1, y0, z0,  nozzleX, ny0, nz0,
+      x1, y1, z0,  nozzleX, ny1, nz0,
+      x1, y1, z1,  nozzleX, ny1, nz1,
+      x1, y0, z1,  nozzleX, ny0, nz1,
+      nozzleX, ny0, nz0,  nozzleX, ny1, nz0,
+      nozzleX, ny1, nz0,  nozzleX, ny1, nz1,
+      nozzleX, ny1, nz1,  nozzleX, ny0, nz1,
+      nozzleX, ny0, nz1,  nozzleX, ny0, nz0,
+    ];
+    const nozzleGeo = new THREE.BufferGeometry();
+    nozzleGeo.setAttribute("position", new THREE.Float32BufferAttribute(nozzleVerts, 3));
+    const nozzleMat = new THREE.LineBasicMaterial({
+      color: 0x34a853,
+      transparent: true,
+      opacity: 0.35,
+    });
+    this.tunnelGroup.add(new THREE.LineSegments(nozzleGeo, nozzleMat));
+
+    // 3. Downstream diffuser cone (expanding from -3.0m to -4.5m)
+    const diffX = -4.5;
+    const dy0 = 0.0, dy1 = 2.4, dz0 = -2.0, dz1 = 2.0;
+    const diffVerts = [
+      x0, y0, z0,  diffX, dy0, dz0,
+      x0, y1, z0,  diffX, dy1, dz0,
+      x0, y1, z1,  diffX, dy1, dz1,
+      x0, y0, z1,  diffX, dy0, dz1,
+      diffX, dy0, dz0,  diffX, dy1, dz0,
+      diffX, dy1, dz0,  diffX, dy1, dz1,
+      diffX, dy1, dz1,  diffX, dy0, dz1,
+      diffX, dy0, dz1,  diffX, dy0, dz0,
+    ];
+    const diffGeo = new THREE.BufferGeometry();
+    diffGeo.setAttribute("position", new THREE.Float32BufferAttribute(diffVerts, 3));
+    const diffMat = new THREE.LineBasicMaterial({
+      color: 0xea4335,
+      transparent: true,
+      opacity: 0.3,
+    });
+    this.tunnelGroup.add(new THREE.LineSegments(diffGeo, diffMat));
+
+    // 4. Test section sting balance strut (aerodynamic support post)
+    this.stingGroup = new THREE.Group();
+    this.stingGroup.name = "stingBalance";
+
+    // Heavy base plate on floor
+    const baseGeo = new THREE.CylinderGeometry(0.18, 0.22, 0.03, 24);
+    const metalMat = new THREE.MeshStandardMaterial({
+      color: 0x5f6368,
+      roughness: 0.4,
+      metalness: 0.8,
+    });
+    const baseMesh = new THREE.Mesh(baseGeo, metalMat);
+    baseMesh.position.set(0, 0.015, 0);
+    this.stingGroup.add(baseMesh);
+
+    // Vertical main mast (r = 0.014m, height 1.1m)
+    const mastGeo = new THREE.CylinderGeometry(0.012, 0.016, 1.1, 16);
+    const mastMesh = new THREE.Mesh(mastGeo, metalMat);
+    mastMesh.position.set(0, 0.55, 0);
+    this.stingGroup.add(mastMesh);
+
+    // Angled sting arm leading to aircraft belly
+    this.stingStrut = new THREE.Group();
+    const armGeo = new THREE.CylinderGeometry(0.005, 0.008, 0.18, 12);
+    armGeo.rotateX(Math.PI / 6);
+    const armMesh = new THREE.Mesh(armGeo, metalMat);
+    armMesh.position.set(-0.03, 0.08, 0);
+    this.stingStrut.add(armMesh);
+
+    // Tip clamp sphere
+    const clampGeo = new THREE.SphereGeometry(0.008, 12, 12);
+    const clampMat = new THREE.MeshStandardMaterial({ color: 0x1a73e8, roughness: 0.3, metalness: 0.7 });
+    const clampMesh = new THREE.Mesh(clampGeo, clampMat);
+    clampMesh.position.set(0, 0.16, 0);
+    this.stingStrut.add(clampMesh);
+
+    this.stingStrut.position.set(0, 1.05, 0);
+    this.stingGroup.add(this.stingStrut);
+
+    this.tunnelGroup.add(this.stingGroup);
+
+    this.tunnelGroup.visible = false;
+    this.scene.add(this.tunnelGroup);
+  }
+
+  setTunnelMode(enabled, params = {}) {
+    this.tunnelMode = Boolean(enabled);
+    if (this.tunnelGroup) this.tunnelGroup.visible = this.tunnelMode;
+    if (this.gripGroup) this.gripGroup.visible = !this.tunnelMode;
+    if (this.launchArrow && this.tunnelMode) this.launchArrow.visible = false;
+    if (params) this.updateTunnelParams(params);
+  }
+
+  updateTunnelParams(params) {
+    if (!this.tunnelParams) this.tunnelParams = {};
+    Object.assign(this.tunnelParams, params);
+  }
+
+  _updateTunnelDynamics(dt) {
+    if (!this.tunnelMode) return;
+    const p = this.tunnelParams || {};
+    const speed = Math.max(Number(p.speed) || 0, 0);
+    const alpha = Number(p.alpha ?? 4.0);
+    const beta = Number(p.beta ?? 0.0);
+    const cl = Number(p.cl ?? 0.35);
+    const cd = Number(p.cd ?? 0.08);
+    const cm = Number(p.cm ?? 0.0);
+
+    const DEG = Math.PI / 180;
+
+    if (speed < 0.05) {
+      const pitchRad = alpha * DEG;
+      const yawRad = -beta * DEG;
+      const euler = new THREE.Euler(0, -pitchRad, yawRad, "ZYX");
+      const q = new THREE.Quaternion().setFromEuler(euler);
+      this.setPose([0, 0, -1.2], [q.w, q.x, q.y, q.z]);
+      if (this.stingStrut) {
+        this.stingStrut.position.set(0, 1.05, 0);
+      }
+      return;
+    }
+
+    this.tunnelTime = (this.tunnelTime || 0) + dt;
+    const t = this.tunnelTime;
+    const vNorm = Math.min(speed / 12.0, 3.0);
+    const isStall = alpha > 14.0 || alpha < -8.0;
+    const stallFactor = isStall ? 2.8 : 1.0;
+
+    // 1. Aerodynamic lift heave (upward float + dynamic flutter)
+    const heaveSteady = Math.max(Math.min(cl * 0.025 * vNorm, 0.09), -0.05);
+    const heaveOsc = (Math.sin(t * 7.7) * 0.0035 + Math.sin(t * 17.3) * 0.0018) * vNorm * stallFactor;
+    const heave = heaveSteady + heaveOsc;
+
+    // 2. Drag surge (rearward pushback deflection)
+    const surgeSteady = -Math.max(Math.min(cd * 0.035 * vNorm, 0.06), 0.0);
+    const surgeOsc = Math.sin(t * 6.3 + 0.7) * 0.002 * vNorm;
+    const surge = surgeSteady + surgeOsc;
+
+    // 3. Dynamic pitch moment + vortex buffeting
+    const pitchDeflect = -cm * 4.0 * vNorm;
+    const pitchBuffet = (Math.sin(t * 11.9) * 0.75 +
+                         Math.sin(t * 24.1 + 1.1) * 0.45 +
+                         Math.sin(t * 43.5) * 0.25) * vNorm * stallFactor;
+    const pitchTotal = alpha + pitchDeflect + pitchBuffet;
+
+    // 4. Lateral roll & yaw buffeting
+    const rollBuffet = (Math.sin(t * 13.7 + 0.9) * 0.85 +
+                        Math.sin(t * 28.3) * 0.4) * vNorm * (1.0 + Math.abs(beta) * 0.03);
+    const yawBuffet = (Math.sin(t * 9.1 + 2.3) * 0.5 +
+                       Math.sin(t * 20.4) * 0.25) * vNorm;
+    const yawTotal = -beta + yawBuffet;
+
+    const simPos = [surge, 0, -(1.2 + heave)];
+    const pitchRad = pitchTotal * DEG;
+    const yawRad = yawTotal * DEG;
+    const rollRad = rollBuffet * DEG;
+    const euler = new THREE.Euler(rollRad, -pitchRad, yawRad, "ZYX");
+    const q = new THREE.Quaternion().setFromEuler(euler);
+
+    this.setPose(simPos, [q.w, q.x, q.y, q.z]);
+
+    if (this.stingStrut) {
+      this.stingStrut.position.set(surge, 1.05 + heave, 0);
+    }
   }
 
   /* ------------------------------------------------------------ public */
@@ -792,7 +1009,14 @@ export class Viewport {
   }
 
   resetCamera() {
-    this.frameOn(this.lastPose, this.frameRadius());
+    if (this.tunnelMode) {
+      const target = new THREE.Vector3(0, 1.15, 0);
+      this.controls.target.copy(target);
+      this.camera.position.set(1.6, 1.7, 1.8);
+      this.controls.update();
+    } else {
+      this.frameOn(this.lastPose, this.frameRadius());
+    }
   }
 
   setMesh(object3D) {
@@ -836,6 +1060,10 @@ export class Viewport {
       offset.copy(this.camera.position).sub(this.controls.target);
       this.controls.target.copy(this.followTarget);
       this.camera.position.copy(this.followTarget).add(offset);
+    }
+
+    if (this.tunnelMode) {
+      this._updateTunnelDynamics(dt);
     }
 
     this.particles.update(dt, this.elapsed);
