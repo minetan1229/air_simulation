@@ -1772,7 +1772,25 @@ class FlightSimulator:
         """
         if launch is not None:
             self._launch = _config_from(LaunchConfig, launch)
-        self._state = initial_state(self._launch, self.environment, self.aircraft)
+        if bool(getattr(self.environment, "wind_tunnel_enabled", False)):
+            alpha = float(getattr(self.environment, "wind_tunnel_alpha_deg", 4.0))
+            beta = float(getattr(self.environment, "wind_tunnel_beta_deg", 0.0))
+            pitch_rad = math.radians(alpha)
+            yaw_rad = math.radians(-beta)
+            q = quaternion_from_euler(0.0, pitch_rad, yaw_rad)
+            self._state = StateVector(
+                time_s=0.0,
+                position_m=(0.0, 0.0, -1.2),
+                velocity_mps=(0.0, 0.0, 0.0),
+                quaternion=(float(q[0]), float(q[1]), float(q[2]), float(q[3])),
+                angular_velocity_radps=(0.0, 0.0, 0.0),
+                acceleration_mps2=(0.0, 0.0, 0.0),
+                angular_accel_radps2=(0.0, 0.0, 0.0),
+                landed=False,
+                crashed=False,
+            )
+        else:
+            self._state = initial_state(self._launch, self.environment, self.aircraft)
         self._diverged = False
         self._rolled_back = False
         self._bounce_count = 0
@@ -2383,6 +2401,27 @@ class FlightSimulator:
         total = max(_finite(self.settings.dt_max, 2.0e-2), 0.0) if dt is None else max(_finite(dt), 0.0)
         if total <= 0.0:
             return self._build_packet(self._diagnostics(), 0.0, 0)
+        if bool(getattr(self.environment, "wind_tunnel_enabled", False)):
+            alpha = float(getattr(self.environment, "wind_tunnel_alpha_deg", 4.0))
+            beta = float(getattr(self.environment, "wind_tunnel_beta_deg", 0.0))
+            pitch_rad = math.radians(alpha)
+            yaw_rad = math.radians(-beta)
+            q = quaternion_from_euler(0.0, pitch_rad, yaw_rad)
+            self._state = replace(
+                self._state,
+                position_m=(0.0, 0.0, -1.2),
+                velocity_mps=(0.0, 0.0, 0.0),
+                quaternion=(float(q[0]), float(q[1]), float(q[2]), float(q[3])),
+                angular_velocity_radps=(0.0, 0.0, 0.0),
+                acceleration_mps2=(0.0, 0.0, 0.0),
+                angular_accel_radps2=(0.0, 0.0, 0.0),
+                landed=False,
+                crashed=False,
+                time_s=float(self._state.time_s) + total,
+            )
+            self._diagnostics_cache = None
+            self._record_sample()
+            return self._build_packet(self._diagnostics(), total, 1)
         budget = max(1, int(self.settings.max_substeps) if substeps is None else int(substeps))
         travelled = 0.0
         used = 0

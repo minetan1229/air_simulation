@@ -233,7 +233,7 @@ export class Transport extends Emitter {
       }
     }
 
-    if (this.playing) {
+    if (this.playing || this.tunnelMode) {
       if (now - this.lastStressAt > STRESS_INTERVAL_MS) {
         this.lastStressAt = now;
         this._pollStress();
@@ -298,24 +298,39 @@ export class Transport extends Emitter {
 
   async _pollWind() {
     const frame = this.lastFrame;
-    const centre = this.tunnelMode
-      ? [0, 0, -1.2]
-      : (frame && frame.position_m ? frame.position_m : [0, 0, -1.2]);
     const half = this.tunnelMode ? 1.4 : 2.6;
-    const min = [centre[0] - half, centre[1] - half, centre[2] - 0.9];
-    const max = [centre[0] + half, centre[1] + half, centre[2] + 1.9];
+    let centreX = 0;
+    let centreY = 0;
+    let altitudeM = 1.2;
+
+    if (this.tunnelMode) {
+      centreX = 0;
+      centreY = 0;
+      altitudeM = 1.2;
+    } else if (frame && frame.position_m) {
+      centreX = Number(frame.position_m[0]) || 0;
+      centreY = Number(frame.position_m[1]) || 0;
+      altitudeM = Math.max(-Number(frame.position_m[2]) || 1.2, 0.1);
+    }
+
+    const minZ = Math.max(altitudeM - 0.9, 0.05);
+    const maxZ = altitudeM + 1.1;
+    const min = [centreX - half, centreY - half, minZ];
+    const max = [centreX + half, centreY + half, maxZ];
     this.windDomain = { min, max };
     const resolution = this.tunnelMode ? [9, 9, 6] : [11, 11, 7];
     const time = frame ? Number(frame.time_s) || 0 : 0;
     const payload = await this.api
       .wind({
-        bounds_min: [min[0], min[1], -max[2]],
-        bounds_max: [max[0], max[1], -min[2]],
+        bounds_min: min,
+        bounds_max: max,
         resolution,
         time_s: time,
+        environment: this.store.data.environment,
       })
       .catch(() => null);
     if (!payload) return;
+    payload.tunnelMode = this.tunnelMode;
     this.windPayload = payload;
     this.emit("wind", payload);
   }

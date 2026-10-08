@@ -23,6 +23,7 @@ import {
 } from "./lib.js";
 import { MeshPanel } from "./meshpanel.js";
 import { OptimizerPanel } from "./optimizer.js";
+import { InvestigatorPanel } from "./investigator.js";
 import { ParameterPanels } from "./panels.js";
 import { store } from "./state.js";
 import { Gauges, PolarChart, StripChart } from "./telemetry.js";
@@ -135,6 +136,35 @@ class ConsoleApp {
     });
     this.optimizer.mount(this.meta);
 
+    this.investigator = new InvestigatorPanel({
+      api,
+      store: this.store,
+      dom: {
+        run: $("#inv-run"),
+        cancel: $("#inv-cancel"),
+        adopt: $("#inv-adopt"),
+        targetSelect: $("#inv-target-select"),
+        progFill: $("#inv-fill"),
+        progText: $("#inv-prog-pct"),
+        statusText: $("#inv-status"),
+        resultArea: $("#inv-result-area"),
+        emptyPrompt: $("#inv-empty-prompt"),
+        diagBadge: $("#inv-diag-badge"),
+        diagTitle: $("#inv-diag-title"),
+        diagDesc: $("#inv-diag-desc"),
+        compDistBase: $("#inv-comp-dist-base"),
+        compDistRec: $("#inv-comp-dist-rec"),
+        compDistGain: $("#inv-comp-dist-gain"),
+        compTimeBase: $("#inv-comp-time-base"),
+        compTimeRec: $("#inv-comp-time-rec"),
+        compTimeGain: $("#inv-comp-time-gain"),
+        adviceHost: $("#inv-advice-list"),
+        sensHost: $("#inv-sens-list"),
+      },
+      notify: (message, tone) => this.notify(message, tone),
+    });
+    this.investigator.mount();
+
     this.meshPanel = new MeshPanel({
       api,
       store: this.store,
@@ -218,6 +248,7 @@ class ConsoleApp {
       "btn-copy-gpu-cmd",
       "gpu-ps-command",
       "top-ghost",
+      "btn-top-investigate",
       "btn-top-record",
       "btn-record-video",
       "record-preset-select",
@@ -332,6 +363,12 @@ class ConsoleApp {
           this.optimizer.chart.resize();
         }
       });
+    }
+    const activeTab = tabs.find((t) => t.getAttribute("aria-selected") === "true") || tabs[0];
+    if (activeTab) {
+      for (const pane of document.querySelectorAll(".wb-pane")) {
+        pane.hidden = pane.dataset.pane !== activeTab.dataset.tab;
+      }
     }
     this.dom["wb-toggle"].addEventListener("click", () => this.setWorkbench(!this._workbenchOpen()));
     this.setWorkbench(false);
@@ -603,6 +640,14 @@ class ConsoleApp {
     this.dom["btn-help"].addEventListener("click", () => {
       this.dom["help"].hidden = false;
     });
+
+    if (this.dom["btn-top-investigate"]) {
+      this.dom["btn-top-investigate"].addEventListener("click", () => {
+        this.setWorkbench(true);
+        const invTab = $("#wb-tab-investigate");
+        if (invTab) invTab.click();
+      });
+    }
     this.dom["help-close"].addEventListener("click", () => {
       this.dom["help"].hidden = true;
     });
@@ -741,9 +786,12 @@ class ConsoleApp {
       this.setTunnel(Boolean(value));
     } else if (this.tunnelMode && (key === "wind_tunnel_speed" || key === "wind_tunnel_alpha_deg" || key === "wind_tunnel_beta_deg")) {
       this._updateTunnelPose();
-      this._updateTrim();
-      this.transport._pollStress();
-      this.transport._pollWind();
+      this._guard(async () => {
+        await api.atmosphere(this.store.data.environment);
+        await this._updateTrim();
+        await this.transport._pollStress();
+        await this.transport._pollWind();
+      });
     }
   }
 
@@ -961,12 +1009,12 @@ class ConsoleApp {
     const alpha = Number(env.wind_tunnel_alpha_deg ?? 4.0);
     const beta = Number(env.wind_tunnel_beta_deg ?? 0.0);
     // In wind tunnel bench:
-    // Pitch is alpha (nose-up: positive pitch in NED = -alpha rotation in body)
+    // Nose-up alpha is negative rotation about body y axis in NED
     // Yaw is -beta (sideslip)
     const deg2rad = Math.PI / 180;
     const pitchRad = alpha * deg2rad;
     const yawRad = -beta * deg2rad;
-    const euler = new THREE.Euler(0, pitchRad, yawRad, "ZYX");
+    const euler = new THREE.Euler(0, -pitchRad, yawRad, "ZYX");
     const q = new THREE.Quaternion().setFromEuler(euler);
     this.viewport.setPose([0, 0, -1.2], [q.w, q.x, q.y, q.z]);
   }
@@ -1114,7 +1162,14 @@ class ConsoleApp {
 
     let label = "飛行";
     let state = "flying";
-    if (frame.crashed) {
+    if (this.tunnelMode) {
+      label = "風洞";
+      state = "tunnel";
+      if (frame.cl !== undefined) this.dom["hud-cl"].textContent = fmt(frame.cl, 3);
+      if (frame.cd !== undefined) this.dom["hud-cd"].textContent = fmt(frame.cd, 4);
+      if (frame.ld_ratio !== undefined) this.dom["hud-ld"].textContent = fmt(frame.ld_ratio, 2);
+      if (frame.cm !== undefined) this.dom["hud-cm"].textContent = fmt(frame.cm, 4);
+    } else if (frame.crashed) {
       label = "墜落";
       state = "crash";
     } else if (frame.landed) {
@@ -1362,6 +1417,7 @@ class ConsoleApp {
       this.viewport.resetCamera();
       if (this.tunnelMode) {
         this.viewport.setLaunchVectorVisible(false);
+        this.viewport.setParticlesVisible(true);
         this._updateTunnelPose();
       } else {
         this._placeAirframeAtLaunch();
@@ -1371,6 +1427,7 @@ class ConsoleApp {
     this._updatePill(this.tunnelMode ? "風洞" : "待機", this.tunnelMode ? "tunnel" : "idle");
     if (this.tunnelMode) {
       this._guard(async () => {
+        await api.atmosphere(this.store.data.environment);
         await this._updateTrim();
         await this.transport._pollWind();
         await this.transport._pollStress();

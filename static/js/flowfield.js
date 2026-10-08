@@ -61,7 +61,7 @@ void main() {
   }
 
   vec3 uvw = clamp(state.xyz, 0.0, 1.0);
-  vec3 flow = texture(uWind, vec3(uvw.x, uvw.z, 1.0 - uvw.y)).xyz;
+  vec3 flow = texture(uWind, vec3(uvw.x, uvw.z, uvw.y)).xyz;
 
   // Cheap divergence-reduced swirl so the streamlines read as air, not smoke.
   vec3 jitter = (hash3(vUv * 7.3 + uTime * 0.05, uSeed) - 0.5);
@@ -93,7 +93,7 @@ void main() {
   vec4 state = texture2D(uPositions, ref);
   vec3 uvw = clamp(state.xyz, 0.0, 1.0);
   vec3 world = uBoxMin + uvw * uBoxSize;
-  vSpeed = length(texture(uWind, vec3(uvw.x, uvw.z, 1.0 - uvw.y)).xyz);
+  vSpeed = length(texture(uWind, vec3(uvw.x, uvw.z, uvw.y)).xyz);
   vFade = smoothstep(0.0, 0.15, state.w) * (1.0 - smoothstep(0.75, 1.0, state.w));
 
   vec4 mv = modelViewMatrix * vec4(world, 1.0);
@@ -152,6 +152,7 @@ export class FlowField {
    */
   ingest(payload) {
     this.payload = payload;
+    this.tunnelMode = Boolean(payload.tunnelMode);
     const [nx, ny, nz] = payload.shape;
     const lo = payload.bounds.min;
     const hi = payload.bounds.max;
@@ -245,8 +246,9 @@ export class FlowField {
     const size = [this.shape[0], this.shape[1], this.shape[2]];
     const data = new Uint16Array(size[0] * size[1] * size[2] * 4);
     const toHalf = THREE_REF.DataUtils.toHalfFloat;
+    const uSign = this.tunnelMode ? -1 : 1;
     for (let i = 0; i < grid.u.length; i += 1) {
-      data[i * 4] = toHalf(grid.u[i]);
+      data[i * 4] = toHalf(grid.u[i] * uSign);
       data[i * 4 + 1] = toHalf(grid.w[i]);
       data[i * 4 + 2] = toHalf(grid.v[i]);
       data[i * 4 + 3] = toHalf(Math.hypot(grid.u[i], grid.v[i], grid.w[i]));
@@ -268,8 +270,8 @@ export class FlowField {
   boxCorners() {
     const lo = this.bounds.min;
     const hi = this.bounds.max;
-    const min = new THREE.Vector3(lo[0], -hi[2], lo[1]);
-    const max = new THREE.Vector3(hi[0], -lo[2], hi[1]);
+    const min = new THREE.Vector3(lo[0], lo[2], lo[1]);
+    const max = new THREE.Vector3(hi[0], hi[2], hi[1]);
     return { min, max };
   }
 }
@@ -505,7 +507,8 @@ export class WindParticles {
         this.field.velocityAt(wx, wz, -wy, out);
         const speed = Math.hypot(out[0], out[1], out[2]);
         speeds[i] = speed;
-        positions[i * 3] += (out[0] * this.speedScale * step) / (sizeX || 1);
+        const uSign = (this.field && this.field.tunnelMode) ? -1 : 1;
+        positions[i * 3] += (out[0] * uSign * this.speedScale * step) / (sizeX || 1);
         // third server component is vertical and points up -> three-space +y
         positions[i * 3 + 1] += (out[2] * this.speedScale * step) / (sizeY || 1);
         positions[i * 3 + 2] += (out[1] * this.speedScale * step) / (sizeZ || 1);
