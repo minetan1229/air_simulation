@@ -241,6 +241,32 @@ function makeUnderNoseBallastSampler(cfg, side) {
   };
 }
 
+/**
+ * 3D Under-wing origami tuck layer sampler.
+ * In authentic folded paper airplanes (Dart, Suzanne, Sky King), folding the wings creates
+ * under-wing triangular tuck flaps along the fuselage keel junction that stiffen the wing root.
+ */
+function makeUnderWingTuckSampler(cfg, side) {
+  const geom = airframeSummary(cfg);
+  const sIdx = shapeIndex(cfg.shape_flag);
+  const keelHalfWidth = Math.min(0.005, geom.span * 0.015);
+  // Tuck flap extends along the first 35% - 55% of chord and 22% - 32% of span
+  const tuckChord = geom.rootChord * (sIdx === 0 ? 0.60 : (sIdx === 1 ? 0.45 : 0.38));
+  const tuckSpan = (geom.span / 2) * (sIdx === 0 ? 0.32 : (sIdx === 1 ? 0.26 : 0.20));
+
+  return (s, t) => {
+    const u = Math.min(Math.max(s, 0), 1); // 0 (keel root junction) to 1 (outer triangular fold edge)
+    const v = Math.min(Math.max(t, 0), 1); // 0 (front apex) to 1 (rear of tuck fold)
+
+    // Sits just 0.5mm below the main wing underside for visible physical layer relief
+    const x = geom.rootChord - v * tuckChord * (1.0 - u * 0.35);
+    const y = -0.0006 - 0.0004 * (1.0 - v * 0.5);
+    const z = side * (keelHalfWidth + u * (1.0 - v * 0.75) * tuckSpan);
+
+    return [x, y, z];
+  };
+}
+
 function pushSurface(target, sampler, spanSegments, chordSegments, flip = false, uvOffset = [0, 0]) {
   const base = target.positions.length / 3;
   for (let i = 0; i <= spanSegments; i += 1) {
@@ -269,21 +295,25 @@ function pushSurface(target, sampler, spanSegments, chordSegments, flip = false,
 export function buildAirframeGeometry(cfg) {
   const sink = { positions: [], uvs: [], indices: [] };
 
-  // 1. Right & Left main wings (with aileron / elevon deformation)
+  // 1. Right & Left main wings (with seamless keel root fusion, dihedral, camber & elevons)
   pushSurface(sink, makeWingSampler(cfg, 1), SPAN_SEGMENTS, CHORD_SEGMENTS, false, [0.5, 0]);
   pushSurface(sink, makeWingSampler(cfg, -1), SPAN_SEGMENTS, CHORD_SEGMENTS, true, [0.0, 0]);
 
-  // 2. 3D V-shaped Keel fuselage (Left & Right side walls with realistic grip profile)
+  // 2. 3D V-shaped Keel fuselage (Left & Right side walls with authentic paper spine thickness)
   pushSurface(sink, makeRealisticKeelSampler(cfg, 1), 4, CHORD_SEGMENTS, false, [0.5, 0]);
   pushSurface(sink, makeRealisticKeelSampler(cfg, -1), 4, CHORD_SEGMENTS, true, [0.0, 0]);
 
-  // 3. Triangular nose lock ballast layers (Upper Left & Right)
+  // 3. Triangular nose lock ballast layers (Upper Left & Right, resting on main wing)
   pushSurface(sink, makeNoseLockSampler(cfg, 1), 3, 4, false, [0.5, 0]);
   pushSurface(sink, makeNoseLockSampler(cfg, -1), 3, 4, true, [0.0, 0]);
 
   // 4. Under-nose ballast fold layers
   pushSurface(sink, makeUnderNoseBallastSampler(cfg, 1), 2, 3, false, [0.5, 0]);
   pushSurface(sink, makeUnderNoseBallastSampler(cfg, -1), 2, 3, true, [0.0, 0]);
+
+  // 5. Authentic under-wing structural tuck flaps (Left & Right)
+  pushSurface(sink, makeUnderWingTuckSampler(cfg, 1), 3, 4, true, [0.5, 0]);
+  pushSurface(sink, makeUnderWingTuckSampler(cfg, -1), 3, 4, false, [0.0, 0]);
 
   const geometry = new THREE.BufferGeometry();
   geometry.setAttribute("position", new THREE.Float32BufferAttribute(sink.positions, 3));
@@ -292,12 +322,12 @@ export function buildAirframeGeometry(cfg) {
   geometry.computeVertexNormals();
 
   const count = sink.positions.length / 3;
-  // Natural origami paper tone
+  // Natural high-grade origami paper tone (warm ivory white)
   const paper = new Float32Array(count * 3);
   for (let i = 0; i < count; i += 1) {
-    paper[i * 3] = 0.975;
-    paper[i * 3 + 1] = 0.968;
-    paper[i * 3 + 2] = 0.952;
+    paper[i * 3] = 0.980;
+    paper[i * 3 + 1] = 0.974;
+    paper[i * 3 + 2] = 0.960;
   }
   geometry.setAttribute("color", new THREE.Float32BufferAttribute(paper, 3));
   geometry.computeBoundingSphere();
@@ -307,12 +337,13 @@ export function buildAirframeGeometry(cfg) {
 
 /**
  * Realistic origami crease lines & silhouette wire (Crease Lines).
- * Highlights the main fold lines:
- * - Center keel fold line
- * - Wing root creases
+ * Highlights the authentic fold lines of actual paper airplanes:
+ * - Center keel spine fold
+ * - Wing root junction creases
  * - Elevon hinge crease lines
- * - Winglet tip fold lines
- * - Nose lock fold triangles
+ * - Winglet tip vertical fold lines
+ * - Nose lock fold triangles & tuck edges
+ * - Under-wing triangular tuck creases
  */
 export function buildCreaseLines(cfg) {
   const positions = [];
@@ -322,8 +353,10 @@ export function buildCreaseLines(cfg) {
   const leftKeel = makeRealisticKeelSampler(cfg, -1);
   const rightLock = makeNoseLockSampler(cfg, 1);
   const leftLock = makeNoseLockSampler(cfg, -1);
+  const rightTuck = makeUnderWingTuckSampler(cfg, 1);
+  const leftTuck = makeUnderWingTuckSampler(cfg, -1);
 
-  // Helper to add segment
+  // Helper to add line segment
   const addLine = (p0, p1) => {
     positions.push(p0[0], p0[1], p0[2], p1[0], p1[1], p1[2]);
   };
@@ -373,7 +406,7 @@ export function buildCreaseLines(cfg) {
     addLine(leftWing(s0, teFoldT), leftWing(s1, teFoldT));
   }
 
-  // 7. Winglet tip fold line
+  // 7. Winglet tip fold line (standing vertical guide)
   const sIdx = shapeIndex(cfg.shape_flag);
   const tipStart = sIdx === 2 ? 0.78 : (sIdx === 0 ? 0.88 : 0.82);
   addLine(rightWing(tipStart, 0), rightWing(tipStart, 1));
@@ -384,6 +417,12 @@ export function buildCreaseLines(cfg) {
   addLine(rightLock(1, 1), rightLock(0, 1));
   addLine(leftLock(0, 0), leftLock(1, 1));
   addLine(leftLock(1, 1), leftLock(0, 1));
+
+  // 9. Under-wing structural tuck diagonal fold lines
+  addLine(rightTuck(0, 0), rightTuck(1, 1));
+  addLine(rightTuck(1, 1), rightTuck(0, 1));
+  addLine(leftTuck(0, 0), leftTuck(1, 1));
+  addLine(leftTuck(1, 1), leftTuck(0, 1));
 
   const geometry = new THREE.BufferGeometry();
   geometry.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
@@ -483,32 +522,100 @@ export function applyStressColors(geometry, grid, heatColour) {
   return colors;
 }
 
+let sharedPaperTexture = null;
+
+/**
+ * Procedural paper texture generator.
+ * Creates an authentic micro-fiber bump texture on an HTML canvas,
+ * giving the procedural airframe the tactile realism of real origami bond paper.
+ */
+function getPaperTextures() {
+  if (typeof document === "undefined") return { map: null };
+  if (!sharedPaperTexture) {
+    try {
+      const size = 512;
+      const canvas = document.createElement("canvas");
+      canvas.width = size;
+      canvas.height = size;
+      const ctx = canvas.getContext("2d");
+      if (ctx) {
+        ctx.fillStyle = "#faf7f2";
+        ctx.fillRect(0, 0, size, size);
+
+        const imgData = ctx.getImageData(0, 0, size, size);
+        const data = imgData.data;
+
+        // Paper pulp micro-fiber grain noise
+        for (let y = 0; y < size; y += 1) {
+          for (let x = 0; x < size; x += 1) {
+            const idx = (y * size + x) * 4;
+            const n = (Math.random() - 0.5) * 14;
+            const streak = Math.sin(x * 0.12 + Math.cos(y * 0.05) * 2.0) * 3.5;
+            const v = Math.min(255, Math.max(0, 246 + n + streak));
+            data[idx] = v;
+            data[idx + 1] = Math.max(0, v - 2);
+            data[idx + 2] = Math.max(0, v - 5);
+            data[idx + 3] = 255;
+          }
+        }
+        ctx.putImageData(imgData, 0, 0);
+
+        // Dispersed fibrous strands
+        ctx.strokeStyle = "rgba(160, 145, 130, 0.09)";
+        ctx.lineWidth = 0.8;
+        for (let i = 0; i < 280; i += 1) {
+          const fx = Math.random() * size;
+          const fy = Math.random() * size;
+          const len = 3 + Math.random() * 8;
+          const ang = Math.random() * Math.PI * 2;
+          ctx.beginPath();
+          ctx.moveTo(fx, fy);
+          ctx.lineTo(fx + Math.cos(ang) * len, fy + Math.sin(ang) * len);
+          ctx.stroke();
+        }
+
+        sharedPaperTexture = new THREE.CanvasTexture(canvas);
+        sharedPaperTexture.wrapS = THREE.RepeatWrapping;
+        sharedPaperTexture.wrapT = THREE.RepeatWrapping;
+        sharedPaperTexture.repeat.set(8, 8);
+      }
+    } catch (e) {
+      // Graceful fallback for non-browser/headless environments
+      sharedPaperTexture = null;
+    }
+  }
+  return { map: sharedPaperTexture };
+}
+
 export function createAirframeMaterial() {
+  const { map } = getPaperTextures();
   return new THREE.MeshStandardMaterial({
     color: 0xffffff,
     vertexColors: true,
     side: THREE.DoubleSide,
     flatShading: true,
-    roughness: 0.88,
-    metalness: 0.01,
+    roughness: 0.92, // Realistic matte paper diffuse
+    metalness: 0.0,
+    bumpMap: map,
+    bumpScale: 0.0006,
   });
 }
 
 export function createCreaseMaterial() {
   return new THREE.LineBasicMaterial({
-    color: 0x374151,
+    color: 0x475569, // Slate 600 - authentic origami crease shadow
     transparent: true,
-    opacity: 0.65,
+    opacity: 0.72,
     linewidth: 1.5,
   });
 }
 
 export function createEdgeMaterial() {
   return new THREE.LineBasicMaterial({
-    color: 0x1f2937,
+    color: 0x1e293b, // Slate 800 - crisp paper boundary edge
     transparent: true,
-    opacity: 0.75,
-    linewidth: 1.5,
+    opacity: 0.82,
+    linewidth: 1.8,
   });
 }
 
