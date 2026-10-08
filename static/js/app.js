@@ -203,6 +203,20 @@ class ConsoleApp {
       "top-range",
       "top-backend",
       "top-fps",
+      "readout-solver",
+      "readout-render",
+      "gpu-modal",
+      "gpu-modal-close",
+      "gpu-modal-close-x",
+      "modal-solver-name",
+      "modal-solver-desc",
+      "modal-render-name",
+      "modal-render-desc",
+      "gpu-status-solver-card",
+      "gpu-status-render-card",
+      "gpu-warning-box",
+      "btn-copy-gpu-cmd",
+      "gpu-ps-command",
       "top-ghost",
       "btn-top-record",
       "btn-record-video",
@@ -512,13 +526,63 @@ class ConsoleApp {
         const shortName = name.replace("NVIDIA GeForce ", "").replace(" Laptop GPU", "");
         if (this.dom["top-backend"]) {
           this.dom["top-backend"].textContent = `${gpu.backend} (${shortName})`;
-          this.dom["top-backend"].title = `${name} (CUDA ${gpu.cuda_version || "12.x"})`;
+          this.dom["top-backend"].title = `物理演算: ${name} (CUDA ${gpu.cuda_version || "12.x"})\nクリックしてGPU診断・切り替えガイドを表示`;
           this.dom["top-backend"].classList.add("gpu-active");
         }
       }
     } catch (e) {
       console.warn("GPU検出エラー:", e);
     }
+  }
+
+  _openGpuModal() {
+    if (!this.dom["gpu-modal"]) return;
+    const solverGpu = this.gpuInfo;
+    const renderGpu = (this.viewport && this.viewport.gpuInfo) || { shortName: "WebGL", raw: "Unknown", isIntel: false, isNvidia: false };
+
+    // Update solver card
+    if (this.dom["modal-solver-name"]) {
+      if (solverGpu && solverGpu.available) {
+        this.dom["modal-solver-name"].textContent = `✅ ${solverGpu.device_name || "GPU"} (${solverGpu.backend})`;
+        this.dom["modal-solver-desc"].textContent = `CUDA ${solverGpu.cuda_version || ""} · 物理演算・風場計算で正常に稼働中`;
+        if (this.dom["gpu-status-solver-card"]) {
+          this.dom["gpu-status-solver-card"].className = "gpu-status-card status-ok";
+        }
+      } else {
+        this.dom["modal-solver-name"].textContent = `ℹ️ CPU / NumPy (${solverGpu ? solverGpu.backend : "CPU"})`;
+        this.dom["modal-solver-desc"].textContent = "物理演算はCPU並列モードで稼働中";
+        if (this.dom["gpu-status-solver-card"]) {
+          this.dom["gpu-status-solver-card"].className = "gpu-status-card";
+        }
+      }
+    }
+
+    // Update render card
+    if (this.dom["modal-render-name"]) {
+      if (renderGpu.isNvidia) {
+        this.dom["modal-render-name"].textContent = `✅ ${renderGpu.shortName} (NVIDIA)`;
+        this.dom["modal-render-desc"].textContent = `WebGL 3D描画: ${renderGpu.raw}`;
+        if (this.dom["gpu-status-render-card"]) {
+          this.dom["gpu-status-render-card"].className = "gpu-status-card status-ok";
+        }
+        if (this.dom["gpu-warning-box"]) this.dom["gpu-warning-box"].hidden = true;
+      } else if (renderGpu.isIntel) {
+        this.dom["modal-render-name"].textContent = `⚠️ ${renderGpu.shortName} (Intel 省電力)`;
+        this.dom["modal-render-desc"].textContent = `WebGL 3D描画: ${renderGpu.raw}`;
+        if (this.dom["gpu-status-render-card"]) {
+          this.dom["gpu-status-render-card"].className = "gpu-status-card status-warn";
+        }
+        if (this.dom["gpu-warning-box"]) this.dom["gpu-warning-box"].hidden = false;
+      } else {
+        this.dom["modal-render-name"].textContent = `${renderGpu.shortName}`;
+        this.dom["modal-render-desc"].textContent = `WebGL 3D描画: ${renderGpu.raw}`;
+        if (this.dom["gpu-status-render-card"]) {
+          this.dom["gpu-status-render-card"].className = "gpu-status-card";
+        }
+      }
+    }
+
+    this.dom["gpu-modal"].hidden = false;
   }
 
   _bindHeader() {
@@ -545,6 +609,43 @@ class ConsoleApp {
     this.dom["help"].addEventListener("click", (event) => {
       if (event.target === this.dom["help"]) this.dom["help"].hidden = true;
     });
+
+    // GPU Diagnostic modal bindings
+    if (this.dom["readout-solver"]) {
+      this.dom["readout-solver"].addEventListener("click", () => this._openGpuModal());
+    }
+    if (this.dom["readout-render"]) {
+      this.dom["readout-render"].addEventListener("click", () => this._openGpuModal());
+    }
+    if (this.dom["gpu-modal-close"]) {
+      this.dom["gpu-modal-close"].addEventListener("click", () => {
+        this.dom["gpu-modal"].hidden = true;
+      });
+    }
+    if (this.dom["gpu-modal-close-x"]) {
+      this.dom["gpu-modal-close-x"].addEventListener("click", () => {
+        this.dom["gpu-modal"].hidden = true;
+      });
+    }
+    if (this.dom["gpu-modal"]) {
+      this.dom["gpu-modal"].addEventListener("click", (event) => {
+        if (event.target === this.dom["gpu-modal"]) this.dom["gpu-modal"].hidden = true;
+      });
+    }
+    if (this.dom["btn-copy-gpu-cmd"]) {
+      this.dom["btn-copy-gpu-cmd"].addEventListener("click", async () => {
+        const cmd = this.dom["gpu-ps-command"] ? this.dom["gpu-ps-command"].textContent : "";
+        if (cmd) {
+          try {
+            await navigator.clipboard.writeText(cmd);
+            this.notify("📋 設定コマンドをクリップボードにコピーしました", "ok");
+          } catch {
+            this.notify("コピーに失敗しました。コマンド枠から手動でコピーしてください", "warn");
+          }
+        }
+      });
+    }
+
     this.dom["tunnel-toggle"].addEventListener("change", (event) => this.setTunnel(event.target.checked));
     this.dom["btn-config-reset"].addEventListener("click", () => this._guard(() => this._resetConfig()));
   }
@@ -603,7 +704,23 @@ class ConsoleApp {
   /* -------------------------------------------------------------- events */
 
   _onStats(stats) {
-    if (this.dom["top-fps"]) this.dom["top-fps"].textContent = `${stats.fps.toFixed(0)} fps`;
+    if (this.dom["top-fps"]) {
+      const gpu = stats.gpu || (this.viewport && this.viewport.gpuInfo);
+      if (gpu && gpu.shortName) {
+        const warnIcon = gpu.isIntel ? " ⚠️" : "";
+        this.dom["top-fps"].textContent = `${stats.fps.toFixed(0)} fps (${gpu.shortName}${warnIcon})`;
+        this.dom["top-fps"].title = `3D描画 (WebGL): ${gpu.raw}\nベンダー: ${gpu.vendor || "N/A"}${gpu.isIntel ? "\n※省電力GPU(Intel)で動作しています。クリックしてRTX切り替えガイドを表示" : "\n※高性能GPUで動作中。クリックして詳細表示"}`;
+        if (gpu.isIntel) {
+          this.dom["top-fps"].classList.add("gpu-warning");
+          this.dom["top-fps"].classList.remove("gpu-active");
+        } else if (gpu.isNvidia) {
+          this.dom["top-fps"].classList.add("gpu-active");
+          this.dom["top-fps"].classList.remove("gpu-warning");
+        }
+      } else {
+        this.dom["top-fps"].textContent = `${stats.fps.toFixed(0)} fps`;
+      }
+    }
     if (this.viewport && this.dom["flow-backend"]) {
       this.dom["flow-backend"].textContent = `flow: ${this.viewport.particleBackend()}`;
     }

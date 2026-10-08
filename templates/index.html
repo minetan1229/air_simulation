@@ -51,11 +51,11 @@
         <span class="readout-key">GHOST</span>
         <span class="readout-val num" id="top-ghost" title="前回の到達飛距離・滞空時間">—</span>
       </div>
-      <div class="readout">
+      <div class="readout readout-clickable" id="readout-solver" title="物理演算GPU情報 (クリックで診断表示)">
         <span class="readout-key">SOLVER</span>
         <span class="readout-val num" id="top-backend">—</span>
       </div>
-      <div class="readout">
+      <div class="readout readout-clickable" id="readout-render" title="3D描画GPU情報 (クリックで診断表示)">
         <span class="readout-key">RENDER</span>
         <span class="readout-val num" id="top-fps">—</span>
       </div>
@@ -485,6 +485,79 @@
       </dl>
       <p class="muted">Canonical frame: +x 前方 / +y 右翼 / +z 下方。UI 内部では three.js 規約 (+y 上) へ回転して描画します。</p>
       <div class="btn-row"><button class="btn" id="help-close" type="button">閉じる</button></div>
+    </div>
+  </div>
+
+  <div class="modal" id="gpu-modal" hidden>
+    <div class="modal-card gpu-dialog-card">
+      <div class="gpu-dialog-header">
+        <h3>⚡ GPU 動作ステータス &amp; 切り替えガイド</h3>
+        <button class="btn btn-icon" id="gpu-modal-close-x" type="button" aria-label="閉じる">×</button>
+      </div>
+
+      <div class="gpu-status-section">
+        <div class="gpu-status-card" id="gpu-status-solver-card">
+          <div class="gpu-status-badge">物理演算 (SOLVER)</div>
+          <div class="gpu-status-title" id="modal-solver-name">検出中...</div>
+          <div class="gpu-status-desc" id="modal-solver-desc">Python CuPy CUDA バックエンド</div>
+        </div>
+
+        <div class="gpu-status-card" id="gpu-status-render-card">
+          <div class="gpu-status-badge">3D描画 (RENDER)</div>
+          <div class="gpu-status-title" id="modal-render-name">検出中...</div>
+          <div class="gpu-status-desc" id="modal-render-desc">Three.js WebGL レンダラー</div>
+        </div>
+      </div>
+
+      <div class="gpu-warning-box" id="gpu-warning-box">
+        <strong>⚠️ 3D描画 (RENDER) で Intel 内蔵GPUが使われている場合について:</strong>
+        <p>Windows ノートPCでは、バッテリー節約のため Web ブラウザ（Chrome / Edge 等）が自動的に内蔵GPU (Intel) に割り当てられる仕様になっています。<br>
+        10万粒子風流線や高精度シェーダーを <strong>NVIDIA GeForce RTX 4060</strong> で描画させるには、以下のいずれかの方法でブラウザを高パフォーマンスGPUに設定してください。</p>
+      </div>
+
+      <div class="gpu-guide-accordion">
+        <details open>
+          <summary><strong>🚀 最短方法: PowerShell コマンドで一発設定（再起動後反映）</strong></summary>
+          <div class="gpu-guide-body">
+            <p>PowerShell を管理者権限不要で開き、以下のコマンドを貼り付けて実行すると、Windows のグラフィック設定に Chrome / Edge の高パフォーマンス（RTX 4060）設定が即時登録されます。</p>
+            <div class="code-box">
+              <pre id="gpu-ps-command">New-Item -Path "HKCU:\Software\Microsoft\DirectX\UserGpuPreferences" -Force | Out-Null; Set-ItemProperty -Path "HKCU:\Software\Microsoft\DirectX\UserGpuPreferences" -Name "C:\Program Files\Google\Chrome\Application\chrome.exe" -Value "GpuPreference=2;"; Set-ItemProperty -Path "HKCU:\Software\Microsoft\DirectX\UserGpuPreferences" -Name "C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe" -Value "GpuPreference=2;"</pre>
+              <button class="btn btn-sm" id="btn-copy-gpu-cmd" type="button">📋 コマンドをコピー</button>
+            </div>
+            <p class="muted">※実行後、ブラウザを完全に閉じて再起動すると RTX 4060 で WebGL が動作します。</p>
+          </div>
+        </details>
+
+        <details>
+          <summary><strong>🛠️ 手動方法①: Windows の設定画面から設定</strong></summary>
+          <div class="gpu-guide-body">
+            <ol>
+              <li>Windows の「設定」(Win + I) を開く</li>
+              <li>「システム」→「ディスプレイ」→「グラフィック」を開く</li>
+              <li>アプリ一覧から使用中のブラウザ（Google Chrome または Microsoft Edge）をクリック</li>
+              <li>「オプション」ボタンを押し、「<strong>高パフォーマンス (NVIDIA GeForce RTX 4060)</strong>」を選択して「保存」</li>
+              <li>ブラウザを再起動</li>
+            </ol>
+          </div>
+        </details>
+
+        <details>
+          <summary><strong>⚙️ 手動方法②: NVIDIA コントロールパネルから設定</strong></summary>
+          <div class="gpu-guide-body">
+            <ol>
+              <li>デスクトップの何もない場所を右クリックし、「NVIDIA コントロールパネル」を開く</li>
+              <li>左メニューの「3D 設定の管理」を選択し、「プログラム設定」タブを開く</li>
+              <li>「1. カスタマイズするプログラムを選択する」で使用ブラウザを選択</li>
+              <li>「2. このプログラム用の優先するグラフィックスプロセッサを選択する」で「<strong>高パフォーマンス NVIDIA プロセッサ</strong>」を選択して「適用」</li>
+              <li>ブラウザを再起動</li>
+            </ol>
+          </div>
+        </details>
+      </div>
+
+      <div class="btn-row">
+        <button class="btn" id="gpu-modal-close" type="button">閉じる</button>
+      </div>
     </div>
   </div>
 </div>

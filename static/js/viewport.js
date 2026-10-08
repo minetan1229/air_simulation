@@ -121,6 +121,8 @@ export class Viewport {
 
     this.particles = new WindParticles(this.scene, this.renderer);
 
+    this.gpuInfo = this._detectGpuRenderer();
+
     this.clock = new THREE.Clock();
     this.frameTimes = [];
     this.lastStats = 0;
@@ -136,6 +138,59 @@ export class Viewport {
       event.preventDefault();
       this.running = false;
     });
+  }
+
+  _detectGpuRenderer() {
+    try {
+      const gl = this.renderer.getContext();
+      const ext = gl.getExtension("WEBGL_debug_renderer_info");
+      const unmasked = ext ? gl.getParameter(ext.UNMASKED_RENDERER_WEBGL) : gl.getParameter(gl.RENDERER);
+      const vendor = ext ? gl.getParameter(ext.UNMASKED_VENDOR_WEBGL) : gl.getParameter(gl.VENDOR);
+      const raw = String(unmasked || "WebGL");
+
+      const isNvidia = /nvidia|geforce|rtx|gtx/i.test(raw);
+      const isIntel = /intel|uhd|iris/i.test(raw);
+      const isAmd = /amd|radeon/i.test(raw);
+
+      let shortName = raw;
+      const angleMatch = raw.match(/ANGLE\s*\([^,]+,\s*([^,]+?)(?:\s+Direct3D|\s+\(0x|\s*,|\))/i);
+      if (angleMatch && angleMatch[1]) {
+        shortName = angleMatch[1].trim();
+      }
+      shortName = shortName
+        .replace(/NVIDIA GeForce\s*/i, "")
+        .replace(/Laptop GPU/i, "")
+        .replace(/Graphics Family/i, "")
+        .replace(/Direct3D\S+/i, "")
+        .trim();
+
+      if (!shortName || shortName.length > 24) {
+        if (isNvidia) shortName = "RTX";
+        else if (isIntel) shortName = "Intel UHD";
+        else if (isAmd) shortName = "Radeon";
+        else shortName = "WebGL";
+      }
+
+      return {
+        raw,
+        shortName,
+        vendor: String(vendor || ""),
+        isNvidia,
+        isIntel,
+        isAmd,
+        isDiscrete: isNvidia || isAmd,
+      };
+    } catch {
+      return {
+        raw: "Unknown",
+        shortName: "WebGL",
+        vendor: "",
+        isNvidia: false,
+        isIntel: false,
+        isAmd: false,
+        isDiscrete: false,
+      };
+    }
   }
 
   /* ------------------------------------------------------------- scene */
@@ -794,7 +849,7 @@ export class Viewport {
       const mean = this.frameTimes.reduce((a, b) => a + b, 0) / Math.max(this.frameTimes.length, 1);
       const fps = mean > 0 ? 1 / mean : 0;
       this._adaptParticles(fps);
-      this.onStats({ fps, elapsed: this.elapsed, particles: this.particles.activeCount });
+      this.onStats({ fps, elapsed: this.elapsed, particles: this.particles.activeCount, gpu: this.gpuInfo });
     }
   }
 
