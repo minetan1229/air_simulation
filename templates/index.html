@@ -72,6 +72,7 @@
         <span class="switch-box"></span>
         <span class="switch-label">風洞モード</span>
       </label>
+      <button class="btn btn-primary" id="btn-top-investigate" type="button" title="指定した機体をベースに手で変えられる項目を自動分析・改善">🔍 Auto調査</button>
       <button class="btn" id="btn-save" type="button" title="設定を JSON で保存 (Ctrl+S)">保存</button>
       <button class="btn" id="btn-load" type="button" title="設定 JSON の読込">読込</button>
       <button class="btn" id="btn-csv" type="button" title="飛行ログを CSV で出力 (E)">CSV</button>
@@ -325,7 +326,8 @@
   <!-- ==================== workbench ==================== -->
   <section class="workbench" id="workbench" data-open="0" aria-label="作業台">
     <nav class="wb-tabs" role="tablist">
-      <button class="wb-tab" id="wb-tab-optimizer" role="tab" aria-selected="true" data-tab="optimizer">最適化<small>OPTIMIZER</small></button>
+      <button class="wb-tab" id="wb-tab-investigate" role="tab" aria-selected="true" data-tab="investigate">🔍 Auto調査<small>INVESTIGATE</small></button>
+      <button class="wb-tab" id="wb-tab-optimizer" role="tab" aria-selected="false" data-tab="optimizer">最適化<small>OPTIMIZER</small></button>
       <button class="wb-tab" id="wb-tab-model" role="tab" aria-selected="false" data-tab="model">3D モデル<small>MESH</small></button>
       <button class="wb-tab" id="wb-tab-data" role="tab" aria-selected="false" data-tab="data">データ<small>EXPORT</small></button>
       <div class="wb-spacer"></div>
@@ -335,6 +337,95 @@
     </nav>
 
     <div class="wb-panes">
+      <!-- auto investigate -->
+      <div class="wb-pane" data-pane="investigate" role="tabpanel">
+        <div class="wb-col wb-col-1">
+          <h4 class="wb-h">Auto調査モード<small>AUTO INVESTIGATE</small></h4>
+          <p class="muted" style="margin: 4px 0 12px; font-size: 11px; line-height: 1.4;">
+            現在の機体から重さや紙質などの前提条件を固定したまま、手作業で調整可能な「トリム・上反角・投げ方・重心」のみを変えて、なぜ・どうすればもっと飛ぶようになるかを自動診断します。
+          </p>
+          <div class="inv-config-group">
+            <label class="inv-label">調査目標 (TARGET OBJECTIVE)</label>
+            <select id="inv-target-select" class="inv-select">
+              <option value="distance">🚀 最大飛距離を伸ばす (Max Distance)</option>
+              <option value="flight_time">⏱ 滞空時間を伸ばす (Max Flight Time)</option>
+            </select>
+          </div>
+          <div class="btn-row" style="margin-top: 12px;">
+            <button class="btn btn-primary" id="inv-run" type="button">🔍 調査開始</button>
+            <button class="btn" id="inv-cancel" type="button" disabled>中断</button>
+          </div>
+          <div class="prog" style="margin-top: 12px;">
+            <div class="prog-track"><div class="prog-fill" id="inv-fill"></div></div>
+            <div class="prog-meta">
+              <span class="num" id="inv-prog-pct">0%</span>
+              <span class="muted" id="inv-status">待機中</span>
+            </div>
+          </div>
+          <h4 class="wb-h" style="margin-top: 16px;">調整可能変数（固定変数は除外）<small>HAND-ADJUSTABLE</small></h4>
+          <ul class="inv-var-list muted" style="font-size: 11px; padding-left: 16px; margin: 4px 0;">
+            <li>主翼エレボン角（昇降舵反り）</li>
+            <li>主翼上反角（V字バンザイ角）</li>
+            <li>主翼後縁キャンバー折り</li>
+            <li>翼端折り（ウイングレット）</li>
+            <li>エルロン・ラダー偏り矯正</li>
+            <li>クリップによる重心前後位置</li>
+            <li>射出角度・傾き・初速（投げ方）</li>
+          </ul>
+        </div>
+
+        <div class="wb-col wb-col-2" style="overflow-y: auto;">
+          <div id="inv-result-area" style="display: none;">
+            <!-- 診断サマリー -->
+            <div class="inv-diag-box">
+              <div class="inv-diag-header">
+                <span id="inv-diag-badge" class="inv-badge">STATUS</span>
+                <span id="inv-diag-title" class="inv-diag-title">—</span>
+              </div>
+              <div id="inv-diag-desc" class="inv-diag-desc">—</div>
+            </div>
+
+            <!-- Before vs After 比較 -->
+            <h4 class="wb-h">飛行結果の比較<small>BEFORE vs AFTER</small></h4>
+            <div class="inv-comp-grid">
+              <div class="inv-comp-card">
+                <div class="inv-comp-label">水平到達距離</div>
+                <div class="inv-comp-row">
+                  <span class="muted">現在:</span> <span class="num" id="inv-comp-dist-base">—</span>
+                  <span class="inv-arrow">➔</span>
+                  <span class="num inv-comp-val" id="inv-comp-dist-rec">—</span>
+                </div>
+                <div class="inv-comp-gain"><span id="inv-comp-dist-gain" class="num">—</span></div>
+              </div>
+              <div class="inv-comp-card">
+                <div class="inv-comp-label">滞空時間</div>
+                <div class="inv-comp-row">
+                  <span class="muted">現在:</span> <span class="num" id="inv-comp-time-base">—</span>
+                  <span class="inv-arrow">➔</span>
+                  <span class="num inv-comp-val" id="inv-comp-time-rec">—</span>
+                </div>
+                <div class="inv-comp-gain"><span id="inv-comp-time-gain" class="num">—</span></div>
+              </div>
+            </div>
+
+            <!-- 改善アドバイスカード -->
+            <div style="display: flex; align-items: center; justify-content: space-between; margin-top: 14px;">
+              <h4 class="wb-h" style="margin: 0;">実践的な折り方・投げ方アドバイス<small>ACTIONABLE ADVICE</small></h4>
+              <button class="btn btn-primary btn-mini" id="inv-adopt" type="button" disabled>🌟 推奨設定を機体に適用</button>
+            </div>
+            <div id="inv-advice-list" class="inv-advice-list"></div>
+
+            <!-- 感度ランキング -->
+            <h4 class="wb-h" style="margin-top: 14px;">各パラメータの影響度ランキング<small>SENSITIVITY RANKING</small></h4>
+            <div id="inv-sens-list" class="inv-sens-list"></div>
+          </div>
+          <div id="inv-empty-prompt" class="chart-empty" style="padding: 40px 16px; text-align: center;">
+            <div style="font-size: 24px; margin-bottom: 8px;">✈️</div>
+            <div>「調査開始」をクリックすると、現在の機体を診断し、もっと飛ぶようになるための調整手順とアドバイスを自動作成します。</div>
+          </div>
+        </div>
+      </div>
+
       <!-- optimizer -->
       <div class="wb-pane" data-pane="optimizer" role="tabpanel">
         <div class="wb-col wb-col-1">

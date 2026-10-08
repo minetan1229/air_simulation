@@ -41,6 +41,7 @@ from physics.config_schema import (
     from_dict,
     utc_now_iso,
 )
+from physics import auto_investigate
 from physics import job_manager as job_manager_module
 from physics import mesh_domain
 from physics import storage_domain
@@ -1091,6 +1092,108 @@ def optimizer_result(job_id: str):
     if fmt != "json":
         raise BadRequest("'format' must be json or csv")
     return jsonify(payload)
+
+
+# ---------------------------------------------------------------------------
+# 7b. Auto Investigate / Tuning
+# ---------------------------------------------------------------------------
+@app.post("/api/v1/investigate/run")
+def investigate_run():
+    payload = body()
+    base_air = as_dict(SESSION.aircraft)
+    base_air.update(payload.get("aircraft", {}) or {})
+    env = as_dict(SESSION.environment)
+    env.update(payload.get("environment", {}) or {})
+    lau = as_dict(SESSION.launch)
+    lau.update(payload.get("launch", {}) or {})
+
+    aircraft_cfg = from_dict(AircraftConfig, base_air, strict=False)
+    environment_cfg = from_dict(EnvironmentConfig, env, strict=False).clamp_ranges()
+    launch_cfg = from_dict(LaunchConfig, lau, strict=False)
+
+    target_metric = str(payload.get("target_metric", "distance")).lower()
+    if target_metric not in ("distance", "flight_time"):
+        raise BadRequest("'target_metric' must be 'distance' or 'flight_time'")
+
+    total_evals = 100
+    job = JOB_MANAGER.create(
+        name=f"Auto-investigate ({target_metric})",
+        total_evaluations=total_evals,
+        backend="auto_investigate",
+        objectives=[f"max_{target_metric}"],
+        algorithm="sensitivity_and_focused_tuning",
+        model_id=SESSION.mesh_model_id,
+    )
+    JOB_MANAGER.start(job.job_id)
+
+    def progress_cb(pct: int, total: int, msg: str) -> None:
+        try:
+            JOB_MANAGER.update(job.job_id, pct, total_evaluations=total, message=msg)
+        except KeyError:
+            pass
+
+    def worker() -> None:
+        try:
+            res = auto_investigate.investigate_airplane(
+                aircraft=aircraft_cfg,
+                environment=environment_cfg,
+                launch=launch_cfg,
+                target_metric=target_metric,
+                progress_callback=progress_cb,
+            )
+            res_dict = as_dict(res)
+            res_dict["job_id"] = job.job_id
+            with RESULT_CACHE_LOCK:
+                RESULT_CACHE[job.job_id] = res_dict
+                while len(RESULT_CACHE) > RESULT_CACHE_LIMIT:
+                    RESULT_CACHE.pop(next(iter(RESULT_CACHE)))
+            JOB_MANAGER.finish(job.job_id, message=f"Completed auto-investigation: {res.summary.get('primary_issue', 'OK')}")
+        except Exception as exc:
+            log.error("investigation job %s failed: %s\n%s", job.job_id, exc, traceback.format_exc())
+            try:
+                JOB_MANAGER.fail(job.job_id, str(exc))
+            except KeyError:
+                pass
+
+    thread = threading.Thread(target=worker, name=f"investigate-{job.job_id}", daemon=True)
+    JOB_MANAGER.register_thread(job.job_id, thread)
+    thread.start()
+    return jsonify(as_dict(JOB_MANAGER.get(job.job_id))), 202
+
+
+@app.get("/api/v1/investigate/status/<job_id>")
+def investigate_status(job_id: str):
+    try:
+        return jsonify(JOB_MANAGER.snapshot(job_id))
+    except KeyError as exc:
+        raise BadRequest(f"unknown job_id '{job_id}'") from exc
+
+
+@app.post("/api/v1/investigate/cancel/<job_id>")
+def investigate_cancel(job_id: str):
+    try:
+        JOB_MANAGER.request_cancel(job_id)
+        record = JOB_MANAGER.cancel(job_id)
+    except KeyError as exc:
+        raise BadRequest(f"unknown job_id '{job_id}'") from exc
+    return jsonify(as_dict(record))
+
+
+@app.get("/api/v1/investigate/result/<job_id>")
+def investigate_result(job_id: str):
+    try:
+        record = JOB_MANAGER.get(job_id)
+    except KeyError as exc:
+        raise BadRequest(f"unknown job_id '{job_id}'") from exc
+    if record.status not in ("completed", "cancelled"):
+        raise BadRequest(f"job '{job_id}' is {record.status}; no result available yet")
+
+    with RESULT_CACHE_LOCK:
+        payload = RESULT_CACHE.get(job_id)
+    if payload is None:
+        raise BadRequest(f"result for job '{job_id}' is not in memory")
+    return jsonify(payload)
+
 
 
 @app.get("/api/v1/jobs")

@@ -783,6 +783,18 @@ def stage_ui(r: Runner) -> None:
     r.log(f"served {len(local)} static assets with HTTP 200")
 
 
+def stage_investigate(r: Runner) -> None:
+    """Auto investigation: trigger, poll status/progress, cancel."""
+    job = r.post("/api/v1/investigate/run", {"target_metric": "distance"}, expect=202)
+    job_id = job.get("job_id")
+    r.check(bool(job_id), "investigate/run returned no job_id")
+    status = r.get(f"/api/v1/investigate/status/{job_id}")
+    r.check(status.get("job_id") == job_id, "investigate/status mismatched job_id")
+    cancel = r.post(f"/api/v1/investigate/cancel/{job_id}")
+    r.check(cancel.get("status") in ("cancelled", "running", "completed"), "investigate/cancel failed")
+    r.log(f"auto-investigate job {job_id} lifecycle verified")
+
+
 STAGES: List[Tuple[str, Callable[[Runner], None]]] = [
     ("health+schemas", stage_health),
     ("environment", stage_environment),
@@ -794,6 +806,7 @@ STAGES: List[Tuple[str, Callable[[Runner], None]]] = [
     ("optimizer job", stage_optimizer),
     ("optimizer cancel", stage_optimizer_cancel),
     ("batch", stage_batch),
+    ("auto investigate", stage_investigate),
     ("data export", stage_data),
     ("ui assets", stage_ui),
 ]

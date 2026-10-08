@@ -1628,3 +1628,244 @@ input[type="range"]:focus-visible { outline: 2px solid var(--accent); outline-of
 .code-box button {
   margin-top: 8px;
 }
+
+/* =====================================================================
+   Auto-Investigate Panel Styling
+   ===================================================================== */
+.inv-config-group {
+  margin: 8px 0;
+}
+
+.inv-label {
+  display: block;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--ink-2);
+  margin-bottom: 4px;
+}
+
+.inv-select {
+  width: 100%;
+  padding: 6px 8px;
+  border: 1px solid var(--line-2);
+  border-radius: 4px;
+  background: var(--surface);
+  font-size: 12px;
+  color: var(--ink);
+}
+
+.inv-diag-box {
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 12px 14px;
+  margin-bottom: 14px;
+}
+
+.inv-diag-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 6px;
+}
+
+.inv-badge {
+  display: inline-block;
+  padding: 2px 6px;
+  font-size: 10px;
+  font-weight: 700;
+  border-radius: 3px;
+  text-transform: uppercase;
+  background: #ea4335;
+  color: #fff;
+}
+
+.inv-badge-stable_glide {
+  background: #34a853;
+}
+
+.inv-badge-low_glide {
+  background: #fbbc04;
+  color: #202124;
+}
+
+.inv-diag-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.inv-diag-desc {
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--ink-2);
+}
+
+/* Comparison Grid */
+.inv-comp-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin: 8px 0 14px;
+}
+
+.inv-comp-card {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 10px 12px;
+}
+
+.inv-comp-label {
+  font-size: 11px;
+  color: var(--muted);
+  margin-bottom: 4px;
+}
+
+.inv-comp-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+}
+
+.inv-arrow {
+  color: var(--muted);
+}
+
+.inv-comp-val {
+  font-weight: 700;
+  color: var(--ink);
+}
+
+.inv-comp-gain {
+  margin-top: 4px;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.gain-pos {
+  color: #1e8e3e;
+}
+
+.gain-neg {
+  color: #d93025;
+}
+
+/* Advice Cards */
+.inv-advice-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.inv-advice-card {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-left: 4px solid var(--accent);
+  border-radius: 4px;
+  padding: 10px 12px;
+}
+
+.inv-advice-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.inv-advice-pri {
+  font-family: var(--mono);
+  font-weight: 700;
+  font-size: 11px;
+  color: var(--accent);
+}
+
+.inv-advice-target {
+  font-weight: 600;
+  font-size: 12px;
+  color: var(--ink);
+}
+
+.inv-advice-delta {
+  margin-left: auto;
+  font-weight: 700;
+  font-size: 12px;
+  color: var(--accent-dk);
+  background: var(--accent-bg);
+  padding: 1px 6px;
+  border-radius: 3px;
+}
+
+.inv-advice-action {
+  font-size: 12px;
+  font-weight: 600;
+  color: #202124;
+  margin-bottom: 4px;
+}
+
+.inv-advice-reason {
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--ink-2);
+}
+
+/* Sensitivity Ranking */
+.inv-sens-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.inv-sens-row {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 8px 10px;
+}
+
+.inv-sens-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  margin-bottom: 4px;
+}
+
+.inv-sens-rank {
+  font-weight: 700;
+  color: var(--muted);
+  width: 16px;
+}
+
+.inv-sens-name {
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.inv-sens-val {
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.inv-sens-bar-track {
+  width: 100%;
+  height: 6px;
+  background: var(--line);
+  border-radius: 3px;
+  overflow: hidden;
+  margin-bottom: 4px;
+}
+
+.inv-sens-bar-fill {
+  height: 100%;
+  background: var(--accent);
+  border-radius: 3px;
+}
+
+.inv-sens-desc {
+  font-size: 10px;
+}

@@ -141,6 +141,12 @@ export const api = {
   optimizerCsv: (jobId) => getText(`/optimizer/result/${encodeURIComponent(jobId)}?format=csv`),
   jobs: () => get("/jobs"),
 
+  /* auto investigate */
+  investigateRun: (payload) => post("/investigate/run", payload),
+  investigateStatus: (jobId) => get(`/investigate/status/${encodeURIComponent(jobId)}`),
+  investigateCancel: (jobId) => post(`/investigate/cancel/${encodeURIComponent(jobId)}`),
+  investigateResult: (jobId) => get(`/investigate/result/${encodeURIComponent(jobId)}`),
+
   /* data */
   exportData: (payload) => post("/data/export", payload),
   importBundle: (bundle) => post("/data/import", { bundle }),
