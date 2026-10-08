@@ -674,10 +674,10 @@ class ConsoleApp {
     // Keel profile depth at tGrip (matches makeRealisticKeelSampler exactly at s=1):
     const sIdx = Number(aircraft.shape_flag) || 1;
     const centreFold = Math.max(0, Number(aircraft.fold_center_deg) || 0);
-    const baseDepthRatio = sIdx === 2 ? 0.28 : (sIdx === 1 ? 0.25 : 0.20);
-    const keelHeight = rootChord * (baseDepthRatio + 0.35 * Math.sin((centreFold * Math.PI) / 180));
-    const gripBell = Math.sin(Math.PI * Math.min(tGrip * 1.6, 1.0));
-    const depthCurve = 0.40 + 0.60 * Math.pow(gripBell, 0.7);
+    const baseDepthRatio = sIdx === 2 ? 0.26 : (sIdx === 1 ? 0.24 : 0.18);
+    const keelHeight = rootChord * (baseDepthRatio + 0.30 * Math.sin((centreFold * Math.PI) / 180));
+    const gripBell = Math.sin(Math.PI * Math.min(tGrip * 1.5, 1.0));
+    const depthCurve = 0.35 + 0.65 * Math.pow(gripBell, 0.7);
     const keelBottomY = -keelHeight * depthCurve;
     
     // Lateral offset (z) if user offsets grip

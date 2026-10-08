@@ -58,12 +58,12 @@ function makeWingSampler(cfg, side) {
   const semispan = geom.span / 2;
   const sIdx = shapeIndex(cfg.shape_flag);
   const sweep = SHAPE_SWEEP[sIdx];
-  const dihedral = Math.tan(((Number(cfg.dihedral_deg) || 0) * Math.PI) / 180);
+  const dihedral = ((Number(cfg.dihedral_deg) || 0) * Math.PI) / 180;
   const tipFold = ((Number(cfg.fold_tip_deg) || 0) * Math.PI) / 180;
   const leFold = ((Number(cfg.fold_leading_deg) || 0) * Math.PI) / 180;
   const teFold = ((Number(cfg.fold_trailing_deg) || 0) * Math.PI) / 180;
   
-  // Base elevon deflection (symmetric pitch trim)
+  // Base elevon deflection (symmetric pitch trim, positive = trailing edge bent up for reflex glide)
   const elevonBase = ((Number(cfg.elevon_deg) || 0) * Math.PI) / 180;
   // Aileron trim / lift asymmetry (asymmetric roll trim):
   // +aileron_deg means roll right (right wing trailing edge down / left wing trailing edge up)
@@ -81,30 +81,37 @@ function makeWingSampler(cfg, side) {
   // Keel root half-width (real paper airplanes have a folded spine thickness)
   const keelHalfWidth = Math.min(0.005, geom.span * 0.015);
 
-  // Cumulative rise & outward angle of the folded winglet tip
-  const rise = new Float64Array(SPAN_SEGMENTS + 1);
-  const tipAngle = new Float64Array(SPAN_SEGMENTS + 1);
-  for (let i = 1; i <= SPAN_SEGMENTS; i += 1) {
-    const s = i / SPAN_SEGMENTS;
-    const k = Math.max(0, (s - tipStart) / (1 - tipStart));
-    // Upward vertical winglet crease fold (e.g., Suzanne & Sky King winglet guide)
-    const angle = tipFold * k * k * (3 - 2 * k);
-    tipAngle[i] = angle;
-    const ds = semispan / SPAN_SEGMENTS;
-    rise[i] = rise[i - 1] + Math.tan(angle) * ds;
-  }
-
   const chordAt = (s) => geom.rootChord + (geom.tipChord - geom.rootChord) * s;
   const leX = (s) => geom.rootChord - sweep * s * semispan;
+
+  // Station computation: calculates exact wing surface fold line in 3D
   const station = (i) => {
     const s = i / SPAN_SEGMENTS;
+    const sInner = Math.min(s, tipStart);
+    const sOuter = Math.max(0, s - tipStart);
+    const outerRatio = (1 - tipStart) > 1e-4 ? sOuter / (1 - tipStart) : 0;
+    
+    // Upward vertical winglet crease fold (e.g. Suzanne & Sky King winglet guide)
+    // Smooth fold transition around the tip crease
+    const foldFactor = outerRatio * outerRatio * (3 - 2 * outerRatio);
+    const currentTipAngle = tipFold * foldFactor;
+
+    // Wing dihedral up to the winglet fold line
+    const innerSpan = sInner * (semispan - keelHalfWidth);
+    const yDihedral = Math.sin(dihedral) * innerSpan;
+    const zInner = keelHalfWidth + Math.cos(dihedral) * innerSpan;
+
+    // Outer winglet fold (standing vertically or angled upward from the crease)
+    const wingletLength = sOuter * semispan;
+    const yWinglet = wingletLength * Math.sin(currentTipAngle);
+    const zWinglet = wingletLength * Math.cos(currentTipAngle);
+
     return {
       s,
       x: leX(s),
-      y: dihedral * s * semispan + rise[i],
-      z: side * (keelHalfWidth + s * (semispan - keelHalfWidth)),
+      y: yDihedral + yWinglet,
+      z: side * (zInner + zWinglet),
       chord: chordAt(s),
-      tipAngle: tipAngle[i],
     };
   };
 
@@ -113,37 +120,34 @@ function makeWingSampler(cfg, side) {
     const i = Math.min(SPAN_SEGMENTS - 1, Math.floor(f));
     const w = f - i;
     const a = station(i);
-    const b = station(i + 1);
+    const b = station(Math.min(SPAN_SEGMENTS, i + 1));
     const x0 = a.x + (b.x - a.x) * w;
     const y0 = a.y + (b.y - a.y) * w;
     const z0 = a.z + (b.z - a.z) * w;
     const chord = a.chord + (b.chord - a.chord) * w;
-    const twist = a.tipAngle + (b.tipAngle - a.tipAngle) * w;
-
-    const dirX = Math.cos(twist);
-    const dirY = Math.sin(twist);
 
     const tc = Math.min(Math.max(t, 0), 1);
-    let x = x0 + tc * chord * dirX;
-    let y = y0 + tc * chord * dirY;
+    // Trailing edge extends in the -X direction (from nose x0 toward tail)
+    let x = x0 - tc * chord;
+    let y = y0;
     const z = z0;
 
-    // Slight aerodynamic camber: real folded paper wings develop convex curvature under airflow
-    const camber = 0.028 * chord * Math.sin(Math.PI * tc);
+    // Aerodynamic camber: real folded paper wings develop slight convex curvature under airflow
+    const camber = 0.020 * chord * Math.sin(Math.PI * tc);
     y += camber;
 
     // Leading-edge fold / reinforced crease (dart & suzanne nose taper)
     if (leFold !== 0 && tc < 0.22) {
       const k = smoothstep(0, 1, 1 - tc / 0.22);
-      y -= Math.sin(leFold) * chord * k * 0.5;
+      y -= Math.sin(leFold) * chord * k * 0.4;
     }
 
     // Trailing edge fold (upward trim) and elevon / aileron on control band
     if (tc > 1 - ctrlRatio) {
       const k = smoothstep(0, 1, (tc - (1 - ctrlRatio)) / ctrlRatio);
+      // Upward fold/trim gives positive Y lift reflex
       y += Math.sin(teFold) * chord * k * 0.4;
-      // Subtracting sin(elevonEffective) tilts trailing edge down for positive elevon, up for negative
-      y -= Math.sin(elevonEffective) * chord * k;
+      y += Math.sin(elevonEffective) * chord * k;
     }
 
     return [x, y, z];
@@ -152,13 +156,7 @@ function makeWingSampler(cfg, side) {
 
 /**
  * 3D Keel Sampler with realistic paper fold thickness & V-shape grip (Fuselage Keel).
- * Represents the authentic folded paper spine:
- * - Real origami models (Sky King, Suzanne, Dart) have a deep center fin under the wings
- * - Holds the paper layers together and acts as the natural human grip area
- * - Tapered from nose to tail with reinforced fold creases
- * `side`: 1 for right wall, -1 for left wall.
- * `s`: 0 (top junction with wing root) .. 1 (bottom keel fold crease line).
- * `t`: 0 (nose apex) .. 1 (tail end).
+ * Seamlessly connects to the wing root along x: [geom.rootChord -> 0], y: 0, z: side * keelHalfWidth.
  */
 function makeRealisticKeelSampler(cfg, side) {
   const geom = airframeSummary(cfg);
@@ -166,8 +164,8 @@ function makeRealisticKeelSampler(cfg, side) {
   const centreFold = Math.max(0, Number(cfg.fold_center_deg) || 0);
   
   // Real origami keel height: Sky King & Suzanne have distinct deep grip keels
-  const baseDepthRatio = sIdx === 2 ? 0.28 : (sIdx === 1 ? 0.25 : 0.20);
-  const height = geom.rootChord * (baseDepthRatio + 0.35 * Math.sin((centreFold * Math.PI) / 180));
+  const baseDepthRatio = sIdx === 2 ? 0.26 : (sIdx === 1 ? 0.24 : 0.18);
+  const height = geom.rootChord * (baseDepthRatio + 0.30 * Math.sin((centreFold * Math.PI) / 180));
   const leFold = ((Number(cfg.fold_leading_deg) || 0) * Math.PI) / 180;
   const keelHalfWidth = Math.min(0.005, geom.span * 0.015);
 
@@ -178,22 +176,22 @@ function makeRealisticKeelSampler(cfg, side) {
 
     let top = 0;
     if (leFold !== 0 && tc < 0.2) {
-      top -= Math.sin(leFold) * geom.rootChord * smoothstep(0, 1, 1 - tc / 0.2) * 0.5;
+      top -= Math.sin(leFold) * geom.rootChord * smoothstep(0, 1, 1 - tc / 0.2) * 0.4;
     }
 
     // Profile of authentic keel:
     // Shallow at nose tip, deepening rapidly around 25-45% chord (the ergonomic grip zone),
     // and tapering cleanly toward the tail
-    const gripBell = Math.sin(Math.PI * Math.min(tc * 1.6, 1.0));
-    const depthCurve = 0.40 + 0.60 * Math.pow(gripBell, 0.7);
+    const gripBell = Math.sin(Math.PI * Math.min(tc * 1.5, 1.0));
+    const depthCurve = 0.35 + 0.65 * Math.pow(gripBell, 0.7);
     const drop = height * depthCurve;
     const y = top - drop * s;
 
     // V-shaped keel wall:
-    // At s=0 (wing root), width is keelHalfWidth.
-    // At s=1 (creased bottom edge), pinches tight to centerline (0.0003m paper thickness).
+    // At s=0 (wing root), width is exactly keelHalfWidth.
+    // At s=1 (creased bottom spine), pinches tight to centerline paper thickness.
     const paperThickness = 0.00035;
-    const z = side * (keelHalfWidth * (1.0 - s * 0.90) + paperThickness * s);
+    const z = side * (keelHalfWidth * (1.0 - s * 0.92) + paperThickness * s);
 
     return [x, y, z];
   };
@@ -201,28 +199,25 @@ function makeRealisticKeelSampler(cfg, side) {
 
 /**
  * 3D Folded Nose Lock & Ballast Sampler (Nose Lock / Ballast Layers).
- * Real origami gliders like Sky King and Suzanne fold the front tip backward
- * or tuck triangular flaps under/over the nose to create forward ballast and lock the fuselage.
- * `side`: 1 for right flap, -1 for left flap.
- * `s`: 0 (spine) .. 1 (outer triangular fold edge).
- * `t`: 0 (apex) .. 1 (back of lock fold).
+ * Fits directly on top of the main wing surface at the nose.
  */
 function makeNoseLockSampler(cfg, side) {
   const geom = airframeSummary(cfg);
   const sIdx = shapeIndex(cfg.shape_flag);
-  // Nose lock extends ~28% to 38% of root chord depending on airframe type
-  const lockLength = geom.rootChord * (sIdx === 2 ? 0.38 : (sIdx === 1 ? 0.32 : 0.26));
-  const lockWidth = geom.span * (sIdx === 2 ? 0.14 : (sIdx === 1 ? 0.11 : 0.08));
+  // Nose lock extends ~25% to 35% of root chord depending on airframe type
+  const lockLength = geom.rootChord * (sIdx === 2 ? 0.36 : (sIdx === 1 ? 0.30 : 0.24));
+  const lockWidth = geom.span * (sIdx === 2 ? 0.13 : (sIdx === 1 ? 0.10 : 0.07));
+  const keelHalfWidth = Math.min(0.005, geom.span * 0.015);
 
   return (s, t) => {
-    const u = Math.min(Math.max(s, 0), 1); // 0 (center) to 1 (outer fold)
+    const u = Math.min(Math.max(s, 0), 1); // 0 (center keel junction) to 1 (outer fold)
     const v = Math.min(Math.max(t, 0), 1); // 0 (nose apex) to 1 (rear of lock fold)
 
-    // Nose apex is at x = geom.rootChord
+    // Nose apex is at x = geom.rootChord, tapering backward
     const x = geom.rootChord - v * lockLength;
-    // Layer sits slightly proud above the main wing surface for tangible physical sheet relief
-    const y = 0.0012 + 0.0008 * (1.0 - v * 0.5);
-    const z = side * (u * (1.0 - v * 0.45) * lockWidth);
+    // Layer sits slightly proud above the main wing surface (y ~ 0) for tangible physical sheet relief
+    const y = 0.0009 + 0.0005 * (1.0 - v * 0.5);
+    const z = side * (keelHalfWidth + u * (1.0 - v * 0.45) * lockWidth);
 
     return [x, y, z];
   };
@@ -240,8 +235,8 @@ function makeUnderNoseBallastSampler(cfg, side) {
     const u = Math.min(Math.max(s, 0), 1);
     const v = Math.min(Math.max(t, 0), 1);
     const x = geom.rootChord - v * ballastLength;
-    const y = -0.0015 * (1.0 - v) * (1.0 - u * 0.5);
-    const z = side * keelHalfWidth * 1.1 * (1.0 - u * 0.8);
+    const y = -0.0012 * (1.0 - v) * (1.0 - u * 0.5);
+    const z = side * keelHalfWidth * (1.05 - u * 0.7);
     return [x, y, z];
   };
 }
