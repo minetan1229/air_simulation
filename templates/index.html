@@ -1,12 +1,13 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="ja">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>3D Paper Airplane CFD Simulator</title>
-<link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
-<link rel="stylesheet" href="static/css/style.css">
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+<meta name="color-scheme" content="light">
+<title>紙飛行機 風洞実験台 — Paper Airplane Wind-Tunnel Console</title>
+<link rel="stylesheet" href="static/css/console.css">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cpath fill='%231a73e8' d='M29 3 4.6 13.1a.6.6 0 0 0 .05 1.13l8.9 2.9 2.9 8.9a.6.6 0 0 0 1.12.05L29 3Z'/%3E%3C/svg%3E">
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script type="importmap">
 {
   "imports": {
@@ -17,651 +18,457 @@
 </script>
 </head>
 <body>
+<div class="console" id="console">
 
-<!-- ===================== 3D viewport (full bleed) ===================== -->
-<div id="viewport">
-  <canvas id="gl-canvas"></canvas>
-  <div id="viewport-fallback" hidden>
-    <div class="viewport-notice">
-      <strong>3D ビューを利用できません</strong>
-      <span id="viewport-fallback-reason">Three.js CDN または WebGL 2 に接続できませんでした。</span>
-      <p class="label-sm" style="margin:10px 0 0">
-        パネル・グラフ・API 計算はそのまま使用できます。<br>
-        （風粒子は CPU フォールバックで描画します）
-      </p>
+  <!-- ==================== top rail ==================== -->
+  <header class="toprail">
+    <div class="brand">
+      <svg class="brand-mark" viewBox="0 0 32 32" aria-hidden="true">
+        <path d="M29 3 4.6 13.1a.6.6 0 0 0 .05 1.13l8.9 2.9 2.9 8.9a.6.6 0 0 0 1.12.05L29 3Z"/>
+        <path d="M29 3 13.55 17.13l2.9 8.9" class="brand-crease"/>
+        <path d="M13.55 17.13 4.65 14.23" class="brand-crease"/>
+      </svg>
+      <div class="brand-text">
+        <span class="brand-title">紙飛行機 風洞実験台</span>
+        <span class="brand-sub">PAPER AIRPLANE WIND-TUNNEL CONSOLE</span>
+      </div>
     </div>
-  </div>
-  <div id="viewport-overlay">
-    <span id="overlay-backend">backend: —</span>
-    <span id="overlay-particles">particles: —</span>
-    <span id="overlay-fps">fps: —</span>
+
+    <div class="toprail-readouts" role="group" aria-label="ラン状態">
+      <div class="readout readout-run">
+        <span class="readout-key">RUN</span>
+        <span class="readout-val" id="top-state">IDLE</span>
+      </div>
+      <div class="readout">
+        <span class="readout-key">T</span>
+        <span class="readout-val num" id="top-clock">0.000<small>s</small></span>
+      </div>
+      <div class="readout">
+        <span class="readout-key">RNG</span>
+        <span class="readout-val num" id="top-range">0.00<small>m</small></span>
+      </div>
+      <div class="readout">
+        <span class="readout-key">GHOST</span>
+        <span class="readout-val num" id="top-ghost" title="前回の到達飛距離・滞空時間">—</span>
+      </div>
+      <div class="readout">
+        <span class="readout-key">SOLVER</span>
+        <span class="readout-val num" id="top-backend">—</span>
+      </div>
+      <div class="readout">
+        <span class="readout-key">RENDER</span>
+        <span class="readout-val num" id="top-fps">—</span>
+      </div>
+    </div>
+
+    <div class="toprail-actions">
+      <div class="header-eta" id="eta-widget">
+        <span class="eta-key">ETA</span>
+        <span class="eta-val num" id="eta-clock">—</span>
+        <span class="eta-sub num" id="eta-left">idle</span>
+      </div>
+      <label class="switch" title="風洞モード: 機体を固定して空力係数のみ測定 (U)">
+        <input type="checkbox" id="tunnel-toggle">
+        <span class="switch-box"></span>
+        <span class="switch-label">風洞モード</span>
+      </label>
+      <button class="btn" id="btn-save" type="button" title="設定を JSON で保存 (Ctrl+S)">保存</button>
+      <button class="btn" id="btn-load" type="button" title="設定 JSON の読込">読込</button>
+      <button class="btn" id="btn-csv" type="button" title="飛行ログを CSV で出力 (E)">CSV</button>
+      <button class="btn btn-rec" id="btn-top-record" type="button" title="3D飛行動画を録画して保存 (WebM/MP4)">🎥 動画録画</button>
+      <button class="btn btn-icon" id="btn-help" type="button" title="ショートカット (?)" aria-label="ショートカット">?</button>
+      <input type="file" id="config-file" accept="application/json,.json" hidden>
+    </div>
+  </header>
+
+  <!-- ==================== stage ==================== -->
+  <main class="stage">
+
+    <!-- ---------- left rail : configuration ---------- -->
+    <aside class="rail rail-left" id="rail-left" aria-label="設定">
+      <div class="rail-head">
+        <span class="rail-title">設定</span>
+        <span class="rail-title-en">CONFIGURATION</span>
+        <button class="btn btn-mini" id="btn-config-reset" type="button" title="サーバの既定値に戻す">既定へ</button>
+      </div>
+      <div class="rail-body" id="rail-left-body">
+
+        <!-- ギネス世界記録・投擲モード -->
+        <section class="group" data-group="records" open>
+          <button class="group-head" type="button" aria-expanded="true">
+            <span class="group-name">🏆 ギネス世界記録・投擲</span><span class="group-en">GUINNESS & THROWS</span>
+            <span class="group-chev" aria-hidden="true"></span>
+          </button>
+          <div class="group-body" data-host="records">
+            <div class="record-select-box">
+              <select id="record-preset-select" aria-label="世界記録モデル・投擲選択">
+                <option value="">-- 世界記録・投げ方を選択 --</option>
+              </select>
+            </div>
+            <div id="record-card" class="record-card" style="display:none;">
+              <div class="record-card-head">
+                <span class="record-badge" id="record-badge">記録</span>
+                <span class="record-val num" id="record-value">—</span>
+              </div>
+              <div class="record-title" id="record-name">—</div>
+              <div class="record-holder" id="record-holder">—</div>
+              
+              <div class="record-section-title">投擲フォーム・投げ方 (THROW TECHNIQUE)</div>
+              <div class="record-technique" id="record-technique">—</div>
+              <div class="record-notes" id="record-notes">—</div>
+              
+              <div class="record-specs">
+                <div class="spec-item"><span class="spec-k">初速</span><span class="spec-v num" id="rec-speed">—</span></div>
+                <div class="spec-item"><span class="spec-k">仰角</span><span class="spec-v num" id="rec-angle">—</span></div>
+                <div class="spec-item"><span class="spec-k">高度</span><span class="spec-v num" id="rec-height">—</span></div>
+                <div class="spec-item"><span class="spec-k">スタイル</span><span class="spec-v num" id="rec-style">—</span></div>
+              </div>
+
+              <div class="record-actions">
+                <button type="button" class="btn-record-primary" id="btn-apply-record" title="機体と投げ方をロードして投げる">
+                  🚀 機体＆投げ方をロードして投擲
+                </button>
+                <button type="button" class="btn-record-secondary" id="btn-apply-throw-only" title="現在の機体のまま、この投げ方で投げる">
+                  🎯 投げ方のみ適用して投擲
+                </button>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section class="group" data-group="airframe" open>
+          <button class="group-head" type="button" aria-expanded="true">
+            <span class="group-name">機体寸法</span><span class="group-en">AIRFRAME</span>
+            <span class="group-note num" id="geom-summary">—</span>
+            <span class="group-chev" aria-hidden="true"></span>
+          </button>
+          <div class="group-body" data-host="airframe"></div>
+        </section>
+
+        <section class="group" data-group="fold" open>
+          <button class="group-head" type="button" aria-expanded="true">
+            <span class="group-name">折り畳み</span><span class="group-en">FOLDS</span>
+            <span class="group-chev" aria-hidden="true"></span>
+          </button>
+          <div class="group-body" data-host="fold"></div>
+        </section>
+
+        <section class="group" data-group="throw" open>
+          <button class="group-head" type="button" aria-expanded="true">
+            <span class="group-name">投げ方</span><span class="group-en">THROW</span>
+            <span class="group-chev" aria-hidden="true"></span>
+          </button>
+          <div class="group-body" data-host="throw"></div>
+        </section>
+
+        <section class="group" data-group="atmosphere">
+          <button class="group-head" type="button" aria-expanded="false">
+            <span class="group-name">大気</span><span class="group-en">ATMOSPHERE</span>
+            <span class="group-chev" aria-hidden="true"></span>
+          </button>
+          <div class="group-body" data-host="atmosphere"></div>
+        </section>
+
+        <section class="group" data-group="wind">
+          <button class="group-head" type="button" aria-expanded="false">
+            <span class="group-name">風況</span><span class="group-en">WIND</span>
+            <span class="group-chev" aria-hidden="true"></span>
+          </button>
+          <div class="group-body" data-host="wind"></div>
+        </section>
+
+        <section class="group" data-group="solver">
+          <button class="group-head" type="button" aria-expanded="false">
+            <span class="group-name">積分・負荷</span><span class="group-en">INTEGRATOR</span>
+            <span class="group-chev" aria-hidden="true"></span>
+          </button>
+          <div class="group-body" data-host="solver"></div>
+        </section>
+
+      </div>
+    </aside>
+
+    <!-- ---------- viewport ---------- -->
+    <section class="viewport" aria-label="3D ビュー">
+      <canvas id="view-canvas"></canvas>
+
+      <div class="vp-toolbar" role="toolbar" aria-label="表示設定">
+        <button class="chip" id="tgl-wind" type="button" data-on="1" title="風流粒子 (F)">風流</button>
+        <button class="chip" id="tgl-track" type="button" data-on="1" title="飛行軌跡 (T)">軌跡</button>
+        <button class="chip" id="tgl-ghost" type="button" data-on="1" title="前回の軌跡 (G)">ゴースト</button>
+        <button class="chip" id="tgl-panels" type="button" title="空力パネル格子 (P)">パネル</button>
+        <button class="chip" id="tgl-grip" type="button" data-on="1" title="持ち手接触点 (M)">持ち手</button>
+        <button class="chip" id="tgl-follow" type="button" data-on="1" title="機体追従 (C)">追従</button>
+        <button class="chip" id="tgl-heat" type="button" data-on="1" title="応力ヒートマップ (H)">応力</button>
+        <button class="chip" id="btn-gpu-ensemble" type="button" title="GPU (CuPy) で100機を同時に一括並列シミュレーション">⚡ GPU 100機同時飛行</button>
+        <button class="chip chip-rec" id="btn-record-video" type="button" title="3Dシミュレーション動画を録画・保存 (WebM/MP4)">🎥 録画</button>
+        <button class="chip" id="btn-view-reset" type="button" title="視点を初期化 (V)">視点</button>
+      </div>
+
+      <div class="vp-hud vp-hud-tl">
+        <div class="hud-row"><span class="hud-key">α</span><span class="hud-val num" id="hud-alpha">—</span></div>
+        <div class="hud-row"><span class="hud-key">β</span><span class="hud-val num" id="hud-beta">—</span></div>
+        <div class="hud-row"><span class="hud-key">V</span><span class="hud-val num" id="hud-speed">—</span></div>
+        <div class="hud-row"><span class="hud-key">q</span><span class="hud-val num" id="hud-q">—</span></div>
+        <div class="hud-row"><span class="hud-key">V∞</span><span class="hud-val num" id="hud-flow">—</span></div>
+      </div>
+
+      <div class="vp-hud vp-hud-tr" id="tunnel-hud" hidden>
+        <div class="hud-title">風洞固定測定 / TUNNEL</div>
+        <div class="hud-row"><span class="hud-key">C_L</span><span class="hud-val num" id="hud-cl">—</span></div>
+        <div class="hud-row"><span class="hud-key">C_D</span><span class="hud-val num" id="hud-cd">—</span></div>
+        <div class="hud-row"><span class="hud-key">L/D</span><span class="hud-val num" id="hud-ld">—</span></div>
+        <div class="hud-row"><span class="hud-key">C_m</span><span class="hud-val num" id="hud-cm">—</span></div>
+      </div>
+
+      <div class="vp-hud vp-hud-bl">
+        <div class="heat-legend">
+          <span class="heat-title">翼面応力インデックス STRESS</span>
+          <div class="heat-bar"><canvas id="heat-ramp" width="180" height="10"></canvas></div>
+          <div class="heat-scale"><span>0.0</span><span>0.5</span><span>1.0</span></div>
+        </div>
+        <div class="flow-legend">
+          <span class="flow-backend" id="flow-backend">flow: —</span>
+          <span class="flow-count num" id="flow-count">—</span>
+        </div>
+      </div>
+
+      <div class="vp-notice" id="vp-notice" hidden>
+        <strong>3D ビューを初期化できませんでした</strong>
+        <p id="vp-notice-msg"></p>
+        <p class="muted">設定・数値計算・最適化はそのまま利用できます。</p>
+      </div>
+    </section>
+
+    <!-- ---------- right rail : instrumentation ---------- -->
+    <aside class="rail rail-right" id="rail-right" aria-label="計器">
+      <div class="rail-head">
+        <span class="rail-title">計器</span>
+        <span class="rail-title-en">INSTRUMENTS</span>
+        <span class="state-pill" id="flight-pill" data-state="idle">待機</span>
+      </div>
+      <div class="rail-body">
+
+        <section class="group" open>
+          <div class="group-head static"><span class="group-name">飛行状態</span><span class="group-en">STATE</span></div>
+          <div class="group-body">
+            <dl class="gauges" id="gauges"></dl>
+            <div class="kv-line"><span>POSITION x / y / z</span><span class="num" id="gauge-position">—</span></div>
+            <div class="kv-line"><span>Re / Ma</span><span class="num" id="gauge-rema">—</span></div>
+          </div>
+        </section>
+
+        <section class="group" open>
+          <div class="group-head static">
+            <span class="group-name">記録</span><span class="group-en">RECORDER</span>
+            <span class="group-note num" id="rec-count">0</span>
+          </div>
+          <div class="group-body">
+            <div class="rec-head">
+              <span class="rec-legend"><i class="sw sw-alt"></i>高度 m</span>
+              <span class="rec-legend"><i class="sw sw-spd"></i>速度 m/s</span>
+              <span class="rec-legend"><i class="sw sw-aoa"></i>迎角 °</span>
+              <span class="rec-legend"><i class="sw sw-sts"></i>応力 Pa</span>
+            </div>
+            <canvas id="rec-canvas" class="rec-canvas"></canvas>
+            <div class="rec-foot">
+              <span class="num" id="rec-cursor">—</span>
+              <button class="btn btn-mini" id="btn-rec-clear" type="button">消去</button>
+            </div>
+          </div>
+        </section>
+
+        <section class="group" open>
+          <div class="group-head static">
+            <span class="group-name">空力極線</span><span class="group-en">DRAG POLAR</span>
+            <button class="btn btn-mini" id="btn-polar" type="button">再計算</button>
+          </div>
+          <div class="group-body">
+            <canvas id="polar-canvas" class="polar-canvas"></canvas>
+            <div class="kv-line"><span>C_D min / α</span><span class="num" id="polar-cdmin">—</span></div>
+            <div class="kv-line"><span>(L/D) max / α</span><span class="num" id="polar-ldmax">—</span></div>
+            <div class="kv-line"><span>トリム α / δ<sub>e</sub></span><span class="num" id="polar-trim">—</span></div>
+          </div>
+        </section>
+
+        <section class="group" open>
+          <div class="group-head static"><span class="group-name">大気</span><span class="group-en">AIR</span></div>
+          <div class="group-body">
+            <dl class="gauges gauges-2" id="gauges-air"></dl>
+          </div>
+        </section>
+
+      </div>
+    </aside>
+  </main>
+
+  <!-- ==================== workbench ==================== -->
+  <section class="workbench" id="workbench" data-open="0" aria-label="作業台">
+    <nav class="wb-tabs" role="tablist">
+      <button class="wb-tab" id="wb-tab-optimizer" role="tab" aria-selected="true" data-tab="optimizer">最適化<small>OPTIMIZER</small></button>
+      <button class="wb-tab" id="wb-tab-model" role="tab" aria-selected="false" data-tab="model">3D モデル<small>MESH</small></button>
+      <button class="wb-tab" id="wb-tab-data" role="tab" aria-selected="false" data-tab="data">データ<small>EXPORT</small></button>
+      <div class="wb-spacer"></div>
+<button class="wb-toggle" id="wb-toggle" type="button" title="作業台を開閉 (W)" aria-expanded="false">
+        <span class="wb-toggle-glyph" aria-hidden="true"></span>
+      </button>
+    </nav>
+
+    <div class="wb-panes">
+      <!-- optimizer -->
+      <div class="wb-pane" data-pane="optimizer" role="tabpanel">
+        <div class="wb-col wb-col-1">
+          <h4 class="wb-h">目的関数<small>OBJECTIVES</small></h4>
+          <div class="obj-list" id="opt-objectives"></div>
+          <h4 class="wb-h">設計変数<small>DESIGN VARIABLES</small></h4>
+          <div class="var-list" id="opt-variables"></div>
+        </div>
+        <div class="wb-col wb-col-2">
+          <h4 class="wb-h">探索設定<small>SEARCH</small></h4>
+          <div class="grid-2" id="opt-settings"></div>
+          <div class="btn-row">
+            <button class="btn btn-primary" id="opt-run" type="button">実行</button>
+            <button class="btn" id="opt-cancel" type="button" disabled>中断</button>
+          </div>
+          <div class="prog">
+            <div class="prog-track"><div class="prog-fill" id="opt-fill"></div></div>
+            <div class="prog-meta">
+              <span class="num" id="opt-count">0 / 0</span>
+              <span class="num" id="opt-rate">—</span>
+            </div>
+          </div>
+          <h4 class="wb-h">ジョブ<small>JOBS</small></h4>
+          <div class="job-list" id="opt-jobs"></div>
+        </div>
+        <div class="wb-col wb-col-3">
+          <h4 class="wb-h">Pareto front<small id="opt-front-axes">—</small></h4>
+          <div class="chart-wrap">
+            <canvas id="opt-chart"></canvas>
+            <p class="chart-empty" id="opt-chart-empty">未実行</p>
+          </div>
+          <div class="btn-row">
+            <button class="btn btn-mini" id="opt-csv" type="button" disabled>Pareto CSV</button>
+            <button class="btn btn-mini" id="opt-adopt" type="button" disabled>この設計を反映</button>
+          </div>
+          <div class="best-grid" id="opt-best"><p class="chart-empty">未実行</p></div>
+        </div>
+      </div>
+
+      <!-- mesh -->
+      <div class="wb-pane" data-pane="model" role="tabpanel" hidden>
+        <div class="wb-col wb-col-1">
+          <h4 class="wb-h">取込<small>IMPORT</small></h4>
+          <div class="drop" id="mesh-drop" tabindex="0" role="button">
+            <span class="drop-main">glTF / GLB / OBJ / STL をドロップ</span>
+            <span class="drop-sub">クリックでファイルを選択</span>
+          </div>
+          <input type="file" id="mesh-file" accept=".gltf,.glb,.obj,.stl" hidden>
+          <div class="field">
+            <label class="field-key" for="mesh-url">URL</label>
+            <input class="text" id="mesh-url" type="url" placeholder="https://…/plane.glb" spellcheck="false">
+          </div>
+          <div class="btn-row">
+            <button class="btn" id="mesh-fetch" type="button">URL から取込</button>
+          </div>
+          <div class="grid-2" id="mesh-opts"></div>
+        </div>
+        <div class="wb-col wb-col-2">
+          <h4 class="wb-h">ライブラリ<small>LIBRARY</small></h4>
+          <div class="model-list" id="mesh-list"><p class="chart-empty">未読込</p></div>
+        </div>
+        <div class="wb-col wb-col-3">
+          <h4 class="wb-h">算出物理量<small>DERIVED METRICS</small></h4>
+          <div class="metric-table" id="mesh-metrics"><p class="chart-empty">モデル未選択</p></div>
+        </div>
+      </div>
+
+      <!-- data -->
+      <div class="wb-pane" data-pane="data" role="tabpanel" hidden>
+        <div class="wb-col wb-col-1">
+          <h4 class="wb-h">プリセット<small>PRESETS</small></h4>
+          <div class="preset-list" id="preset-list"></div>
+          <div class="btn-row">
+            <button class="btn" id="preset-save" type="button">現在値を保存</button>
+            <button class="btn" id="preset-del" type="button" disabled>削除</button>
+          </div>
+        </div>
+        <div class="wb-col wb-col-2">
+          <h4 class="wb-h">書出<small>EXPORT</small></h4>
+          <div class="grid-2" id="export-opts"></div>
+          <div class="btn-row">
+            <button class="btn btn-primary" id="export-run" type="button">生成してダウンロード</button>
+          </div>
+          <pre class="preview" id="export-preview">—</pre>
+        </div>
+        <div class="wb-col wb-col-3">
+          <h4 class="wb-h">書込<small>IMPORT</small></h4>
+          <div class="drop" id="bundle-drop" tabindex="0" role="button">
+            <span class="drop-main">設定バンドルをドロップ</span>
+            <span class="drop-sub">または JSON を貼り付け</span>
+          </div>
+          <textarea class="paste" id="bundle-paste" spellcheck="false" placeholder='{"aircraft": {...}, "environment": {...}}'></textarea>
+          <div class="btn-row">
+            <button class="btn" id="bundle-apply" type="button">適用</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ==================== transport ==================== -->
+  <footer class="transport">
+    <div class="tp-controls">
+      <button class="tp-btn" id="tp-reset" type="button" title="リセット (R)">
+        <span class="glyph glyph-reset" aria-hidden="true"></span><span class="tp-label">リセット</span>
+      </button>
+      <button class="tp-btn tp-play" id="tp-play" type="button" title="再生 / 一時停止 (Space)">
+        <span class="glyph glyph-play" aria-hidden="true"></span><span class="tp-label" id="tp-play-label">再生</span>
+      </button>
+      <button class="tp-btn" id="tp-prev" type="button" title="1 フレーム戻る (←)">
+        <span class="glyph glyph-prev" aria-hidden="true"></span>
+      </button>
+      <button class="tp-btn" id="tp-next" type="button" title="1 フレーム進む (→)">
+        <span class="glyph glyph-next" aria-hidden="true"></span>
+      </button>
+    </div>
+
+    <div class="tp-rate" role="group" aria-label="再生速度" id="tp-rate"></div>
+
+    <div class="tp-timeline">
+      <input type="range" id="tp-scrub" min="0" max="0" value="0" step="1" aria-label="タイムライン">
+      <div class="tp-frame"><span class="num" id="tp-frame">0</span><span class="muted">/</span><span class="num" id="tp-total">0</span><span class="muted">frame</span></div>
+    </div>
+
+    <div class="tp-meta">
+      <div class="tp-clock"><span class="num" id="tp-time">0.000</span><span class="muted">s</span></div>
+      <div class="tp-stat"><span class="muted">滞空</span><span class="num" id="tp-flight">0.00</span><span class="muted">s</span></div>
+      <div class="tp-stat"><span class="muted">距離</span><span class="num" id="tp-dist">0.00</span><span class="muted">m</span></div>
+    </div>
+  </footer>
+
+  <div class="toasts" id="toasts" aria-live="polite"></div>
+
+  <div class="modal" id="help" hidden>
+    <div class="modal-card">
+      <h3>操作</h3>
+      <dl class="keys">
+        <dt>Space</dt><dd>再生 / 一時停止</dd>
+        <dt>← →</dt><dd>1 フレーム送り / 戻し</dd>
+        <dt>, .</dt><dd>速度を落とす / 上げる</dd>
+        <dt>R</dt><dd>リセット</dd>
+        <dt>V</dt><dd>視点を機体にリセット</dd>
+        <dt>T / G / F / H / P / M / C</dt><dd>軌跡 / ゴースト / 風流 / 応力 / パネル / 持ち手 / 追従</dd>
+        <dt>W</dt><dd>作業台を開閉</dd>
+        <dt>U</dt><dd>風洞モード</dd>
+        <dt>E</dt><dd>飛行ログを CSV で出力</dd>
+        <dt>?</dt><dd>この一覧</dd>
+      </dl>
+      <p class="muted">Canonical frame: +x 前方 / +y 右翼 / +z 下方。UI 内部では three.js 規約 (+y 上) へ回転して描画します。</p>
+      <div class="btn-row"><button class="btn" id="help-close" type="button">閉じる</button></div>
+    </div>
   </div>
 </div>
 
-<!-- ===================== Header bar ===================== -->
-<header id="app-header">
-  <button id="btn-toggle-left" class="btn btn-icon drawer-toggle" type="button" title="パネル切替">☰</button>
-  <button id="btn-toggle-right" class="btn btn-icon drawer-toggle" type="button" title="ステータス切替">📊</button>
-
-  <div class="app-title">
-    <svg class="app-mark" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-      <path d="M21.5 2.5 2.8 10.1a0.4 0.4 0 0 0 0.03 0.75l7.2 2.35 2.35 7.2a0.4 0.4 0 0 0 .75.03L21.5 2.5Z" fill="currentColor"/>
-      <path d="M21.5 2.5 10.03 13.2l2.35 7.2" stroke="#FFFFFF" stroke-width="1.1" stroke-linecap="round"/>
-    </svg>
-    <span>3D Paper Airplane Simulator</span>
-  </div>
-
-  <div class="header-actions">
-    <label class="switch" title="風洞モード（風速を固定し空力係数のみ計測）">
-      <input type="checkbox" id="wind-tunnel-toggle">
-      <span class="switch-track"></span>
-      <span>風洞モード</span>
-    </label>
-    <button id="btn-load-model" class="btn" type="button">Load 3D model</button>
-    <button id="btn-save-json" class="btn" type="button">Save JSON</button>
-    <button id="btn-load-json" class="btn" type="button">Load JSON</button>
-    <button id="btn-export-csv" class="btn" type="button">Export CSV</button>
-  </div>
-
-  <div class="header-spacer"></div>
-
-  <!-- EtaDisplay renders here (static/js/eta_display.js) -->
-  <div id="eta-widget" class="header-eta"></div>
-
-  <input type="file" id="json-file-input" accept="application/json,.json" hidden>
-</header>
-
-<!-- ===================== Left panel ===================== -->
-<aside id="left-panel" class="panel" aria-label="機体・環境設定">
-
-  <!-- ---------- Airframe ---------- -->
-  <section class="section" id="section-airframe" data-section="airframe">
-    <button class="section-header" type="button" data-section-toggle="airframe" aria-expanded="true">
-      機体 (Airframe)
-      <span class="section-chevron">▾</span>
-    </button>
-    <div class="section-body">
-
-      <div class="field">
-        <span class="field-label">質量 mass_kg</span>
-        <span class="field-value" id="af-val-mass_kg">—</span>
-        <input type="range" class="field-range" id="af-range-mass_kg" min="0.001" max="0.030" step="0.0001">
-        <input type="number" class="num-input" id="af-num-mass_kg" min="0.001" max="0.030" step="0.0001">
-      </div>
-
-      <div class="field">
-        <span class="field-label">坪量 paper_gsm</span>
-        <span class="field-value" id="af-val-paper_gsm">—</span>
-        <input type="range" class="field-range" id="af-range-paper_gsm" min="40" max="300" step="1">
-        <input type="number" class="num-input" id="af-num-paper_gsm" min="40" max="300" step="1">
-      </div>
-
-      <div class="field">
-        <span class="field-label">紙剛性 paper_stiffness</span>
-        <span class="field-value" id="af-val-paper_stiffness">—</span>
-        <input type="range" class="field-range" id="af-range-paper_stiffness" min="0" max="1" step="0.01">
-        <input type="number" class="num-input" id="af-num-paper_stiffness" min="0" max="1" step="0.01">
-      </div>
-
-      <div class="field">
-        <span class="field-label">翼幅 wingspan_m</span>
-        <span class="field-value" id="af-val-wingspan_m">—</span>
-        <input type="range" class="field-range" id="af-range-wingspan_m" min="0.08" max="0.50" step="0.002">
-        <input type="number" class="num-input" id="af-num-wingspan_m" min="0.08" max="0.50" step="0.002">
-      </div>
-
-      <div class="field">
-        <span class="field-label">翼面積 wing_area_m2</span>
-        <span class="field-value" id="af-val-wing_area_m2">—</span>
-        <input type="range" class="field-range" id="af-range-wing_area_m2" min="0.004" max="0.060" step="0.0005">
-        <input type="number" class="num-input" id="af-num-wing_area_m2" min="0.004" max="0.060" step="0.0005">
-      </div>
-
-      <div class="field">
-        <span class="field-label">テーパ比 taper_ratio</span>
-        <span class="field-value" id="af-val-taper_ratio">—</span>
-        <input type="range" class="field-range" id="af-range-taper_ratio" min="0.05" max="1" step="0.01">
-        <input type="number" class="num-input" id="af-num-taper_ratio" min="0.05" max="1" step="0.01">
-      </div>
-
-      <div class="field">
-        <span class="field-label">二面角 dihedral_deg</span>
-        <span class="field-value" id="af-val-dihedral_deg">—</span>
-        <input type="range" class="field-range" id="af-range-dihedral_deg" min="-10" max="30" step="0.5">
-        <input type="number" class="num-input" id="af-num-dihedral_deg" min="-10" max="30" step="0.5">
-      </div>
-
-      <div class="field">
-        <span class="field-label">前縁折り角 fold_leading_deg</span>
-        <span class="field-value" id="af-val-fold_leading_deg">—</span>
-        <input type="range" class="field-range" id="af-range-fold_leading_deg" min="0" max="90" step="1">
-        <input type="number" class="num-input" id="af-num-fold_leading_deg" min="0" max="90" step="1">
-      </div>
-
-      <div class="field">
-        <span class="field-label">後縁折り角 fold_trailing_deg</span>
-        <span class="field-value" id="af-val-fold_trailing_deg">—</span>
-        <input type="range" class="field-range" id="af-range-fold_trailing_deg" min="0" max="90" step="1">
-        <input type="number" class="num-input" id="af-num-fold_trailing_deg" min="0" max="90" step="1">
-      </div>
-
-      <div class="field">
-        <span class="field-label">翼端折り角 fold_tip_deg</span>
-        <span class="field-value" id="af-val-fold_tip_deg">—</span>
-        <input type="range" class="field-range" id="af-range-fold_tip_deg" min="0" max="90" step="1">
-        <input type="number" class="num-input" id="af-num-fold_tip_deg" min="0" max="90" step="1">
-      </div>
-
-      <div class="field">
-        <span class="field-label">中央折り角 fold_center_deg</span>
-        <span class="field-value" id="af-val-fold_center_deg">—</span>
-        <input type="range" class="field-range" id="af-range-fold_center_deg" min="0" max="90" step="1">
-        <input type="number" class="num-input" id="af-num-fold_center_deg" min="0" max="90" step="1">
-      </div>
-
-      <div class="field">
-        <span class="field-label">Elevon 角 elevon_deg</span>
-        <span class="field-value" id="af-val-elevon_deg">—</span>
-        <input type="range" class="field-range" id="af-range-elevon_deg" min="-15" max="35" step="0.5">
-        <input type="number" class="num-input" id="af-num-elevon_deg" min="-15" max="35" step="0.5">
-      </div>
-
-      <div class="row row-between">
-        <span class="label-sm">発射初速 launch_speed (m/s)</span>
-        <span class="field-value" id="launch-val-launch_speed">—</span>
-      </div>
-      <input type="range" class="range-input" id="launch-range-launch_speed" min="2" max="40" step="0.5">
-      <input type="number" class="num-input" id="launch-num-launch_speed" min="2" max="40" step="0.5">
-
-      <div class="row row-between">
-        <span class="label-sm">発射角 launch_angle_deg (°)</span>
-        <span class="field-value" id="launch-val-launch_angle_deg">—</span>
-      </div>
-      <input type="range" class="range-input" id="launch-range-launch_angle_deg" min="-10" max="45" step="0.5">
-      <input type="number" class="num-input" id="launch-num-launch_angle_deg" min="-10" max="45" step="0.5">
-
-      <div class="row row-between">
-        <span class="label-sm">ロール角 launch_roll_deg (°)</span>
-        <span class="field-value" id="launch-val-launch_roll_deg">—</span>
-      </div>
-      <input type="range" class="range-input" id="launch-range-launch_roll_deg" min="-45" max="45" step="1">
-      <input type="number" class="num-input" id="launch-num-launch_roll_deg" min="-45" max="45" step="1">
-
-      <div class="row">
-        <button id="btn-apply-airframe" class="btn btn-primary" type="button">機体設定を適用 (reset)</button>
-      </div>
-    </div>
-  </section>
-
-  <!-- ---------- Environment ---------- -->
-  <section class="section" id="section-environment" data-section="environment">
-    <button class="section-header" type="button" data-section-toggle="environment" aria-expanded="true">
-      環境 (Environment)
-      <span class="section-chevron">▾</span>
-    </button>
-    <div class="section-body">
-
-      <div class="field-pair">
-        <div class="field">
-          <span class="field-label">気温 °C</span>
-          <span class="field-value" id="env-val-temp_c">—</span>
-          <input type="range" class="field-range" id="env-range-temp_c" min="-40" max="60" step="0.5">
-          <input type="number" class="num-input" id="env-num-temp_c" min="-40" max="60" step="0.5">
-        </div>
-        <div class="field">
-          <span class="field-label">気温 K</span>
-          <span class="field-value" id="env-val-temp_k">—</span>
-          <input type="range" class="field-range" id="env-range-temp_k" min="233.15" max="333.15" step="0.25">
-          <input type="number" class="num-input" id="env-num-temp_k" min="233.15" max="333.15" step="0.25">
-        </div>
-      </div>
-
-      <div class="field-pair">
-        <div class="field">
-          <span class="field-label">気圧 hPa</span>
-          <span class="field-value" id="env-val-press_hpa">—</span>
-          <input type="range" class="field-range" id="env-range-press_hpa" min="500" max="1100" step="0.5">
-          <input type="number" class="num-input" id="env-num-press_hpa" min="500" max="1100" step="0.5">
-        </div>
-        <div class="field">
-          <span class="field-label">気圧 Pa</span>
-          <span class="field-value" id="env-val-press_pa">—</span>
-          <input type="range" class="field-range" id="env-range-press_pa" min="50000" max="110000" step="10">
-          <input type="number" class="num-input" id="env-num-press_pa" min="50000" max="110000" step="10">
-        </div>
-      </div>
-
-      <div class="field">
-        <span class="field-label">相対湿度 humidity_rel (%)</span>
-        <span class="field-value" id="env-val-humidity_pct">—</span>
-        <input type="range" class="field-range" id="env-range-humidity_pct" min="0" max="100" step="1">
-        <input type="number" class="num-input" id="env-num-humidity_pct" min="0" max="100" step="1">
-      </div>
-
-      <div class="field">
-        <span class="field-label">風速 wind_speed (m/s)</span>
-        <span class="field-value" id="env-val-wind_speed">—</span>
-        <input type="range" class="field-range" id="env-range-wind_speed" min="0" max="40" step="0.1">
-        <input type="number" class="num-input" id="env-num-wind_speed" min="0" max="40" step="0.1">
-      </div>
-
-      <div class="field">
-        <span class="field-label">風向 wind_direction_deg (°)</span>
-        <span class="field-value" id="env-val-wind_direction_deg">—</span>
-        <input type="range" class="field-range" id="env-range-wind_direction_deg" min="0" max="360" step="1">
-        <input type="number" class="num-input" id="env-num-wind_direction_deg" min="0" max="360" step="1">
-      </div>
-
-      <div class="field">
-        <span class="field-label">乱気流強度 gust_intensity</span>
-        <span class="field-value" id="env-val-gust_intensity">—</span>
-        <input type="range" class="field-range" id="env-range-gust_intensity" min="0" max="1" step="0.01">
-        <input type="number" class="num-input" id="env-num-gust_intensity" min="0" max="1" step="0.01">
-      </div>
-
-      <div class="field">
-        <span class="field-label">熱上昇強度 thermal_strength (m/s)</span>
-        <span class="field-value" id="env-val-thermal_strength">—</span>
-        <input type="range" class="field-range" id="env-range-thermal_strength" min="0" max="15" step="0.1">
-        <input type="number" class="num-input" id="env-num-thermal_strength" min="0" max="15" step="0.1">
-      </div>
-
-      <div class="field">
-        <span class="field-label">重力 gravity (m/s²)</span>
-        <span class="field-value" id="env-val-gravity">—</span>
-        <input type="range" class="field-range" id="env-range-gravity" min="0.1" max="30" step="0.01">
-        <input type="number" class="num-input" id="env-num-gravity" min="0.1" max="30" step="0.01">
-      </div>
-
-      <div class="field">
-        <span class="field-label">地面摩擦 ground_friction</span>
-        <span class="field-value" id="env-val-ground_friction">—</span>
-        <input type="range" class="field-range" id="env-range-ground_friction" min="0" max="2" step="0.01">
-        <input type="number" class="num-input" id="env-num-ground_friction" min="0" max="2" step="0.01">
-      </div>
-
-      <div class="field">
-        <span class="field-label">抗力倍率 drag_scale</span>
-        <span class="field-value" id="env-val-drag_scale">—</span>
-        <input type="range" class="field-range" id="env-range-drag_scale" min="0" max="5" step="0.01">
-        <input type="number" class="num-input" id="env-num-drag_scale" min="0" max="5" step="0.01">
-      </div>
-
-      <div class="field">
-        <span class="field-label">揚力倍率 lift_scale</span>
-        <span class="field-value" id="env-val-lift_scale">—</span>
-        <input type="range" class="field-range" id="env-range-lift_scale" min="0" max="5" step="0.01">
-        <input type="number" class="num-input" id="env-num-lift_scale" min="0" max="5" step="0.01">
-      </div>
-
-      <div class="field">
-        <span class="field-label">風洞風速 wind_tunnel_speed (m/s)</span>
-        <span class="field-value" id="env-val-wind_tunnel_speed">—</span>
-        <input type="range" class="field-range" id="env-range-wind_tunnel_speed" min="0" max="60" step="0.5">
-        <input type="number" class="num-input" id="env-num-wind_tunnel_speed" min="0" max="60" step="0.5">
-      </div>
-
-      <label class="switch">
-        <input type="checkbox" id="env-toggle-ground_effect_enabled">
-        <span class="switch-track"></span>
-        <span>地面効果 ground_effect_enabled</span>
-      </label>
-
-      <label class="switch">
-        <input type="checkbox" id="env-toggle-compressibility_enabled">
-        <span class="switch-track"></span>
-        <span>圧縮性補正 compressibility_enabled</span>
-      </label>
-
-      <label class="switch">
-        <input type="checkbox" id="env-toggle-wind_tunnel_enabled">
-        <span class="switch-track"></span>
-        <span>風洞固定 wind_tunnel_enabled</span>
-      </label>
-
-      <div class="divider"></div>
-
-      <div class="row row-between">
-        <span class="label-sm">派生値（サーバー計算）</span>
-        <span class="backend-chip" id="env-backend-chip">backend: —</span>
-      </div>
-      <dl class="derived-grid">
-        <div class="derived-item"><dt>密度 ρ</dt><dd id="derived-density">—</dd></div>
-        <div class="derived-item"><dt>動粘性 μ</dt><dd id="derived-viscosity">—</dd></div>
-        <div class="derived-item"><dt>動粘性係数 ν</dt><dd id="derived-kinematic">—</dd></div>
-        <div class="derived-item"><dt>音速 a</dt><dd id="derived-sound">—</dd></div>
-        <div class="derived-item"><dt>レイノルズ数 Re</dt><dd id="derived-reynolds">—</dd></div>
-        <div class="derived-item"><dt>マッハ数 M</dt><dd id="derived-mach">—</dd></div>
-      </dl>
-      <div class="row">
-        <button id="btn-refresh-environment" class="btn btn-sm" type="button">環境を取得</button>
-      </div>
-    </div>
-  </section>
-
-  <!-- ---------- 3D model ---------- -->
-  <section class="section is-collapsed" id="section-model" data-section="model">
-    <button class="section-header" type="button" data-section-toggle="model" aria-expanded="false">
-      3D モデル (glTF / GLB / OBJ / STL)
-      <span class="section-chevron">▾</span>
-    </button>
-    <div class="section-body">
-
-      <div class="field">
-        <span class="field-label">形式</span>
-        <select class="select-input" id="mesh-format">
-          <option value="gltf">glTF 2.0 (.gltf / .glb)</option>
-          <option value="glb">GLB (binary)</option>
-          <option value="obj">Wavefront OBJ</option>
-          <option value="stl">STL (binary / ASCII)</option>
-        </select>
-      </div>
-
-      <div class="dropzone" id="mesh-dropzone" tabindex="0" role="button">
-        <strong>ファイルをドロップ</strong>
-        <span class="label-sm">またはクリックして選択</span>
-        <span class="label-sm" id="mesh-dropzone-hint">.gltf / .glb / .obj / .stl</span>
-      </div>
-      <input type="file" id="mesh-file-input" accept=".gltf,.glb,.obj,.stl,model/gltf+json,model/gltf-binary,model/obj,model/stl" hidden>
-
-      <div class="field">
-        <span class="field-label">URL</span>
-        <input type="url" class="text-input" id="mesh-url-input" placeholder="https://example.com/paper-plane.glb">
-      </div>
-      <div class="row">
-        <button id="mesh-url-import" class="btn btn-primary" type="button">URL から読込</button>
-        <button id="mesh-refresh-list" class="btn" type="button">一覧更新</button>
-      </div>
-
-      <div class="field-pair">
-        <div class="field">
-          <span class="field-label">単位補正 scale_hint</span>
-          <select class="select-input" id="mesh-scale-hint">
-            <option value="m">m (メートル)</option>
-            <option value="cm">cm (センチ)</option>
-            <option value="mm">mm (ミリ)</option>
-          </select>
-        </div>
-        <div class="field">
-          <span class="field-label">CG 算出 cg_mode</span>
-          <select class="select-input" id="mesh-cg-mode">
-            <option value="volume">volume (体積)</option>
-            <option value="surface">surface (面積)</option>
-          </select>
-        </div>
-      </div>
-
-      <div class="field">
-        <span class="field-label">坪量 paper_gsm (g/m²)</span>
-        <input type="number" class="num-input" id="mesh-gsm" min="40" max="300" step="1" value="100">
-      </div>
-
-      <div class="divider"></div>
-
-      <div class="label-sm">取込済みモデル</div>
-      <ul class="model-list" id="mesh-model-list"></ul>
-      <div class="metric-status" id="mesh-status">未読込</div>
-
-      <div class="table-scroll">
-        <table class="metric-table" id="mesh-metrics-table">
-          <thead>
-            <tr><th>物理量</th><th>自動値</th><th>上書き</th></tr>
-          </thead>
-          <tbody id="mesh-metric-body">
-            <tr><td colspan="3" class="label-sm">モデル未選択</td></tr>
-          </tbody>
-        </table>
-      </div>
-
-      <div class="row">
-        <button id="mesh-apply-to-airframe" class="btn" type="button">物理量を機体に反映</button>
-      </div>
-    </div>
-  </section>
-
-</aside>
-
-<!-- ===================== Right panel ===================== -->
-<aside id="right-panel" class="panel" aria-label="飛行ステータス">
-
-  <!-- ---------- Flight status ---------- -->
-  <section class="section" id="section-status" data-section="status">
-    <button class="section-header" type="button" data-section-toggle="status" aria-expanded="true">
-      飛行ステータス
-      <span id="status-pill" class="status-pill">待機</span>
-      <span class="section-chevron">▾</span>
-    </button>
-    <div class="section-body">
-      <dl class="status-grid">
-        <div class="status-item"><dt>高度</dt><dd id="stat-altitude">—<small>m</small></dd></div>
-        <div class="status-item"><dt>速度</dt><dd id="stat-speed">—<small>m/s</small></dd></div>
-        <div class="status-item"><dt>迎角 α</dt><dd id="stat-alpha">—<small>°</small></dd></div>
-        <div class="status-item"><dt>-slip 角 β</dt><dd id="stat-beta">—<small>°</small></dd></div>
-        <div class="status-item"><dt>ロール φ</dt><dd id="stat-roll">—<small>°</small></dd></div>
-        <div class="status-item"><dt>ピッチ θ</dt><dd id="stat-pitch">—<small>°</small></dd></div>
-        <div class="status-item"><dt>ヨー ψ</dt><dd id="stat-yaw">—<small>°</small></dd></div>
-        <div class="status-item"><dt>L/D</dt><dd id="stat-ld">—</dd></div>
-        <div class="status-item"><dt>G フォース</dt><dd id="stat-gload">—<small>g</small></dd></div>
-        <div class="status-item"><dt>最大応力</dt><dd id="stat-stress">—<small>Pa</small></dd></div>
-        <div class="status-item"><dt>応力指標</dt><dd id="stat-stress-index">—</dd></div>
-        <div class="status-item"><dt>動圧 q</dt><dd id="stat-dynq">—<small>Pa</small></dd></div>
-      </dl>
-      <div class="row row-between">
-        <span class="label-sm">位置 x / y / z (m)</span>
-        <span class="field-value" id="stat-position">—</span>
-      </div>
-      <div class="row row-between">
-        <span class="label-sm"> Reynolds / Mach</span>
-        <span class="field-value" id="stat-re-mach">—</span>
-      </div>
-      <div class="row">
-        <span class="backend-chip" id="sim-backend-chip">backend: —</span>
-        <span class="backend-chip" id="sim-substeps-chip">substeps: —</span>
-      </div>
-    </div>
-  </section>
-
-  <!-- ---------- Charts ---------- -->
-  <section class="section" id="section-charts" data-section="charts">
-    <button class="section-header" type="button" data-section-toggle="charts" aria-expanded="true">
-      リアルタイムグラフ
-      <span class="section-chevron">▾</span>
-    </button>
-    <div class="section-body">
-      <div class="chart-card">
-        <h4>高度 altitude (m)</h4>
-        <div class="chart-canvas-wrap">
-          <canvas id="chart-altitude"></canvas>
-          <div class="chart-fallback" id="chart-altitude-fallback" hidden>Chart.js CDN に接続できないためグラフを描画できません。</div>
-        </div>
-      </div>
-      <div class="chart-card">
-        <h4>速度 speed (m/s)</h4>
-        <div class="chart-canvas-wrap">
-          <canvas id="chart-speed"></canvas>
-          <div class="chart-fallback" id="chart-speed-fallback" hidden>Chart.js CDN に接続できないためグラフを描画できません。</div>
-        </div>
-      </div>
-      <div class="chart-card">
-        <h4>迎角 alpha (deg)</h4>
-        <div class="chart-canvas-wrap">
-          <canvas id="chart-alpha"></canvas>
-          <div class="chart-fallback" id="chart-alpha-fallback" hidden>Chart.js CDN に接続できないためグラフを描画できません。</div>
-        </div>
-      </div>
-      <div class="chart-card">
-        <h4>翼面最大応力 max stress (Pa)</h4>
-        <div class="chart-canvas-wrap">
-          <canvas id="chart-stress"></canvas>
-          <div class="chart-fallback" id="chart-stress-fallback" hidden>Chart.js CDN に接続できないためグラフを描画できません。</div>
-        </div>
-      </div>
-      <div class="row">
-        <button id="btn-clear-charts" class="btn btn-sm" type="button">グラフクリア</button>
-        <span class="label-sm" id="chart-sample-count">0 samples</span>
-      </div>
-    </div>
-  </section>
-
-  <!-- ---------- Optimizer ---------- -->
-  <section class="section" id="section-optimizer" data-section="optimizer">
-    <button class="section-header" type="button" data-section-toggle="optimizer" aria-expanded="true">
-      最適化 Optimizer
-      <span class="section-chevron">▾</span>
-    </button>
-    <div class="section-body">
-
-      <div class="label-sm">目的関数</div>
-      <div class="objective-list" id="opt-objective-list">
-        <div class="objective-row" data-objective="max_distance">
-          <input type="checkbox" id="opt-obj-max_distance" checked>
-          <span>最大距離 max_distance</span>
-          <span class="objective-weight" id="opt-weight-val-max_distance">1.00</span>
-        </div>
-        <input type="range" class="range-input" id="opt-weight-max_distance" min="0" max="1" step="0.05" value="1">
-        <div class="objective-row" data-objective="max_flight_time">
-          <input type="checkbox" id="opt-obj-max_flight_time">
-          <span>最大滞空時間 max_flight_time</span>
-          <span class="objective-weight" id="opt-weight-val-max_flight_time">0.50</span>
-        </div>
-        <input type="range" class="range-input" id="opt-weight-max_flight_time" min="0" max="1" step="0.05" value="0.5">
-        <div class="objective-row" data-objective="max_ld_ratio">
-          <input type="checkbox" id="opt-obj-max_ld_ratio">
-          <span>最大 L/D max_ld_ratio</span>
-          <span class="objective-weight" id="opt-weight-val-max_ld_ratio">0.50</span>
-        </div>
-        <input type="range" class="range-input" id="opt-weight-max_ld_ratio" min="0" max="1" step="0.05" value="0.5">
-        <div class="objective-row" data-objective="min_max_stress">
-          <input type="checkbox" id="opt-obj-min_max_stress" checked>
-          <span>最小最大応力 min_max_stress</span>
-          <span class="objective-weight" id="opt-weight-val-min_max_stress">0.50</span>
-        </div>
-        <input type="range" class="range-input" id="opt-weight-min_max_stress" min="0" max="1" step="0.05" value="0.5">
-        <div class="objective-row" data-objective="max_stall_margin">
-          <input type="checkbox" id="opt-obj-max_stall_margin">
-          <span>最大失速マージン max_stall_margin</span>
-          <span class="objective-weight" id="opt-weight-val-max_stall_margin">0.50</span>
-        </div>
-        <input type="range" class="range-input" id="opt-weight-max_stall_margin" min="0" max="1" step="0.05" value="0.5">
-        <div class="objective-row" data-objective="min_launch_speed">
-          <input type="checkbox" id="opt-obj-min_launch_speed">
-          <span>最小発射初速 min_launch_speed</span>
-          <span class="objective-weight" id="opt-weight-val-min_launch_speed">0.50</span>
-        </div>
-        <input type="range" class="range-input" id="opt-weight-min_launch_speed" min="0" max="1" step="0.05" value="0.5">
-        <div class="objective-row" data-objective="max_stability">
-          <input type="checkbox" id="opt-obj-max_stability">
-          <span>最大安定性 max_stability</span>
-          <span class="objective-weight" id="opt-weight-val-max_stability">0.50</span>
-        </div>
-        <input type="range" class="range-input" id="opt-weight-max_stability" min="0" max="1" step="0.05" value="0.5">
-      </div>
-
-      <div class="field">
-        <span class="field-label">アルゴリズム</span>
-        <select class="select-input" id="opt-algorithm">
-          <option value="grid">Coarse Grid Sweep</option>
-          <option value="nelder-mead">Nelder-Mead</option>
-          <option value="differential-evolution" selected>Differential Evolution</option>
-          <option value="nsga2">NSGA-II (Pareto)</option>
-          <option value="surrogate">Surrogate (k-NN / RBF + EI)</option>
-        </select>
-      </div>
-
-      <div class="field-pair">
-        <div class="field">
-          <span class="field-label">評価回数</span>
-          <input type="number" class="num-input" id="opt-max-evaluations" min="4" max="20000" step="1" value="200">
-        </div>
-        <div class="field">
-          <span class="field-label">母集団数</span>
-          <input type="number" class="num-input" id="opt-population-size" min="4" max="512" step="1" value="40">
-        </div>
-      </div>
-
-      <div class="field-pair">
-        <div class="field">
-          <span class="field-label">並列プロセス</span>
-          <input type="number" class="num-input" id="opt-processes" min="0" max="64" step="1" value="0">
-        </div>
-        <div class="field">
-          <span class="field-label">乱数 seed</span>
-          <input type="number" class="num-input" id="opt-seed" min="1" max="999999" step="1" value="7">
-        </div>
-      </div>
-
-      <div class="row">
-        <button id="opt-run" class="btn btn-primary" type="button">実行 (Run)</button>
-        <button id="opt-cancel" class="btn btn-danger" type="button" disabled>中断 (Cancel)</button>
-      </div>
-
-      <div class="progress-track"><div class="progress-bar" id="opt-progress-bar"></div></div>
-      <div class="progress-meta">
-        <span id="opt-progress-meta">— / —</span>
-        <span id="opt-eta-text">eta --:--</span>
-      </div>
-
-      <div class="divider"></div>
-
-      <div class="row row-between">
-        <span class="label-sm">Pareto front</span>
-        <span class="label-sm" id="opt-pareto-axes">x: — / y: —</span>
-      </div>
-      <div class="pareto-wrap">
-        <canvas id="opt-pareto-canvas"></canvas>
-        <div class="chart-fallback" id="opt-pareto-fallback" hidden>Chart.js CDN に接続できないため散布図を描画できません。</div>
-      </div>
-
-      <div class="row row-between">
-        <span class="label-sm">最適パラメータ</span>
-        <span class="row">
-          <button id="opt-export-csv" class="btn btn-sm" type="button" disabled>Pareto CSV</button>
-          <button id="opt-load-best" class="btn btn-sm" type="button" disabled>この設定を読み込む</button>
-        </span>
-      </div>
-      <table class="best-table">
-        <thead><tr><th>パラメータ</th><th>値</th></tr></thead>
-        <tbody id="opt-best-body">
-          <tr><td colspan="2" class="label-sm">未実行</td></tr>
-        </tbody>
-      </table>
-      <div class="metric-status" id="opt-message">未実行</div>
-    </div>
-  </section>
-
-</aside>
-
-<!-- ===================== Bottom time-control dock ===================== -->
-<div id="bottom-dock">
-  <div class="dock-row">
-    <button id="btn-play" class="btn btn-primary btn-icon" type="button" title="再生 (Space)">▶</button>
-    <button id="btn-pause" class="btn btn-icon" type="button" title="一時停止 (Space)">❚❚</button>
-    <button id="btn-step-back" class="btn btn-icon" type="button" title="1 フレーム戻る (←)">⏴</button>
-    <button id="btn-step-fwd" class="btn btn-icon" type="button" title="1 フレーム進む (→)">⏵</button>
-    <button id="btn-reset" class="btn" type="button" title="リセット (R)">リセット</button>
-
-    <div class="speed-group" id="speed-group" role="group" aria-label="倍速">
-      <button class="speed-btn" type="button" data-speed="0.25">0.25x</button>
-      <button class="speed-btn" type="button" data-speed="0.5">0.5x</button>
-      <button class="speed-btn is-active" type="button" data-speed="1">1x</button>
-      <button class="speed-btn" type="button" data-speed="2">2x</button>
-      <button class="speed-btn" type="button" data-speed="5">5x</button>
-      <button class="speed-btn" type="button" data-speed="10">10x</button>
-    </div>
-
-    <span class="dock-time" id="dock-time">t = 0.000 s</span>
-    <span class="backend-chip" id="play-state-chip">PAUSED</span>
-  </div>
-
-  <div class="dock-row timeline">
-    <label class="label-sm" for="timeline-range">TIMELINE</label>
-    <input type="range" id="timeline-range" min="0" max="0" step="1" value="0">
-    <span class="dock-frame-label" id="dock-frame">frame 0 / 0</span>
-  </div>
-</div>
-
-<div id="toast-stack" aria-live="polite"></div>
-
-<script type="module" src="static/js/main.js"></script>
+<script type="module" src="static/js/app.js"></script>
 </body>
 </html>

@@ -868,7 +868,10 @@ def test_compute_metrics_populates_every_contract_field():
     assert metrics.mass_kg == pytest.approx(
         paper_mass_from_mesh(metrics.planform_area_m2, 120.0), rel=1e-15
     )
-    assert paper_mass_from_mesh(0.02, 100.0) == pytest.approx(0.016, rel=1e-15)
+    # Grammage is an areal mass density: 100 g/m^2 over 0.02 m^2 is 2 g.
+    assert paper_mass_from_mesh(0.02, 100.0) == pytest.approx(0.002, rel=1e-15)
+    assert paper_mass_from_mesh(0.0624, 100.0) == pytest.approx(0.00624, rel=1e-15)  # A4 sheet
+    assert paper_mass_from_mesh(0.02, 0.0) == 0.0
     assert len(metrics.inertia_tensor) == 9
     assert all(math.isfinite(float(v)) for v in metrics.inertia_tensor)
     tensor = np.asarray(metrics.inertia_tensor).reshape(3, 3)

@@ -586,7 +586,8 @@ class JobManager:
             record = state.record
             if record.status in TERMINAL_STATUSES:
                 return _copy_record(record)
-            record.evaluated_count = max(int(evaluated_count), 0)
+            new_count = max(int(evaluated_count), 0)
+            record.evaluated_count = max(record.evaluated_count, new_count)
             if backend is not None:
                 record.backend = str(backend)
             if total_evaluations is not None:
@@ -621,6 +622,8 @@ class JobManager:
             record = state.record
             if record.status in TERMINAL_STATUSES:
                 return _copy_record(record)
+            if state.cancel_requested:
+                return _copy_record(self._finalise(state, "cancelled", "cancelled by request"))
             return _copy_record(self._finalise(state, "failed", str(message)))
 
     def cancel(self, job_id: str) -> JobRecord:
@@ -633,11 +636,17 @@ class JobManager:
         with self._lock:
             state = self._require_state(job_id)
             record = state.record
+            state.cancel_requested = True
             if record.status in TERMINAL_STATUSES:
                 return _copy_record(record)
-            state.cancel_requested = True
             message = record.message or "cancelled by request"
             return _copy_record(self._finalise(state, "cancelled", message))
+
+    def register_thread(self, job_id: str, thread: Any) -> None:
+        """Associate a running thread or TrackedJob runner with the job state."""
+        with self._lock:
+            state = self._require_state(job_id)
+            state.thread = thread
 
     # -- cooperative cancellation -----------------------------------------
     def request_cancel(self, job_id: str) -> bool:

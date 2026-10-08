@@ -69,6 +69,7 @@ __all__ = [
     "parallel_evaluate",
     "evaluate_flight_surrogate",
     "gpu_ensemble_simulation",
+    "get_gpu_info",
     "isa_air_density",
     "worker_id",
     "worker_pid",
@@ -102,6 +103,50 @@ _WORKER_PID: int = os.getpid()
 
 #: Paper burst strength used to normalise the stress heat-map index (Pa).
 _STRESS_LIMIT_PA: float = 1.2e5
+
+
+def get_gpu_info() -> Dict[str, Any]:
+    """Return runtime GPU hardware availability and metadata.
+
+    Probes CuPy first, then torch.cuda without crashing if unavailable.
+    """
+    info: Dict[str, Any] = {
+        "available": False,
+        "backend": "numpy",
+        "device_name": None,
+        "device_count": 0,
+        "cuda_version": None,
+        "total_memory_mb": None,
+    }
+    try:
+        import cupy as cp
+        count = int(cp.cuda.runtime.getDeviceCount())
+        if count > 0:
+            dev = cp.cuda.runtime.getDeviceProperties(0)
+            raw_name = dev["name"]
+            name = raw_name.decode("utf-8") if isinstance(raw_name, bytes) else str(raw_name)
+            total_mem = getattr(dev, "totalGlobalMem", None)
+            info["available"] = True
+            info["backend"] = "cupy"
+            info["device_name"] = name
+            info["device_count"] = count
+            info["cuda_version"] = getattr(cp.cuda.runtime, "runtimeGetVersion", lambda: None)()
+            if total_mem:
+                info["total_memory_mb"] = round(float(total_mem) / (1024 * 1024), 1)
+            return info
+    except Exception:
+        pass
+    try:
+        import torch
+        if bool(torch.cuda.is_available()) and int(torch.cuda.device_count()) > 0:
+            info["available"] = True
+            info["backend"] = "torch"
+            info["device_name"] = str(torch.cuda.get_device_name(0))
+            info["device_count"] = int(torch.cuda.device_count())
+            return info
+    except Exception:
+        pass
+    return info
 
 
 # --------------------------------------------------------------------------
@@ -602,6 +647,7 @@ def gpu_ensemble_simulation(
     noise_config: Optional[Dict[str, float]] = None,
     force_cpu: bool = False,
     random_seed: Optional[int] = 42,
+    max_sample_tracks: int = 8,
 ) -> Dict[str, Any]:
     """GPU-accelerated ensemble Monte Carlo batch flight simulator with CPU fallback.
 
@@ -631,6 +677,8 @@ def gpu_ensemble_simulation(
         If True, forces NumPy execution even if CuPy/CUDA is present.
     random_seed : int, optional
         Seed for pseudo-random perturbation reproducibility.
+    max_sample_tracks : int, default 128
+        Maximum number of individual trajectory 3D lines to return.
 
     Returns
     -------
@@ -647,12 +695,15 @@ def gpu_ensemble_simulation(
     # 1. Decide execution backend (CuPy GPU vs NumPy CPU)
     xp = np
     backend = "numpy"
-    if not force_cpu:
+    gpu_info = get_gpu_info()
+    device_name = None
+    if not force_cpu and gpu_info["available"]:
         try:
-            import cupy as cp
-            if cp.cuda.runtime.getDeviceCount() > 0:
+            if gpu_info["backend"] == "cupy":
+                import cupy as cp
                 xp = cp
                 backend = "cupy"
+                device_name = gpu_info.get("device_name")
         except Exception:
             xp = np
             backend = "numpy"
@@ -758,7 +809,8 @@ def gpu_ensemble_simulation(
     history_times: List[float] = []
     history_altitudes = []
     history_distances = []
-    sample_indices = list(range(min(8, N)))
+    sample_count = max(1, min(int(max_sample_tracks), N))
+    sample_indices = list(range(sample_count))
     sample_tracks: List[List[Tuple[float, float, float]]] = [[] for _ in sample_indices]
 
     # Pre-record t = 0
@@ -943,8 +995,13 @@ def gpu_ensemble_simulation(
     max_d = float(np.max(landing_distances_np))
     median_d = float(np.median(landing_distances_np))
 
+    backend_display = f"{backend} ({device_name})" if device_name else backend
+
     return {
         "backend": backend,
+        "backend_display": backend_display,
+        "device_name": device_name,
+        "gpu_available": bool(backend == "cupy"),
         "trajectories_count": N,
         "evaluated_count": N,
         "duration_s": duration_s,

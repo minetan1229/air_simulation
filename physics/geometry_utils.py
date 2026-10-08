@@ -146,14 +146,21 @@ def quaternion_from_euler(roll_deg: float, pitch_deg: float, yaw_deg: float) -> 
 def euler_zyx_from_quaternion(q: Sequence[float]) -> Tuple[float, float, float]:
     """Unit quaternion -> ZYX Euler angles in **degrees** (roll, pitch, yaw)."""
     w, x, y, z = quaternion_normalize(q)
-    sin_roll = 2.0 * (w * x + y * z)
-    cos_roll = 1.0 - 2.0 * (x * x + y * y)
-    roll = math.atan2(sin_roll, cos_roll)
     sin_pitch = 2.0 * (w * y - z * x)
-    pitch = math.asin(float(np.clip(sin_pitch, -1.0, 1.0)))
-    sin_yaw = 2.0 * (w * z + x * y)
-    cos_yaw = 1.0 - 2.0 * (y * y + z * z)
-    yaw = math.atan2(sin_yaw, cos_yaw)
+    if abs(sin_pitch) < 1.0 - 1.0e-9:
+        sin_roll = 2.0 * (w * x + y * z)
+        cos_roll = 1.0 - 2.0 * (x * x + y * y)
+        roll = math.atan2(sin_roll, cos_roll)
+        pitch = math.asin(float(np.clip(sin_pitch, -1.0, 1.0)))
+        sin_yaw = 2.0 * (w * z + x * y)
+        cos_yaw = 1.0 - 2.0 * (y * y + z * z)
+        yaw = math.atan2(sin_yaw, cos_yaw)
+    else:  # Gimbal lock singularity at pitch = ±90 deg
+        pitch = math.copysign(math.pi * 0.5, sin_pitch)
+        m12 = 2.0 * (y * z - w * x)
+        m11 = 1.0 - 2.0 * (x * x + z * z)
+        roll = math.atan2(-m12, m11)
+        yaw = 0.0
     return (rad2deg(roll), rad2deg(pitch), rad2deg(yaw))
 
 

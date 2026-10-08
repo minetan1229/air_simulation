@@ -22,6 +22,7 @@ import traceback
 from typing import Any, Callable, Dict, Optional, Tuple
 
 from flask import Flask, Response, jsonify, request
+from werkzeug.exceptions import BadRequest, HTTPException
 from werkzeug.utils import secure_filename
 
 from physics.config_schema import (
@@ -136,6 +137,12 @@ def _handle_zero_division(exc: ZeroDivisionError):
     return _error(f"degenerate input caused a division by zero: {exc}", 400)
 
 
+@app.errorhandler(HTTPException)
+def _handle_http_exception(exc: HTTPException):
+    code = exc.code or 500
+    return _error(exc.description or str(exc), code)
+
+
 @app.errorhandler(Exception)
 def _handle_unexpected(exc: Exception):
     log.error("unhandled error on %s: %s\n%s", request.path, exc, traceback.format_exc())
@@ -206,10 +213,16 @@ MAX_DENSITY = 50.0
 
 def build(cfg_cls, payload: Optional[Dict[str, Any]], base: Any = None):
     """Merge a partial payload onto ``base`` (or the class defaults)."""
+    if payload is not None and not isinstance(payload, dict):
+        raise BadRequest(f"{cfg_cls.__name__} payload must be a JSON object")
     current = as_dict(base) if base is not None else {}
-    current.update(payload or {})
+    if payload:
+        current.update(payload)
     try:
-        return from_dict(cfg_cls, current, strict=False)
+        obj = from_dict(cfg_cls, current, strict=False)
+        if hasattr(obj, "clamp_ranges"):
+            obj = obj.clamp_ranges()
+        return obj
     except Exception as exc:
         raise BadRequest(f"invalid {cfg_cls.__name__} payload: {exc}") from exc
 
@@ -232,28 +245,40 @@ class Session:
 
     # -- configuration ---------------------------------------------------
     def set_aircraft(self, cfg: AircraftConfig) -> None:
-        self.aircraft = cfg
-        self.simulator = None
+        with self.lock:
+            self.aircraft = cfg
+            self.simulator = None
 
     def set_environment(self, cfg: EnvironmentConfig) -> None:
-        self.environment = cfg
-        if self.simulator is not None:
-            try:
-                self.simulator.environment = cfg
-            except Exception:  # pragma: no cover
-                self.simulator = None
+        with self.lock:
+            self.environment = cfg
+            if self.simulator is not None:
+                try:
+                    self.simulator.environment = cfg
+                    if hasattr(self.simulator, "_refresh_derived"):
+                        self.simulator._refresh_derived()
+                except Exception:  # pragma: no cover
+                    self.simulator = None
 
     def set_launch(self, cfg: LaunchConfig) -> None:
-        self.launch = cfg
-        self.simulator = None
+        with self.lock:
+            self.launch = cfg
+            self.simulator = None
 
     def set_settings(self, cfg: SimulationSettings) -> None:
-        self.settings = cfg
-        if self.simulator is not None:
-            try:
-                self.simulator.settings = cfg
-            except Exception:  # pragma: no cover
-                self.simulator = None
+        with self.lock:
+            self.settings = cfg
+            if self.simulator is not None:
+                try:
+                    self.simulator.settings = cfg
+                    if hasattr(self.simulator, "_history") and hasattr(self.simulator._history, "maxlen"):
+                        # Rebuild history ring buffer capacity if changed
+                        if self.simulator._history.maxlen != cfg.ring_buffer_capacity:
+                            from collections import deque
+                            old_items = list(self.simulator._history)
+                            self.simulator._history = deque(old_items, maxlen=cfg.ring_buffer_capacity)
+                except Exception:  # pragma: no cover
+                    self.simulator = None
 
     # -- simulator -------------------------------------------------------
     def simulator_instance(self):
@@ -274,13 +299,14 @@ class Session:
             return sim.reset(launch=self.launch)
 
     def current_snapshot(self) -> Dict[str, Any]:
-        return {
-            "aircraft": as_dict(self.aircraft),
-            "environment": as_dict(self.environment),
-            "launch": as_dict(self.launch),
-            "simulation": as_dict(self.settings),
-            "selected_mesh_model_id": self.mesh_model_id,
-        }
+        with self.lock:
+            return {
+                "aircraft": as_dict(self.aircraft),
+                "environment": as_dict(self.environment),
+                "launch": as_dict(self.launch),
+                "simulation": as_dict(self.settings),
+                "selected_mesh_model_id": self.mesh_model_id,
+            }
 
 
 SESSION = Session()
@@ -289,6 +315,7 @@ SESSION = Session()
 #: ``GET /api/v1/optimizer/result/<job_id>`` can serve the full payload.
 RESULT_CACHE: Dict[str, Dict[str, Any]] = {}
 RESULT_CACHE_LIMIT = 32
+RESULT_CACHE_LOCK = threading.RLock()
 
 
 # ---------------------------------------------------------------------------
@@ -334,7 +361,19 @@ def meta_health():
             domains[name] = "ok"
         except ServiceUnavailable as exc:
             domains[name] = str(exc)
-    return jsonify({"status": "ok", "domains": domains, "timestamp": utc_now_iso()})
+    gpu_info = _domain("parallel_engine").get_gpu_info()
+    return jsonify({
+        "status": "ok",
+        "domains": domains,
+        "gpu": gpu_info,
+        "timestamp": utc_now_iso(),
+    })
+
+
+@app.get("/api/v1/system/gpu")
+def system_gpu():
+    parallel = _domain("parallel_engine")
+    return jsonify(parallel.get_gpu_info())
 
 
 # ---------------------------------------------------------------------------
@@ -479,13 +518,15 @@ def wind_field():
     wind = _domain("wind_domain")
     payload = body()
 
-    bounds_min = payload.get("bounds_min", [-2.0, -2.0, -0.5])
-    bounds_max = payload.get("bounds_max", [2.0, 2.0, 1.5])
-    if not (isinstance(bounds_min, (list, tuple)) and len(bounds_min) == 3):
+    bounds_min_raw = payload.get("bounds_min", [-2.0, -2.0, -0.5])
+    bounds_max_raw = payload.get("bounds_max", [2.0, 2.0, 1.5])
+    if not (isinstance(bounds_min_raw, (list, tuple)) and len(bounds_min_raw) == 3):
         raise BadRequest("'bounds_min' must be a 3-element list")
-    if not (isinstance(bounds_max, (list, tuple)) and len(bounds_max) == 3):
+    if not (isinstance(bounds_max_raw, (list, tuple)) and len(bounds_max_raw) == 3):
         raise BadRequest("'bounds_max' must be a 3-element list")
-    if any(float(b) <= float(a) for a, b in zip(bounds_min, bounds_max)):
+    bounds_min = [as_float(v, f"bounds_min[{i}]") for i, v in enumerate(bounds_min_raw)]
+    bounds_max = [as_float(v, f"bounds_max[{i}]") for i, v in enumerate(bounds_max_raw)]
+    if any(b <= a for a, b in zip(bounds_min, bounds_max)):
         raise BadRequest("every entry of 'bounds_max' must exceed 'bounds_min'")
 
     resolution = payload.get("resolution", 16)
@@ -495,10 +536,15 @@ def wind_field():
         resolution = [as_int(v, "resolution") for v in resolution]
         if any(v < 2 or v > 128 for v in resolution):
             raise BadRequest("'resolution' list must hold 3 integers in [2, 128]")
+        total_grid = resolution[0] * resolution[1] * resolution[2]
     else:
         resolution = as_int(resolution, "resolution")
         if resolution < 2 or resolution > 64:
             raise BadRequest("'resolution' must be an int in [2, 64] or a 3-list")
+        total_grid = resolution ** 3
+
+    if total_grid > 262144:
+        raise BadRequest(f"total grid points ({total_grid}) exceeds limit of 262144")
 
     time_s = as_float(payload.get("time_s", 0.0), "time_s")
     backend = str(payload.get("backend", "auto"))
@@ -581,22 +627,27 @@ def simulation_step():
     if substeps is not None and not (1 <= substeps <= 4096):
         raise BadRequest("'substeps' must lie within [1, 4096]")
 
-    if payload.get("aircraft"):
-        SESSION.set_aircraft(build(AircraftConfig, payload["aircraft"]))
-    if payload.get("environment"):
-        SESSION.set_environment(
-            merge_environment(payload["environment"], SESSION.environment)
-        )
-    if payload.get("launch"):
-        SESSION.set_launch(build(LaunchConfig, payload["launch"]))
-    if payload.get("simulation"):
-        SESSION.set_settings(build(SimulationSettings, payload["simulation"]))
-
     with SESSION.lock:
+        if payload.get("aircraft"):
+            SESSION.set_aircraft(build(AircraftConfig, payload["aircraft"]))
+        if payload.get("environment"):
+            SESSION.set_environment(
+                merge_environment(payload["environment"], SESSION.environment)
+            )
+        if payload.get("launch"):
+            SESSION.set_launch(build(LaunchConfig, payload["launch"]))
+        if payload.get("simulation"):
+            SESSION.set_settings(build(SimulationSettings, payload["simulation"]))
+
         simulator = SESSION.simulator_instance()
         result = simulator.step(dt=dt, substeps=substeps)
     out = dict(result)
-    out.setdefault("backend", "numpy")
+    gpu_info = _domain("parallel_engine").get_gpu_info()
+    if gpu_info.get("available"):
+        out.setdefault("backend", gpu_info["backend"])
+        out.setdefault("device_name", gpu_info.get("device_name"))
+    else:
+        out.setdefault("backend", "numpy")
     return jsonify(out)
 
 
@@ -693,10 +744,11 @@ def simulation_ensemble():
     launch = build(LaunchConfig, payload.get("launch"), SESSION.launch)
     settings = build(SimulationSettings, payload.get("settings"), SESSION.settings)
 
-    n_trajectories = int(payload.get("n_trajectories", 128))
+    n_trajectories = int(payload.get("n_trajectories", 100))
     noise_config = payload.get("noise_config")
     force_cpu = bool(payload.get("force_cpu", False))
     random_seed = payload.get("random_seed", 42)
+    max_sample_tracks = int(payload.get("max_sample_tracks", n_trajectories))
     if random_seed is not None:
         random_seed = int(random_seed)
 
@@ -709,6 +761,7 @@ def simulation_ensemble():
         noise_config=noise_config,
         force_cpu=force_cpu,
         random_seed=random_seed,
+        max_sample_tracks=max_sample_tracks,
     )
     return jsonify(result)
 

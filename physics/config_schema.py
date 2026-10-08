@@ -68,11 +68,16 @@ PAPER_DENSITY_BASE: float = 800.0  # kg/m^3 for 100 g/m^2 uncreped stock
 # --------------------------------------------------------------------------
 def clamp(value: float, low: float, high: float) -> float:
     """Clamp ``value`` into ``[low, high]`` (order independent)."""
-    if value < low:
-        return low
-    if value > high:
-        return high
-    return value
+    val = float(value)
+    if not math.isfinite(val):
+        raise ValueError(f"cannot clamp non-finite value {value!r}")
+    lo = min(float(low), float(high))
+    hi = max(float(low), float(high))
+    if val < lo:
+        return lo
+    if val > hi:
+        return hi
+    return val
 
 
 def deg2rad(value: float) -> float:
@@ -313,6 +318,41 @@ class AircraftConfig:
     def resolved(self) -> Dict[str, float]:
         """Return the reference quantities actually used by the solvers."""
         return derived_properties(self)
+
+    def clamp_ranges(self) -> "AircraftConfig":
+        """Return a copy with physical scalars forced into plausible bounds."""
+        from dataclasses import replace as _replace
+
+        return _replace(
+            self,
+            mass_kg=clamp(self.mass_kg, 1.0e-4, 1.0),
+            paper_gsm=clamp(self.paper_gsm, 10.0, 600.0),
+            paper_stiffness=clamp(self.paper_stiffness, 0.0, 1.0),
+            sheet_area_m2=clamp(self.sheet_area_m2, 1.0e-4, 2.0),
+            wing_area_m2=clamp(self.wing_area_m2, 1.0e-4, 1.0),
+            wingspan_m=clamp(self.wingspan_m, 0.01, 5.0),
+            taper_ratio=clamp(self.taper_ratio, 0.01, 2.0),
+            dihedral_deg=clamp(self.dihedral_deg, -45.0, 45.0),
+            aspect_ratio=clamp(self.aspect_ratio, 0.0, 30.0),
+            fold_leading_deg=clamp(self.fold_leading_deg, -90.0, 90.0),
+            fold_trailing_deg=clamp(self.fold_trailing_deg, -90.0, 90.0),
+            fold_tip_deg=clamp(self.fold_tip_deg, -90.0, 90.0),
+            fold_center_deg=clamp(self.fold_center_deg, -90.0, 90.0),
+            elevon_deg=clamp(self.elevon_deg, -45.0, 45.0),
+            elevon_chord_ratio=clamp(self.elevon_chord_ratio, 0.01, 0.9),
+            aileron_deg=clamp(self.aileron_deg, -45.0, 45.0),
+            asymmetry_cl=clamp(self.asymmetry_cl, -0.5, 0.5),
+            rudder_deg=clamp(self.rudder_deg, -45.0, 45.0),
+            cL0=clamp(self.cL0, -1.0, 2.0),
+            cd0=clamp(self.cd0, 0.001, 1.0),
+            oswald_e=clamp(self.oswald_e, 0.1, 1.0),
+            cl_max=clamp(self.cl_max, 0.1, 3.0),
+            stall_alpha_deg=clamp(self.stall_alpha_deg, 2.0, 45.0),
+            stall_sharpness=clamp(self.stall_sharpness, 0.1, 10.0),
+            re_cd0_exponent=clamp(self.re_cd0_exponent, 0.0, 1.0),
+            static_margin=clamp(self.static_margin, -1.0, 1.0),
+            cg_offset_x=clamp(self.cg_offset_x, -1.0, 1.0),
+        )
 
 
 # --------------------------------------------------------------------------
@@ -814,6 +854,26 @@ class SimulationSettings:
     adaptive: bool = True
     collision_enabled: bool = True
     restitution: float = 0.15
+
+    def clamp_ranges(self) -> "SimulationSettings":
+        """Return a copy with simulation parameters constrained to safe numerical limits."""
+        from dataclasses import replace as _replace
+
+        dt_min = clamp(self.dt_min, 1.0e-7, 0.1)
+        dt_max = clamp(self.dt_max, dt_min, 1.0)
+        return _replace(
+            self,
+            dt_min=dt_min,
+            dt_max=dt_max,
+            max_substeps=int(clamp(self.max_substeps, 1, 1024)),
+            duration_s=clamp(self.duration_s, 0.1, 600.0),
+            ring_buffer_capacity=int(clamp(self.ring_buffer_capacity, 10, 100000)),
+            record_interval_s=clamp(self.record_interval_s, 1.0e-4, 1.0),
+            time_scale=clamp(self.time_scale, 0.01, 100.0),
+            adaptive=bool(self.adaptive),
+            collision_enabled=bool(self.collision_enabled),
+            restitution=clamp(self.restitution, 0.0, 1.0),
+        )
 
 
 @dataclass

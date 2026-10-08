@@ -99,7 +99,7 @@
 1. **Step 1**: Git初期化 (`git init`), `.gitignore`, `requirements.txt` (Flask, numpy, scipy, cupy-cuda12x/torch等) の作成。
 2. **Step 2**: `physics/` モジュール群 (`aero_domain.py`, `wind_domain.py`, `stress_domain.py`, `flight_sim.py`, `parallel_engine.py`, `storage_domain.py`) の完全実装と単体検証。
 3. **Step 3**: `app.py` (Flask REST API 全エンドポイント) の完全実装と API 通信テスト。
-4. **Step 4**: Google Clean UI (`index.html`, CSS) および GPUアクセラレーション対応 Three.js 3D ビューア (`main.js`, `airplane_gpu.js`, `wind_gpgpu.js`, `time_controller.js`, `storage.js`) の完全実装と統合テスト。
+4. **Step 4**: 計器コンソール UI (`index.html`, `static/css/console.css`) および GPUアクセラレーション対応 Three.js 3D ビューア (`static/js/` の `app.js` / `viewport.js` / `airframe.js` / `flowfield.js` / `transport.js` / `telemetry.js` / `panels.js` / `optimizer.js` / `meshpanel.js` / `datapanel.js`) の完全実装と統合テスト。
 
 > **v4 では上記の工程を §8.6 の Phase 0〜3 によるサブエージェント並列プロトコルで実行する。** 契約（`config_schema.py` / `geometry_utils.py`）を Manager が先に確定し、残りを §9 の分担表で排他並列に委譲する。
 
@@ -182,7 +182,7 @@
 | 5 | `flight-dynamics` | `physics/flight_sim.py`, `tests/test_flight.py` | 6DoF RK4・四元数・adaptive sub-stepping・リングバッファ・発射/着地判定 |
 | 6 | `parallel-optimizer` | `physics/parallel_engine.py`, `physics/optimizer_domain.py`, `tests/test_optimizer.py` | Nelder-Mead / DE / NSGA-II / Surrogate / Pareto 並列評価 |
 | 7 | `job-eta-storage` | `physics/job_manager.py`, `physics/storage_domain.py`, `tests/test_jobs.py` | JobManager・ETA 式・進捗管理・JSON/CSV エクスポート |
-| 8 | `ui-gpu-viz` | `templates/index.html`, `static/css/*.css`, `static/js/*.js` | Google Clean UI・Three.js シェーダー・GPGPU 風粒子・時間軸・最適化パネル・ETA 表示・3D モデルローダー |
+| 8 | `ui-gpu-viz` | `templates/index.html`, `static/css/console.css`, `static/js/*.js` | 計器コンソール UI・Three.js シェーダー・GPGPU 風粒子・時間軸・最適化パネル・ETA 表示・3D モデルローダー |
 
 ---
 
@@ -248,9 +248,10 @@
 │   └── test_jobs.py
 ├── templates/index.html
 ├── static/
-│   ├── css/style.css
-│   └── js/{main.js, airplane_gpu.js, wind_gpgpu.js, time_controller.js,
-│          storage.js, model_importer.js, optimizer_panel.js, eta_display.js}
+│   ├── css/console.css
+│   └── js/{app.js, api.js, lib.js, state.js, panels.js, viewport.js,
+│          airframe.js, flowfield.js, telemetry.js, transport.js,
+│          optimizer.js, meshpanel.js, datapanel.js}
 └── models/                    # 取込 3D モデルのキャッシュ（gitignore 対象）
 ```
 

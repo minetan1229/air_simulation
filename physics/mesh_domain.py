@@ -1547,9 +1547,23 @@ def panel_aerodynamics(
 
 
 def paper_mass_from_mesh(sheet_area_m2: float, paper_gsm: float) -> float:
-    """Mass of a folded sheet: ``gsm * area / 1000 * PAPER_DENSITY_BASE / 100``.
+    """Mass of a folded sheet: ``m = gsm * area / 1000`` (kg).
 
-    ``0.02 m^2`` of ``100 g/m^2`` stock yields ``0.016 kg``.
+    Grammage is an **areal** mass density in g/m^2, so multiplying by the area
+    already gives the mass in grams and the only conversion needed is ``/ 1000``.
+    The bulk density :data:`config_schema.PAPER_DENSITY_BASE` must *not* appear
+    here: it belongs in the thickness relation ``t = sigma / rho`` (see
+    :data:`PAPER_THICKNESS_M`), and folding it into the mass would overstate an
+    airframe by the factor ``rho / 1000 = 0.8`` -- i.e. ``0.02 m^2`` of
+    ``100 g/m^2`` stock is ``2 g = 0.002 kg``, not ``16 g``.
+
+    Parameters
+    ----------
+    sheet_area_m2:
+        Area of the sheet in m^2 (planform when available, else the surface
+        silhouette).
+    paper_gsm:
+        Areal mass density in g/m^2.
     """
     area = float(sheet_area_m2)
     if area < 0.0:
@@ -1557,7 +1571,7 @@ def paper_mass_from_mesh(sheet_area_m2: float, paper_gsm: float) -> float:
     gsm = float(paper_gsm)
     if gsm < 0.0:
         raise ValueError(f"paper_gsm must be non-negative, got {paper_gsm!r}")
-    return gsm * area / 1000.0 * PAPER_DENSITY_BASE / 100.0
+    return gsm * area / 1000.0
 
 
 # ==========================================================================
