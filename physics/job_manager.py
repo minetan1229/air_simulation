@@ -571,6 +571,7 @@ class JobManager:
         evaluated_count: int,
         backend: Optional[str] = None,
         total_evaluations: Optional[int] = None,
+        message: Optional[str] = None,
     ) -> JobRecord:
         """Record progress for ``job_id`` (absolute ``evaluated_count``).
 
@@ -592,6 +593,8 @@ class JobManager:
                 record.backend = str(backend)
             if total_evaluations is not None:
                 record.total_evaluations = max(int(total_evaluations), 0)
+            if message is not None:
+                record.message = str(message)
             record.progress = clamp_progress(
                 float(record.evaluated_count) / max(record.total_evaluations, 1)
             )
