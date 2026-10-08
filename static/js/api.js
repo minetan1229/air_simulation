@@ -30,16 +30,35 @@ async function parse(response) {
   return data;
 }
 
-async function get(path) {
-  const response = await fetch(`${BASE}${path}`, {
+const DEFAULT_TIMEOUT_MS = 15000;
+
+function createSignal(options) {
+  if (options && options.signal) return options.signal;
+  if (typeof AbortSignal !== "undefined" && typeof AbortSignal.timeout === "function") {
+    return AbortSignal.timeout(DEFAULT_TIMEOUT_MS);
+  }
+  const controller = new AbortController();
+  setTimeout(() => controller.abort(), DEFAULT_TIMEOUT_MS);
+  return controller.signal;
+}
+
+async function get(path, options = {}) {
+  const init = {
     headers: { Accept: "application/json" },
     cache: "no-store",
-  });
+    signal: createSignal(options),
+    ...options,
+  };
+  const response = await fetch(`${BASE}${path}`, init);
   return parse(response);
 }
 
 async function post(path, body, options = {}) {
-  const init = { method: "POST", headers: { Accept: "application/json" } };
+  const init = {
+    method: "POST",
+    headers: { Accept: "application/json" },
+    signal: createSignal(options),
+  };
   if (body instanceof FormData) {
     init.body = body;
   } else if (body !== undefined && body !== null) {
@@ -52,8 +71,13 @@ async function post(path, body, options = {}) {
 }
 
 /** GET returning the raw response (used for CSV downloads). */
-async function getText(path) {
-  const response = await fetch(`${BASE}${path}`, { cache: "no-store" });
+async function getText(path, options = {}) {
+  const init = {
+    cache: "no-store",
+    signal: createSignal(options),
+    ...options,
+  };
+  const response = await fetch(`${BASE}${path}`, init);
   if (!response.ok) await parse(response);
   return { text: await response.text(), type: response.headers.get("Content-Type") || "text/csv" };
 }

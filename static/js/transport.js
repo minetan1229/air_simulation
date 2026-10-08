@@ -205,11 +205,13 @@ export class Transport extends Emitter {
         this.accumulator += wallDelta * this.rate;
         const settings = this.store.data.simulation;
         const dtMax = Number(settings.dt_max) || 0.02;
-        const dt = Math.min(this.accumulator, dtMax);
+        const dtMaxEffective = Math.min(dtMax * Math.max(1, this.rate), 0.16);
+        const dt = Math.min(this.accumulator, dtMaxEffective);
         if (dt > 1e-4) {
           this.inFlight = true;
           this.busy = true;
-          const substeps = Number(settings.max_substeps) || 64;
+          const baseSubsteps = Number(settings.max_substeps) || 64;
+          const substeps = Math.min(Math.round(baseSubsteps * Math.sqrt(Math.max(1, this.rate))), 512);
           const generation = this.generation;
           this.api
             .step({ dt, substeps })
@@ -231,13 +233,15 @@ export class Transport extends Emitter {
       }
     }
 
-    if (now - this.lastStressAt > STRESS_INTERVAL_MS) {
-      this.lastStressAt = now;
-      this._pollStress();
-    }
-    if (now - this.lastWindAt > WIND_INTERVAL_MS) {
-      this.lastWindAt = now;
-      this._pollWind();
+    if (this.playing) {
+      if (now - this.lastStressAt > STRESS_INTERVAL_MS) {
+        this.lastStressAt = now;
+        this._pollStress();
+      }
+      if (now - this.lastWindAt > WIND_INTERVAL_MS) {
+        this.lastWindAt = now;
+        this._pollWind();
+      }
     }
 
     this._handle = requestAnimationFrame(this._tick);
@@ -247,7 +251,10 @@ export class Transport extends Emitter {
     if (!payload) return;
     this.lastFrame = payload;
     this.frames = Number(payload.frames) || this.frames;
-    this.history = null; // the ring buffer moved on
+    if (this.history) {
+      this.history.push(payload);
+      if (this.history.length > 20000) this.history.shift();
+    }
     this.emit("frame", payload);
     if (payload.landed || payload.crashed || payload.diverged) {
       this.playing = false;

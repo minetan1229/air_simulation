@@ -219,7 +219,7 @@ export class MeshPanel {
     this.overrides = { ...(metrics.overrides || {}) };
     this.store.mesh = metrics.model_id;
     if (localObject) this._mountLocal(localObject, metrics);
-    else this.viewport.setMesh(null);
+    else if (this.viewport) this.viewport.setMesh(null);
     this._renderMetrics();
     // The server pushed mesh-derived geometry into the live airframe; the app
     // re-reads the snapshot so the rail and the viewport stay in step.
@@ -277,7 +277,7 @@ export class MeshPanel {
     object.scale.setScalar(scale);
 
     applyStressColors(firstGeometry(object), null, heatColour);
-    this.viewport.setMesh(object);
+    if (this.viewport) this.viewport.setMesh(object);
     this.object = object;
   }
 
