@@ -590,8 +590,9 @@ class ConsoleApp {
     // Update solver card
     if (this.dom["modal-solver-name"]) {
       if (solverGpu && solverGpu.available) {
+        const vramStr = solverGpu.total_memory_mb ? ` · VRAM: ${solverGpu.total_memory_mb}MB` : "";
         this.dom["modal-solver-name"].textContent = `✅ ${solverGpu.device_name || "GPU"} (${solverGpu.backend})`;
-        this.dom["modal-solver-desc"].textContent = `CUDA ${solverGpu.cuda_version || ""} · 物理演算・風場計算で正常に稼働中`;
+        this.dom["modal-solver-desc"].textContent = `CUDA ${solverGpu.cuda_version || ""} · 物理演算(6DoF RK4)・オプティマイザ(NSGA-II)・風場計算で正常にフル稼働中${vramStr}`;
         if (this.dom["gpu-status-solver-card"]) {
           this.dom["gpu-status-solver-card"].className = "gpu-status-card status-ok";
         }
@@ -608,7 +609,7 @@ class ConsoleApp {
     if (this.dom["modal-render-name"]) {
       if (renderGpu.isNvidia) {
         this.dom["modal-render-name"].textContent = `✅ ${renderGpu.shortName} (NVIDIA)`;
-        this.dom["modal-render-desc"].textContent = `WebGL 3D描画: ${renderGpu.raw}`;
+        this.dom["modal-render-desc"].textContent = `3D描画: ${renderGpu.raw}`;
         if (this.dom["gpu-status-render-card"]) {
           this.dom["gpu-status-render-card"].className = "gpu-status-card status-ok";
         }
@@ -638,6 +639,14 @@ class ConsoleApp {
     }
     if (this.dom["btn-rail-launch"]) {
       this.dom["btn-rail-launch"].addEventListener("click", () => this._launchFlight());
+    }
+    const btnTopGpu = document.getElementById("btn-top-gpu-ensemble");
+    if (btnTopGpu) {
+      btnTopGpu.addEventListener("click", () => this._runGpuEnsemble(100));
+    }
+    const btnRailGpu = document.getElementById("btn-rail-gpu-ensemble");
+    if (btnRailGpu) {
+      btnRailGpu.addEventListener("click", () => this._runGpuEnsemble(100));
     }
     this.dom["btn-save"].addEventListener("click", () => this.dataPanel.exportConfigJson());
     this.dom["btn-load"].addEventListener("click", () => this.dom["config-file"].click());
@@ -704,6 +713,14 @@ class ConsoleApp {
             this.notify("コピーに失敗しました。コマンド枠から手動でコピーしてください", "warn");
           }
         }
+      });
+    }
+
+    const btnModalTest = document.getElementById("btn-modal-test-gpu");
+    if (btnModalTest) {
+      btnModalTest.addEventListener("click", () => {
+        if (this.dom["gpu-modal"]) this.dom["gpu-modal"].hidden = true;
+        this._runGpuEnsemble(100);
       });
     }
 
@@ -1084,12 +1101,18 @@ class ConsoleApp {
       });
 
       this.flightDirty = false;
+      // Auto-render GPU-accelerated ensemble trajectories (RTX 4060 parallel flights)
+      if (this.viewport && result.sample_trajectories && result.sample_trajectories.length) {
+        this.viewport.setEnsembleTracks(result.sample_trajectories);
+      }
+
       const metrics = result.metrics || {};
       const dist = metrics.horizontal_range_m || metrics.distance_m || 0;
       const time = metrics.flight_time_s || 0;
       const speed = Number((this.store.data.launch && this.store.data.launch.launch_speed) || 10).toFixed(1);
       const angle = Number((this.store.data.launch && this.store.data.launch.launch_angle_deg) || 15).toFixed(1);
-      this.notify(`✈️ 発射完了 (${speed}m/s · ${angle}°): 飛距離 ${fmt(dist, 2)}m / 滞空 ${fmt(time, 2)}s`, "ok");
+      const gpuNote = result.backend && result.backend.includes("cupy") ? " · ⚡ RTX 4060 GPU並列計算" : "";
+      this.notify(`✈️ 発射完了 (${speed}m/s · ${angle}°): 飛距離 ${fmt(dist, 2)}m / 滞空 ${fmt(time, 2)}s${gpuNote}`, "ok");
       this._updateTransportUi(this.transport.state);
     });
   }

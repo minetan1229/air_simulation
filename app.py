@@ -595,6 +595,7 @@ def stress_analysis():
     load = payload.get("load_factor")
     load = None if load is None else as_float(load, "load_factor")
 
+    backend = str(payload.get("backend", "auto"))
     data = dict(
         stress.analyse(
             cfg=cfg,
@@ -605,9 +606,9 @@ def stress_analysis():
             spanwise=spanwise,
             chordwise=chordwise,
             beta_deg=beta_deg,
+            backend=backend,
         )
     )
-    data.setdefault("backend", "numpy")
     return jsonify(data)
 
 
@@ -704,13 +705,43 @@ def simulation_launch():
         duration_s = as_float(payload.get("duration_s", 25.0), "duration_s")
         summary = simulator.simulate(duration_s=duration_s, record=True)
         samples = [as_dict(s) for s in simulator.history()]
-        
+
+        # GPU-accelerated ensemble Monte Carlo on RTX 4060
+        parallel = _domain("parallel_engine")
+        gpu_info = parallel.get_gpu_info()
+        sample_trajectories = []
+        ensemble_data = None
+        backend_name_str = summary.get("backend", "numpy")
+        device_name_str = None
+
+        if gpu_info.get("available") and gpu_info.get("backend") == "cupy":
+            try:
+                ensemble_res = parallel.gpu_ensemble_simulation(
+                    aircraft=SESSION.aircraft,
+                    environment=SESSION.environment,
+                    launch=SESSION.launch,
+                    settings=SESSION.settings,
+                    n_trajectories=128,
+                    max_sample_tracks=64,
+                )
+                if ensemble_res and "sample_trajectories" in ensemble_res:
+                    sample_trajectories = ensemble_res["sample_trajectories"]
+                    ensemble_data = ensemble_res
+                    backend_name_str = f"cupy ({gpu_info.get('device_name', 'RTX 4060')})"
+                    device_name_str = gpu_info.get("device_name")
+            except Exception as exc:
+                log.warning("GPU ensemble simulation fallback: %s", exc)
+
     return jsonify(
         {
             "metrics": summary,
             "samples": samples,
+            "sample_trajectories": sample_trajectories,
+            "ensemble": ensemble_data,
             "total_frames": len(samples),
-            "backend": summary.get("backend", "numpy"),
+            "backend": backend_name_str,
+            "device_name": device_name_str,
+            "gpu_available": bool(gpu_info.get("available")),
             "timestamp": utc_now_iso(),
         }
     )

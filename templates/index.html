@@ -68,6 +68,7 @@
         <span class="eta-sub num" id="eta-left">idle</span>
       </div>
       <button class="btn btn-primary btn-launch-top" id="btn-top-launch" type="button" title="現在の設定で飛行軌跡を一括シミュレーション計算して再生します (Enter)">🚀 シミュレーション発射</button>
+      <button class="btn btn-gpu" id="btn-top-gpu-ensemble" type="button" title="NVIDIA RTX 4060 GPUで100機を同時に一括シミュレーション計算して全軌跡を描画します">⚡ GPU 100機同時飛行</button>
       <label class="switch" title="風洞モード: 機体を固定して空力係数のみ測定 (U)">
         <input type="checkbox" id="tunnel-toggle">
         <span class="switch-box"></span>
@@ -97,6 +98,9 @@
         <div class="rail-launch-hero">
           <button class="btn btn-primary btn-launch-hero" id="btn-rail-launch" type="button" title="現在のパラメータで飛行軌跡を一括シミュレーション計算して再生します (Enter)">
             🚀 飛行シミュレーション発射
+          </button>
+          <button class="btn btn-gpu btn-launch-hero" id="btn-rail-gpu-ensemble" type="button" style="margin-top:6px;" title="NVIDIA RTX 4060 GPUで100機を同時に一括シミュレーション計算">
+            ⚡ GPU 100機一括同時飛行
           </button>
         </div>
 
@@ -612,6 +616,12 @@
           <div class="gpu-status-title" id="modal-render-name">検出中...</div>
           <div class="gpu-status-desc" id="modal-render-desc">Three.js WebGL レンダラー</div>
         </div>
+      </div>
+
+      <div class="gpu-action-banner" style="margin: 12px 0; text-align: center;">
+        <button class="btn btn-primary" id="btn-modal-test-gpu" type="button" style="width: 100%; padding: 10px; font-weight: 600;">
+          ⚡ RTX 4060 GPU 動作テスト (100機一括並列シミュレーション実行)
+        </button>
       </div>
 
       <div class="gpu-warning-box" id="gpu-warning-box">

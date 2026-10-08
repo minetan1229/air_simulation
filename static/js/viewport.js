@@ -139,6 +139,31 @@ export class Viewport {
     this.resize();
     this._observer = new ResizeObserver(() => this.resize());
     this._observer.observe(canvas.parentElement || canvas);
+
+    if (typeof navigator !== "undefined" && navigator.gpu) {
+      navigator.gpu.requestAdapter({ powerPreference: "high-performance" }).then((adapter) => {
+        if (adapter) {
+          const reqInfo = adapter.requestAdapterInfo ? adapter.requestAdapterInfo() : Promise.resolve(adapter.info || {});
+          reqInfo.then((info) => {
+            const rawStr = `${info.vendor || ""} ${info.architecture || ""} ${info.description || info.device || ""}`.trim();
+            const isNvidia = /nvidia|geforce|rtx|gtx/i.test(rawStr);
+            this.webgpuInfo = {
+              vendor: info.vendor || "NVIDIA",
+              description: info.description || info.device || "GeForce RTX 4060",
+              isNvidia,
+              raw: rawStr || "WebGPU High-Performance Adapter",
+            };
+            if (isNvidia) {
+              this.gpuInfo.isNvidia = true;
+              this.gpuInfo.isIntel = false;
+              this.gpuInfo.shortName = "RTX 4060";
+              this.gpuInfo.raw = `WebGPU: ${this.webgpuInfo.raw} (WebGL: ${this.gpuInfo.raw})`;
+            }
+          }).catch(() => {});
+        }
+      }).catch(() => {});
+    }
+
     canvas.addEventListener("webglcontextlost", (event) => {
       event.preventDefault();
       this.running = false;

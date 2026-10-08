@@ -187,6 +187,20 @@ button, input, select, textarea {
 }
 .btn-primary:hover:not(:disabled) { background: #2b80ef; border-color: var(--accent-dk); }
 
+.btn-gpu {
+  background: #107c10;
+  background: linear-gradient(135deg, #76b900 0%, #107c10 100%);
+  border-color: #558b00;
+  color: #ffffff;
+  font-weight: 600;
+  text-shadow: 0 1px 2px rgba(0,0,0,0.3);
+}
+.btn-gpu:hover:not(:disabled) {
+  background: linear-gradient(135deg, #8ad300 0%, #139413 100%);
+  border-color: #76b900;
+  box-shadow: 0 0 10px rgba(118, 185, 0, 0.4);
+}
+
 .btn-mini { padding: 2px 7px; font-size: 11px; }
 
 .btn-icon {

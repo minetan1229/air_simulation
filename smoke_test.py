@@ -320,7 +320,7 @@ def stage_stress(r: Runner) -> None:
     r.check(abs(max(flat) - result["max_stress_index"]) < 1e-9, "max_stress_index mismatch")
     r.check(result["status"] in ("ok", "high_load", "failed"), f"bad status {result['status']}")
     r.check(result["max_stress_pa"] > 0.0, "max stress must be positive")
-    r.check(result["backend"] == "numpy", "unexpected stress backend")
+    r.check(result["backend"] in ("numpy", "cupy"), f"unexpected stress backend {result['backend']}")
     r.log(f"max_index={result['max_stress_index']:.4f} max_pa={result['max_stress_pa']:.1f} nz={result['load_factor']:.3f} status={result['status']}")
 
     # Higher speed must raise the stress.

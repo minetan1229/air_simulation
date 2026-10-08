@@ -355,6 +355,7 @@ class _Run:
         self.started = time.perf_counter()
         self._progress_cb = progress_cb
         self._cancel_cb = cancel_cb
+        self._used_gpu = False
 
     # -- protocol ----------------------------------------------------------
     def poll_cancel(self) -> bool:
@@ -398,12 +399,19 @@ class _Run:
             self.evaluations = before + int(evaluated)
             self.notify()
 
-        flights = parallel_evaluate(
-            cases,
-            processes=self.cfg.processes,
-            progress_cb=relay,
-            cancel_cb=self._cancel_cb,
-        )
+        from .parallel_engine import get_gpu_info, gpu_batch_evaluate_cases
+        gpu_info = get_gpu_info()
+        use_gpu = (self.cfg.processes != 1) and gpu_info.get("available") and (gpu_info.get("backend") == "cupy")
+        if use_gpu:
+            flights = gpu_batch_evaluate_cases(cases, progress_cb=relay)
+            self._used_gpu = True
+        else:
+            flights = parallel_evaluate(
+                cases,
+                processes=self.cfg.processes,
+                progress_cb=relay,
+                cancel_cb=self._cancel_cb,
+            )
         results: List[Dict[str, Any]] = []
         for offset, (vector, flight) in enumerate(zip(batch, flights), start=1):
             self.evaluations = before + offset
@@ -486,6 +494,8 @@ class _Run:
                     "params": params_for_vector(self.variables, self.best_vector),
                 }
             ]
+        from .parallel_engine import get_gpu_info
+        gpu_info = get_gpu_info()
         return {
             "algorithm": self.algorithm,
             "best_vector": list(self.best_vector),
@@ -495,7 +505,7 @@ class _Run:
             "pareto_front": front,
             "evaluations": int(self.evaluations),
             "history": list(self.history),
-            "backend": backend_name(self.cfg.processes),
+            "backend": f"cupy ({gpu_info['device_name']})" if (self._used_gpu and gpu_info.get("device_name")) else backend_name(self.cfg.processes),
             "population_size": int(population_size),
             "seed": int(self.cfg.seed),
             "objectives": list(self.objectives),
