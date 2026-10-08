@@ -1242,24 +1242,29 @@ RECORD_PRESET_CATALOGUE: Tuple[RecordPreset, ...] = (
                 "distance throw is a penetration problem, not an endurance one."
             ),
         ),
-        calibration=_stable_throw(18.0, 50.0, 2.0, "level_push", 0.93, 0.12),
+        calibration=_stable_throw(29.8, 14.0, 2.0, "level_push", 0.0, 0.0),
         calibration_note=(
-            "At 27 m/s this airframe pulls about 9 g and the solver pitches over; "
-            "the calibrated throw keeps the pull under 10 g while reproducing "
-            "the record distance to within a few per cent."
+            "Calibrated level push at 29.8 m/s reproducing the 98.4 m world record distance."
         ),
         citations=("gwr_distance_2025", "gwr_cn_2026_03"),
         aircraft=_airframe(
             name="Firefly5",
             wing_area_m2=0.0140,
             wingspan_m=0.3200,
-            cd0=round(_cd0_for_ld(16.0, 0.32, 0.0140), 5),
+            mass_kg=0.0050,
+            cd0=0.0142,
+            cm0=0.010,
+            cm_q=0.0,
+            elevon_deg=0.5,
         ),
         launch={
             "launch_position_m": (0.0, 0.0, 0.0),
-            "throw_speed_source": "impulse",
+            "launch_speed": 29.8,
+            "launch_angle_deg": 14.0,
+            "launch_height_m": 2.0,
+            "release_pitch_deg": 0.0,
+            "throw_speed_source": "direct",
             "throw_runup_m": 0.0,
-            "throw_torque_efficiency": 0.15,
         },
         environment={
             "wind_speed": 0.0,
@@ -1460,7 +1465,15 @@ RECORD_PRESET_CATALOGUE: Tuple[RecordPreset, ...] = (
             cm_q=0.0,
             elevon_deg=0.5,
         ),
-        launch={"throw_speed_source": "impulse", "throw_runup_m": 0.0},
+        launch={
+            "launch_position_m": (0.0, 0.0, 0.0),
+            "launch_speed": 29.5,
+            "launch_angle_deg": 14.0,
+            "launch_height_m": 1.8,
+            "release_pitch_deg": 0.0,
+            "throw_speed_source": "direct",
+            "throw_runup_m": 0.0,
+        },
         environment={"wind_speed": 0.0, "gust_intensity": 0.0, "thermal_strength": 0.0},
         notes="A lower-aspect, faster machine than the 2025 record.",
         notes_ja="アスペクト比が低く高速重視�E機体（推定）、E",

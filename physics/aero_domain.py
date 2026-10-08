@@ -304,7 +304,15 @@ def stall_blend_weight(alpha_deg: float, cfg: AircraftConfig) -> float:
     ``1`` deep post-stall, ``0`` in attached flow, exactly
     ``0.5 ** STALL_BLEND_ORDER`` at ``cfg.stall_alpha_deg``.
     """
-    offset = _finite(alpha_deg) - _finite(cfg.stall_alpha_deg, 14.0)
+    alpha = _finite(alpha_deg)
+    stall_alpha = _finite(cfg.stall_alpha_deg, 14.0)
+    if alpha >= 0.0:
+        offset = alpha - stall_alpha
+    else:
+        # Negative alpha remains linear in typical inverted/recovery angles,
+        # transitioning to the flat plate curve at deep negative alpha
+        neg_stall = max(stall_alpha + 15.0, 30.0)
+        offset = -alpha - neg_stall
     sharpness = max(abs(_finite(cfg.stall_sharpness, 1.4)), 1.0e-6)
     return _logistic(sharpness * offset) ** STALL_BLEND_ORDER
 
@@ -335,39 +343,25 @@ MAX_ABS_LIFT_COEFFICIENT = 4.0
 
 
 def _post_stall_lift_coefficient(alpha: float, cfg: AircraftConfig, linear_at_stall: float) -> float:
-    """Bounded post-stall lift, anchored to the airframe's own lift curve.
-
-    Both post-stall branches start from ``linear_at_stall`` -- the value of the
-    attached-flow line ``cL0 + C_Lalpha alpha`` evaluated at the stall angle --
-    so the post-stall model is continuous with the linear one *and* inherits the
-    airframe's lift scale.  Anchoring on ``cfg.cl_max`` instead would hand a
-    configured ``cl_max=0`` airframe a large lift as soon as it left the linear
-    regime, which is not physical and silently animates "quiescent" test cases.
-
-    The ramp is compressed with a ``tanh`` saturation, which is strictly
-    monotonic (so "lift strictly decreases after stall" survives) yet caps the
-    magnitude at :data:`MAX_ABS_LIFT_COEFFICIENT`.  Deep in stall it is handed
-    over to :func:`flat_plate_lift_coefficient`, scaled to pass through the same
-    value at the stall angle so the join stays continuous.
-    """
+    """Bounded post-stall lift, anchored to the airframe's own lift curve."""
+    sign = 1.0 if alpha >= 0.0 else -1.0
+    abs_alpha = abs(alpha)
     stall_alpha = _finite(cfg.stall_alpha_deg, 14.0)
-    raw = linear_at_stall + _finite(cfg.post_stall_slope, -0.03) * (alpha - stall_alpha)
-    ceiling = MAX_ABS_LIFT_COEFFICIENT
-    ramp = ceiling * math.tanh(raw / ceiling)
-    magnitude = abs(alpha)
-    if magnitude <= POST_STALL_BLEND_START_DEG:
+    ref_cl = abs(linear_at_stall)
+    raw = ref_cl + _finite(cfg.post_stall_slope, -0.03) * (abs_alpha - stall_alpha)
+    ceiling = max(abs(_finite(cfg.cl_max, 0.90)), ref_cl, 0.1)
+    ramp = sign * ceiling * math.tanh(max(raw, 0.0) / ceiling)
+    if abs_alpha <= POST_STALL_BLEND_START_DEG:
         return ramp
-    # Scale the fully-separated plate curve so it meets the ramp at the stall
-    # angle; a zero-lift airframe therefore stays exactly zero out there.
     plate_reference = flat_plate_lift_coefficient(stall_alpha)
     if abs(plate_reference) < 1.0e-9:
         plate = 0.0
     else:
-        plate = flat_plate_lift_coefficient(alpha) * (linear_at_stall / plate_reference)
-    if magnitude >= POST_STALL_BLEND_END_DEG:
+        plate = flat_plate_lift_coefficient(alpha) * (ref_cl / plate_reference)
+    if abs_alpha >= POST_STALL_BLEND_END_DEG:
         return plate
     span = POST_STALL_BLEND_END_DEG - POST_STALL_BLEND_START_DEG
-    t = (magnitude - POST_STALL_BLEND_START_DEG) / span
+    t = (abs_alpha - POST_STALL_BLEND_START_DEG) / span
     weight = t * t * (3.0 - 2.0 * t)  # smoothstep, C1 continuous
     return (1.0 - weight) * ramp + weight * plate
 

@@ -245,8 +245,10 @@ def parse_csv(text: str) -> List[Dict[str, Any]]:
 
 def rows_to_json(rows: Sequence[Mapping[str, Any]], indent: Optional[int] = 2) -> str:
     """Serialise ``rows`` to JSON (UTF-8 friendly, never ASCII-escaped)."""
+    data = as_dict(list(rows or []))
+    _assert_json_finite("rows", data)
     return json.dumps(
-        as_dict(list(rows or [])), ensure_ascii=False, indent=indent, default=_json_default
+        data, ensure_ascii=False, indent=indent, default=_json_default, allow_nan=False
     )
 
 
@@ -513,8 +515,10 @@ def export_optimizer_result(result: Any, fmt: str = "csv") -> Tuple[str, str, st
         rows = optimizer_result_to_rows(payload, columns=columns)
         return rows_to_csv(rows, columns=columns), CSV_MIMETYPE, f"optimizer_{stamp}.csv"
     if style == "json":
+        data = as_dict(dict(payload))
+        _assert_json_finite("optimizer", data)
         return (
-            json.dumps(as_dict(dict(payload)), ensure_ascii=False, indent=2, default=_json_default),
+            json.dumps(data, ensure_ascii=False, indent=2, default=_json_default, allow_nan=False),
             JSON_MIMETYPE,
             f"optimizer_{stamp}.json",
         )

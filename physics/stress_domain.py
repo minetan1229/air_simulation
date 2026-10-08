@@ -632,8 +632,8 @@ def stress_field(
     tilt = clamp(math.tan(dihedral_rad), -_TILT_LIMIT, _TILT_LIMIT)
     side = clamp(math.tan(deg2rad(beta)), -_TILT_LIMIT, _TILT_LIMIT)
 
-    area = max(_finite_or(float(derived["wing_area_m2"]), 0.0), _EPS)
-    span = max(_finite_or(float(derived["wingspan_m"]), 0.0), _EPS)
+    area = max(_finite_or(float(derived.get("ref_area_m2") or derived["wing_area_m2"]), 0.0), _EPS)
+    span = max(_finite_or(float(derived.get("ref_span_m") or derived["wingspan_m"]), 0.0), _EPS)
     taper = clamp(_finite_or(float(derived["taper_ratio"]), 0.7), 0.05, 1.0)
 
     # --- reported semispan: a folded winglet removes loaded span ----------

@@ -556,11 +556,21 @@ def evaluate_case(case: Dict[str, Any]) -> Dict[str, Any]:
     if module is not None and hasattr(module, "evaluate_flight"):
         try:
             result = module.evaluate_flight(aircraft, environment, launch, duration, dt_max)
-        except Exception:
-            # A broken integrator must never take a worker pool down with it.
-            return evaluate_flight_surrogate(aircraft, environment, launch, duration, dt_max)
-        if isinstance(result, dict):
-            return result
+            if isinstance(result, dict):
+                return result
+        except Exception as exc:
+            return {
+                "status": "failed",
+                "error": str(exc),
+                "distance_m": 0.0,
+                "flight_time_s": 0.0,
+                "max_stress_index": 1.0,
+                "max_stress_pa": 1.0e6,
+                "crashed": True,
+                "diverged": True,
+                "landed": False,
+                "backend": "error",
+            }
     return evaluate_flight_surrogate(aircraft, environment, launch, duration, dt_max)
 
 
@@ -594,10 +604,22 @@ def parallel_evaluate(
     workers = get_worker_count(processes)
     plan = _chunk_plan(total, workers, None)
     results: List[Dict[str, Any]] = []
+    best_seen = float("-inf")
 
     def emit() -> None:
+        nonlocal best_seen
         if progress_cb is not None:
-            progress_cb(len(results), total, 0.0)
+            for r in results:
+                s = r.get("score")
+                if s is None:
+                    s = r.get("distance_m", 0.0)
+                try:
+                    s_val = float(s)
+                    if math.isfinite(s_val) and s_val > best_seen:
+                        best_seen = s_val
+                except (ValueError, TypeError):
+                    pass
+            progress_cb(len(results), total, best_seen if math.isfinite(best_seen) else 0.0)
 
     if workers == 1:
         for item in materialised:

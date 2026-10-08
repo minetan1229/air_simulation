@@ -1029,9 +1029,10 @@ def optimizer_run():
                 optimizer.from_dict(OptimizerConfig, cfg_dict), progress_cb, cancel_cb
             )
             result["job_id"] = job.job_id
-            RESULT_CACHE[job.job_id] = result
-            while len(RESULT_CACHE) > RESULT_CACHE_LIMIT:
-                RESULT_CACHE.pop(next(iter(RESULT_CACHE)))
+            with RESULT_CACHE_LOCK:
+                RESULT_CACHE[job.job_id] = result
+                while len(RESULT_CACHE) > RESULT_CACHE_LIMIT:
+                    RESULT_CACHE.pop(next(iter(RESULT_CACHE)))
             JOB_MANAGER.finish(job.job_id, message=f"{result['evaluations']} evaluations")
         except Exception as exc:
             log.error("optimizer job %s failed: %s\n%s", job.job_id, exc, traceback.format_exc())
@@ -1041,6 +1042,7 @@ def optimizer_run():
                 pass
 
     thread = threading.Thread(target=worker, name=f"optimizer-{job.job_id}", daemon=True)
+    JOB_MANAGER.register_thread(job.job_id, thread)
     thread.start()
     return jsonify(as_dict(JOB_MANAGER.get(job.job_id))), 202
 
@@ -1072,7 +1074,8 @@ def optimizer_result(job_id: str):
     if record.status not in ("completed", "cancelled"):
         raise BadRequest(f"job '{job_id}' is {record.status}; no result available yet")
 
-    payload = RESULT_CACHE.get(job_id)
+    with RESULT_CACHE_LOCK:
+        payload = RESULT_CACHE.get(job_id)
     if payload is None:
         payload = {
             "job_id": job_id,
@@ -1105,12 +1108,15 @@ def jobs_list():
 
 @app.post("/api/v1/jobs/join/<job_id>")
 def jobs_join(job_id: str):
-    timeout = as_float(request.args.get("timeout", 30.0), "timeout")
+    timeout_raw = request.args.get("timeout", 30.0)
+    timeout = min(max(as_float(timeout_raw, "timeout"), 0.0), 300.0)
     try:
-        record = JOB_MANAGER.join(job_id, timeout)
+        finished = JOB_MANAGER.join(job_id, timeout)
     except KeyError as exc:
         raise BadRequest(f"unknown job_id '{job_id}'") from exc
-    return jsonify(JOB_MANAGER.snapshot(record.job_id))
+    snap = JOB_MANAGER.snapshot(job_id)
+    snap["joined"] = finished
+    return jsonify(snap)
 
 
 # ---------------------------------------------------------------------------
@@ -1206,6 +1212,8 @@ def apply_record_preset():
         raise BadRequest("'key' is required")
     apply_throw_only = bool(payload.get("throw_only", False))
     apply_aircraft_only = bool(payload.get("aircraft_only", False))
+    # calibrated defaults to True for full presets, but False when isolating a throw technique
+    calibrated = bool(payload.get("calibrated", not apply_throw_only))
 
     with SESSION.lock:
         try:
@@ -1216,18 +1224,20 @@ def apply_record_preset():
         if not apply_throw_only:
             SESSION.set_aircraft(entry.aircraft_config(SESSION.aircraft))
         if not apply_aircraft_only:
-            SESSION.set_launch(entry.launch_config(SESSION.launch))
+            SESSION.set_launch(entry.launch_config(SESSION.launch, calibrated=calibrated))
             SESSION.set_environment(entry.environment_config(SESSION.environment))
 
         SESSION.simulator = None
         state = SESSION.reset()
         snapshot = SESSION.current_snapshot()
 
+    chosen_throw = entry.calibration if calibrated and entry.calibration else entry.throw
     return jsonify({
         "ok": True,
         "key": key,
         "preset_name": entry.name,
-        "throw": as_dict(entry.throw),
+        "calibrated": calibrated,
+        "throw": as_dict(chosen_throw),
         "state": state,
         **snapshot,
     })

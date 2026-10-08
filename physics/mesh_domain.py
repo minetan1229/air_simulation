@@ -609,9 +609,15 @@ def _buffer_blobs(
                     f"buffers[{index}] references external resource {uri!r} "
                     "but no base directory was supplied"
                 )
-            path = os.path.join(base_dir, urllib.parse.unquote(str(uri)))
+            unquoted = urllib.parse.unquote(str(uri))
+            resolved_base = os.path.abspath(base_dir)
+            resolved_path = os.path.abspath(os.path.join(resolved_base, unquoted))
+            if not resolved_path.startswith(resolved_base + os.sep) and resolved_path != resolved_base:
+                raise ValueError(
+                    f"buffers[{index}] external resource {uri!r} escapes base directory"
+                )
             try:
-                with open(path, "rb") as handle:
+                with open(resolved_path, "rb") as handle:
                     payload = handle.read()
             except OSError as exc:
                 raise ValueError(
@@ -1740,25 +1746,30 @@ def _apply_overrides(
         if key in _OVERRIDABLE_CG:
             if key == "cg_m":
                 values = np.asarray(raw_value, dtype=np.float64).reshape(-1)
-                if values.size != 3:
-                    raise ValueError("overrides['cg_m'] must hold three components")
+                if values.size != 3 or not np.all(np.isfinite(values)):
+                    raise ValueError("overrides['cg_m'] must hold three finite components")
                 cg = [float(values[0]), float(values[1]), float(values[2])]
                 recorded["cg_x_m"] = cg[0]
                 recorded["cg_y_m"] = cg[1]
                 recorded["cg_z_m"] = cg[2]
             else:
                 axis = {"cg_x_m": 0, "cg_y_m": 1, "cg_z_m": 2}[key]
-                cg[axis] = float(raw_value)
-                recorded[key] = float(raw_value)
+                val = float(raw_value)
+                if not math.isfinite(val):
+                    raise ValueError(f"override '{key}' must be a finite number, got {raw_value!r}")
+                cg[axis] = val
+                recorded[key] = val
             continue
         if key not in _OVERRIDABLE_FLOATS:
             raise ValueError(
                 f"unsupported mesh metric override {key!r}; allowed: "
                 f"{', '.join(sorted(_OVERRIDABLE_FLOATS + _OVERRIDABLE_CG))}"
             )
-        value = float(raw_value)
-        setattr(metrics, key, value)
-        recorded[key] = value
+        val = float(raw_value)
+        if not math.isfinite(val):
+            raise ValueError(f"override '{key}' must be a finite number, got {raw_value!r}")
+        setattr(metrics, key, val)
+        recorded[key] = val
     metrics.cg_m = (cg[0], cg[1], cg[2])
     metrics.overrides = recorded
     return metrics
@@ -2003,16 +2014,46 @@ class MeshLibrary:
         parsed = urllib.parse.urlparse(str(url))
         if parsed.scheme not in ("http", "https"):
             raise ValueError(f"unsupported URL scheme {parsed.scheme!r} in {url!r}")
+        hostname = parsed.hostname or ""
+        if not hostname:
+            raise ValueError(f"invalid host in URL {url!r}")
+
+        import ipaddress
+        import socket
+        if hostname.lower() in ("localhost", "127.0.0.1", "::1"):
+            raise ValueError(f"access to loopback host {hostname!r} is forbidden")
+        try:
+            ip_obj = ipaddress.ip_address(hostname)
+            if ip_obj.is_private or ip_obj.is_loopback or ip_obj.is_link_local:
+                raise ValueError(f"access to private/local network address {hostname!r} is forbidden")
+        except ValueError:
+            # hostname is a domain name, resolve it
+            try:
+                addr_info = socket.getaddrinfo(hostname, None)
+                for _, _, _, _, sockaddr in addr_info:
+                    ip_str = sockaddr[0]
+                    ip_obj = ipaddress.ip_address(ip_str)
+                    if ip_obj.is_private or ip_obj.is_loopback or ip_obj.is_link_local:
+                        raise ValueError(f"access to private/local network address {ip_str!r} is forbidden")
+            except socket.gaierror:
+                pass  # Fall through to urlopen (handles test mocks or natural connection failure)
+
         request = urllib.request.Request(
             str(url), headers={"User-Agent": "paper-airplane-sim/1.0"}
         )
         try:
             with urllib.request.urlopen(request, timeout=float(timeout)) as response:  # noqa: S310
-                data = bytes(response.read())
+                try:
+                    raw_bytes = response.read(64 * 1024 * 1024 + 1)
+                except TypeError:
+                    raw_bytes = response.read()
+                data = bytes(raw_bytes)
         except (urllib.error.URLError, OSError, ValueError) as exc:
             raise ValueError(f"failed to fetch {url!r}: {exc}") from exc
         if not data:
             raise ValueError(f"{url!r} returned an empty body")
+        if len(data) > 64 * 1024 * 1024:
+            raise ValueError(f"downloaded model from {url!r} exceeds 64MB limit")
         name = os.path.basename(parsed.path) or "model.glb"
         metrics = self._build(
             data,

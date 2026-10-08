@@ -141,7 +141,17 @@ RESULT_KEYS: Tuple[str, ...] = (
 )
 
 #: Design variables that land on :class:`~physics.config_schema.LaunchConfig`.
-LAUNCH_VARIABLES: Tuple[str, ...] = ("launch_angle_deg", "launch_roll_deg", "launch_speed")
+LAUNCH_VARIABLES: Tuple[str, ...] = (
+    "launch_angle_deg",
+    "launch_roll_deg",
+    "launch_speed",
+    "throw_force_n",
+    "throw_duration_s",
+    "throw_force_pitch_deg",
+    "throw_grip_x",
+    "throw_grip_y",
+    "throw_wrist_spin_radps",
+)
 
 #: Every other catalogue variable lands on :class:`AircraftConfig`.
 AIRCRAFT_VARIABLES: Tuple[str, ...] = (
@@ -388,7 +398,12 @@ class _Run:
             self.evaluations = before + int(evaluated)
             self.notify()
 
-        flights = parallel_evaluate(cases, processes=self.cfg.processes, progress_cb=relay)
+        flights = parallel_evaluate(
+            cases,
+            processes=self.cfg.processes,
+            progress_cb=relay,
+            cancel_cb=self._cancel_cb,
+        )
         results: List[Dict[str, Any]] = []
         for offset, (vector, flight) in enumerate(zip(batch, flights), start=1):
             self.evaluations = before + offset
@@ -928,13 +943,7 @@ def latin_hypercube(size: int, lows: Sequence[float], highs: Sequence[float], rn
 # --------------------------------------------------------------------------
 # Algorithm 1: coarse grid sweep
 # --------------------------------------------------------------------------
-def grid_points(variables: Sequence[DesignVariable]) -> List[List[float]]:
-    """Cartesian product of every variable's grid.
-
-    A variable with ``step > 0`` contributes ``arange(low, high + eps, step)``
-    (clipped to ``high``); a variable with ``step <= 0`` contributes the three
-    points ``low``, midpoint and ``high``.  The last variable varies fastest.
-    """
+def _grid_axes(variables: Sequence[DesignVariable]) -> List[List[float]]:
     axes: List[List[float]] = []
     for variable in variables:
         low = float(variable.low)
@@ -949,22 +958,32 @@ def grid_points(variables: Sequence[DesignVariable]) -> List[List[float]]:
         else:
             values = [low, 0.5 * (low + high), high]
         axes.append(values)
+    return axes
 
-    points: List[List[float]] = []
-    current = [0] * len(axes)
+
+def _point_from_flat_index(index: int, axes: Sequence[Sequence[float]], strides: Sequence[int]) -> List[float]:
+    point = []
+    rem = index
+    for axis, stride in zip(axes, strides):
+        idx = (rem // stride) % len(axis)
+        point.append(float(axis[idx]))
+        rem = rem % stride
+    return point
+
+
+def grid_points(variables: Sequence[DesignVariable], max_points: int = 100000) -> List[List[float]]:
+    """Cartesian product of every variable's grid."""
+    axes = _grid_axes(variables)
     if not axes:
         return [[]]
     total = 1
     for axis in axes:
         total *= len(axis)
-    for _ in range(total):
-        points.append([float(axes[dim][current[dim]]) for dim in range(len(axes))])
-        for dim in range(len(axes) - 1, -1, -1):
-            current[dim] += 1
-            if current[dim] < len(axes[dim]):
-                break
-            current[dim] = 0
-    return points
+    strides = [1] * len(axes)
+    for i in range(len(axes) - 2, -1, -1):
+        strides[i] = strides[i + 1] * len(axes[i + 1])
+    count = min(total, max_points)
+    return [_point_from_flat_index(i, axes, strides) for i in range(count)]
 
 
 def _evenly_spaced_indices(count: int, cap: int) -> List[int]:
@@ -985,14 +1004,27 @@ def run_grid_search(
     """Coarse cartesian sweep, deterministically capped at ``max_evaluations``."""
     variables, _lows, _highs = _prepare(cfg)
     cap = max(1, int(cfg.max_evaluations))
-    points = grid_points(variables)
-    chosen = [points[index] for index in _evenly_spaced_indices(len(points), cap)]
-    run = _Run("grid", cfg, variables, cap, progress_cb, cancel_cb)
+    axes = _grid_axes(variables)
+    if not axes:
+        chosen = [[]]
+        total = 1
+    else:
+        total = 1
+        for axis in axes:
+            total *= len(axis)
+        strides = [1] * len(axes)
+        for i in range(len(axes) - 2, -1, -1):
+            strides[i] = strides[i + 1] * len(axes[i + 1])
+        chosen_indices = _evenly_spaced_indices(total, cap)
+        chosen = [_point_from_flat_index(idx, axes, strides) for idx in chosen_indices]
+
+    eval_cap = min(cap, total)
+    run = _Run("grid", cfg, variables, eval_cap, progress_cb, cancel_cb)
     if run.poll_cancel():
-        return run.result(cap)
+        return run.result(eval_cap)
     run.evaluate_batch(chosen)
     run.notify()
-    return run.result(cap)
+    return run.result(eval_cap)
 
 
 # --------------------------------------------------------------------------
