@@ -295,7 +295,8 @@ class ConsoleApp {
     for (const rail of document.querySelectorAll(".rail")) {
       const head = rail.querySelector(".rail-head");
       if (!head) continue;
-      head.addEventListener("click", () => {
+      head.addEventListener("click", (event) => {
+        if (event.target.closest("button") || event.target.closest(".pill")) return;
         if (window.innerWidth > 900) return;
         rail.classList.toggle("is-open");
       });
@@ -585,7 +586,7 @@ class ConsoleApp {
     };
     window.addEventListener("keydown", (event) => {
       const tag = event.target && event.target.tagName;
-      if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
+      if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || tag === "BUTTON") return;
       if (event.ctrlKey || event.metaKey || event.altKey) return;
       const action = actions[event.key];
       if (!action) return;
@@ -1063,6 +1064,35 @@ class ConsoleApp {
     const sel = this.dom["record-preset-select"];
     if (!sel) return;
 
+    this.recordModeCalibrated = true;
+
+    const btnCal = document.getElementById("btn-mode-calibrated");
+    const btnRaw = document.getElementById("btn-mode-raw");
+
+    if (btnCal && btnRaw) {
+      btnCal.addEventListener("click", async () => {
+        if (this.recordModeCalibrated) return;
+        this.recordModeCalibrated = true;
+        btnCal.classList.add("active");
+        btnRaw.classList.remove("active");
+        if (this.selectedRecordPreset) {
+          this._updateRecordSpecsDisplay();
+          await this._applyRecordPreset(false);
+        }
+      });
+
+      btnRaw.addEventListener("click", async () => {
+        if (!this.recordModeCalibrated) return;
+        this.recordModeCalibrated = false;
+        btnRaw.classList.add("active");
+        btnCal.classList.remove("active");
+        if (this.selectedRecordPreset) {
+          this._updateRecordSpecsDisplay();
+          await this._applyRecordPreset(false);
+        }
+      });
+    }
+
     try {
       const data = await api.recordPresets();
       const presets = data.presets || [];
@@ -1103,6 +1133,32 @@ class ConsoleApp {
     }
   }
 
+  _updateRecordSpecsDisplay() {
+    const p = this.selectedRecordPreset;
+    if (!p) return;
+    const throwInfo = (this.recordModeCalibrated && p.calibration) ? p.calibration : (p.throw || {});
+
+    this.dom["rec-speed"].textContent = `${throwInfo.release_speed_mps || 0} m/s`;
+    this.dom["rec-angle"].textContent = `${throwInfo.launch_angle_deg || 0}°`;
+    this.dom["rec-height"].textContent = `${throwInfo.release_height_m || 1.8} m`;
+    this.dom["rec-style"].textContent = throwInfo.throw_style || "—";
+
+    if (this.recordModeCalibrated && p.calibration_note) {
+      this.dom["record-technique"].textContent = `${p.calibration_note} (校正済)`;
+    } else {
+      const rawThrow = p.throw || {};
+      this.dom["record-technique"].textContent = rawThrow.technique_ja || rawThrow.technique || "公認投擲値";
+    }
+
+    if (this.viewport) {
+      this.viewport.setLaunchVector(
+        throwInfo.release_speed_mps,
+        throwInfo.launch_angle_deg,
+        throwInfo.release_height_m
+      );
+    }
+  }
+
   async _showRecordDetails(key) {
     const card = this.dom["record-card"];
     if (!card) return;
@@ -1111,30 +1167,16 @@ class ConsoleApp {
       this.selectedRecordPreset = p;
 
       const achievement = p.achievement || {};
-      const throwInfo = p.throw || {};
 
       this.dom["record-badge"].textContent = p.category === "time_aloft" ? "滞空世界記録" : "飛距離世界記録";
       this.dom["record-value"].textContent = achievement.value_display || (p.category === "time_aloft" ? `${achievement.duration_s || 0} s` : `${achievement.distance_m || 0} m`);
       this.dom["record-name"].textContent = p.name_ja || p.name;
       this.dom["record-holder"].textContent = `${p.holder || ""} (${p.year || achievement.year || ""}) · ${achievement.venue || ""}`;
+      this.dom["record-notes"].textContent = p.description_ja || p.description || p.notes_ja || p.notes || "世界記録の機体と初期パラメータです。";
 
-      this.dom["record-technique"].textContent = throwInfo.technique_ja || throwInfo.technique || "規定投擲";
-      this.dom["record-notes"].textContent = throwInfo.notes_ja || throwInfo.notes || p.description_ja || p.description || "世界記録の投擲フォームと初期パラメータです。";
-
-      this.dom["rec-speed"].textContent = `${throwInfo.release_speed_mps || 0} m/s`;
-      this.dom["rec-angle"].textContent = `${throwInfo.launch_angle_deg || 0}°`;
-      this.dom["rec-height"].textContent = `${throwInfo.release_height_m || 1.8} m`;
-      this.dom["rec-style"].textContent = throwInfo.throw_style || "—";
+      this._updateRecordSpecsDisplay();
 
       card.style.display = "flex";
-
-      if (this.viewport) {
-        this.viewport.setLaunchVector(
-          throwInfo.release_speed_mps,
-          throwInfo.launch_angle_deg,
-          throwInfo.release_height_m
-        );
-      }
     } catch (err) {
       this.notify(`記録情報の取得に失敗: ${err.message}`, "error");
     }
@@ -1153,7 +1195,8 @@ class ConsoleApp {
         this.viewport.archiveTrack();
       }
 
-      const res = await api.recordApply({ key, throw_only: throwOnly });
+      const calibrated = Boolean(this.recordModeCalibrated !== false);
+      const res = await api.recordApply({ key, throw_only: throwOnly, calibrated });
       if (!res.ok) throw new Error(res.message || "プリセットの適用に失敗しました");
 
       this.store.adopt(res);
@@ -1162,10 +1205,11 @@ class ConsoleApp {
       await this.refreshAir();
       await this.refreshPolar();
 
+      const modeStr = calibrated ? "【🌟 記録再現モード】" : "【⚡ 生公認値モード】";
       this.notify(
         throwOnly
-          ? `投げ方を適用しました: ${res.throw.technique || key}`
-          : `世界記録機体・投げ方をロードしました: ${res.preset_name || key}`,
+          ? `${modeStr} 投げ方を適用しました: ${res.throw.technique || key}`
+          : `${modeStr} 世界記録機体・投げ方をロードしました: ${res.preset_name || key}`,
         "ok"
       );
 

@@ -113,6 +113,16 @@
               <div class="record-title" id="record-name">—</div>
               <div class="record-holder" id="record-holder">—</div>
               
+              <div class="record-section-title">投擲モード選択 (SIMULATION MODE)</div>
+              <div class="record-mode-toggle" id="record-mode-toggle">
+                <button type="button" class="btn-mode active" id="btn-mode-calibrated" title="剛体シミュレーターの空力特性に合わせて最適化された投擲。記録級の安定滑空を体験できます">
+                  🌟 記録再現・安定滑空 (推奨)
+                </button>
+                <button type="button" class="btn-mode" id="btn-mode-raw" title="公式記録時の極限初速（時速約100km）。急激なGフォースと失速挙動を検証できます">
+                  ⚡ 生の公認記録値 (高G限界)
+                </button>
+              </div>
+
               <div class="record-section-title">投擲フォーム・投げ方 (THROW TECHNIQUE)</div>
               <div class="record-technique" id="record-technique">—</div>
               <div class="record-notes" id="record-notes">—</div>
@@ -123,6 +133,16 @@
                 <div class="spec-item"><span class="spec-k">高度</span><span class="spec-v num" id="rec-height">—</span></div>
                 <div class="spec-item"><span class="spec-k">スタイル</span><span class="spec-v num" id="rec-style">—</span></div>
               </div>
+
+              <details class="record-help-details">
+                <summary>💡 なぜ生の記録値だと墜落しやすいの？</summary>
+                <div class="record-help-content">
+                  <p><strong>① 巨大なGフォース（30〜50G）:</strong> 時速100kmで投げると通常の滑空時の50〜100倍の揚力が発生し、急激な頭上げで失速します。</p>
+                  <p><strong>② 紙のしなり（空力弾性）:</strong> 現実の紙飛行機は時速100kmの風圧で主翼がしなり、矢のように直進してから滑空に戻ります。</p>
+                  <p><strong>③ 非公開の内部調整:</strong> ギネス記録ではミリ単位の重心位置や0.1度単位のエレボン角度が非公開です。</p>
+                  <p class="help-rec">👉 <strong>「記録再現モード」</strong>を選択すると、シミュレーター上で安定して記録級のロングフライトを再現できます！</p>
+                </div>
+              </details>
 
               <div class="record-actions">
                 <button type="button" class="btn-record-primary" id="btn-apply-record" title="機体と投げ方をロードして投げる">

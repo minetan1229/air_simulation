@@ -1338,6 +1338,66 @@ input[type="range"]:focus-visible { outline: 2px solid var(--accent); outline-of
   font-weight: 600;
   color: var(--ink);
 }
+.record-mode-toggle {
+  display: flex;
+  gap: 4px;
+  background: var(--surface);
+  padding: 2px;
+  border-radius: 6px;
+  border: 1px solid var(--line);
+}
+.record-mode-toggle .btn-mode {
+  flex: 1;
+  padding: 5px 6px;
+  font-size: 10px;
+  font-weight: 600;
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  text-align: center;
+}
+.record-mode-toggle .btn-mode.active {
+  background: #fff;
+  color: #1a73e8;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+  font-weight: 700;
+}
+.record-help-details {
+  background: #f8f9fa;
+  border: 1px solid #e8eaed;
+  border-radius: 4px;
+  padding: 6px 8px;
+  font-size: 11px;
+  color: #5f6368;
+}
+.record-help-details summary {
+  cursor: pointer;
+  font-weight: 600;
+  color: #1a73e8;
+  outline: none;
+  user-select: none;
+}
+.record-help-content {
+  margin-top: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  line-height: 1.4;
+  color: #3c4043;
+}
+.record-help-content p {
+  margin: 0;
+}
+.record-help-content .help-rec {
+  color: #188038;
+  font-weight: 600;
+  border-top: 1px dashed #dadce0;
+  padding-top: 4px;
+  margin-top: 2px;
+}
 .record-actions {
   display: flex;
   flex-direction: column;

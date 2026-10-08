@@ -88,3 +88,19 @@ def test_api_throw_techniques():
     data = resp.json
     assert "throw_rules" in data
     assert len(data["throw_rules"]) > 0
+
+
+def test_api_records_apply_calibrated_toggle():
+    client = app.test_client()
+    # Default is calibrated=True
+    resp_cal = client.post("/api/v1/records/apply", json={"key": "ayoob_69_1m"})
+    assert resp_cal.status_code == 200
+    assert resp_cal.json["calibrated"] is True
+    assert resp_cal.json["throw"]["release_speed_mps"] == 26.5
+
+    # Explicit calibrated=False applies raw documented throw
+    resp_raw = client.post("/api/v1/records/apply", json={"key": "firefly5_98m", "calibrated": False})
+    assert resp_raw.status_code == 200
+    assert resp_raw.json["calibrated"] is False
+    assert resp_raw.json["throw"]["release_speed_mps"] == 27.0
+
