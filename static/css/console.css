@@ -1014,9 +1014,33 @@ input[type="range"]:focus-visible { outline: 2px solid var(--accent); outline-of
 }
 .tp-btn:hover:not(:disabled) { background: #23262b; border-color: #383c43; color: #fff; }
 .tp-btn:disabled { opacity: 0.35; cursor: not-allowed; }
-.tp-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .tp-play { color: #fff; }
 .tp-play[data-playing="1"] { background: var(--accent); border-color: var(--accent); }
+.tp-btn-launch {
+  background: var(--accent);
+  color: #fff;
+  border-radius: var(--radius-sm);
+  font-weight: 600;
+  padding: 0 10px;
+  box-shadow: 0 1px 4px rgba(26, 115, 232, 0.35);
+}
+.tp-btn-launch:hover:not(:disabled) {
+  background: var(--accent-hover);
+  color: #fff;
+}
+.btn-throw-launch {
+  width: 100%;
+  padding: 8px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  margin-bottom: 8px;
+  border-radius: var(--radius-sm);
+  box-shadow: 0 2px 4px rgba(26, 115, 232, 0.25);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
 
 .glyph { width: 11px; height: 12px; position: relative; display: inline-block; }
 .glyph-play::before {

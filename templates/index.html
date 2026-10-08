@@ -539,7 +539,10 @@
       <span class="tp-badge-text">再生プレイヤー</span>
     </div>
     <div class="tp-controls">
-      <button class="tp-btn" id="tp-reset" type="button" title="最初に戻る (R)">
+      <button class="tp-btn tp-btn-launch" id="tp-launch" type="button" title="現在の機体・設定でシミュレーションを実行して投げる (Space / Enter)">
+        <span class="tp-icon-btn">🚀</span><span class="tp-label" id="tp-launch-label">投げる</span>
+      </button>
+      <button class="tp-btn" id="tp-reset" type="button" title="最初に戻る / 待機状態 (R)">
         <span class="tp-icon-btn">⏮️</span><span class="tp-label">最初へ</span>
       </button>
       <button class="tp-btn" id="tp-prev" type="button" title="1 フレーム戻る (←)">
@@ -573,7 +576,7 @@
     <div class="modal-card">
       <h3>操作</h3>
       <dl class="keys">
-        <dt>Space</dt><dd>再生 / 一時停止</dd>
+        <dt>Space / Enter</dt><dd>投げる (発射) / 一時停止 / 再生</dd>
         <dt>← →</dt><dd>1 フレーム送り / 戻し</dd>
         <dt>, .</dt><dd>速度を落とす / 上げる</dd>
         <dt>R</dt><dd>リセット</dd>

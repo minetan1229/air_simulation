@@ -111,14 +111,31 @@ export class Transport extends Emitter {
     }
   }
 
-  /** Rewind current flight to start (t=0) without deleting computed trajectory. */
-  async reset(reason = "user") {
+  /** Clear any cached trajectory so the next launch re-simulates with fresh settings. */
+  clearHistory() {
     this.pause();
-    if (this.history && this.history.length > 0) {
+    this.history = null;
+    this.metrics = null;
+    this.frames = 0;
+    this.playIndex = 0;
+    this.playTime = 0;
+    this.lastFrame = null;
+    this.emit("state", this.state);
+  }
+
+  /**
+   * Reset playback or clear trajectory back to the launch stance.
+   * If `clearHistory` is true, the computed flight is discarded and the airframe
+   * returns to pre-launch stand-by state.
+   */
+  async reset(clearHistory = false) {
+    this.pause();
+    if (!clearHistory && this.history && this.history.length > 0) {
       this.seek(0);
       return;
     }
-    // Fallback: request initial frame from backend
+    this.clearHistory();
+    // Request initial frame from backend
     this.generation += 1;
     const payload = await this.api.reset({
       aircraft: this.store.data.aircraft,

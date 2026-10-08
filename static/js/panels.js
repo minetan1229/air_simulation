@@ -117,11 +117,12 @@ const HOST_SECTION = {
 };
 
 export class ParameterPanels {
-  constructor({ store, root, onChange, onCommit }) {
+  constructor({ store, root, onChange, onCommit, onLaunch }) {
     this.store = store;
     this.root = root;
     this.onChange = onChange || (() => {});
     this.onCommit = onCommit || (() => {});
+    this.onLaunch = onLaunch || (() => {});
     this.controls = [];
     this.throwStyleSelect = null;
     this.throwNote = null;
@@ -170,10 +171,20 @@ export class ParameterPanels {
   }
 
   _buildThrowHead(container) {
+    const btnLaunch = make("button", {
+      class: "btn btn-primary btn-throw-launch",
+      type: "button",
+      text: "🚀 この機体・設定で投擲 (LAUNCH)",
+      title: "現在の機体寸法・折り畳み・投げ方・風況で飛行シミュレーションを実行します (Enter)",
+    });
+    btnLaunch.addEventListener("click", () => {
+      if (this.onLaunch) this.onLaunch();
+    });
+
     const styles = (this.store.schema.launch && this.store.schema.launch.throw_styles) || [];
     const block = make("div", { class: "field" });
     const top = make("div", { class: "field-top" }, [
-      make("span", { class: "field-key", text: "投げ方" }),
+      make("span", { class: "field-key", text: "投げ方プリセット" }),
       make("span", { class: "field-unit", text: "STYLE" }),
     ]);
     const select = make("select", { class: "select", id: "throw-style" });
@@ -191,6 +202,7 @@ export class ParameterPanels {
     });
     block.append(top, select, note);
     container.insertBefore(block, container.firstChild);
+    container.insertBefore(btnLaunch, container.firstChild);
     this.throwStyleSelect = select;
     this.throwNote = note;
   }

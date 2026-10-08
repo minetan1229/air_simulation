@@ -85,6 +85,7 @@ class ConsoleApp {
       root: document,
       onChange: (section, key, value) => this._onFieldChange(section, key, value),
       onCommit: (section) => this._onCommit(section),
+      onLaunch: () => this._launchFlight(),
     });
     this.panels.build();
 
@@ -281,6 +282,8 @@ class ConsoleApp {
       "hud-cm",
       "tunnel-hud",
       "tunnel-toggle",
+      "tp-launch",
+      "tp-launch-label",
       "tp-play",
       "tp-play-label",
       "tp-prev",
@@ -403,10 +406,13 @@ class ConsoleApp {
       rates.append(button);
     }
 
+    if (this.dom["tp-launch"]) {
+      this.dom["tp-launch"].addEventListener("click", () => this._launchFlight());
+    }
     this.dom["tp-play"].addEventListener("click", () => this._togglePlay());
     this.dom["tp-prev"].addEventListener("click", () => this._guard(() => this.transport.stepBack()));
     this.dom["tp-next"].addEventListener("click", () => this._guard(() => this.transport.stepForward()));
-    this.dom["tp-reset"].addEventListener("click", () => this._guard(() => this._resetFlight()));
+    this.dom["tp-reset"].addEventListener("click", () => this._guard(() => this._resetFlight(true)));
 
     const scrub = this.dom["tp-scrub"];
     scrub.addEventListener("input", () => {
@@ -712,8 +718,8 @@ class ConsoleApp {
       ArrowRight: () => this._guard(() => this.transport.stepForward()),
       ",": () => this.transport.cycleRate(-1),
       ".": () => this.transport.cycleRate(1),
-      r: () => this._guard(() => this._resetFlight()),
-      R: () => this._guard(() => this._resetFlight()),
+      r: () => this._guard(() => this._resetFlight(true)),
+      R: () => this._guard(() => this._resetFlight(true)),
       t: () => this._flip("tgl-track"),
       T: () => this._flip("tgl-track"),
       g: () => this._flip("tgl-ghost"),
@@ -784,11 +790,17 @@ class ConsoleApp {
   _onStoreChange(event) {
     if (event.section) {
       this.dirty.add(event.section);
-      if (event.section === "aircraft" || event.section === "launch") this.flightDirty = true;
+      if (event.section === "aircraft" || event.section === "launch" || event.section === "environment") {
+        this.flightDirty = true;
+      }
       this._schedulePush();
+    } else {
+      this.flightDirty = true;
     }
     if (this.panels) this.panels.sync();
     this._syncGeometry();
+    this._updateLaunchVector();
+    this._updateTransportUi(this.transport.state);
   }
 
   _onFieldChange(section, key, value) {
@@ -1029,11 +1041,12 @@ class ConsoleApp {
     this.viewport.setPose([0, 0, -1.2], [q.w, q.x, q.y, q.z]);
   }
 
-  /* -------------------------------------------------------------- flight */
-
   async _launchFlight() {
     await this._guard(async () => {
-      this.notify("🚀 飛行軌跡を一括シミュレーション計算中...", "info");
+      if (this.dirty.size > 0) {
+        await this._push();
+      }
+      this.notify("🚀 飛行シミュレーション計算中...", "info");
       if (this.viewport) {
         this.viewport.archiveTrack();
         this.viewport.setLaunchVectorVisible(false);
@@ -1053,15 +1066,21 @@ class ConsoleApp {
       const metrics = result.metrics || {};
       const dist = metrics.horizontal_range_m || metrics.distance_m || 0;
       const time = metrics.flight_time_s || 0;
-      this.notify(`✈️ フライト計算完了: 飛距離 ${fmt(dist, 2)}m / 滞空 ${fmt(time, 2)}s (動画再生を開始します)`, "ok");
+      const speed = Number((this.store.data.launch && this.store.data.launch.launch_speed) || 10).toFixed(1);
+      const angle = Number((this.store.data.launch && this.store.data.launch.launch_angle_deg) || 15).toFixed(1);
+      this.notify(`✈️ 発射完了 (${speed}m/s · ${angle}°): 飛距離 ${fmt(dist, 2)}m / 滞空 ${fmt(time, 2)}s`, "ok");
+      this._updateTransportUi(this.transport.state);
     });
   }
 
   async _togglePlay() {
     await this._guard(async () => {
-      if (!this.transport.history || !this.transport.history.length) {
+      if (this.flightDirty || !this.transport.history || !this.transport.history.length) {
         await this._launchFlight();
         return;
+      }
+      if (!this.transport.playing && this.transport.playIndex >= (this.transport.history.length - 1)) {
+        this.transport.seek(0);
       }
       if (!this.transport.playing && this.viewport) {
         this.viewport.setLaunchVectorVisible(false);
@@ -1070,11 +1089,18 @@ class ConsoleApp {
     });
   }
 
-  async _resetFlight() {
+  async _resetFlight(clearHistory = true) {
     if (this.viewport) {
+      this.viewport.archiveTrack();
+      this.viewport.setLaunchVectorVisible(true);
       this._updateLaunchVector();
     }
-    await this.transport.reset();
+    if (this.recorder) this.recorder.clear();
+    if (this.gauges) this.gauges.resetPeaks();
+    this.flightDirty = true;
+    await this.transport.reset(clearHistory);
+    this._placeAirframeAtLaunch();
+    this._updateTransportUi(this.transport.state);
   }
 
   _placeAirframeAtLaunch() {
@@ -1420,15 +1446,16 @@ class ConsoleApp {
   }
 
   _updateTransportUi(state) {
+    const isReadyToLaunch = this.flightDirty || !this.transport.history || !this.transport.history.length;
     const play = this.dom["tp-play"];
     if (play) {
       play.dataset.playing = state.playing ? "1" : "0";
       const glyph = document.getElementById("tp-play-glyph");
       if (glyph) {
-        glyph.textContent = state.playing ? "⏸️" : "▶️";
+        glyph.textContent = state.playing ? "⏸️" : (isReadyToLaunch ? "🚀" : "▶️");
       }
       if (this.dom["tp-play-label"]) {
-        this.dom["tp-play-label"].textContent = state.playing ? "一時停止" : "再生";
+        this.dom["tp-play-label"].textContent = state.playing ? "一時停止" : (isReadyToLaunch ? "投げる" : "再生");
       }
     }
     for (const button of document.querySelectorAll(".rate-btn")) {
@@ -1436,8 +1463,9 @@ class ConsoleApp {
     }
     const runNode = this.dom["top-state"];
     if (runNode) {
-      runNode.textContent = state.playing ? "PLAYING" : state.frames > 0 ? "PAUSED" : "IDLE";
-      runNode.parentElement.dataset.run = state.playing ? "running" : state.frames > 0 ? "paused" : "idle";
+      const statusText = state.playing ? "PLAYING" : isReadyToLaunch ? "READY" : state.frames > 0 ? "PAUSED" : "IDLE";
+      runNode.textContent = statusText;
+      runNode.parentElement.dataset.run = state.playing ? "running" : isReadyToLaunch ? "ready" : state.frames > 0 ? "paused" : "idle";
     }
   }
 
