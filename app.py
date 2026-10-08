@@ -713,6 +713,12 @@ def simulation_batch():
     for index, case in enumerate(cases):
         if not isinstance(case, dict):
             raise BadRequest(f"cases[{index}] must be a JSON object")
+        duration_s = as_float(case.get("duration_s", 5.0), f"cases[{index}].duration_s")
+        if not (0.01 <= duration_s <= 120.0):
+            raise BadRequest(f"cases[{index}].duration_s must lie within [0.01, 120.0]")
+        dt_max = as_float(case.get("dt_max", 0.02), f"cases[{index}].dt_max")
+        if not (1.0e-4 <= dt_max <= 1.0):
+            raise BadRequest(f"cases[{index}].dt_max must lie within [1e-4, 1.0]")
         normalised.append(
             {
                 "aircraft": build(AircraftConfig, case.get("aircraft"), SESSION.aircraft).__dict__,
@@ -720,11 +726,17 @@ def simulation_batch():
                     EnvironmentConfig, case.get("environment"), SESSION.environment
                 ).clamp_ranges().__dict__,
                 "launch": build(LaunchConfig, case.get("launch"), SESSION.launch).__dict__,
-                "duration_s": as_float(case.get("duration_s", 5.0), f"cases[{index}].duration_s"),
-                "dt_max": as_float(case.get("dt_max", 0.02), f"cases[{index}].dt_max"),
+                "duration_s": duration_s,
+                "dt_max": dt_max,
             }
         )
-    processes = int(payload.get("processes", 0))
+    processes_raw = payload.get("processes", 0)
+    if processes_raw is None:
+        processes = 0
+    else:
+        processes = as_int(processes_raw, "processes")
+        if not (0 <= processes <= 64):
+            raise BadRequest("'processes' must lie within [0, 64]")
     results = parallel.parallel_evaluate(normalised, processes=processes)
     return jsonify(
         {
@@ -908,6 +920,14 @@ def _optimizer_config(payload: Dict[str, Any]) -> OptimizerConfig:
             names.append(str(name))
             weights[str(name)] = float(weight)
 
+    raw_weights = raw.get("weights")
+    if isinstance(raw_weights, dict):
+        for k, v in raw_weights.items():
+            try:
+                weights[str(k)] = float(v)
+            except (ValueError, TypeError):
+                pass
+
     unknown = [n for n in names if n not in OBJECTIVE_DIRECTIONS]
     if unknown:
         raise BadRequest(f"unknown objective(s): {', '.join(unknown)}")
@@ -917,6 +937,14 @@ def _optimizer_config(payload: Dict[str, Any]) -> OptimizerConfig:
     algorithm = str(raw.get("algorithm", "differential-evolution"))
     if algorithm not in ALGORITHM_NAMES:
         raise BadRequest(f"'algorithm' must be one of {', '.join(ALGORITHM_NAMES)}")
+
+    dvars_raw = raw.get("design_variables")
+    if dvars_raw is None:
+        dvars = [v.name for v in DESIGN_VARIABLE_CATALOGUE]
+    elif not dvars_raw:
+        raise BadRequest("at least one design variable must be selected")
+    else:
+        dvars = list(dvars_raw)
 
     base = as_dict(SESSION.aircraft)
     base.update(raw.get("aircraft", {}) or {})
@@ -939,7 +967,7 @@ def _optimizer_config(payload: Dict[str, Any]) -> OptimizerConfig:
             objectives=names,
             weights=weights,
             algorithm=algorithm,
-            design_variables=list(raw.get("design_variables") or []),
+            design_variables=dvars,
             variable_bounds={k: (float(v[0]), float(v[1])) for k, v in variable_bounds.items()},
             max_evaluations=int(raw.get("max_evaluations", 200)),
             population_size=int(raw.get("population_size", 40)),
