@@ -30,16 +30,24 @@ async function parse(response) {
   return data;
 }
 
-const DEFAULT_TIMEOUT_MS = 15000;
+const DEFAULT_TIMEOUT_MS = 60000;
 
 function createSignal(options) {
   if (options && options.signal) return options.signal;
+  const timeoutMs = (options && options.timeoutMs) || DEFAULT_TIMEOUT_MS;
   if (typeof AbortSignal !== "undefined" && typeof AbortSignal.timeout === "function") {
-    return AbortSignal.timeout(DEFAULT_TIMEOUT_MS);
+    return AbortSignal.timeout(timeoutMs);
   }
   const controller = new AbortController();
-  setTimeout(() => controller.abort(), DEFAULT_TIMEOUT_MS);
+  setTimeout(() => controller.abort(), timeoutMs);
   return controller.signal;
+}
+
+function handleFetchError(err) {
+  if (err && (err.name === "TimeoutError" || err.name === "AbortError" || String(err.message).toLowerCase().includes("timed out") || String(err.message).toLowerCase().includes("timeout"))) {
+    throw new ApiError("処理がタイムアウトしました。GPU/サーバーが計算中の可能性があります。数秒待ってから再度お試しください。", 408);
+  }
+  throw err;
 }
 
 async function get(path, options = {}) {
@@ -49,8 +57,12 @@ async function get(path, options = {}) {
     signal: createSignal(options),
     ...options,
   };
-  const response = await fetch(`${BASE}${path}`, init);
-  return parse(response);
+  try {
+    const response = await fetch(`${BASE}${path}`, init);
+    return parse(response);
+  } catch (err) {
+    handleFetchError(err);
+  }
 }
 
 async function post(path, body, options = {}) {
@@ -66,8 +78,12 @@ async function post(path, body, options = {}) {
     init.body = JSON.stringify(body);
   }
   Object.assign(init, options);
-  const response = await fetch(`${BASE}${path}`, init);
-  return parse(response);
+  try {
+    const response = await fetch(`${BASE}${path}`, init);
+    return parse(response);
+  } catch (err) {
+    handleFetchError(err);
+  }
 }
 
 /** GET returning the raw response (used for CSV downloads). */
@@ -77,9 +93,13 @@ async function getText(path, options = {}) {
     signal: createSignal(options),
     ...options,
   };
-  const response = await fetch(`${BASE}${path}`, init);
-  if (!response.ok) await parse(response);
-  return { text: await response.text(), type: response.headers.get("Content-Type") || "text/csv" };
+  try {
+    const response = await fetch(`${BASE}${path}`, init);
+    if (!response.ok) await parse(response);
+    return { text: await response.text(), type: response.headers.get("Content-Type") || "text/csv" };
+  } catch (err) {
+    handleFetchError(err);
+  }
 }
 
 export const api = {
@@ -105,13 +125,13 @@ export const api = {
   stress: (payload) => post("/stress/analysis", payload),
 
   /* flight */
-  launch: (payload) => post("/simulation/launch", payload ?? {}),
+  launch: (payload) => post("/simulation/launch", payload ?? {}, { timeoutMs: 120000 }),
   step: (payload) => post("/simulation/step", payload),
   reset: (payload) => post("/simulation/reset", payload ?? {}),
   history: () => get("/simulation/history"),
   frame: (index) => get(`/simulation/history/${index}`),
-  batch: (cases, processes = 0) => post("/simulation/batch", { cases, processes }),
-  ensemble: (payload) => post("/simulation/ensemble", payload),
+  batch: (cases, processes = 0) => post("/simulation/batch", { cases, processes }, { timeoutMs: 120000 }),
+  ensemble: (payload) => post("/simulation/ensemble", payload, { timeoutMs: 120000 }),
 
   /* mesh */
   meshList: () => get("/mesh/models"),
@@ -135,7 +155,7 @@ export const api = {
   meshOverrides: (modelId, overrides) => post(`/mesh/overrides/${encodeURIComponent(modelId)}`, { overrides }),
 
   /* optimizer */
-  optimizerRun: (payload) => post("/optimizer/run", payload),
+  optimizerRun: (payload) => post("/optimizer/run", payload, { timeoutMs: 120000 }),
   optimizerStatus: (jobId) => get(`/optimizer/status/${encodeURIComponent(jobId)}`),
   optimizerCancel: (jobId) => post(`/optimizer/cancel/${encodeURIComponent(jobId)}`),
   optimizerResult: (jobId) => get(`/optimizer/result/${encodeURIComponent(jobId)}`),
@@ -143,7 +163,7 @@ export const api = {
   jobs: () => get("/jobs"),
 
   /* auto investigate */
-  investigateRun: (payload) => post("/investigate/run", payload),
+  investigateRun: (payload) => post("/investigate/run", payload, { timeoutMs: 120000 }),
   investigateStatus: (jobId) => get(`/investigate/status/${encodeURIComponent(jobId)}`),
   investigateCancel: (jobId) => post(`/investigate/cancel/${encodeURIComponent(jobId)}`),
   investigateResult: (jobId) => get(`/investigate/result/${encodeURIComponent(jobId)}`),

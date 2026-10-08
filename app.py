@@ -58,6 +58,18 @@ app.config["JSON_SORT_KEYS"] = False
 app.config["MAX_CONTENT_LENGTH"] = 64 * 1024 * 1024
 
 
+# Pre-warm GPU kernels in background on app load
+def _kick_gpu_warmup():
+    try:
+        from physics import parallel_engine
+        threading.Thread(target=parallel_engine.warmup_gpu, daemon=True).start()
+    except Exception:
+        pass
+
+
+_kick_gpu_warmup()
+
+
 # ---------------------------------------------------------------------------
 # Lazy domain access
 # ---------------------------------------------------------------------------
@@ -1449,6 +1461,13 @@ def main() -> None:
     parser.add_argument("--port", type=int, default=5000)
     parser.add_argument("--debug", action="store_true")
     args = parser.parse_args()
+    # Pre-warm GPU CUDA kernels in background so the first user flight has 0ms compile latency
+    try:
+        parallel = _domain("parallel_engine")
+        threading.Thread(target=parallel.warmup_gpu, daemon=True).start()
+    except Exception as exc:
+        log.warning("GPU warmup thread skipped: %s", exc)
+
     log.info("starting on http://%s:%d", args.host, args.port)
     app.run(host=args.host, port=args.port, debug=args.debug, threaded=True)
 

@@ -156,7 +156,26 @@ def get_gpu_info() -> Dict[str, Any]:
     return info
 
 
-# --------------------------------------------------------------------------
+_WARMED_UP = False
+
+
+def warmup_gpu() -> bool:
+    """Pre-compile CUDA JIT kernels in background to eliminate first-request latency."""
+    global _WARMED_UP
+    if _WARMED_UP:
+        return True
+    gpu_info = get_gpu_info()
+    if not (gpu_info["available"] and gpu_info["backend"] == "cupy"):
+        _WARMED_UP = True
+        return False
+    try:
+        # Pre-warm GPU ensemble simulation with a tiny batch
+        gpu_ensemble_simulation(n_trajectories=16)
+        _WARMED_UP = True
+        return True
+    except Exception:
+        return False
+
 # Worker sizing / backend naming
 # --------------------------------------------------------------------------
 def get_worker_count(requested: int = 0) -> int:
