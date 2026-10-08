@@ -678,6 +678,44 @@ def simulation_reset():
     )
 
 
+@app.post("/api/v1/simulation/launch")
+def simulation_launch():
+    """Execute a complete flight trajectory from release until landing.
+
+    Precomputes all samples so the frontend transport dock operates as a pure
+    video-like player (scrub, rewind, play, pause) without ad-hoc background steps.
+    """
+    payload = body()
+    with SESSION.lock:
+        if payload.get("aircraft"):
+            SESSION.set_aircraft(build(AircraftConfig, payload["aircraft"]))
+        if payload.get("environment"):
+            SESSION.set_environment(
+                merge_environment(payload["environment"], SESSION.environment)
+            )
+        if payload.get("launch"):
+            SESSION.set_launch(build(LaunchConfig, payload["launch"]))
+        if payload.get("simulation"):
+            SESSION.set_settings(build(SimulationSettings, payload["simulation"]))
+        
+        SESSION.simulator = None
+        simulator = SESSION.simulator_instance()
+        simulator.reset(launch=SESSION.launch)
+        duration_s = as_float(payload.get("duration_s", 25.0), "duration_s")
+        summary = simulator.simulate(duration_s=duration_s, record=True)
+        samples = [as_dict(s) for s in simulator.history()]
+        
+    return jsonify(
+        {
+            "metrics": summary,
+            "samples": samples,
+            "total_frames": len(samples),
+            "backend": summary.get("backend", "numpy"),
+            "timestamp": utc_now_iso(),
+        }
+    )
+
+
 @app.get("/api/v1/simulation/history")
 def simulation_history():
     with SESSION.lock:

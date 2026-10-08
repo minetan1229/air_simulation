@@ -248,6 +248,9 @@ class ConsoleApp {
       "btn-copy-gpu-cmd",
       "gpu-ps-command",
       "top-ghost",
+      "btn-top-launch",
+      "btn-rail-launch",
+      "tp-play-glyph",
       "btn-top-investigate",
       "btn-top-record",
       "btn-record-video",
@@ -623,6 +626,12 @@ class ConsoleApp {
   }
 
   _bindHeader() {
+    if (this.dom["btn-top-launch"]) {
+      this.dom["btn-top-launch"].addEventListener("click", () => this._launchFlight());
+    }
+    if (this.dom["btn-rail-launch"]) {
+      this.dom["btn-rail-launch"].addEventListener("click", () => this._launchFlight());
+    }
     this.dom["btn-save"].addEventListener("click", () => this.dataPanel.exportConfigJson());
     this.dom["btn-load"].addEventListener("click", () => this.dom["config-file"].click());
     this.dom["config-file"].addEventListener("change", async (event) => {
@@ -697,6 +706,7 @@ class ConsoleApp {
 
   _bindKeyboard() {
     const actions = {
+      Enter: () => this._launchFlight(),
       " ": () => this._togglePlay(),
       ArrowLeft: () => this._guard(() => this.transport.stepBack()),
       ArrowRight: () => this._guard(() => this.transport.stepForward()),
@@ -1021,13 +1031,37 @@ class ConsoleApp {
 
   /* -------------------------------------------------------------- flight */
 
+  async _launchFlight() {
+    await this._guard(async () => {
+      this.notify("🚀 飛行軌跡を一括シミュレーション計算中...", "info");
+      if (this.viewport) {
+        this.viewport.archiveTrack();
+        this.viewport.setLaunchVectorVisible(false);
+      }
+      if (this.recorder) this.recorder.clear();
+      if (this.gauges) this.gauges.resetPeaks();
+
+      const result = await this.transport.launch({
+        aircraft: this.store.data.aircraft,
+        environment: this.store.data.environment,
+        launch: this.store.data.launch,
+        simulation: this.store.data.simulation,
+        duration_s: 25.0,
+      });
+
+      this.flightDirty = false;
+      const metrics = result.metrics || {};
+      const dist = metrics.horizontal_range_m || metrics.distance_m || 0;
+      const time = metrics.flight_time_s || 0;
+      this.notify(`✈️ フライト計算完了: 飛距離 ${fmt(dist, 2)}m / 滞空 ${fmt(time, 2)}s (動画再生を開始します)`, "ok");
+    });
+  }
+
   async _togglePlay() {
     await this._guard(async () => {
-      if (this.flightDirty) {
-        await this._resetFlight();
-        this.flightDirty = false;
-      } else if (!this.transport.playing && this.viewport && this.viewport.trackPoints.length > 0 && this.transport.frames === 0) {
-        this.viewport.archiveTrack();
+      if (!this.transport.history || !this.transport.history.length) {
+        await this._launchFlight();
+        return;
       }
       if (!this.transport.playing && this.viewport) {
         this.viewport.setLaunchVectorVisible(false);
@@ -1038,12 +1072,8 @@ class ConsoleApp {
 
   async _resetFlight() {
     if (this.viewport) {
-      this.viewport.archiveTrack();
       this._updateLaunchVector();
     }
-    if (this.recorder) this.recorder.clear();
-    if (this.gauges) this.gauges.resetPeaks();
-    this.dom["rec-count"].textContent = "0";
     await this.transport.reset();
   }
 
@@ -1385,23 +1415,28 @@ class ConsoleApp {
         "ok"
       );
 
-      await this._resetFlight();
-      this.transport.play();
+      await this._launchFlight();
     });
   }
 
   _updateTransportUi(state) {
     const play = this.dom["tp-play"];
-    play.dataset.playing = state.playing ? "1" : "0";
-    this.dom["tp-play-label"].textContent =
-      state.mode === "replay" ? "続行" : state.playing ? "一時停止" : "再生";
-    play.querySelector(".glyph").className = `glyph ${state.playing ? "glyph-pause" : "glyph-play"}`;
+    if (play) {
+      play.dataset.playing = state.playing ? "1" : "0";
+      const glyph = document.getElementById("tp-play-glyph");
+      if (glyph) {
+        glyph.textContent = state.playing ? "⏸️" : "▶️";
+      }
+      if (this.dom["tp-play-label"]) {
+        this.dom["tp-play-label"].textContent = state.playing ? "一時停止" : "再生";
+      }
+    }
     for (const button of document.querySelectorAll(".rate-btn")) {
       button.setAttribute("aria-pressed", Number(button.dataset.rate) === state.rate ? "true" : "false");
     }
     const runNode = this.dom["top-state"];
     if (runNode) {
-      runNode.textContent = state.playing ? "RUNNING" : state.frames > 0 ? "PAUSED" : "IDLE";
+      runNode.textContent = state.playing ? "PLAYING" : state.frames > 0 ? "PAUSED" : "IDLE";
       runNode.parentElement.dataset.run = state.playing ? "running" : state.frames > 0 ? "paused" : "idle";
     }
   }

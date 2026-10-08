@@ -293,17 +293,19 @@ class AircraftConfig:
     cy_beta: float = -0.25
     cl_beta: float = -0.03
     cn_beta: float = 0.08
-    # Rate derivatives are *damping* terms: C_lp and C_nr must be negative or
-    # the roll/yaw modes become anti-damped and the airframe tumbles.
-    cl_roll_rate: float = -0.10
-    cm_roll_rate: float = -0.02
-    cn_roll_rate: float = -0.08
-    cl_pitch_rate: float = -0.06
-    cm_pitch_rate: float = 0.05
-    cn_pitch_rate: float = -0.12
-    cl_yaw_rate: float = -0.08
+    # Rate derivatives are damping terms: paper airplanes have very small inertia
+    # and large surface area, so aerodynamic roll/yaw damping must be strong.
+    # Cross-coupling terms (cl_pitch_rate, cn_pitch_rate, cm_roll_rate) are zero
+    # for symmetric airframes so pitching does not cause unnatural rolling or spinning.
+    cl_roll_rate: float = -0.40
+    cm_roll_rate: float = 0.0
+    cn_roll_rate: float = 0.0
+    cl_pitch_rate: float = 0.0
+    cm_pitch_rate: float = 0.0
+    cn_pitch_rate: float = 0.0
+    cl_yaw_rate: float = 0.0
     cm_yaw_rate: float = 0.0
-    cn_yaw_rate: float = -0.15
+    cn_yaw_rate: float = -0.30
     static_margin: float = 0.12
     cg_offset_x: float = 0.0  # metres, + = aft
 

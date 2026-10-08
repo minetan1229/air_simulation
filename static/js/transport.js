@@ -25,8 +25,10 @@ export class Transport extends Emitter {
     this.inFlight = false;
     this.lastFrame = null;
     this.frames = 0;
-    this.scrubIndex = null;
+    this.playIndex = 0;
+    this.playTime = 0;
     this.history = null;
+    this.metrics = null;
     this.stressIndex = null;
     this.windPayload = null;
     this.tunnelMode = false;
@@ -52,27 +54,71 @@ export class Transport extends Emitter {
   }
 
   get state() {
+    const total = this.history ? this.history.length : this.frames;
     return {
       playing: this.playing,
       rate: this.rate,
-      frames: this.frames,
+      frames: total,
+      index: this.playIndex,
       time: this.lastFrame ? Number(this.lastFrame.time_s) || 0 : 0,
-      mode: this.scrubIndex === null ? "live" : "replay",
+      mode: "playback",
     };
   }
 
   /* ------------------------------------------------------------ controls */
 
-  async reset(reason = "user") {
+  /** Launch a new flight simulation: precomputes the entire trajectory. */
+  async launch(customPayload = null) {
     this.playing = false;
-    this.scrubIndex = null;
-    this.history = null;
-    this.stopped = false;
-    this.accumulator = 0;
-    this.lastFrame = null;
-    this.frames = 0;
-    // Invalidate responses of requests that were in flight: they belong to the
-    // flight that just ended and must not repopulate the new one.
+    this.busy = true;
+    this.generation += 1;
+    const currentGen = this.generation;
+
+    const payload = customPayload || {
+      aircraft: this.store.data.aircraft,
+      environment: this.store.data.environment,
+      launch: this.store.data.launch,
+      simulation: this.store.data.simulation,
+      duration_s: 25.0,
+    };
+
+    try {
+      const result = await this.api.launch(payload);
+      if (currentGen !== this.generation) return result;
+      this.history = result.samples || [];
+      this.metrics = result.metrics || null;
+      this.frames = this.history.length;
+      this.playIndex = 0;
+      this.playTime = 0;
+      this.stopped = false;
+
+      if (this.history.length > 0) {
+        this.seek(0);
+      }
+      if (this.metrics) {
+        this.emit("metrics", this.metrics);
+      }
+      this.emit("launched", result);
+      this.emit("state", this.state);
+      // Auto-start playback of the computed flight
+      this.play();
+      return result;
+    } catch (err) {
+      this.emit("error", err);
+      throw err;
+    } finally {
+      this.busy = false;
+    }
+  }
+
+  /** Rewind current flight to start (t=0) without deleting computed trajectory. */
+  async reset(reason = "user") {
+    this.pause();
+    if (this.history && this.history.length > 0) {
+      this.seek(0);
+      return;
+    }
+    // Fallback: request initial frame from backend
     this.generation += 1;
     const payload = await this.api.reset({
       aircraft: this.store.data.aircraft,
@@ -87,14 +133,18 @@ export class Transport extends Emitter {
     return payload;
   }
 
-  async play() {
-    if (this.stopped) await this.reset("auto");
-    if (this.scrubIndex !== null) {
-      // A scrubbed view is a read-only replay: jump back to the live tail.
-      this.scrubIndex = null;
-      this.emit("live", null);
+  play() {
+    if (!this.history || !this.history.length) {
+      // If no trajectory exists yet, compute a new flight
+      this.launch();
+      return;
+    }
+    // If at the end of the trajectory, loop back to start
+    if (this.playIndex >= this.history.length - 1) {
+      this.seek(0);
     }
     this.playing = true;
+    this.stopped = false;
     this.lastWall = performance.now();
     this.emit("state", this.state);
   }
@@ -122,73 +172,48 @@ export class Transport extends Emitter {
     this.setRate(RATES[next]);
   }
 
-  /** Advance exactly one recorded sample towards the live edge. */
-  async stepForward() {
-    this.playing = false;
-    await this._loadHistory();
-    if (!this.history || !this.history.length) {
-      await this._singleStep();
-      return;
-    }
-    const current = this.scrubIndex === null ? this.history.length - 1 : this.scrubIndex;
-    const next = clamp(current + 1, 0, this.history.length - 1);
-    await this.seek(next);
-  }
-
-  async stepBack() {
-    this.playing = false;
-    await this._loadHistory();
+  /** Advance exactly one recorded sample towards the end. */
+  stepForward() {
+    this.pause();
     if (!this.history || !this.history.length) return;
-    const current = this.scrubIndex === null ? this.history.length - 1 : this.scrubIndex;
-    await this.seek(clamp(current - 1, 0, this.history.length - 1));
+    const next = clamp(this.playIndex + 1, 0, this.history.length - 1);
+    this.seek(next);
   }
 
-  async seek(index) {
-    await this._loadHistory();
+  /** Step one recorded sample backwards towards start. */
+  stepBack() {
+    this.pause();
+    if (!this.history || !this.history.length) return;
+    const prev = clamp(this.playIndex - 1, 0, this.history.length - 1);
+    this.seek(prev);
+  }
+
+  seek(index) {
     if (!this.history || !this.history.length) return null;
     const i = clamp(Math.round(index), 0, this.history.length - 1);
-    this.scrubIndex = i;
-    const sample = await this.api.frame(i).catch(() => null);
-    const payload = sample ? sample.sample : this.history[i];
-    if (payload) {
-      this.emit("replay", payload);
-      this.emit("state", this.state);
-    }
-    return payload;
+    this.playIndex = i;
+    const sample = this.history[i];
+    this.lastFrame = sample;
+    this.playTime = Number(sample.time_s) || 0;
+    this.emit("frame", sample);
+    this.emit("replay", sample);
+    this.emit("state", this.state);
+    return sample;
   }
 
-  /** Nearest recorded frame for a wall-clock time. */
-  async seekTime(seconds) {
-    await this._loadHistory();
+  /** Nearest recorded frame for a wall-clock flight time. */
+  seekTime(seconds) {
     if (!this.history || !this.history.length) return null;
     let best = 0;
     let bestDelta = Infinity;
-    this.history.forEach((sample, index) => {
-      const delta = Math.abs((Number(sample.time_s) || 0) - seconds);
+    for (let i = 0; i < this.history.length; i++) {
+      const delta = Math.abs((Number(this.history[i].time_s) || 0) - seconds);
       if (delta < bestDelta) {
         bestDelta = delta;
-        best = index;
+        best = i;
       }
-    });
+    }
     return this.seek(best);
-  }
-
-  async _loadHistory() {
-    if (this.history) return this.history;
-    const payload = await this.api.history().catch(() => null);
-    this.history = payload ? payload.samples : null;
-    if (payload && payload.metrics) this.emit("metrics", payload.metrics);
-    return this.history;
-  }
-
-  async _singleStep() {
-    const settings = this.store.data.simulation;
-    const payload = await this.api.step({
-      dt: Number(settings.dt_max) || 0.02,
-      substeps: Number(settings.max_substeps) || 64,
-    });
-    this._absorb(payload);
-    return payload;
   }
 
   /* --------------------------------------------------------------- loop */
@@ -198,37 +223,29 @@ export class Transport extends Emitter {
     const wallDelta = clamp((now - this.lastWall) / 1000, 0, 0.25);
     this.lastWall = now;
 
-    if (this.playing && !this.inFlight) {
-      const budget = 1000 / MAX_STEP_CALLS_PER_SECOND;
-      if (now - (this.lastCallAt || 0) >= budget) {
-        this.lastCallAt = now;
-        this.accumulator += wallDelta * this.rate;
-        const settings = this.store.data.simulation;
-        const dtMax = Number(settings.dt_max) || 0.02;
-        const dtMaxEffective = Math.min(dtMax * Math.max(1, this.rate), 0.16);
-        const dt = Math.min(this.accumulator, dtMaxEffective);
-        if (dt > 1e-4) {
-          this.inFlight = true;
-          this.busy = true;
-          const baseSubsteps = Number(settings.max_substeps) || 64;
-          const substeps = Math.min(Math.round(baseSubsteps * Math.sqrt(Math.max(1, this.rate))), 512);
-          const generation = this.generation;
-          this.api
-            .step({ dt, substeps })
-            .then((payload) => {
-              if (generation !== this.generation) return; // superseded by a reset
-              const advanced = isNum(payload.dt) ? payload.dt : dt;
-              this.accumulator = Math.max(this.accumulator - advanced, 0);
-              this._absorb(payload);
-            })
-            .catch((error) => {
-              this.emit("error", error);
-              this.playing = false;
-            })
-            .finally(() => {
-              this.inFlight = false;
-              this.busy = false;
-            });
+    if (this.playing && this.history && this.history.length > 0) {
+      this.playTime += wallDelta * this.rate;
+      
+      // Advance playIndex based on playTime
+      let idx = this.playIndex;
+      while (idx < this.history.length - 1 && (Number(this.history[idx].time_s) || 0) < this.playTime) {
+        idx++;
+      }
+
+      if (idx !== this.playIndex) {
+        this.playIndex = idx;
+        const frame = this.history[idx];
+        this.lastFrame = frame;
+        this.emit("frame", frame);
+        this.emit("replay", frame);
+        this.emit("state", this.state);
+
+        if (idx >= this.history.length - 1) {
+          // Reached end of flight
+          this.playing = false;
+          this.stopped = true;
+          this.emit("ended", frame);
+          this.emit("state", this.state);
         }
       }
     }
@@ -245,23 +262,6 @@ export class Transport extends Emitter {
     }
 
     this._handle = requestAnimationFrame(this._tick);
-  }
-
-  _absorb(payload) {
-    if (!payload) return;
-    this.lastFrame = payload;
-    this.frames = Number(payload.frames) || this.frames;
-    if (this.history) {
-      this.history.push(payload);
-      if (this.history.length > 20000) this.history.shift();
-    }
-    this.emit("frame", payload);
-    if (payload.landed || payload.crashed || payload.diverged) {
-      this.playing = false;
-      this.stopped = true;
-      this.emit("ended", payload);
-    }
-    this.emit("state", this.state);
   }
 
   async _pollStress() {

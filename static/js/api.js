@@ -105,6 +105,7 @@ export const api = {
   stress: (payload) => post("/stress/analysis", payload),
 
   /* flight */
+  launch: (payload) => post("/simulation/launch", payload ?? {}),
   step: (payload) => post("/simulation/step", payload),
   reset: (payload) => post("/simulation/reset", payload ?? {}),
   history: () => get("/simulation/history"),

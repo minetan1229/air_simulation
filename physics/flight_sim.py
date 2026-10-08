@@ -196,17 +196,12 @@ ELASTIC_DAMPING_RATIO = 0.7
 ELASTIC_YAW_GAIN = 0.05
 #: Nondimensional roll / yaw damping of the folded keel, ``C_lp`` and ``C_nr``
 #: referred to the wing span (``moment = q*S*b*C*p_hat`` with
-#: ``p_hat = omega*b/(2V)``).  The wing-level solver applies ``cfg.cl_roll_rate``
-#: and ``cfg.cn_yaw_rate`` with their literal signs, and the contract defaults
-#: (+0.10 / +0.15) are *anti*-damping there, so without the physical keel
-#: damping of prompt.md 2.3 ("attitude stabilisation restoring torque") the roll
-#: and yaw modes diverge and the airframe tumbles within 0.3 s.  The keel values
-#: are the usual magnitudes for a paper fuselage fin and make both modes
-#: convergent.
-KEEL_ROLL_DAMPING = -0.16
+#: ``p_hat = omega*b/(2V)``). Paper wings have enormous relative damping against
+#: roll and yaw rotations due to their high surface area and featherweight mass.
+KEEL_ROLL_DAMPING = -0.20
 KEEL_YAW_DAMPING = -0.26
 #: Airspeed (m/s) at which the keel damping reaches half of its linear value.
-KEEL_DAMPING_CUTOFF_MPS = 1.0
+KEEL_DAMPING_CUTOFF_MPS = 0.8
 
 # --------------------------------------------------------------------------
 # Structural model used when ``stress_domain`` is unavailable
@@ -1752,6 +1747,10 @@ class FlightSimulator:
         keel = max(_finite(dynamic_pressure), 0.0) * area * span * rate_hat * scale
         moment[0] += keel * KEEL_ROLL_DAMPING * float(omega[0])
         moment[2] += keel * KEEL_YAW_DAMPING * float(omega[2])
+        # Aerodynamic dihedral restoring couple proportional to dynamic pressure
+        if abs(dihedral) > 1.0e-6 and abs(roll_error) > 1.0e-6:
+            aero_dihedral = -max(_finite(dynamic_pressure), 0.0) * area * span * 0.04 * dihedral * math.sin(roll_error) * scale
+            moment[0] += aero_dihedral
         return moment
 
     # -- lifecycle --------------------------------------------------------

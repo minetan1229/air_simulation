@@ -67,12 +67,13 @@
         <span class="eta-val num" id="eta-clock">—</span>
         <span class="eta-sub num" id="eta-left">idle</span>
       </div>
+      <button class="btn btn-primary btn-launch-top" id="btn-top-launch" type="button" title="現在の設定で飛行軌跡を一括シミュレーション計算して再生します (Enter)">🚀 シミュレーション発射</button>
       <label class="switch" title="風洞モード: 機体を固定して空力係数のみ測定 (U)">
         <input type="checkbox" id="tunnel-toggle">
         <span class="switch-box"></span>
         <span class="switch-label">風洞モード</span>
       </label>
-      <button class="btn btn-primary" id="btn-top-investigate" type="button" title="指定した機体をベースに手で変えられる項目を自動分析・改善">🔍 Auto調査</button>
+      <button class="btn" id="btn-top-investigate" type="button" title="指定した機体をベースに手で変えられる項目を自動分析・改善">🔍 Auto調査</button>
       <button class="btn" id="btn-save" type="button" title="設定を JSON で保存 (Ctrl+S)">保存</button>
       <button class="btn" id="btn-load" type="button" title="設定 JSON の読込">読込</button>
       <button class="btn" id="btn-csv" type="button" title="飛行ログを CSV で出力 (E)">CSV</button>
@@ -93,6 +94,11 @@
         <button class="btn btn-mini" id="btn-config-reset" type="button" title="サーバの既定値に戻す">既定へ</button>
       </div>
       <div class="rail-body" id="rail-left-body">
+        <div class="rail-launch-hero">
+          <button class="btn btn-primary btn-launch-hero" id="btn-rail-launch" type="button" title="現在のパラメータで飛行軌跡を一括シミュレーション計算して再生します (Enter)">
+            🚀 飛行シミュレーション発射
+          </button>
+        </div>
 
         <!-- ギネス世界記録・投擲モード -->
         <section class="group" data-group="records" open>
@@ -528,18 +534,22 @@
 
   <!-- ==================== transport ==================== -->
   <footer class="transport">
+    <div class="tp-badge">
+      <span class="tp-badge-icon">🎬</span>
+      <span class="tp-badge-text">再生プレイヤー</span>
+    </div>
     <div class="tp-controls">
-      <button class="tp-btn" id="tp-reset" type="button" title="リセット (R)">
-        <span class="glyph glyph-reset" aria-hidden="true"></span><span class="tp-label">リセット</span>
-      </button>
-      <button class="tp-btn tp-play" id="tp-play" type="button" title="再生 / 一時停止 (Space)">
-        <span class="glyph glyph-play" aria-hidden="true"></span><span class="tp-label" id="tp-play-label">再生</span>
+      <button class="tp-btn" id="tp-reset" type="button" title="最初に戻る (R)">
+        <span class="tp-icon-btn">⏮️</span><span class="tp-label">最初へ</span>
       </button>
       <button class="tp-btn" id="tp-prev" type="button" title="1 フレーム戻る (←)">
-        <span class="glyph glyph-prev" aria-hidden="true"></span>
+        <span class="tp-icon-btn">⏪</span><span class="tp-label">戻る</span>
+      </button>
+      <button class="tp-btn tp-play" id="tp-play" type="button" title="再生 / 一時停止 (Space)">
+        <span class="tp-icon-btn" id="tp-play-glyph">▶️</span><span class="tp-label" id="tp-play-label">再生</span>
       </button>
       <button class="tp-btn" id="tp-next" type="button" title="1 フレーム進む (→)">
-        <span class="glyph glyph-next" aria-hidden="true"></span>
+        <span class="tp-icon-btn">⏩</span><span class="tp-label">進む</span>
       </button>
     </div>
 
