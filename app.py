@@ -313,14 +313,15 @@ class Session:
             return sim.reset(launch=self.launch)
 
     def current_snapshot(self) -> Dict[str, Any]:
-        with self.lock:
-            return {
-                "aircraft": as_dict(self.aircraft),
-                "environment": as_dict(self.environment),
-                "launch": as_dict(self.launch),
-                "simulation": as_dict(self.settings),
-                "selected_mesh_model_id": self.mesh_model_id,
-            }
+        # Configuration objects are replaced atomically by the setters.  A
+        # read-only snapshot must not wait behind a long-running flight.
+        return {
+            "aircraft": as_dict(self.aircraft),
+            "environment": as_dict(self.environment),
+            "launch": as_dict(self.launch),
+            "simulation": as_dict(self.settings),
+            "selected_mesh_model_id": self.mesh_model_id,
+        }
 
 
 SESSION = Session()
@@ -576,6 +577,8 @@ def environment_current():
 def environment_config():
     """Persist the airframe / launch / integrator configuration."""
     payload = body()
+    if not payload:
+        return jsonify(SESSION.current_snapshot())
     with SESSION.lock:
         if "aircraft" in payload:
             SESSION.set_aircraft(build(AircraftConfig, payload["aircraft"]))
