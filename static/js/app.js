@@ -441,6 +441,15 @@ class ConsoleApp {
     }
     this.dom["wb-toggle"].addEventListener("click", () => this.setWorkbench(!this._workbenchOpen()));
     this.setWorkbench(false);
+
+    if (this.dom["eta-widget"]) {
+      this.dom["eta-widget"].style.cursor = "pointer";
+      this.dom["eta-widget"].title = "クリックで完了予想表示を待機中にリセット";
+      this.dom["eta-widget"].addEventListener("click", () => {
+        this.stopEtaCountdown();
+        this.setGlobalEta({ clock: "—", left: "待機中", active: false, title: "計算完了予想時間 (ETA)" });
+      });
+    }
   }
 
   _workbenchOpen() {
@@ -602,61 +611,75 @@ class ConsoleApp {
   async _runGpuEnsemble(count = 100) {
     this.hideSimulationError();
     const tStart = performance.now();
-    this.setGlobalEta({
+    this.startEtaCountdown({
       clock: "GPU計算中...",
-      left: "残 約1.2秒",
-      active: true,
+      estimatedSec: 1.5,
       title: `GPU並列シミュレーション (${count}機同時計算) を実行中...`,
     });
 
-    await this._guard(async () => {
-      this.notify(`GPU一括並列シミュレーション (${count}機同時計算) を実行中...`, "info");
-      const currentAircraft = this.store.data.aircraft || {};
-      const currentEnv = this.store.data.environment || {};
-      const currentLaunch = this.store.data.launch || {};
-      const currentSettings = this.store.data.simulation || {};
+    try {
+      await this._guard(async () => {
+        this.notify(`GPU一括並列シミュレーション (${count}機同時計算) を実行中...`, "info");
+        const currentAircraft = this.store.data.aircraft || {};
+        const currentEnv = this.store.data.environment || {};
+        const currentLaunch = this.store.data.launch || {};
+        const currentSettings = this.store.data.simulation || {};
 
-      const res = await api.ensemble({
-        aircraft: currentAircraft,
-        environment: currentEnv,
-        launch: currentLaunch,
-        settings: { ...currentSettings, duration_s: 25.0, dt_max: 0.01 },
-        n_trajectories: count,
-        max_sample_tracks: count,
+        const res = await api.ensemble({
+          aircraft: currentAircraft,
+          environment: currentEnv,
+          launch: currentLaunch,
+          settings: { ...currentSettings, duration_s: 25.0, dt_max: 0.01 },
+          n_trajectories: count,
+          max_sample_tracks: count,
+        });
+
+        const elapsedSec = ((performance.now() - tStart) / 1000).toFixed(2);
+        this.stopEtaCountdown();
+        this.setGlobalEta({
+          clock: `${elapsedSec}s`,
+          left: "GPU完了",
+          active: false,
+          title: `GPU 100機同時シミュレーション完了 (所要時間: ${elapsedSec}秒)`,
+        });
+
+        if (!res || !res.sample_trajectories) {
+          throw new Error("アンサンブルシミュレーションの結果が空です");
+        }
+
+        // Render trajectories in Three.js viewport (default to top 1 to prevent freeze/browser crash)
+        if (this.viewport && res.sample_trajectories.length) {
+          this.viewport.setEnsembleTracks(res.sample_trajectories);
+          this.viewport.filterEnsembleTracks("top1");
+        }
+
+        const backendStr = res.backend_display || res.backend || "cupy";
+        const meanDist = Number(res.mean_distance_m || 0);
+        const maxDist = Number(res.max_distance_m || 0);
+        const meanTime = Number(res.mean_flight_time_s || 0);
+        const maxTime = Number(res.max_flight_time_s || 0);
+
+        this.notify(
+          `GPU 100機同時飛行完了 (${res.trajectories_count || count}機 · ${backendStr})\n最大飛距離: ${maxDist.toFixed(2)}m (平均: ${meanDist.toFixed(2)}m) · 最大滞空: ${maxTime.toFixed(2)}s (平均: ${meanTime.toFixed(2)}s)`,
+          "ok"
+        );
+
+        // Show comprehensive champion metrics & leaderboard HUD
+        this._showEnsembleChampionHud(res);
+        this._updateFlightStatus("landed", `100機同時飛行完了 — 1位最高飛距離: ${maxDist.toFixed(2)}m (平均: ${meanDist.toFixed(2)}m)`);
       });
-
-      const elapsedSec = ((performance.now() - tStart) / 1000).toFixed(2);
-      this.setGlobalEta({
-        clock: `${elapsedSec}s`,
-        left: "GPU完了",
-        active: false,
-        title: `GPU 100機同時シミュレーション完了 (所要時間: ${elapsedSec}秒)`,
-      });
-
-      if (!res || !res.sample_trajectories) {
-        throw new Error("アンサンブルシミュレーションの結果が空です");
+    } finally {
+      this.stopEtaCountdown();
+      const widget = this.dom["eta-widget"];
+      if (widget && widget.dataset.active === "1") {
+        const elapsedSec = ((performance.now() - tStart) / 1000).toFixed(2);
+        this.setGlobalEta({
+          clock: `${elapsedSec}s`,
+          left: "待機中",
+          active: false,
+        });
       }
-
-      // Render all 100 trajectories in Three.js viewport
-      if (this.viewport && res.sample_trajectories.length) {
-        this.viewport.setEnsembleTracks(res.sample_trajectories);
-      }
-
-      const backendStr = res.backend_display || res.backend || "cupy";
-      const meanDist = Number(res.mean_distance_m || 0);
-      const maxDist = Number(res.max_distance_m || 0);
-      const meanTime = Number(res.mean_flight_time_s || 0);
-      const maxTime = Number(res.max_flight_time_s || 0);
-
-      this.notify(
-        `GPU 100機同時飛行完了 (${res.trajectories_count || count}機 · ${backendStr})\n最大飛距離: ${maxDist.toFixed(2)}m (平均: ${meanDist.toFixed(2)}m) · 最大滞空: ${maxTime.toFixed(2)}s (平均: ${meanTime.toFixed(2)}s)`,
-        "ok"
-      );
-
-      // Show comprehensive champion metrics & leaderboard HUD
-      this._showEnsembleChampionHud(res);
-      this._updateFlightStatus("landed", `100機同時飛行完了 — 1位最高飛距離: ${maxDist.toFixed(2)}m (平均: ${meanDist.toFixed(2)}m)`);
-    });
+    }
   }
 
   _showEnsembleChampionHud(res) {
@@ -870,18 +893,29 @@ class ConsoleApp {
         }
       });
     }
-    let ensembleFleetMode = "all";
+    let ensembleFleetMode = "top1";
     if (this.dom["champ-btn-toggle-fleet"]) {
+      this.dom["champ-btn-toggle-fleet"].textContent = "表示: 1位のみ (少しずつ飛ばす ⇄)";
       this.dom["champ-btn-toggle-fleet"].addEventListener("click", () => {
         if (!this.viewport) return;
-        if (ensembleFleetMode === "all") {
+        if (ensembleFleetMode === "top1") {
+          ensembleFleetMode = "stagger";
+          this.dom["champ-btn-toggle-fleet"].textContent = "表示: 少しずつ順次飛行中 (上位3機へ)";
+          this.viewport.filterEnsembleTracks("stagger");
+          this.notify("少しずつ順次軌跡を表示中...", "info");
+        } else if (ensembleFleetMode === "stagger") {
           ensembleFleetMode = "top3";
-          this.dom["champ-btn-toggle-fleet"].textContent = "表示: 上位3機のみ (全100機へ戻す)";
-        } else {
+          this.dom["champ-btn-toggle-fleet"].textContent = "表示: 上位3機のみ (全100機へ)";
+          this.viewport.filterEnsembleTracks("top3");
+        } else if (ensembleFleetMode === "top3") {
           ensembleFleetMode = "all";
-          this.dom["champ-btn-toggle-fleet"].textContent = "表示: 全100機 ⇄ 上位3機";
+          this.dom["champ-btn-toggle-fleet"].textContent = "表示: 全100機 (1位のみへ戻す)";
+          this.viewport.filterEnsembleTracks("all");
+        } else {
+          ensembleFleetMode = "top1";
+          this.dom["champ-btn-toggle-fleet"].textContent = "表示: 1位のみ (少しずつ飛ばす ⇄)";
+          this.viewport.filterEnsembleTracks("top1");
         }
-        this.viewport.filterEnsembleTracks(ensembleFleetMode);
       });
     }
 
@@ -1284,6 +1318,8 @@ class ConsoleApp {
     try {
       await action();
     } catch (error) {
+      this.stopEtaCountdown();
+      this.setGlobalEta({ clock: "エラー", left: "中断", active: false, title: "シミュレーション計算エラー" });
       const msg = this._describe(error);
       this.notify(msg, "error");
       this.showSimulationError({
@@ -1342,12 +1378,51 @@ class ConsoleApp {
     }
   }
 
+  startEtaCountdown({
+    clock = "計算中...",
+    estimatedSec = 1.5,
+    title = "計算を実行中...",
+  } = {}) {
+    this.stopEtaCountdown();
+    const t0 = performance.now();
+    const update = () => {
+      const elapsed = (performance.now() - t0) / 1000;
+      let leftStr = "";
+      if (elapsed < estimatedSec) {
+        const remaining = Math.max(0.1, estimatedSec - elapsed);
+        leftStr = `残 約${remaining.toFixed(1)}秒`;
+      } else {
+        leftStr = `計算中 (${elapsed.toFixed(1)}s)`;
+      }
+      this.setGlobalEta({
+        clock: clock,
+        left: leftStr,
+        active: true,
+        title: title,
+        skipStopCountdown: true,
+      });
+    };
+    update();
+    this._etaTimer = setInterval(update, 100);
+  }
+
+  stopEtaCountdown() {
+    if (this._etaTimer) {
+      clearInterval(this._etaTimer);
+      this._etaTimer = null;
+    }
+  }
+
   setGlobalEta({
     clock = "—",
     left = "待機中",
     active = false,
     title = "計算完了予想時間 (ETA)",
+    skipStopCountdown = false,
   } = {}) {
+    if (!skipStopCountdown && !active) {
+      this.stopEtaCountdown();
+    }
     const widget = this.dom["eta-widget"];
     const clockEl = this.dom["eta-clock"];
     const leftEl = this.dom["eta-left"];
@@ -1533,60 +1608,73 @@ class ConsoleApp {
   async _launchFlight() {
     this.hideSimulationError();
     const tStart = performance.now();
-    this.setGlobalEta({
-      clock: "計算中...",
-      left: "残 約1秒",
-      active: true,
+    this.startEtaCountdown({
+      clock: "6DoF計算中...",
+      estimatedSec: 1.5,
       title: "6DoF RK4 飛行シミュレーション軌跡を計算中...",
     });
 
-    await this._guard(async () => {
-      if (this.dirty.size > 0) {
-        await this._push();
-      }
-      this.notify("飛行シミュレーション計算中...", "info");
-      if (this.viewport) {
-        this.viewport.archiveTrack();
-        this.viewport.setLaunchVectorVisible(false);
-      }
-      if (this.recorder) this.recorder.clear();
-      if (this.gauges) this.gauges.resetPeaks();
+    try {
+      await this._guard(async () => {
+        if (this.dirty.size > 0) {
+          await this._push();
+        }
+        this.notify("飛行シミュレーション計算中...", "info");
+        if (this.viewport) {
+          this.viewport.archiveTrack();
+          this.viewport.setLaunchVectorVisible(false);
+        }
+        if (this.recorder) this.recorder.clear();
+        if (this.gauges) this.gauges.resetPeaks();
 
-      const result = await this.transport.launch({
-        aircraft: this.store.data.aircraft,
-        environment: this.store.data.environment,
-        launch: this.store.data.launch,
-        simulation: this.store.data.simulation,
-        duration_s: 25.0,
+        const result = await this.transport.launch({
+          aircraft: this.store.data.aircraft,
+          environment: this.store.data.environment,
+          launch: this.store.data.launch,
+          simulation: this.store.data.simulation,
+          duration_s: 25.0,
+        });
+
+        const elapsedSec = ((performance.now() - tStart) / 1000).toFixed(2);
+        this.stopEtaCountdown();
+        this.setGlobalEta({
+          clock: `${elapsedSec}s`,
+          left: "計算完了",
+          active: false,
+          title: `飛行シミュレーション計算完了 (所要時間: ${elapsedSec}秒)`,
+        });
+
+        this.flightDirty = false;
+        if (this.viewport && result.sample_trajectories && result.sample_trajectories.length) {
+          this.viewport.setEnsembleTracks(result.sample_trajectories);
+        }
+
+        const metrics = result.metrics || {};
+        const dist = metrics.horizontal_range_m || metrics.distance_m || 0;
+        const time = metrics.flight_time_s || 0;
+        const speed = Number((this.store.data.launch && this.store.data.launch.launch_speed) || 10).toFixed(1);
+        const angle = Number((this.store.data.launch && this.store.data.launch.launch_angle_deg) || 15).toFixed(1);
+        const gpuNote = result.backend && result.backend.includes("cupy") ? " (GPU並列計算)" : "";
+
+        if (metrics.status === "diverged" || metrics.diverged) {
+          this.notify("数値計算が発散しました。初速や迎角の設定をご確認ください。", "warn");
+        } else {
+          this.notify(`発射完了 (${speed}m/s · ${angle}°): 飛距離 ${fmt(dist, 2)}m / 滞空 ${fmt(time, 2)}s${gpuNote}`, "ok");
+        }
+        this._updateTransportUi(this.transport.state);
       });
-
-      const elapsedSec = ((performance.now() - tStart) / 1000).toFixed(2);
-      this.setGlobalEta({
-        clock: `${elapsedSec}s`,
-        left: "計算完了",
-        active: false,
-        title: `飛行シミュレーション計算完了 (所要時間: ${elapsedSec}秒)`,
-      });
-
-      this.flightDirty = false;
-      if (this.viewport && result.sample_trajectories && result.sample_trajectories.length) {
-        this.viewport.setEnsembleTracks(result.sample_trajectories);
+    } finally {
+      this.stopEtaCountdown();
+      const widget = this.dom["eta-widget"];
+      if (widget && widget.dataset.active === "1") {
+        const elapsedSec = ((performance.now() - tStart) / 1000).toFixed(2);
+        this.setGlobalEta({
+          clock: `${elapsedSec}s`,
+          left: "待機中",
+          active: false,
+        });
       }
-
-      const metrics = result.metrics || {};
-      const dist = metrics.horizontal_range_m || metrics.distance_m || 0;
-      const time = metrics.flight_time_s || 0;
-      const speed = Number((this.store.data.launch && this.store.data.launch.launch_speed) || 10).toFixed(1);
-      const angle = Number((this.store.data.launch && this.store.data.launch.launch_angle_deg) || 15).toFixed(1);
-      const gpuNote = result.backend && result.backend.includes("cupy") ? " (GPU並列計算)" : "";
-
-      if (metrics.status === "diverged" || metrics.diverged) {
-        this.notify("数値計算が発散しました。初速や迎角の設定をご確認ください。", "warn");
-      } else {
-        this.notify(`発射完了 (${speed}m/s · ${angle}°): 飛距離 ${fmt(dist, 2)}m / 滞空 ${fmt(time, 2)}s${gpuNote}`, "ok");
-      }
-      this._updateTransportUi(this.transport.state);
-    });
+    }
   }
 
   async _togglePlay() {

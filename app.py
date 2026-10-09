@@ -802,7 +802,8 @@ def simulation_launch():
     backend_name_str = summary.get("backend", "numpy")
     device_name_str = None
 
-    if gpu_info.get("available") and gpu_info.get("backend") == "cupy":
+    should_ensemble = bool(payload.get("include_ensemble") or payload.get("ensemble"))
+    if should_ensemble and gpu_info.get("available") and gpu_info.get("backend") == "cupy":
         try:
             ensemble_res = parallel.gpu_ensemble_simulation(
                 aircraft=aircraft,

@@ -1106,6 +1106,9 @@ def stress_metrics(
                 "ground_height_m": _finite(ground_height_m),
                 "angular_rate": vec3(angular_rate),
                 "time_s": 0.0,
+                "spanwise": 2,
+                "chordwise": 2,
+                "backend": "numpy",
             },
         )
         if out is not None:
