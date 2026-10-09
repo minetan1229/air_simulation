@@ -754,6 +754,10 @@ class ConsoleApp {
     const toggleBtn = this.dom["quick-dock-toggle"];
     const panel = this.dom["quick-tuning-panel"];
     if (toggleBtn && panel) {
+      panel.setAttribute("hidden", "");
+      panel.style.display = "none";
+      toggleBtn.innerHTML = "⚙️ 投げ方調整";
+
       toggleBtn.addEventListener("click", () => {
         const isHidden = panel.style.display === "none" || panel.hasAttribute("hidden");
         if (isHidden) {
@@ -812,11 +816,14 @@ class ConsoleApp {
     // 5. Controls Guide Toggle
     const guideToggle = this.dom["guide-toggle-btn"];
     const guideBox = this.dom["vp-controls-guide"];
-    if (guideToggle && guideBox) {
-      guideToggle.addEventListener("click", () => {
+    if (guideBox) {
+      const toggleGuide = () => {
         const isCollapsed = guideBox.classList.toggle("collapsed");
-        guideToggle.textContent = isCollapsed ? "▸" : "▾";
-      });
+        if (guideToggle) guideToggle.textContent = isCollapsed ? "▸" : "▾";
+      };
+      if (guideToggle) guideToggle.addEventListener("click", (e) => { e.stopPropagation(); toggleGuide(); });
+      const guideHead = guideBox.querySelector(".guide-header");
+      if (guideHead) guideHead.addEventListener("click", toggleGuide);
     }
 
     // 6. Champion Card Actions
@@ -825,6 +832,19 @@ class ConsoleApp {
         if (this.dom["ensemble-champion-card"]) this.dom["ensemble-champion-card"].hidden = true;
       });
     }
+    // ESCキーでモーダル・カードを閉じる
+    window.addEventListener("keydown", (e) => {
+      if (e.key === "Escape") {
+        if (this.dom["ensemble-champion-card"] && !this.dom["ensemble-champion-card"].hidden) {
+          this.dom["ensemble-champion-card"].hidden = true;
+        }
+        if (this.dom["quick-tuning-panel"] && !this.dom["quick-tuning-panel"].hasAttribute("hidden")) {
+          this.dom["quick-tuning-panel"].setAttribute("hidden", "");
+          this.dom["quick-tuning-panel"].style.display = "none";
+          if (this.dom["quick-dock-toggle"]) this.dom["quick-dock-toggle"].innerHTML = "⚙️ 投げ方調整";
+        }
+      }
+    });
     if (this.dom["champ-btn-adopt"]) {
       this.dom["champ-btn-adopt"].addEventListener("click", () => {
         if (!this._lastChampionFlight) return;
@@ -1306,6 +1326,9 @@ class ConsoleApp {
       }
     }
     banner.hidden = false;
+    if (this.dom["vp-flight-status-announcer"]) {
+      this.dom["vp-flight-status-announcer"].style.display = "none";
+    }
     this._updatePill(badge === "DIVERGED" ? "発散" : "エラー", "error");
     if (this.dom["top-state"]) this.dom["top-state"].textContent = "ERROR";
   }
@@ -1313,6 +1336,9 @@ class ConsoleApp {
   hideSimulationError() {
     if (this.dom["sim-error-banner"]) {
       this.dom["sim-error-banner"].hidden = true;
+    }
+    if (this.dom["vp-flight-status-announcer"]) {
+      this.dom["vp-flight-status-announcer"].style.display = "";
     }
   }
 

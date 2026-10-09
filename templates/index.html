@@ -67,18 +67,18 @@
         <span class="eta-val num" id="eta-clock">—</span>
         <span class="eta-sub num" id="eta-left">待機中</span>
       </div>
-      <button class="btn btn-primary btn-launch-top" id="btn-top-launch" type="button" title="現在の設定で飛行軌跡を一括シミュレーション計算して再生します (Enter)">🚀 シミュレーション発射</button>
-      <button class="btn btn-gpu" id="btn-top-gpu-ensemble" type="button" title="NVIDIA RTX 4060 GPUで100機を同時に一括シミュレーション計算して全軌跡を描画します">⚡ GPU 100機同時飛行</button>
+      <button class="btn btn-primary btn-launch-top" id="btn-top-launch" type="button" title="現在の設定で飛行軌跡を一括シミュレーション計算して再生します (Enter)">🚀 発射</button>
+      <button class="btn btn-gpu" id="btn-top-gpu-ensemble" type="button" title="GPUで100機を同時に一括シミュレーション計算して全軌跡を描画します">⚡ 100機一括</button>
       <label class="switch" title="風洞モード: 機体を固定して空力係数のみ測定 (U)">
         <input type="checkbox" id="tunnel-toggle">
         <span class="switch-box"></span>
-        <span class="switch-label">風洞モード</span>
+        <span class="switch-label">風洞</span>
       </label>
-      <button class="btn" id="btn-top-investigate" type="button" title="指定した機体をベースに手で変えられる項目を自動分析・改善">🔍 Auto調査</button>
+      <button class="btn" id="btn-top-investigate" type="button" title="指定した機体をベースに手で変えられる項目を自動分析・改善">🔍 調査</button>
       <button class="btn" id="btn-save" type="button" title="設定を JSON で保存 (Ctrl+S)">保存</button>
       <button class="btn" id="btn-load" type="button" title="設定 JSON の読込">読込</button>
       <button class="btn" id="btn-csv" type="button" title="飛行ログを CSV で出力 (E)">CSV</button>
-      <button class="btn btn-rec" id="btn-top-record" type="button" title="3D飛行動画を録画して保存 (WebM/MP4)">🎥 動画録画</button>
+      <button class="btn btn-rec" id="btn-top-record" type="button" title="3D飛行動画を録画して保存 (WebM/MP4)">🎥 録画</button>
       <button class="btn btn-icon" id="btn-help" type="button" title="ショートカット (?)" aria-label="ショートカット">?</button>
       <input type="file" id="config-file" accept="application/json,.json" hidden>
     </div>
@@ -286,11 +286,11 @@
       </div>
 
       <!-- 操作ガイドHUD (マウス・キーボード操作が3秒でわかる) -->
-      <div class="vp-controls-guide" id="vp-controls-guide">
+      <div class="vp-controls-guide collapsed" id="vp-controls-guide">
         <div class="guide-header">
           <span class="guide-icon">🎮</span>
           <span class="guide-title">操作ガイド</span>
-          <button class="guide-toggle-btn" id="guide-toggle-btn" type="button" title="ガイドを折りたたむ">▾</button>
+          <button class="guide-toggle-btn" id="guide-toggle-btn" type="button" title="ガイドを開く/折りたたむ">▸</button>
         </div>
         <div class="guide-content" id="guide-content">
           <div class="guide-item">
@@ -405,7 +405,7 @@
         </div>
 
         <!-- 投げ方クイック調整パネル (初速・角度・バンクの即座変更) -->
-        <div class="quick-tuning-panel" id="quick-tuning-panel">
+        <div class="quick-tuning-panel" id="quick-tuning-panel" hidden>
           <div class="tuning-col">
             <div class="tuning-head">
               <span class="tuning-label">初速 (スピード)</span>

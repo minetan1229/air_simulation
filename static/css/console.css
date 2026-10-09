@@ -122,7 +122,7 @@ button, input, select, textarea {
 .toprail-readouts {
   display: flex;
   align-items: stretch;
-  flex: 1 1 auto;
+  flex: 0 1 auto;
   min-width: 0;
   overflow: hidden;
 }
@@ -132,19 +132,19 @@ button, input, select, textarea {
   flex-direction: column;
   justify-content: center;
   gap: 1px;
-  padding: 0 14px;
+  padding: 0 9px;
   border-right: 1px solid #2c2f34;
   min-width: 0;
 }
 .readout-key {
   font-family: var(--mono);
   font-size: 8px;
-  letter-spacing: 0.18em;
+  letter-spacing: 0.16em;
   color: #6f757d;
 }
 .readout-val {
   font-family: var(--mono);
-  font-size: 12.5px;
+  font-size: 12px;
   color: #e9e7e2;
   white-space: nowrap;
   overflow: hidden;
@@ -159,9 +159,17 @@ button, input, select, textarea {
 .toprail-actions {
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 0 12px;
+  justify-content: flex-end;
+  gap: 5px;
+  padding: 0 10px;
   border-left: 1px solid #2c2f34;
+  flex: 1 0 auto;
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.toprail-actions::-webkit-scrollbar {
+  display: none;
 }
 
 .btn {
@@ -598,16 +606,18 @@ input[type="range"]:focus-visible { outline: 2px solid var(--accent); outline-of
   gap: 4px;
   flex-wrap: wrap;
   justify-content: flex-end;
-  max-width: 60%;
+  max-width: min(55%, 520px);
+  z-index: 14;
 }
 .chip {
   appearance: none;
   background: rgba(251, 250, 247, 0.9);
   border: 1px solid var(--line-2);
   color: var(--ink-2);
-  font-size: 11px;
-  padding: 2px 8px;
+  font-size: 10.5px;
+  padding: 2px 7px;
   cursor: pointer;
+  border-radius: 3px;
 }
 .chip:hover { border-color: var(--ink-2); background: #fff; }
 .chip[data-on="1"] {
@@ -622,14 +632,17 @@ input[type="range"]:focus-visible { outline: 2px solid var(--accent); outline-of
   font-family: var(--mono);
   font-size: 10.5px;
   color: var(--ink-2);
-  background: rgba(251, 250, 247, 0.82);
+  background: rgba(251, 250, 247, 0.88);
+  backdrop-filter: blur(4px);
   border: 1px solid var(--line);
   padding: 6px 8px;
   pointer-events: none;
   min-width: 132px;
+  z-index: 12;
+  border-radius: 4px;
 }
 .vp-hud-tl { top: 10px; left: 12px; }
-.vp-hud-tr { top: 46px; right: 12px; min-width: 150px; }
+.vp-hud-tr { top: 68px; right: 12px; min-width: 150px; }
 .vp-hud-bl { bottom: 12px; left: 12px; min-width: 190px; }
 
 .hud-row { display: flex; justify-content: space-between; gap: 12px; line-height: 1.6; }
@@ -861,7 +874,7 @@ input[type="range"]:focus-visible { outline: 2px solid var(--accent); outline-of
 .workbench[data-open="1"] .wb-toggle-glyph { transform: rotate(-135deg) translate(-1px, -1px); }
 
 .wb-panes {
-  height: 330px;
+  height: min(330px, 38vh);
   overflow: hidden;
   min-height: 0;
 }
@@ -1122,13 +1135,15 @@ input[type="range"]:focus-visible { outline: 2px solid var(--accent); outline-of
 /* ------------------------------------------------------------------ */
 .transport {
   display: grid;
-  grid-template-columns: auto auto minmax(0, 1fr) auto;
+  grid-template-columns: auto auto auto minmax(0, 1fr) auto;
   align-items: center;
-  gap: 16px;
+  gap: 12px;
   padding: 0 14px;
   background: var(--ink);
   color: #e9e7e2;
   border-top: 1px solid #000;
+  height: var(--dock-h);
+  overflow: hidden;
 }
 
 .tp-controls { display: flex; align-items: center; gap: 3px; }
@@ -1362,7 +1377,8 @@ input[type="range"]:focus-visible { outline: 2px solid var(--accent); outline-of
   :root { --rail-l: 262px; --rail-r: 268px; }
   .wb-pane { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
   .wb-col-3 { grid-column: 1 / -1; border-right: 0; border-top: 1px solid var(--line); }
-  .transport { gap: 10px; }
+  .transport { gap: 8px; grid-template-columns: auto auto minmax(0, 1fr) auto; }
+  .tp-badge { display: none; }
   .tp-label { display: none; }
 }
 
@@ -1391,6 +1407,7 @@ input[type="range"]:focus-visible { outline: 2px solid var(--accent); outline-of
   .rail-right .rail-head::after { content: "◂"; }
   .rail-head .btn-mini { margin-left: 0; }
   .transport { grid-template-columns: auto minmax(0, 1fr) auto; }
+  .tp-badge { display: none; }
   .tp-rate { display: none; }
   .toprail-readouts .readout:nth-child(n+3) { display: none; }
   .wb-panes { height: 60vh; }
@@ -2117,7 +2134,7 @@ input[type="range"]:focus-visible { outline: 2px solid var(--accent); outline-of
   display: flex;
   align-items: center;
   gap: 8px;
-  background: rgba(255, 255, 255, 0.92);
+  background: rgba(255, 255, 255, 0.94);
   backdrop-filter: blur(8px);
   padding: 6px 16px;
   border-radius: 20px;
@@ -2125,6 +2142,11 @@ input[type="range"]:focus-visible { outline: 2px solid var(--accent); outline-of
   border: 1px solid rgba(26, 115, 232, 0.2);
   pointer-events: none;
   transition: all 0.25s ease;
+  max-width: min(480px, calc(100% - 360px));
+}
+
+.sim-error-banner:not([hidden]) ~ .vp-flight-status-announcer {
+  display: none !important;
 }
 
 .vp-flight-status-announcer .status-dot {
@@ -2151,27 +2173,36 @@ input[type="range"]:focus-visible { outline: 2px solid var(--accent); outline-of
 }
 
 .vp-flight-status-announcer .status-text {
-  font-size: 12.5px;
+  font-size: 12px;
   font-weight: 600;
   color: #202124;
   letter-spacing: 0.02em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 /* 2. 直感操作ガイドHUD */
 .vp-controls-guide {
   position: absolute;
-  top: 54px;
-  left: 14px;
-  z-index: 15;
-  background: rgba(255, 255, 255, 0.88);
+  top: 114px;
+  left: 12px;
+  z-index: 12;
+  background: rgba(255, 255, 255, 0.92);
   backdrop-filter: blur(8px);
-  border-radius: 10px;
-  border: 1px solid rgba(0, 0, 0, 0.08);
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
-  padding: 8px 12px;
-  max-width: 280px;
+  border-radius: 8px;
+  border: 1px solid rgba(0, 0, 0, 0.1);
+  box-shadow: 0 3px 10px rgba(0, 0, 0, 0.07);
+  padding: 6px 10px;
+  max-width: 270px;
   font-size: 11px;
   transition: all 0.2s ease;
+}
+
+.vp-controls-guide.collapsed {
+  padding: 4px 8px;
+  background: rgba(255, 255, 255, 0.85);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.05);
 }
 
 .vp-controls-guide .guide-header {
@@ -2186,15 +2217,15 @@ input[type="range"]:focus-visible { outline: 2px solid var(--accent); outline-of
   font-weight: 700;
   color: #1a73e8;
   flex: 1;
-  font-size: 11.5px;
+  font-size: 11px;
 }
 .vp-controls-guide .guide-toggle-btn {
   background: none;
   border: none;
   cursor: pointer;
-  font-size: 12px;
+  font-size: 11px;
   color: #5f6368;
-  padding: 0 4px;
+  padding: 0 2px;
 }
 .vp-controls-guide .guide-content {
   margin-top: 6px;
@@ -2234,22 +2265,22 @@ input[type="range"]:focus-visible { outline: 2px solid var(--accent); outline-of
   bottom: 14px;
   left: 50%;
   transform: translateX(-50%);
-  z-index: 15;
+  z-index: 18;
   display: flex;
   flex-direction: column;
   align-items: center;
   gap: 8px;
-  max-width: 90%;
+  max-width: calc(100% - 24px);
   pointer-events: auto;
 }
 
 .quick-launch-actions {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
   background: rgba(255, 255, 255, 0.94);
   backdrop-filter: blur(12px);
-  padding: 8px 14px;
+  padding: 6px 12px;
   border-radius: 28px;
   box-shadow: 0 6px 24px rgba(0, 0, 0, 0.16), 0 2px 6px rgba(0, 0, 0, 0.08);
   border: 1px solid rgba(255, 255, 255, 0.8);
@@ -2258,12 +2289,12 @@ input[type="range"]:focus-visible { outline: 2px solid var(--accent); outline-of
 .btn-main-throw {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
   background: linear-gradient(135deg, #1a73e8 0%, #1557b0 100%);
   color: #ffffff;
   border: none;
-  border-radius: 22px;
-  padding: 8px 22px;
+  border-radius: 20px;
+  padding: 7px 18px;
   font-family: inherit;
   cursor: pointer;
   box-shadow: 0 4px 12px rgba(26, 115, 232, 0.4);
@@ -2280,7 +2311,7 @@ input[type="range"]:focus-visible { outline: 2px solid var(--accent); outline-of
 }
 
 .btn-main-throw .throw-icon {
-  font-size: 20px;
+  font-size: 18px;
   line-height: 1;
   animation: float-rocket 1.8s ease-in-out infinite alternate;
 }
@@ -2295,13 +2326,13 @@ input[type="range"]:focus-visible { outline: 2px solid var(--accent); outline-of
   align-items: flex-start;
 }
 .throw-title {
-  font-size: 15px;
+  font-size: 14px;
   font-weight: 800;
   letter-spacing: 0.04em;
   line-height: 1.1;
 }
 .throw-hint {
-  font-size: 9.5px;
+  font-size: 9px;
   font-weight: 600;
   opacity: 0.85;
   letter-spacing: 0.05em;
@@ -2311,12 +2342,12 @@ input[type="range"]:focus-visible { outline: 2px solid var(--accent); outline-of
 .btn-ensemble-throw {
   display: flex;
   align-items: center;
-  gap: 9px;
+  gap: 8px;
   background: linear-gradient(135deg, #f9ab00 0%, #e37400 100%);
   color: #ffffff;
   border: none;
-  border-radius: 22px;
-  padding: 8px 18px;
+  border-radius: 20px;
+  padding: 7px 15px;
   font-family: inherit;
   cursor: pointer;
   box-shadow: 0 4px 12px rgba(227, 116, 0, 0.35);
@@ -2331,7 +2362,7 @@ input[type="range"]:focus-visible { outline: 2px solid var(--accent); outline-of
   transform: translateY(1px);
 }
 .btn-ensemble-throw .ensemble-icon {
-  font-size: 18px;
+  font-size: 16px;
 }
 .ensemble-text-wrap {
   display: flex;
@@ -2339,12 +2370,12 @@ input[type="range"]:focus-visible { outline: 2px solid var(--accent); outline-of
   align-items: flex-start;
 }
 .ensemble-title {
-  font-size: 13.5px;
+  font-size: 13px;
   font-weight: 800;
   line-height: 1.1;
 }
 .ensemble-sub {
-  font-size: 9px;
+  font-size: 8.5px;
   font-weight: 600;
   opacity: 0.9;
 }
@@ -2354,8 +2385,8 @@ input[type="range"]:focus-visible { outline: 2px solid var(--accent); outline-of
   color: #3c4043;
   border: 1px solid #dadce0;
   border-radius: 18px;
-  padding: 6px 12px;
-  font-size: 11.5px;
+  padding: 5px 11px;
+  font-size: 11px;
   font-weight: 600;
   cursor: pointer;
   transition: all 0.15s ease;
@@ -2369,18 +2400,22 @@ input[type="range"]:focus-visible { outline: 2px solid var(--accent); outline-of
 /* クイック調整パネル */
 .quick-tuning-panel {
   display: none;
-  background: rgba(255, 255, 255, 0.96);
+  background: rgba(255, 255, 255, 0.97);
   backdrop-filter: blur(14px);
   border-radius: 16px;
   box-shadow: 0 8px 28px rgba(0, 0, 0, 0.18), 0 2px 8px rgba(0, 0, 0, 0.08);
   border: 1px solid rgba(0, 0, 0, 0.08);
   padding: 12px 18px;
-  width: 620px;
+  width: min(580px, calc(100vw - 32px));
   max-width: 95vw;
-  display: grid;
+  max-height: calc(100vh - 220px);
+  overflow-y: auto;
   grid-template-columns: repeat(3, 1fr);
-  gap: 16px;
+  gap: 14px;
   animation: slide-up-fade 0.2s ease;
+}
+.quick-tuning-panel:not([hidden]) {
+  display: grid;
 }
 .quick-tuning-panel[hidden] {
   display: none !important;
@@ -2445,20 +2480,20 @@ input[type="range"]:focus-visible { outline: 2px solid var(--accent); outline-of
 
 /* 4. 🏆 100機一斉飛行 チャンピオンHUD (Leaderboard Card) */
 .ensemble-champion-card {
-  position: absolute;
+  position: fixed;
   top: 50%;
   left: 50%;
   transform: translate(-50%, -50%);
-  z-index: 30;
+  z-index: 50;
   width: 580px;
   max-width: 94vw;
   max-height: 85vh;
   overflow-y: auto;
-  background: rgba(255, 255, 255, 0.97);
+  background: rgba(255, 255, 255, 0.98);
   backdrop-filter: blur(16px);
   border-radius: 18px;
-  border: 1px solid rgba(251, 188, 4, 0.4);
-  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.22), 0 4px 12px rgba(251, 188, 4, 0.2);
+  border: 1.5px solid rgba(251, 188, 4, 0.6);
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3), 0 0 0 100vmax rgba(15, 23, 42, 0.45);
   padding: 18px 22px;
   animation: pop-champion 0.25s cubic-bezier(0.18, 0.89, 0.32, 1.28);
 }
