@@ -2154,3 +2154,228 @@ input[type="range"]:focus-visible { outline: 2px solid var(--accent); outline-of
   vertical-align: -2px;
   margin-right: 3px;
 }
+
+/* ==========================================================================
+   100機一括飛行 記録・統計HUD (Google Clean Minimalist Modal/Card)
+   ========================================================================== */
+.ensemble-champion-card {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 50;
+  width: 620px;
+  max-width: 94vw;
+  max-height: 85vh;
+  overflow-y: auto;
+  background: rgba(255, 255, 255, 0.98);
+  backdrop-filter: blur(12px);
+  border-radius: 12px;
+  border: 1px solid var(--line-2);
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.22), 0 0 0 100vmax rgba(15, 23, 42, 0.35);
+  padding: 16px 20px;
+  box-sizing: border-box;
+}
+.ensemble-champion-card[hidden] {
+  display: none !important;
+}
+
+.champ-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid var(--line);
+  padding-bottom: 8px;
+  margin-bottom: 12px;
+}
+.champ-title-group {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.champ-title {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--ink);
+  letter-spacing: -0.01em;
+}
+.champ-sub {
+  font-size: 11px;
+  color: var(--accent);
+  font-family: var(--mono);
+}
+.champ-close-btn {
+  background: #f1f3f4;
+  border: 1px solid var(--line);
+  border-radius: 50%;
+  width: 26px;
+  height: 26px;
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--muted);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.15s ease;
+}
+.champ-close-btn:hover {
+  background: #e8eaed;
+  color: var(--ink);
+}
+
+/* 統計グリッド (最高値・最下位・平均値) */
+.champ-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+.champ-stat-card {
+  background: #f8f9fa;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 8px 12px;
+  display: flex;
+  flex-direction: column;
+}
+.champ-stat-card.champ-gold {
+  grid-column: span 2;
+  background: #fef7e0;
+  border: 1.5px solid #f9ab00;
+}
+.champ-stat-card.champ-avg {
+  background: #e8f0fe;
+  border: 1px solid #a8c7fa;
+}
+.champ-stat-card.champ-min {
+  background: #fce8e6;
+  border: 1px solid #f28b82;
+}
+.champ-stat-label {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--ink-2);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-bottom: 2px;
+}
+.champ-stat-card.champ-gold .champ-stat-label {
+  color: #b06000;
+}
+.champ-stat-card.champ-avg .champ-stat-label {
+  color: #1a73e8;
+}
+.champ-stat-card.champ-min .champ-stat-label {
+  color: #c5221f;
+}
+.champ-stat-value {
+  font-size: 22px;
+  font-weight: 800;
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  color: var(--ink);
+  line-height: 1.2;
+}
+.champ-stat-card.champ-gold .champ-stat-value {
+  font-size: 26px;
+  color: #b06000;
+}
+.champ-stat-card.champ-avg .champ-stat-value {
+  color: #1a73e8;
+}
+.champ-stat-card.champ-min .champ-stat-value {
+  color: #c5221f;
+}
+.champ-stat-value .unit {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
+}
+.champ-stat-extra {
+  font-size: 10.5px;
+  color: var(--muted);
+  margin-top: 2px;
+  font-family: var(--mono);
+}
+.champ-stat-card.champ-gold .champ-stat-extra {
+  color: #8c4c00;
+}
+.champ-stat-card.champ-avg .champ-stat-extra {
+  color: #174ea6;
+}
+.champ-stat-card.champ-min .champ-stat-extra {
+  color: #a50e0e;
+}
+
+/* アクションボタン群 */
+.champ-actions {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+.champ-btn {
+  flex: 1 1 auto;
+  min-width: 130px;
+  padding: 6px 10px;
+  font-size: 11px;
+  font-weight: 600;
+  border-radius: 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+}
+
+/* リーダーボードテーブル */
+.champ-table-wrap {
+  border-top: 1px solid var(--line);
+  padding-top: 8px;
+}
+.champ-table-title {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--ink-2);
+  margin-bottom: 4px;
+}
+.champ-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 10.5px;
+}
+.champ-table th {
+  background: #f1f3f4;
+  color: var(--muted);
+  padding: 4px 6px;
+  text-align: left;
+  font-weight: 700;
+  font-size: 10px;
+}
+.champ-table td {
+  padding: 5px 6px;
+  border-bottom: 1px solid var(--line);
+  color: var(--ink);
+  font-family: var(--mono);
+}
+.champ-table tr.clickable {
+  cursor: pointer;
+  transition: background 0.12s ease;
+}
+.champ-table tr.clickable:hover {
+  background: #e8f0fe;
+}
+.champ-table tr.champ-rank-1 {
+  background: #fef7e0;
+  font-weight: 700;
+}
+.champ-table tr.champ-rank-1 td {
+  color: #b06000;
+}
+.champ-table tr.champ-rank-worst {
+  background: #fce8e6;
+  font-weight: 600;
+}
+.champ-table tr.champ-rank-worst td {
+  color: #c5221f;
+}

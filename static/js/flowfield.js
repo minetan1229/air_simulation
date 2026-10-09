@@ -44,6 +44,11 @@ uniform float uSeed;
 uniform float uSpeedScale;
 uniform float uSwirl;
 uniform float uTunnel;
+uniform float uTunnelCl;
+uniform float uTunnelAlpha;
+uniform float uTunnelSpeed;
+uniform vec3 uModelCenter;
+uniform vec3 uWingSpan;
 varying vec2 vUv;
 
 vec3 hash3(vec2 p, float seed) {
@@ -53,14 +58,92 @@ vec3 hash3(vec2 p, float seed) {
   return fract(sin(h + seed) * 43758.5453);
 }
 
+// Compute aerodynamic interference vector (deflection, downwash, wingtip vortices, wake)
+vec3 computeAeroInterference(vec3 worldPos) {
+  if (uTunnel < 0.5) return vec3(0.0);
+
+  // Position relative to airframe aerodynamic center (typically around x=0, y=1.2, z=0 in three-space)
+  // Three.js coords: X = Tunnel axial flow (upstream +X to downstream -X)
+  //                 Y = Vertical (upward +Y, ground 0)
+  //                 Z = Lateral / Spanwise (left/right)
+  vec3 rel = worldPos - uModelCenter;
+  
+  float bHalf = max(uWingSpan.z * 0.5, 0.16); // Half-span
+  float chord = max(uWingSpan.x, 0.28);       // Mean chord
+  
+  // 1. Upstream stagnation & wing thickness displacement
+  // Near the leading edge (rel.x ~ chord*0.5) and wing planform
+  float rPlanform = length(vec2(rel.x / chord, rel.z / bHalf));
+  float vertDist = abs(rel.y);
+  
+  vec3 defl = vec3(0.0);
+  
+  // Upwash before leading edge, downwash behind
+  if (abs(rel.z) < bHalf * 1.25) {
+    // Distance from wing center plane
+    float coreDist = length(vec2(max(abs(rel.x) - chord * 0.5, 0.0), rel.y));
+    float pushStrength = exp(-coreDist * 16.0);
+    
+    // Vertical deflection (flow avoids solid wing: pushes up above wing, down below wing)
+    float signY = sign(rel.y + 0.001);
+    defl.y += signY * pushStrength * 0.45 * uTunnelSpeed;
+    
+    // Deceleration right at the nose / stagnation
+    if (rel.x > 0.0 && rel.x < chord * 0.7 && coreDist < 0.06) {
+      defl.x += pushStrength * 0.35 * uTunnelSpeed; // Counteracts downstream flow
+    }
+    
+    // 2. Downwash behind the trailing edge (rel.x < 0)
+    if (rel.x < 0.1) {
+      float wakeX = clamp(-rel.x / 1.5, 0.0, 1.0);
+      float wakeAtten = exp(-wakeX * 1.8) * exp(-abs(rel.y) * 12.0) * (1.0 - smoothstep(0.0, bHalf * 1.2, abs(rel.z)));
+      // Downwash angle proportional to lift coefficient Cl and alpha
+      float downwashVel = -(uTunnelCl * 0.38 + uTunnelAlpha * 0.015) * uTunnelSpeed * wakeAtten;
+      defl.y += downwashVel;
+      
+      // Momentum deficit / drag wake (deficit in main flow)
+      defl.x += 0.25 * wakeAtten * uTunnelSpeed;
+      
+      // Stall buffeting wake when alpha is high
+      if (uTunnelAlpha > 14.0 || uTunnelAlpha < -8.0) {
+        float noise = sin(rel.x * 25.0 + uTime * 35.0) * cos(rel.z * 30.0 + uTime * 20.0);
+        defl.y += noise * 0.6 * uTunnelSpeed * wakeAtten;
+        defl.z += cos(rel.x * 20.0 + uTime * 28.0) * 0.5 * uTunnelSpeed * wakeAtten;
+      }
+    }
+  }
+
+  // 3. Wingtip Vortices (Trail from +/- bHalf behind wing, rel.x < 0)
+  for (int side = -1; side <= 1; side += 2) {
+    float tipZ = float(side) * bHalf;
+    vec2 dVortex = vec2(rel.y, rel.z - tipZ);
+    float rVortex = length(dVortex);
+    
+    if (rel.x < chord * 0.2 && rVortex < 0.28) {
+      // Vortex core model (Rankine / Lamb-Oseen)
+      float wakeDecay = exp(rel.x * 0.7); // Stronger near tip, diffuses downstream
+      float circ = uTunnelCl * 0.25 * uTunnelSpeed * float(side); // Sign based on port/starboard
+      float vTheta = circ * (rVortex / (rVortex * rVortex + 0.002)) * wakeDecay;
+      
+      // Tangential velocity around vortex axis (along -X)
+      defl.y += -vTheta * (dVortex.y / (rVortex + 0.001));
+      defl.z +=  vTheta * (dVortex.x / (rVortex + 0.001));
+    }
+  }
+
+  return defl;
+}
+
 void main() {
   vec4 state;
   if (uSeed > 0.5) {
     if (uTunnel > 0.5) {
-      // Wind tunnel nozzle seeding: regular stream lanes with slight jitter
-      vec2 grid = floor(vUv * vec2(36.0, 24.0)) / vec2(36.0, 24.0);
-      vec3 j = (hash3(vUv * 19.3, 1.0) - 0.5) * 0.04;
-      state = vec4(fract(vUv.x + j.x), fract(grid.y + j.y), fract(grid.x + j.z), hash3(vUv, 3.1).x);
+      // Wind tunnel: organize smoke filaments in discrete streamline comb lines
+      // 18 parallel streamline combs across span, 8 vertical levels
+      vec2 combs = floor(vUv * vec2(18.0, 8.0)) / vec2(18.0, 8.0);
+      vec3 j = (hash3(vUv * 37.1, 1.0) - 0.5) * 0.015;
+      // Start near upstream +X entrance
+      state = vec4(0.98 + j.x * 0.02, clamp(combs.y + 0.06 + j.y, 0.15, 0.85), clamp(combs.x + 0.03 + j.z, 0.15, 0.85), hash3(vUv, 2.1).x);
     } else {
       state = vec4(hash3(vUv, uSeed), 0.0);
     }
@@ -69,23 +152,28 @@ void main() {
   }
 
   vec3 uvw = clamp(state.xyz, 0.0, 1.0);
+  vec3 worldPos = uBoxMin + uvw * uBoxSize;
   vec3 flow = texture(uWind, vec3(uvw.x, uvw.z, uvw.y)).xyz;
+
+  // Add aerodynamic deflection, downwash, and wingtip vortices
+  vec3 aeroMod = computeAeroInterference(worldPos);
 
   vec3 jitter = (hash3(vUv * 7.3 + uTime * 0.05, uSeed) - 0.5);
   vec3 swirl = cross(flow, jitter) * uSwirl;
 
-  vec3 velocity = flow * uSpeedScale + swirl;
+  vec3 velocity = (flow + aeroMod) * uSpeedScale + swirl;
   vec3 next = state.xyz + velocity * uDt / uBoxSize;
 
-  float life = fract(state.w + uDt * (uTunnel > 0.5 ? 0.22 : 0.12));
+  float life = fract(state.w + uDt * (uTunnel > 0.5 ? 0.35 : 0.12));
 
   if (uTunnel > 0.5) {
-    // Respawn along the upstream nozzle wall as organized smoke filament lines
-    if (next.x < 0.005 || next.x > 0.995 || next.y < 0.005 || next.y > 0.995 || next.z < 0.005 || next.z > 0.995 || life < 0.02) {
-      vec2 grid = floor(vUv * vec2(36.0, 24.0)) / vec2(36.0, 24.0);
-      vec3 j = (hash3(vUv * 43.1 + life * 17.0, 2.0) - 0.5) * 0.03;
-      next = vec3(0.99, clamp(grid.y + j.y, 0.05, 0.95), clamp(grid.x + j.z, 0.05, 0.95));
-      life = fract(hash3(vUv, 7.3).x * 0.2);
+    // Respawn along the upstream nozzle rake as crisp smoke filaments
+    if (next.x < 0.005 || next.x > 0.995 || next.y < 0.005 || next.y > 0.995 || next.z < 0.005 || next.z > 0.995 || life < 0.015) {
+      vec2 combs = floor(vUv * vec2(18.0, 8.0)) / vec2(18.0, 8.0);
+      vec3 j = (hash3(vUv * 53.7 + life * 11.0, 4.0) - 0.5) * 0.012;
+      // Inflow at +X nozzle edge (0.98 in UVW space)
+      next = vec3(0.98, clamp(combs.y + 0.08 + j.y, 0.18, 0.82), clamp(combs.x + 0.03 + j.z, 0.18, 0.82));
+      life = fract(hash3(vUv, 5.7).x * 0.15);
     }
   } else {
     next = fract(next);
@@ -93,6 +181,7 @@ void main() {
 
   gl_FragColor = vec4(next, life);
 }
+
 `;
 
 const POINT_VERT = /* glsl */ `
@@ -386,6 +475,11 @@ export class WindParticles {
       uSpeedScale: { value: 1 },
       uSwirl: { value: this.swirl },
       uTunnel: { value: 0 },
+      uTunnelCl: { value: 0.35 },
+      uTunnelAlpha: { value: 4.0 },
+      uTunnelSpeed: { value: 12.0 },
+      uModelCenter: { value: new THREE.Vector3(0, 1.15, 0) },
+      uWingSpan: { value: new THREE.Vector3(0.28, 0.05, 0.32) },
     };
     this.simMaterial = new THREE.ShaderMaterial({
       uniforms: this.simUniforms,
@@ -503,6 +597,15 @@ export class WindParticles {
       this.pointMaterial.opacity = isTunnel ? 0.75 : 0.45;
       this.mode = "cpu";
     }
+  }
+
+  setTunnelAero(params = {}) {
+    if (!this.gpuSupported || !this.simUniforms) return;
+    if (params.cl !== undefined) this.simUniforms.uTunnelCl.value = Number(params.cl);
+    if (params.alpha !== undefined) this.simUniforms.uTunnelAlpha.value = Number(params.alpha);
+    if (params.speed !== undefined) this.simUniforms.uTunnelSpeed.value = Number(params.speed);
+    if (params.center) this.simUniforms.uModelCenter.value.copy(params.center);
+    if (params.span) this.simUniforms.uWingSpan.value.copy(params.span);
   }
 
   update(dt, elapsed) {

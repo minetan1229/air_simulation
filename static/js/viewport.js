@@ -590,6 +590,48 @@ export class Viewport {
 
     this.tunnelGroup.add(this.stingGroup);
 
+    // 5. Upstream smoke rake nozzle comb (visual injection comb at x=2.8)
+    this.smokeRakeGroup = new THREE.Group();
+    this.smokeRakeGroup.name = "smokeRakeComb";
+    const rakeBarGeo = new THREE.CylinderGeometry(0.008, 0.008, 1.6, 16);
+    rakeBarGeo.rotateX(Math.PI / 2);
+    const rakeMat = new THREE.MeshStandardMaterial({ color: 0x4285f4, roughness: 0.3, metalness: 0.8 });
+    const rakeBar = new THREE.Mesh(rakeBarGeo, rakeMat);
+    rakeBar.position.set(2.8, 1.2, 0);
+    this.smokeRakeGroup.add(rakeBar);
+
+    // Nozzle needles (18 needles along the bar)
+    const needleGeo = new THREE.CylinderGeometry(0.002, 0.004, 0.08, 8);
+    needleGeo.rotateZ(Math.PI / 2);
+    const needleMat = new THREE.MeshStandardMaterial({ color: 0x34a853, roughness: 0.2, metalness: 0.9 });
+    for (let i = 0; i < 18; i += 1) {
+      const zPos = -0.7 + (1.4 / 17) * i;
+      const needle = new THREE.Mesh(needleGeo, needleMat);
+      needle.position.set(2.76, 1.2, zPos);
+      this.smokeRakeGroup.add(needle);
+    }
+    this.tunnelGroup.add(this.smokeRakeGroup);
+
+    // 6. Aerodynamic force vector indicators (Lift, Drag arrows)
+    this.liftArrow = new THREE.ArrowHelper(
+      new THREE.Vector3(0, 1, 0),
+      new THREE.Vector3(0, 1.25, 0),
+      0.3,
+      0x1a73e8,
+      0.08,
+      0.04
+    );
+    this.dragArrow = new THREE.ArrowHelper(
+      new THREE.Vector3(-1, 0, 0),
+      new THREE.Vector3(0, 1.25, 0),
+      0.2,
+      0xea4335,
+      0.06,
+      0.03
+    );
+    this.tunnelGroup.add(this.liftArrow);
+    this.tunnelGroup.add(this.dragArrow);
+
     this.tunnelGroup.visible = false;
     this.scene.add(this.tunnelGroup);
   }
@@ -672,6 +714,36 @@ export class Viewport {
 
     if (this.stingStrut) {
       this.stingStrut.position.set(surge, 1.05 + heave, 0);
+    }
+
+    // 5. Update aerodynamic force vector arrows
+    const origin = new THREE.Vector3(surge, 1.2 + heave, 0);
+    if (this.liftArrow) {
+      const liftMag = Math.max(0.05, Math.min(Math.abs(cl) * 0.45 * vNorm, 1.2));
+      const liftDir = cl >= 0 ? new THREE.Vector3(0, 1, 0) : new THREE.Vector3(0, -1, 0);
+      this.liftArrow.position.copy(origin);
+      this.liftArrow.setDirection(liftDir);
+      this.liftArrow.setLength(liftMag, liftMag * 0.25, liftMag * 0.12);
+      this.liftArrow.visible = speed > 0.1;
+    }
+    if (this.dragArrow) {
+      const dragMag = Math.max(0.04, Math.min(Math.max(cd, 0.01) * 0.5 * vNorm, 1.0));
+      this.dragArrow.position.copy(origin);
+      this.dragArrow.setDirection(new THREE.Vector3(-1, 0, 0));
+      this.dragArrow.setLength(dragMag, dragMag * 0.25, dragMag * 0.12);
+      this.dragArrow.visible = speed > 0.1;
+    }
+
+    // 6. Propagate aerodynamic flow parameters to particle field
+    if (this.particles && typeof this.particles.setTunnelAero === "function") {
+      const span = this.airframeMesh?.geometry?.boundingSphere?.radius ? this.airframeMesh.geometry.boundingSphere.radius * 2 : 0.32;
+      this.particles.setTunnelAero({
+        cl,
+        alpha: pitchTotal,
+        speed,
+        center: origin,
+        span: new THREE.Vector3(0.28, 0.05, span),
+      });
     }
   }
 
@@ -927,6 +999,9 @@ export class Viewport {
       const isRank2 = rank === 2;
       const isRank3 = rank === 3;
 
+      const totalCount = trajectories.length;
+      const isWorst = rank === totalCount || (sorted.length > 0 && tr.id === sorted[sorted.length - 1].id);
+
       const positions = [];
       pts.forEach((p) => {
         // sim to three: x -> x, height -> y, lateral -> z
@@ -941,9 +1016,13 @@ export class Viewport {
       let linewidth = 1;
 
       if (isRank1) {
-        col = new THREE.Color(0xffb300); // 1st Gold
+        col = new THREE.Color(0xffb300); // 1st Gold (最高値)
         opacity = 1.0;
         linewidth = 3;
+      } else if (isWorst) {
+        col = new THREE.Color(0xe53935); // Worst Red (最低値)
+        opacity = 0.95;
+        linewidth = 2;
       } else if (isRank2) {
         col = new THREE.Color(0xb0bec5); // 2nd Silver
         opacity = 0.85;
@@ -962,7 +1041,7 @@ export class Viewport {
       });
 
       const line = new THREE.Line(geom, mat);
-      line.userData = { trajectoryId: tr.id, rank: rank, isRank1: isRank1 };
+      line.userData = { trajectoryId: tr.id, rank: rank, isRank1: isRank1, isWorst: isWorst };
       group.add(line);
 
       // Landing ground marker
@@ -972,7 +1051,7 @@ export class Viewport {
         const lz = Number(lastPt.y) || 0;
 
         if (isRank1) {
-          // 1st place gold landing circle and outer pulsating ring
+          // 1st place gold landing circle and outer pulsating ring (最高値)
           const innerGeom = new THREE.CircleGeometry(0.40, 24);
           innerGeom.rotateX(-Math.PI / 2);
           const innerMat = new THREE.MeshBasicMaterial({
@@ -996,7 +1075,22 @@ export class Viewport {
           });
           const ring = new THREE.Mesh(ringGeom, ringMat);
           ring.position.set(lx, 0.012, lz);
+          ring.userData = { trajectoryId: tr.id, rank: 1 };
           group.add(ring);
+        } else if (isWorst) {
+          // Worst place red landing circle (最低値)
+          const innerGeom = new THREE.CircleGeometry(0.30, 20);
+          innerGeom.rotateX(-Math.PI / 2);
+          const innerMat = new THREE.MeshBasicMaterial({
+            color: 0xd32f2f,
+            transparent: true,
+            opacity: 0.90,
+            side: THREE.DoubleSide,
+          });
+          const inner = new THREE.Mesh(innerGeom, innerMat);
+          inner.position.set(lx, 0.008, lz);
+          inner.userData = { trajectoryId: tr.id, rank: rank, isWorst: true };
+          group.add(inner);
         } else {
           const radius = (isRank2 || isRank3) ? 0.22 : 0.10;
           const markerGeom = new THREE.CircleGeometry(radius, 16);
@@ -1037,8 +1131,42 @@ export class Viewport {
     }
   }
 
-  filterEnsembleTracks(mode = "all") {
+  filterEnsembleTracks(mode = "top1") {
     if (!this._ensembleGroup) return;
+    if (this._staggerTimer) {
+      clearInterval(this._staggerTimer);
+      this._staggerTimer = null;
+    }
+
+    if (mode === "stagger") {
+      // Start with top 1, then reveal gradually in small batches
+      this._ensembleGroup.children.forEach((child) => {
+        const rank = child.userData ? child.userData.rank : 999;
+        child.visible = rank === 1;
+      });
+      let currentRevealRank = 1;
+      const maxRank = this._ensembleTrajectories ? this._ensembleTrajectories.length : 100;
+      this._staggerTimer = setInterval(() => {
+        if (!this._ensembleGroup) {
+          clearInterval(this._staggerTimer);
+          this._staggerTimer = null;
+          return;
+        }
+        currentRevealRank += 3; // reveal 3 planes every 100ms
+        this._ensembleGroup.children.forEach((child) => {
+          const rank = child.userData ? child.userData.rank : 999;
+          if (rank <= currentRevealRank) {
+            child.visible = true;
+          }
+        });
+        if (currentRevealRank >= maxRank) {
+          clearInterval(this._staggerTimer);
+          this._staggerTimer = null;
+        }
+      }, 100);
+      return;
+    }
+
     this._ensembleGroup.children.forEach((child) => {
       const rank = child.userData ? child.userData.rank : 999;
       if (mode === "top1") {

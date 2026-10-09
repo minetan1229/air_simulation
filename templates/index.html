@@ -247,6 +247,7 @@
       <div class="vp-hud vp-hud-tr" id="tunnel-hud" hidden>
         <div class="hud-title">風洞実験室 / WIND TUNNEL</div>
         <div class="hud-row"><span class="hud-key">動態</span><span class="hud-val" id="hud-tunnel-status" style="color:#1a73e8;font-weight:600;">リアルタイム空力応答</span></div>
+        <div class="hud-row"><span class="hud-key">流線</span><span class="hud-val" style="color:#34a853;font-size:11px;">煙線レイク・翼干渉・翼端渦 ON</span></div>
         <div class="hud-row"><span class="hud-key">C_L</span><span class="hud-val num" id="hud-cl">—</span></div>
         <div class="hud-row"><span class="hud-key">C_D</span><span class="hud-val num" id="hud-cd">—</span></div>
         <div class="hud-row"><span class="hud-key">L/D</span><span class="hud-val num" id="hud-ld">—</span></div>
@@ -271,6 +272,122 @@
         <strong>3D ビューを初期化できませんでした</strong>
         <p id="vp-notice-msg"></p>
         <p class="muted">設定・数値計算・最適化はそのまま利用できます。</p>
+      </div>
+
+      <!-- 🏆 100機一括飛行・最高値/最下位/平均値 統計記録カード (100機シミュレーション記録HUD) -->
+      <div class="ensemble-champion-card" id="ensemble-champion-card" hidden>
+        <div class="champ-head">
+          <div class="champ-title-group">
+            <span class="champ-trophy"><img src="https://api.iconify.design/material-symbols/social-leaderboard-outline.svg?color=%23f9ab00" class="ui-icon" style="width:28px;height:28px;" alt=""></span>
+            <div>
+              <div class="champ-title">100機一斉飛行 記録・統計分析</div>
+              <div class="champ-sub" id="champ-backend-sub">GPU 並列演算 · 計 100機</div>
+            </div>
+          </div>
+          <button class="champ-close-btn" id="champ-close-btn" type="button" title="閉じる">✕</button>
+        </div>
+
+        <!-- 最高値・最下位・平均値の記録グリッド -->
+        <div class="champ-grid">
+          <!-- 🥇 最高値 (1位 最長飛距離) -->
+          <div class="champ-stat-card champ-gold">
+            <div class="champ-stat-label">
+              <img src="https://api.iconify.design/material-symbols/trophy.svg?color=%23b06000" class="ui-icon" alt="">
+              最高飛距離 (1位チャンピオン)
+            </div>
+            <div class="champ-stat-value"><span class="num" id="champ-best-dist">—</span><span class="unit"> m</span></div>
+            <div class="champ-stat-extra" id="champ-best-detail">機体 #— · 初速: — · 角度: —</div>
+          </div>
+
+          <!-- 🥈 最長滞空時間 (最高値) -->
+          <div class="champ-stat-card">
+            <div class="champ-stat-label">
+              <img src="https://api.iconify.design/material-symbols/timer-outline.svg?color=%231a73e8" class="ui-icon" alt="">
+              最長滞空時間 (最高値)
+            </div>
+            <div class="champ-stat-value"><span class="num" id="champ-best-time">—</span><span class="unit"> s</span></div>
+            <div class="champ-stat-extra" id="champ-best-time-detail">機体 #— · 飛距離: —m</div>
+          </div>
+
+          <!-- ⛰️ 最高到達高度 (最高値) -->
+          <div class="champ-stat-card">
+            <div class="champ-stat-label">
+              <img src="https://api.iconify.design/material-symbols/height.svg?color=%23188038" class="ui-icon" alt="">
+              最高到達高度 (最高値)
+            </div>
+            <div class="champ-stat-value"><span class="num" id="champ-best-alt">—</span><span class="unit"> m</span></div>
+            <div class="champ-stat-extra" id="champ-best-alt-detail">機体 #—</div>
+          </div>
+
+          <!-- 📊 100機 平均飛距離 & 滞空平均 -->
+          <div class="champ-stat-card champ-avg">
+            <div class="champ-stat-label">
+              <img src="https://api.iconify.design/material-symbols/bar-chart.svg?color=%231a73e8" class="ui-icon" alt="">
+              100機 平均値の記録
+            </div>
+            <div class="champ-stat-value"><span class="num" id="champ-avg-dist">—</span><span class="unit"> m</span></div>
+            <div class="champ-stat-extra" id="champ-avg-range">平均滞空: —s (最小 —m 〜 最大 —m)</div>
+          </div>
+
+          <!-- 🔻 最低飛距離 (最下位 100位) -->
+          <div class="champ-stat-card champ-min">
+            <div class="champ-stat-label">
+              <img src="https://api.iconify.design/material-symbols/south.svg?color=%23d93025" class="ui-icon" alt="">
+              最低飛距離 (最下位 100位)
+            </div>
+            <div class="champ-stat-value"><span class="num" id="champ-worst-dist">—</span><span class="unit"> m</span></div>
+            <div class="champ-stat-extra" id="champ-worst-detail">機体 #— · 初速: — · 角度: —</div>
+          </div>
+
+          <!-- ⏱️ 最低滞空時間 (最短滞空) -->
+          <div class="champ-stat-card champ-min">
+            <div class="champ-stat-label">
+              <img src="https://api.iconify.design/material-symbols/arrow-downward.svg?color=%23d93025" class="ui-icon" alt="">
+              最短滞空時間 (最低値)
+            </div>
+            <div class="champ-stat-value"><span class="num" id="champ-worst-time">—</span><span class="unit"> s</span></div>
+            <div class="champ-stat-extra" id="champ-worst-time-detail">機体 #— · 飛距離: —m</div>
+          </div>
+        </div>
+
+        <!-- チャンピオン機 & 表示切り替えアクション -->
+        <div class="champ-actions">
+          <button class="btn btn-primary btn-sm champ-btn" id="champ-btn-adopt" type="button" title="最も飛んだ機体の初速・仰角を現在の機体設定にコピーして再現">
+            <img src="https://api.iconify.design/material-symbols/check-circle-outline.svg?color=%23ffffff" class="ui-icon" alt=""> 1位の投げ方を設定に反映
+          </button>
+          <button class="btn btn-sm champ-btn" id="champ-btn-focus" type="button" title="1位の機体の着地点・軌跡にカメラをズーム">
+            <img src="https://api.iconify.design/material-symbols/center-focus-strong.svg?color=%231a73e8" class="ui-icon" alt=""> 1位にフォーカス
+          </button>
+          <button class="btn btn-sm champ-btn" id="champ-btn-focus-worst" type="button" title="最下位の機体にカメラをズームして課題を検証">
+            <img src="https://api.iconify.design/material-symbols/visibility.svg?color=%23d93025" class="ui-icon" alt=""> 最下位にフォーカス
+          </button>
+          <button class="btn btn-sm champ-btn" id="champ-btn-toggle-fleet" type="button" title="全100機表示と上位トップ3表示を切り替え">
+            <img src="https://api.iconify.design/material-symbols/layers.svg?color=%235f6368" class="ui-icon" alt=""> 表示: 全100機 ⇄ 上位3機
+          </button>
+        </div>
+
+        <!-- ランキング・記録テーブル (TOP & WORST) -->
+        <div class="champ-table-wrap">
+          <div class="champ-table-header-row">
+            <div class="champ-table-title">🏅 飛距離ランキング TOP 5 & 最下位 (行クリックでその機体をフォーカス)</div>
+          </div>
+          <table class="champ-table">
+            <thead>
+              <tr>
+                <th>順位</th>
+                <th>機体ID</th>
+                <th>飛距離</th>
+                <th>滞空時間</th>
+                <th>最高高度</th>
+                <th>初速</th>
+                <th>仰角</th>
+              </tr>
+            </thead>
+            <tbody id="champ-leaderboard-body">
+              <!-- 動的生成 -->
+            </tbody>
+          </table>
+        </div>
       </div>
     </section>
 
@@ -556,9 +673,6 @@
       <span class="tp-badge-text">再生プレイヤー</span>
     </div>
     <div class="tp-controls">
-      <button class="tp-btn tp-btn-launch" id="tp-launch" type="button" title="現在の機体・設定でシミュレーションを実行して投げる (Space / Enter)">
-        <img src="https://api.iconify.design/material-symbols/rocket-launch.svg?color=%231a73e8" class="ui-icon" alt=""><span class="tp-label" id="tp-launch-label">投げる</span>
-      </button>
       <button class="tp-btn" id="tp-reset" type="button" title="最初に戻る / 待機状態 (R)">
         <img src="https://api.iconify.design/material-symbols/replay.svg?color=%235f6368" class="ui-icon" alt=""><span class="tp-label">最初へ</span>
       </button>

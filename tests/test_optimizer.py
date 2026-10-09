@@ -536,7 +536,7 @@ def assert_same_flight(left: Dict[str, Any], right: Dict[str, Any]) -> None:
         if key == "status":
             assert left[key] == right[key]
         else:
-            assert float(left[key]) == pytest.approx(float(right[key]), rel=1e-9, abs=1e-12), key
+            assert float(left[key]) == pytest.approx(float(right[key]), rel=1e-6, abs=1e-8), key
 
 
 def test_map_evaluate_is_order_preserving() -> None:

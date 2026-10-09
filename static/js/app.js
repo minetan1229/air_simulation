@@ -352,8 +352,13 @@ class ConsoleApp {
       "champ-best-alt-detail",
       "champ-avg-dist",
       "champ-avg-range",
+      "champ-worst-dist",
+      "champ-worst-detail",
+      "champ-worst-time",
+      "champ-worst-time-detail",
       "champ-btn-adopt",
       "champ-btn-focus",
+      "champ-btn-focus-worst",
       "champ-btn-toggle-fleet",
       "champ-close-btn",
       "champ-leaderboard-body",
@@ -691,10 +696,15 @@ class ConsoleApp {
     const bestTimeFlight = res.best_hangtime || {};
     const bestAltFlight = res.best_altitude || {};
 
+    const worstFlight = res.worst_flight || (res.sample_trajectories && res.sample_trajectories[res.sample_trajectories.length - 1]) || {};
+    const worstTimeFlight = res.worst_hangtime || {};
+
     const maxDist = Number(res.max_distance_m || bestFlight.landing_distance_m || 0);
     const meanDist = Number(res.mean_distance_m || 0);
-    const minDist = Number(res.min_distance_m || 0);
+    const minDist = Number(res.min_distance_m || worstFlight.landing_distance_m || 0);
     const maxTime = Number(res.max_flight_time_s || bestTimeFlight.flight_time_s || 0);
+    const meanTime = Number(res.mean_flight_time_s || 0);
+    const minTime = Number(res.min_flight_time_s || worstTimeFlight.flight_time_s || 0);
     const maxAlt = Number(bestAltFlight.max_altitude_m || 0);
 
     const bestSpeed = bestFlight.speed_mps != null ? bestFlight.speed_mps : "—";
@@ -702,35 +712,56 @@ class ConsoleApp {
     const bestRoll = bestFlight.roll_deg != null ? bestFlight.roll_deg : "—";
     const bestId = bestFlight.id != null ? bestFlight.id : "—";
 
+    const worstSpeed = worstFlight.speed_mps != null ? worstFlight.speed_mps : "—";
+    const worstPitch = worstFlight.pitch_deg != null ? worstFlight.pitch_deg : "—";
+    const worstRoll = worstFlight.roll_deg != null ? worstFlight.roll_deg : "—";
+    const worstId = worstFlight.id != null ? worstFlight.id : "—";
+
+    // 1. 最高値 (Max)
     if (this.dom["champ-best-dist"]) this.dom["champ-best-dist"].textContent = maxDist.toFixed(2);
     if (this.dom["champ-best-detail"]) {
       this.dom["champ-best-detail"].textContent = `機体 #${bestId} · 初速: ${bestSpeed} m/s · 仰角: ${bestPitch}° · ロール: ${bestRoll}°`;
     }
     if (this.dom["champ-best-time"]) this.dom["champ-best-time"].textContent = maxTime.toFixed(2);
     if (this.dom["champ-best-time-detail"]) {
-      this.dom["champ-best-time-detail"].textContent = `機体 #${bestTimeFlight.id ?? "—"} · 距離: ${Number(bestTimeFlight.landing_distance_m || 0).toFixed(2)}m`;
+      this.dom["champ-best-time-detail"].textContent = `機体 #${bestTimeFlight.id ?? "—"} · 飛距離: ${Number(bestTimeFlight.landing_distance_m || 0).toFixed(2)}m`;
     }
     if (this.dom["champ-best-alt"]) this.dom["champ-best-alt"].textContent = maxAlt.toFixed(2);
     if (this.dom["champ-best-alt-detail"]) {
       this.dom["champ-best-alt-detail"].textContent = `機体 #${bestAltFlight.id ?? "—"}`;
     }
+
+    // 2. 平均値 (Mean / Average)
     if (this.dom["champ-avg-dist"]) this.dom["champ-avg-dist"].textContent = meanDist.toFixed(2);
     if (this.dom["champ-avg-range"]) {
-      this.dom["champ-avg-range"].textContent = `最小 ${minDist.toFixed(2)}m 〜 最大 ${maxDist.toFixed(2)}m (分散)`;
+      this.dom["champ-avg-range"].textContent = `平均滞空: ${meanTime.toFixed(2)}s (飛距離 分散: 最小 ${minDist.toFixed(2)}m 〜 最大 ${maxDist.toFixed(2)}m)`;
     }
+
+    // 3. 最低値 (Min / Worst)
+    if (this.dom["champ-worst-dist"]) this.dom["champ-worst-dist"].textContent = minDist.toFixed(2);
+    if (this.dom["champ-worst-detail"]) {
+      this.dom["champ-worst-detail"].textContent = `機体 #${worstId} · 初速: ${worstSpeed} m/s · 仰角: ${worstPitch}° · ロール: ${worstRoll}°`;
+    }
+    if (this.dom["champ-worst-time"]) this.dom["champ-worst-time"].textContent = minTime.toFixed(2);
+    if (this.dom["champ-worst-time-detail"]) {
+      this.dom["champ-worst-time-detail"].textContent = `機体 #${worstTimeFlight.id ?? "—"} · 飛距離: ${Number(worstTimeFlight.landing_distance_m || 0).toFixed(2)}m`;
+    }
+
     if (this.dom["champ-backend-sub"]) {
       this.dom["champ-backend-sub"].textContent = `${res.backend_display || res.backend || "CuPy GPU"} · 計 ${res.trajectories_count || 100}機`;
     }
 
-    // Leaderboard table body
+    // Leaderboard table body: Top 5 + Worst 1
     const tbody = this.dom["champ-leaderboard-body"];
     if (tbody) {
       tbody.innerHTML = "";
-      const list = res.leaderboard || (res.sample_trajectories ? res.sample_trajectories.slice(0, 5) : []);
-      list.slice(0, 5).forEach((item, idx) => {
+      const topList = res.leaderboard ? res.leaderboard.slice(0, 5) : (res.sample_trajectories ? res.sample_trajectories.slice(0, 5) : []);
+      const totalCount = res.trajectories_count || (res.sample_trajectories ? res.sample_trajectories.length : 100);
+
+      topList.forEach((item, idx) => {
         const tr = document.createElement("tr");
         tr.className = `clickable ${idx === 0 ? "champ-rank-1" : ""}`;
-        const rankMedal = idx === 0 ? "1位" : idx === 1 ? "2位" : idx === 2 ? "3位" : `${idx + 1}位`;
+        const rankMedal = idx === 0 ? "🥇 1位 (最高)" : idx === 1 ? "🥈 2位" : idx === 2 ? "🥉 3位" : `${idx + 1}位`;
         tr.innerHTML = `
           <td><strong>${rankMedal}</strong></td>
           <td>#${item.id}</td>
@@ -749,9 +780,34 @@ class ConsoleApp {
         });
         tbody.appendChild(tr);
       });
+
+      // 最低値 (最下位機体) をリスト末尾に追加表示
+      if (worstFlight && worstFlight.id != null && (topList.length === 0 || worstFlight.id !== topList[0].id)) {
+        const trWorst = document.createElement("tr");
+        trWorst.className = "clickable champ-rank-worst";
+        const worstRankLabel = `🔻 ${worstFlight.rank || totalCount}位 (最低)`;
+        trWorst.innerHTML = `
+          <td><strong>${worstRankLabel}</strong></td>
+          <td>#${worstFlight.id}</td>
+          <td><strong>${Number(worstFlight.landing_distance_m || minDist).toFixed(2)} m</strong></td>
+          <td>${Number(worstFlight.flight_time_s || 0).toFixed(2)} s</td>
+          <td>${Number(worstFlight.max_altitude_m || 0).toFixed(2)} m</td>
+          <td>${worstFlight.speed_mps != null ? worstFlight.speed_mps : "—"} m/s</td>
+          <td>${worstFlight.pitch_deg != null ? worstFlight.pitch_deg : "—"}°</td>
+        `;
+        trWorst.title = `クリックして最下位機体 #${worstFlight.id} にカメラをフォーカス`;
+        trWorst.addEventListener("click", () => {
+          if (this.viewport && worstFlight.id != null) {
+            this.viewport.focusTrajectory(worstFlight.id);
+            this.notify(`最下位 機体 #${worstFlight.id} (${Number(worstFlight.landing_distance_m || minDist).toFixed(2)}m) にカメラをフォーカスしました`, "info");
+          }
+        });
+        tbody.appendChild(trWorst);
+      }
     }
 
     this._lastChampionFlight = bestFlight;
+    this._lastWorstFlight = worstFlight;
     card.hidden = false;
   }
 
@@ -890,6 +946,15 @@ class ConsoleApp {
         if (this.viewport) {
           this.viewport.focusTrajectory(this._lastChampionFlight.id);
           this.notify(`1位 (機体 #${this._lastChampionFlight.id}) にフォーカスしました`, "info");
+        }
+      });
+    }
+    if (this.dom["champ-btn-focus-worst"]) {
+      this.dom["champ-btn-focus-worst"].addEventListener("click", () => {
+        if (!this._lastWorstFlight || this._lastWorstFlight.id == null) return;
+        if (this.viewport) {
+          this.viewport.focusTrajectory(this._lastWorstFlight.id);
+          this.notify(`最下位 (機体 #${this._lastWorstFlight.id}) にフォーカスしました`, "info");
         }
       });
     }

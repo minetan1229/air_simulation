@@ -1048,8 +1048,11 @@ def gpu_ensemble_simulation(
         tr["rank"] = rank_idx + 1
 
     best_distance_flight = sorted_by_dist[0] if sorted_by_dist else None
+    worst_distance_flight = sorted_by_dist[-1] if sorted_by_dist else None
     best_hangtime_flight = max(sample_trajectories, key=lambda tr: tr["flight_time_s"]) if sample_trajectories else None
+    worst_hangtime_flight = min(sample_trajectories, key=lambda tr: tr["flight_time_s"]) if sample_trajectories else None
     best_altitude_flight = max(sample_trajectories, key=lambda tr: tr["max_altitude_m"]) if sample_trajectories else None
+    worst_altitude_flight = min(sample_trajectories, key=lambda tr: tr["max_altitude_m"]) if sample_trajectories else None
     leaderboard = [
         {
             "rank": tr["rank"],
@@ -1062,6 +1065,19 @@ def gpu_ensemble_simulation(
             "roll_deg": tr["roll_deg"],
         }
         for tr in sorted_by_dist[:10]
+    ]
+    bottomboard = [
+        {
+            "rank": tr["rank"],
+            "id": tr["id"],
+            "landing_distance_m": tr["landing_distance_m"],
+            "flight_time_s": tr["flight_time_s"],
+            "max_altitude_m": tr["max_altitude_m"],
+            "speed_mps": tr["speed_mps"],
+            "pitch_deg": tr["pitch_deg"],
+            "roll_deg": tr["roll_deg"],
+        }
+        for tr in reversed(sorted_by_dist[-5:])
     ]
 
     # Summary metrics
@@ -1094,9 +1110,13 @@ def gpu_ensemble_simulation(
         "min_flight_time_s": round(min_t, 3),
         "min_distance_m": round(min_d, 3),
         "best_flight": best_distance_flight,
+        "worst_flight": worst_distance_flight,
         "best_hangtime": best_hangtime_flight,
+        "worst_hangtime": worst_hangtime_flight,
         "best_altitude": best_altitude_flight,
+        "worst_altitude": worst_altitude_flight,
         "leaderboard": leaderboard,
+        "bottomboard": bottomboard,
         "statistics": {
             "flight_time": {
                 "mean": round(mean_t, 3),
