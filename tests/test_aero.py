@@ -42,6 +42,9 @@ from physics.aero_domain import (
     lift_slope_per_rad,
     parasite_drag_coefficient,
     pitching_moment_offset_nm,
+    center_of_pressure_x,
+    polhamus_lift_coefficient,
+    effective_stall_alpha_deg,
     prandtl_glauert,
     trim_solution,
     wave_drag_coefficient,
@@ -926,3 +929,157 @@ def test_post_stall_is_continuous_with_the_linear_branch():
         ) * math.radians(stall),
         rel=2.0e-2,
     )
+
+
+# ==========================================================================
+# 16. Polhamus LEV suction analogy
+# ==========================================================================
+def test_polhamus_formula_matches_exact_definition(cfg: AircraftConfig) -> None:
+    """Validate K_p * sin(a) * cos^2(a) + K_v * sin^2(a) * cos(a)."""
+    alpha = 15.0
+    a_rad = deg2rad(alpha)
+    kv = 1.8
+    kp = 2.5
+    cfg_lev = AircraftConfig(**{**as_dict(cfg), "polhamus_kv": kv})
+    expected = kp * math.sin(a_rad) * (math.cos(a_rad) ** 2) + kv * (math.sin(a_rad) ** 2) * math.cos(a_rad)
+    assert polhamus_lift_coefficient(alpha, cfg_lev, kp=kp) == pytest.approx(expected, rel=1e-12)
+
+
+def test_polhamus_zero_kv_invariance(cfg: AircraftConfig) -> None:
+    """When polhamus_kv == 0, lift_coefficient is bit-for-bit unchanged from standard."""
+    cfg_zero = AircraftConfig(**{**as_dict(cfg), "polhamus_kv": 0.0})
+    for alpha in (-10.0, -5.0, 0.0, 5.0, 10.0, 15.0, 25.0):
+        cl_standard = lift_coefficient(alpha, cfg, compressible=False)
+        cl_zero = lift_coefficient(alpha, cfg_zero, compressible=False)
+        assert cl_standard == pytest.approx(cl_zero, rel=1e-15)
+
+
+def test_polhamus_adds_suction_lift_at_positive_alpha(cfg: AircraftConfig) -> None:
+    """When polhamus_kv > 0, vortex lift strictly increases attached lift at alpha > 0."""
+    cfg_lev = AircraftConfig(**{**as_dict(cfg), "polhamus_kv": 2.0})
+    for alpha in (5.0, 10.0, 15.0):
+        cl_standard = lift_coefficient(alpha, cfg, compressible=False)
+        cl_lev = lift_coefficient(alpha, cfg_lev, compressible=False)
+        assert cl_lev > cl_standard
+        a_rad = deg2rad(alpha)
+        delta_expected = 2.0 * (math.sin(a_rad) ** 2) * math.cos(a_rad)
+        assert (cl_lev - cl_standard) == pytest.approx(delta_expected, rel=1e-5)
+
+
+# ==========================================================================
+# 17. Dynamic Center of Pressure shift
+# ==========================================================================
+def test_center_of_pressure_at_zero_alpha(cfg: AircraftConfig) -> None:
+    """At alpha=0, center of pressure is exactly at the aerodynamic center (0.25 MAC)."""
+    mac = derived_properties(cfg)["ref_length_m"]
+    cfg_cp = AircraftConfig(**{**as_dict(cfg), "cp_shift_gain": 0.8})
+    cp_x = center_of_pressure_x(0.0, cfg_cp)
+    assert cp_x == pytest.approx(0.25 * mac, rel=1e-12)
+
+
+def test_center_of_pressure_shifts_aft_with_alpha(cfg: AircraftConfig) -> None:
+    """Center of pressure moves aft (0.25 c -> 0.45..0.50 c) as alpha increases."""
+    mac = derived_properties(cfg)["ref_length_m"]
+    cfg_cp = AircraftConfig(**{**as_dict(cfg), "cp_shift_gain": 1.0})
+    cp_0 = center_of_pressure_x(0.0, cfg_cp)
+    cp_half = center_of_pressure_x(cfg.stall_alpha_deg * 0.5, cfg_cp)
+    cp_stall = center_of_pressure_x(cfg.stall_alpha_deg, cfg_cp)
+
+    assert cp_0 == pytest.approx(0.25 * mac, rel=1e-12)
+    assert cp_half > cp_0
+    assert cp_stall > cp_half
+    assert cp_stall == pytest.approx(0.50 * mac, rel=1e-12)
+
+
+def test_center_of_pressure_shift_creates_stabilizing_moment(cfg: AircraftConfig, env: EnvironmentConfig) -> None:
+    """Aft shift of CP creates nose-down delta Cm: delta_cm = - (x_cp - x_ac)/c * C_L."""
+    alpha = 10.0
+    speed = 10.0
+    cfg_base = AircraftConfig(**{**as_dict(cfg), "cp_shift_gain": 0.0})
+    cfg_shifted = AircraftConfig(**{**as_dict(cfg), "cp_shift_gain": 0.8})
+
+    res_base = evaluate_aero(cfg_base, env, speed, alpha)
+    res_shifted = evaluate_aero(cfg_shifted, env, speed, alpha)
+
+    # When CP moves aft of AC at positive lift, it produces a stabilizing nose-down pitch
+    assert res_shifted.cm < res_base.cm
+    assert res_shifted.pitching_moment_nm < res_base.pitching_moment_nm
+    assert res_shifted.cp_x_m > res_base.cp_x_m
+
+
+# ==========================================================================
+# 18. Fold step / crease turbulator trip wire effect
+# ==========================================================================
+def test_step_trip_delays_stall(cfg: AircraftConfig) -> None:
+    """step_trip_ratio > 0 delays stall angle of attack."""
+    stall_base = effective_stall_alpha_deg(cfg)
+    assert stall_base == pytest.approx(cfg.stall_alpha_deg, rel=1e-12)
+
+    cfg_trip = AircraftConfig(**{**as_dict(cfg), "step_trip_ratio": 0.01})
+    stall_trip = effective_stall_alpha_deg(cfg_trip)
+    assert stall_trip > stall_base
+    # Expected delay around ~1.67 deg for 0.01 ratio
+    assert stall_trip > stall_base + 1.0
+
+
+def test_step_trip_preserves_attached_flow_at_low_alpha(cfg: AircraftConfig) -> None:
+    """At low angles of attack, step turbulator leaves the linear lift branch unaffected."""
+    cfg_trip = AircraftConfig(**{**as_dict(cfg), "step_trip_ratio": 0.015})
+    cl_base = lift_coefficient(4.0, cfg, compressible=False)
+    cl_trip = lift_coefficient(4.0, cfg_trip, compressible=False)
+    assert cl_base == pytest.approx(cl_trip, rel=1e-9)
+
+
+# ==========================================================================
+# 19. Ground cushion lift and nose-down pitch coupling
+# ==========================================================================
+def test_ground_cushion_lift_increment(cfg: AircraftConfig, env: EnvironmentConfig) -> None:
+    """ground_cushion_lift increases lift near the ground scaled by exp(-4 h / b)."""
+    cfg_cushion = AircraftConfig(**{**as_dict(cfg), "ground_cushion_lift": 0.5})
+    span = derived_properties(cfg)["ref_span_m"]
+    h_close = 0.05 * span
+    h_far = 5.0 * span
+
+    res_close = evaluate_aero(cfg_cushion, env, 10.0, 4.0, ground_height_m=h_close)
+    res_far = evaluate_aero(cfg_cushion, env, 10.0, 4.0, ground_height_m=h_far)
+    res_base = evaluate_aero(cfg, env, 10.0, 4.0, ground_height_m=h_close)
+
+    assert res_close.cl > res_base.cl
+    assert res_close.lift_n > res_base.lift_n
+    # Far from ground, cushion effect decays exponentially to zero
+    assert res_far.cl == pytest.approx(res_base.cl, rel=1e-3)
+
+
+def test_ground_pitch_coupling_nose_down(cfg: AircraftConfig, env: EnvironmentConfig) -> None:
+    """ground_pitch_coupling induces nose-down pitching moment near the ground."""
+    cfg_pitch = AircraftConfig(**{**as_dict(cfg), "ground_pitch_coupling": 0.4})
+    span = derived_properties(cfg)["ref_span_m"]
+    h_close = 0.05 * span
+
+    res_base = evaluate_aero(cfg, env, 10.0, 4.0, ground_height_m=h_close)
+    res_pitch = evaluate_aero(cfg_pitch, env, 10.0, 4.0, ground_height_m=h_close)
+
+    # Pitch coupling adds a nose-down moment (reduces cm)
+    assert res_pitch.cm < res_base.cm
+    assert res_pitch.pitching_moment_nm < res_base.pitching_moment_nm
+
+
+def test_aero_result_populates_advanced_fields(cfg: AircraftConfig, env: EnvironmentConfig) -> None:
+    """Verify AeroResult includes cp_x_m, aeroelastic_dihedral_deg, aeroelastic_twist_deg."""
+    cfg_adv = AircraftConfig(
+        **{
+            **as_dict(cfg),
+            "cp_shift_gain": 0.5,
+            "aeroelastic_flex": 0.3,
+            "aeroelastic_twist": 0.2,
+        }
+    )
+    res = evaluate_aero(cfg_adv, env, 12.0, 5.0)
+    assert hasattr(res, "cp_x_m")
+    assert hasattr(res, "aeroelastic_dihedral_deg")
+    assert hasattr(res, "aeroelastic_twist_deg")
+    assert res.cp_x_m > 0.0
+    assert math.isfinite(res.cp_x_m)
+    assert res.aeroelastic_dihedral_deg > 0.0
+    assert res.aeroelastic_twist_deg < 0.0  # washout is negative twist
+

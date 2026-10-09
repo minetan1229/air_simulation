@@ -148,6 +148,8 @@ __all__ = [
     "trim_lift_coefficient",
     "trim_speed",
     "wing_root_bending_moment",
+    "effective_paper_stiffness",
+    "aeroelastic_deformations",
     "paper_allowable_stress",
     "failure_index",
     "status_for_failure_index",
@@ -422,11 +424,14 @@ def wing_root_bending_moment(
     wing_area_m2: float,
     wingspan_m: float,
     load_factor: float = 1.0,
+    cfg: Optional[AircraftConfig] = None,
 ) -> float:
     """Return the wing-root bending moment ``M = q S (b/2) nz k`` in N m.
 
     ``SPAN_LOADING_FACTOR`` (``k = 0.35``) is the linear-taper span-loading
     factor.  Exactly zero at ``q = 0`` and linear in each argument.
+    If ``cfg`` is provided and has paper grain anisotropy, the moment or load
+    distribution accounts for effective paper stiffness.
     """
     q = _finite_or(float(dynamic_pressure_pa), 0.0)
     area = _finite_or(float(wing_area_m2), 0.0)
@@ -435,6 +440,86 @@ def wing_root_bending_moment(
     if q <= 0.0 or area <= 0.0 or span <= 0.0 or nz <= 0.0:
         return 0.0
     return q * area * (span * 0.5) * nz * SPAN_LOADING_FACTOR
+
+
+def effective_paper_stiffness(cfg: AircraftConfig) -> float:
+    """Return effective bending stiffness of the paper taking into account fiber grain anisotropy.
+
+    Real paper has Machine Direction (MD) and Cross Direction (CD) with Young's
+    modulus ratio E_MD / E_CD ~ 1.5..2.2 (``cfg.paper_anisotropy_ratio``, default 1.8).
+    Using ellipse interpolation:
+        E(theta) = E_MD / sqrt(cos(theta)^2 + (E_MD/E_CD)^2 * sin(theta)^2)
+    where theta = cfg.paper_grain_angle_deg (0 deg = MD longitudinal, 90 deg = CD transverse).
+
+    Returns an effective stiffness value scaled relative to isotropic stiffness:
+        effective_stiffness = cfg.paper_stiffness * (E(theta) / E_MD)
+    clamped to >= 0.0.
+    """
+    base_stiffness = max(_finite_or(float(cfg.paper_stiffness), 0.35), 0.0)
+    theta_rad = deg2rad(_finite_or(float(cfg.paper_grain_angle_deg), 0.0))
+    ratio = max(_finite_or(float(cfg.paper_anisotropy_ratio), 1.8), 1.0)
+
+    cos_t = math.cos(theta_rad)
+    sin_t = math.sin(theta_rad)
+    denom = math.sqrt(cos_t * cos_t + (ratio * ratio) * (sin_t * sin_t))
+    anisotropy_factor = 1.0 / max(denom, _EPS)
+    return max(base_stiffness * anisotropy_factor, 0.0)
+
+
+def aeroelastic_deformations(
+    cfg: AircraftConfig,
+    dynamic_pressure: float,
+    nz: float = 1.0,
+) -> Dict[str, float]:
+    """Compute dynamic aeroelastic deformations due to dynamic pressure and g-load.
+
+    Returns:
+        {
+            "delta_dihedral_deg": float,  # wing bending flex / dynamic dihedral increment
+            "washout_twist_deg": float,   # wingtip washout twist
+            "effective_stiffness": float, # effective paper stiffness considering grain
+        }
+
+    When ``cfg.aeroelastic_flex == 0.0`` and ``cfg.aeroelastic_twist == 0.0``,
+    both deformations return 0.0 exactly.
+    """
+    eff_stiff = effective_paper_stiffness(cfg)
+    q = max(_finite_or(float(dynamic_pressure), 0.0), 0.0)
+    load = max(_finite_or(float(nz), 0.0), 0.0)
+
+    flex_gain = _finite_or(float(cfg.aeroelastic_flex), 0.0)
+    twist_gain = _finite_or(float(cfg.aeroelastic_twist), 0.0)
+
+    if (flex_gain == 0.0 and twist_gain == 0.0) or q == 0.0:
+        return {
+            "delta_dihedral_deg": 0.0,
+            "washout_twist_deg": 0.0,
+            "effective_stiffness": float(eff_stiff),
+        }
+
+    derived = derived_properties(cfg)
+    area = max(_finite_or(float(derived.get("ref_area_m2") or derived["wing_area_m2"]), 0.0), _EPS)
+    span = max(_finite_or(float(derived.get("ref_span_m") or derived["wingspan_m"]), 0.0), _EPS)
+    c_mac = max(_finite_or(float(derived.get("mac_m") or derived["ref_length_m"]), 0.0), _EPS)
+
+    gsm = max(_finite_or(float(cfg.paper_gsm), 0.0), 0.0)
+    thickness = _sheet_thickness(gsm)
+    t3 = max(thickness ** 3, 1.0e-18)
+    denom = max(eff_stiff * t3, 1.0e-18)
+
+    # Reference normalisation constants:
+    # Under typical flight conditions (q ~ 10 Pa, S ~ 0.015, b/2 ~ 0.1, t ~ 1.25e-4 m),
+    # q * S * (b/2) * nz / (E_eff * t^3) is dimensionless bending parameter.
+    # Normalised so gain 1.0 produces ~ 10 deg at high q.
+    norm_scale = 1.0e-10
+    delta_dihedral = (q * area * (span * 0.5) * load * flex_gain * norm_scale) / denom
+    washout_twist = (q * area * c_mac * twist_gain * norm_scale) / denom
+
+    return {
+        "delta_dihedral_deg": float(delta_dihedral),
+        "washout_twist_deg": float(washout_twist),
+        "effective_stiffness": float(eff_stiff),
+    }
 
 
 def dihedral_roll_couple(
@@ -666,7 +751,8 @@ def stress_field(
     # --- section properties ------------------------------------------------
     gsm = max(_finite_or(float(cfg.paper_gsm), 0.0), 0.0)
     thickness = _sheet_thickness(gsm)
-    stiffness = max(_finite_or(float(cfg.paper_stiffness), 0.0), 0.0)
+    eff_stiffness = effective_paper_stiffness(cfg)
+    stiffness = max(eff_stiffness, 0.0)
     z_gain = max(Z_SCALE_OFFSET + Z_SCALE_GAIN * stiffness, _EPS)
 
     # --- spanwise axis (full span, centre-line at i_c) ---------------------

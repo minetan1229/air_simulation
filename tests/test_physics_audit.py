@@ -80,10 +80,10 @@ def _reference_mac(area: float, span: float, taper: float) -> float:
 
 
 def _numeric_mac(area: float, span: float, taper: float, samples: int = 200001) -> float:
-    """MAC from the definition ``MAC = (2/S) * integral c(y)^2 dy`` (a length)."""
     y = np.linspace(0.0, span * 0.5, samples)
     c = (2.0 * area / (span * (1.0 + taper))) * (1.0 - (1.0 - taper) * (2.0 * y / span))
-    return float(2.0 / area * np.trapezoid(c * c, y))
+    trapz_fn = getattr(np, "trapezoid", getattr(np, "trapz", None))
+    return float(2.0 / area * trapz_fn(c * c, y))
 
 
 @pytest.mark.parametrize(

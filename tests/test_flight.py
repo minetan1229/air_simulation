@@ -994,3 +994,89 @@ def test_asymmetry_and_aileron_3d_6dof_bank_and_turn():
     assert last_asym.y_m > 0.05
     assert last_asym.yaw_deg > 2.0
 
+
+def test_aeroelastic_coupling_reduces_peak_pitchup_during_high_speed_throw():
+    """Verify aeroelastic coupling (flex and washout twist) reduces peak pitch-up during high-speed throw."""
+    launch_fast = LaunchConfig(
+        launch_speed=20.0,
+        launch_angle_deg=5.0,
+        launch_height_m=5.0,
+    )
+    settings = SimulationSettings(dt_max=0.005, record_interval_s=0.02)
+
+    # Baseline rigid airframe
+    glider_rigid = replace(GLIDER, aeroelastic_flex=0.0, aeroelastic_twist=0.0)
+    sim_rigid = FlightSimulator(glider_rigid, EnvironmentConfig(), launch_fast, settings)
+    sim_rigid.simulate(duration_s=0.5, record=True)
+    max_pitch_rigid = max(sample.pitch_deg for sample in sim_rigid.history())
+
+    # Flexible airframe with aeroelastic twist (washout) and dihedral flex
+    glider_flex = replace(GLIDER, aeroelastic_flex=0.5, aeroelastic_twist=0.8)
+    sim_flex = FlightSimulator(glider_flex, EnvironmentConfig(), launch_fast, settings)
+    sim_flex.simulate(duration_s=0.5, record=True)
+    max_pitch_flex = max(sample.pitch_deg for sample in sim_flex.history())
+
+    # Washout twist decreases effective alpha under high q, reducing pitch-up zoom climb
+    assert max_pitch_flex < max_pitch_rigid
+    # Check diagnostics populated
+    step_packet = sim_flex.step(dt=0.01)
+    assert "aeroelastic_twist_deg" in step_packet
+    assert "aeroelastic_dihedral_deg" in step_packet
+
+
+def test_added_mass_attenuates_normal_acceleration():
+    """Verify added mass effect smoothly attenuates body normal acceleration when enabled."""
+    settings = SimulationSettings(dt_max=0.005, collision_enabled=False)
+    launch = LaunchConfig(launch_speed=10.0, launch_angle_deg=10.0, launch_height_m=10.0)
+
+    # 1. Without added mass
+    glider_no_add = replace(GLIDER, added_mass_enabled=False)
+    sim_no_add = FlightSimulator(glider_no_add, EnvironmentConfig(), launch, settings)
+    diag_no_add = sim_no_add._diagnostics()
+    # Body normal acceleration: acceleration projected to body z
+    q1 = diag_no_add["quaternion"]
+    a1_world = np.array(diag_no_add["acceleration_mps2"], dtype=np.float64)
+    a1_body = world_to_body(q1, a1_world)
+
+    # 2. With added mass
+    glider_with_add = replace(GLIDER, added_mass_enabled=True)
+    sim_with_add = FlightSimulator(glider_with_add, EnvironmentConfig(), launch, settings)
+    diag_with_add = sim_with_add._diagnostics()
+    q2 = diag_with_add["quaternion"]
+    a2_world = np.array(diag_with_add["acceleration_mps2"], dtype=np.float64)
+    a2_body = world_to_body(q2, a2_world)
+
+    # Effective mass in z is larger (m + m_add_z), so magnitude of a_z is attenuated
+    assert abs(a2_body[2]) < abs(a1_body[2])
+
+
+def test_multipoint_ground_collision_stability():
+    """Verify multi-point ground collision behaves stably with roll/yaw damping and landing/stop."""
+    # Launch glider banked into ground at low altitude
+    launch_banked = LaunchConfig(
+        launch_speed=4.0,
+        launch_angle_deg=-10.0,
+        launch_roll_deg=30.0,
+        launch_height_m=0.05,
+    )
+    settings = SimulationSettings(
+        dt_max=0.005,
+        record_interval_s=0.01,
+        collision_enabled=True,
+        restitution=0.1,
+    )
+    sim = FlightSimulator(GLIDER, EnvironmentConfig(), launch_banked, settings)
+    summary = sim.simulate(duration_s=1.0, record=True)
+
+    # Simulation finishes stably without divergence
+    assert summary["status"] in ("landed", "crashed", "flying")
+    assert not summary["diverged"]
+    history = sim.history()
+    assert len(history) > 1
+    # Check that angular rate and altitude are bounded
+    for sample in history:
+        assert math.isfinite(sample.pitch_deg)
+        assert math.isfinite(sample.roll_deg)
+        assert sample.altitude_m >= -0.05
+
+

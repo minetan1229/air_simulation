@@ -881,7 +881,7 @@ def _local_aero(
         stalled=alpha > stall_alpha,
         cd_min=cd0,
         alpha_ld_max_deg=rad2deg(safe_div(_finite(aircraft.cL0) + cl, cl_alpha, 0.0)),
-        circulation_m2ps=safe_div(2.0 * area * cl, rho * speed * span, 0.0),
+        circulation_m2ps=safe_div(0.5 * speed * area * cl, span, 0.0),
         trim_alpha_deg=elevon["dalpha_trim_deg"],
         trim_elevon_deg=_finite(aircraft.elevon_deg),
         ground_effect_ratio=effect,
@@ -1528,9 +1528,9 @@ def resolve_throw(
         speed_mps=float(speed),
         velocity_mps=tuple(float(v) for v in velocity),  # type: ignore[arg-type]
         flight_path_deg=(float(velocity_pitch_deg), float(velocity_yaw_deg)),
-        # +z is down, so a nose-up attitude relative to a shallower flight path
-        # is a positive angle of attack, and the force tilt adds to it.
-        release_alpha_deg=float(velocity_pitch_deg - pitch_total),
+        # Nose-up attitude relative to flight path gives positive angle of attack:
+        # alpha = pitch_attitude - flight_path_pitch.
+        release_alpha_deg=float(pitch_total - velocity_pitch_deg),
         release_euler_deg=(float(roll_total), float(pitch_total), float(yaw_total)),
         quaternion=tuple(float(v) for v in quaternion),  # type: ignore[arg-type]
         release_height_m=float(height),
@@ -1712,7 +1712,8 @@ class FlightSimulator:
         return elevon_effects(self.aircraft.elevon_deg, self.aircraft)["dalpha_trim_deg"]
 
     def _restoring_moment(
-        self, quaternion: np.ndarray, omega: np.ndarray, dynamic_pressure: float, speed: float
+        self, quaternion: np.ndarray, omega: np.ndarray, dynamic_pressure: float, speed: float,
+        effective_dihedral_deg: Optional[float] = None,
     ) -> np.ndarray:
         """Aeroelastic restoring and damping moment about the body axes.
 
@@ -1732,7 +1733,8 @@ class FlightSimulator:
         roll_deg, pitch_deg, _ = euler_zyx_from_quaternion(quaternion)
         pitch_error = deg2rad(_finite(pitch_deg) - self._trim_pitch_deg)
         roll_error = deg2rad(_finite(roll_deg))
-        dihedral = math.sin(deg2rad(_finite(self.aircraft.dihedral_deg)))
+        d_deg = _finite(effective_dihedral_deg) if effective_dihedral_deg is not None else _finite(self.aircraft.dihedral_deg)
+        dihedral = math.sin(deg2rad(d_deg))
         moment = np.zeros(3, dtype=np.float64)
         moment[1] = -self._restoring_gain * pitch_error - self._restoring_damping * float(omega[1])
         moment[0] = (
@@ -1965,11 +1967,45 @@ class FlightSimulator:
         alpha_deg, beta_deg = effective_alpha_beta(body_relative, gravity_body, self.environment)
         mach = safe_div(speed, max(air["sound_speed_mps"], 1.0), 0.0)
         reynolds = safe_div(speed * self._chord, max(air["kinematic_viscosity_m2s"], 1.0e-12), 0.0)
+
+        # Dynamic pressure
+        q_dyn = 0.5 * max(air["density_kgm3"], 1.0e-6) * speed * speed
+
+        # 2-Way Aeroelastic Coupling:
+        # Check dynamic pressure q. If aeroelastic_flex > 0 or aeroelastic_twist > 0:
+        # call stress_domain.aeroelastic_deformations or lazy fallback.
+        aero_flex_gain = max(_finite(getattr(self.aircraft, "aeroelastic_flex", 0.0)), 0.0)
+        aero_twist_gain = max(_finite(getattr(self.aircraft, "aeroelastic_twist", 0.0)), 0.0)
+        aero_dihedral_deg = 0.0
+        aero_twist_deg = 0.0
+        if (aero_flex_gain > 0.0 or aero_twist_gain > 0.0) and q_dyn > 0.0:
+            stress_mod = stress_module()
+            deform_func = _resolve_callable(stress_mod, ("aeroelastic_deformations", "compute_aeroelastic_deformations"))
+            if deform_func is not None:
+                try:
+                    res_deform = deform_func(self.aircraft, q_dyn)
+                    if isinstance(res_deform, dict):
+                        aero_dihedral_deg = float(res_deform.get("delta_dihedral_deg", 0.0))
+                        aero_twist_deg = float(res_deform.get("washout_twist_deg", 0.0))
+                    elif isinstance(res_deform, (tuple, list)) and len(res_deform) >= 2:
+                        aero_dihedral_deg = float(res_deform[0])
+                        aero_twist_deg = float(res_deform[1])
+                except Exception:
+                    deform_func = None
+            if deform_func is None:
+                stiffness = max(_finite(self.aircraft.paper_stiffness, 0.35), 0.05)
+                q_ref = 100.0 * stiffness
+                aero_dihedral_deg = aero_flex_gain * (q_dyn / q_ref) * 5.0
+                aero_twist_deg = aero_twist_gain * (q_dyn / q_ref) * 4.0
+
+        effective_alpha_deg = alpha_deg - aero_twist_deg
+        effective_dihedral_deg = float(self.aircraft.dihedral_deg) + aero_dihedral_deg
+
         result = aero_forces(
             self.aircraft,
             self.environment,
             speed,
-            alpha_deg,
+            effective_alpha_deg,
             beta_deg,
             mach,
             reynolds,
@@ -1978,10 +2014,8 @@ class FlightSimulator:
             air["density_kgm3"],
             air["kinematic_viscosity_m2s"],
         )
-        alpha_rad = deg2rad(alpha_deg)
+        alpha_rad = deg2rad(effective_alpha_deg)
         cos_a, sin_a = math.cos(alpha_rad), math.sin(alpha_rad)
-        # Wind axes -> body axes for a +z-down body frame: drag opposes the
-        # relative wind, lift is perpendicular to it and points along body "up".
         force_body = np.array(
             [
                 -result.drag_n * cos_a + result.lift_n * sin_a,
@@ -1990,15 +2024,48 @@ class FlightSimulator:
             ],
             dtype=np.float64,
         )
-        force_world = body_to_world(quaternion, force_body) + self._mass * gravity_world
-        acceleration = force_world / self._mass
+
+        # Apparent / Added Mass Tensor:
+        # When self.aircraft.added_mass_enabled is True:
+        # thin plate added mass normal to the wing m_add_z = (pi / 4.0) * rho * span * chord^2.
+        # The effective mass along normal acceleration is m_eff = m + m_add_z.
+        # Adjust linear acceleration in body normal direction accordingly.
+        span = max(self._derived["wingspan_m"], 1.0e-6)
+        if bool(getattr(self.aircraft, "added_mass_enabled", False)):
+            rho = max(air["density_kgm3"], 1.0e-6)
+            m_add_z = (math.pi / 4.0) * rho * span * (self._chord ** 2)
+            m_eff_z = self._mass + m_add_z
+            f_z_eff = self._mass / m_eff_z
+            # Accelerations in body frame before world rotation:
+            gravity_body = world_to_body(quaternion, gravity_world)
+            a_body = (force_body / self._mass) + gravity_body
+            a_body[2] = (force_body[2] / m_eff_z) + gravity_body[2] * f_z_eff
+            acceleration = body_to_world(quaternion, a_body)
+        else:
+            force_world = body_to_world(quaternion, force_body) + self._mass * gravity_world
+            acceleration = force_world / self._mass
+
         moment_body = (
             np.array(
                 [result.rolling_moment_nm, result.pitching_moment_nm, result.yawing_moment_nm],
                 dtype=np.float64,
             )
-            + self._restoring_moment(quaternion, omega, result.dynamic_pressure_pa, speed)
+            + self._restoring_moment(quaternion, omega, result.dynamic_pressure_pa, speed, effective_dihedral_deg=effective_dihedral_deg)
         )
+
+        # Ground Pitch Coupling:
+        # When near ground (altitude < span), if self.aircraft.ground_pitch_coupling > 0,
+        # add nose-down ground pitching moment to moment_body.
+        ground_pitch_gain = max(_finite(getattr(self.aircraft, "ground_pitch_coupling", 0.0)), 0.0)
+        if ground_pitch_gain > 0.0 and altitude < span and altitude >= -1.0:
+            h_eff = max(altitude, 0.01)
+            # Factor grows as h -> 0: (1 - h/b)
+            proximity = max(0.0, 1.0 - (h_eff / span))
+            # Dynamic pressure * S * c * gain * proximity gives nose-down (negative) pitching moment
+            area = max(self._derived["wing_area_m2"], 1.0e-9)
+            m_ground_pitch = -ground_pitch_gain * proximity * q_dyn * area * self._chord
+            moment_body[1] += m_ground_pitch
+
         angular_acceleration = angular_acceleration_body(self._inertia, omega, moment_body)
         specific_force_body = world_to_body(quaternion, acceleration - gravity_world)
         gravity_ref = abs(gravity)
@@ -2020,7 +2087,7 @@ class FlightSimulator:
             "wind": wind,
             "speed": speed,
             "body_relative": body_relative,
-            "alpha_deg": alpha_deg,
+            "alpha_deg": effective_alpha_deg,
             "beta_deg": beta_deg,
             "mach": mach,
             "reynolds": reynolds,
@@ -2028,6 +2095,8 @@ class FlightSimulator:
             "altitude": altitude,
             "aero": result,
             "air": air,
+            "aeroelastic_dihedral_deg": aero_dihedral_deg,
+            "aeroelastic_twist_deg": aero_twist_deg,
         }
 
     def _derivative(self, y: np.ndarray, time_s: float, core: Optional[Dict[str, Any]] = None) -> np.ndarray:
@@ -2096,13 +2165,45 @@ class FlightSimulator:
         sheet slides and crumples) and the impact is declared a structural
         failure when the impact speed exceeds :data:`CRASH_IMPACT_SPEED_MPS` or
         the impact wing stress reaches the allowable limit (index >= 1).
+
+        Multi-point contact & crumple dynamics:
+        Tracks positions of nose, left wingtip, right wingtip, and tail keel relative to ground.
+        If a wingtip strikes first before the main body, introduces a ground cartwheel / roll-yaw torque damping.
+        If nose strikes at high impact speed, resolves crumple deceleration.
         """
         if not bool(self.settings.collision_enabled) or state.landed or state.crashed:
             return state
         ground = _finite(self.environment.ground_level_m)
-        altitude = -float(state.position_m[2]) - ground
-        if altitude > 0.0:
+        altitude_cg = -float(state.position_m[2]) - ground
+
+        # Multi-point contact tracking
+        mac = max(self._derived.get("mac_m", 0.08), 1.0e-3)
+        span = max(self._derived.get("wingspan_m", 0.20), 1.0e-3)
+        semispan = span * 0.5
+
+        # Key body stations relative to CG (x fwd, y right, z down)
+        r_nose = np.array([0.5 * mac, 0.0, 0.0], dtype=np.float64)
+        r_ltip = np.array([-0.3 * mac, -semispan, 0.0], dtype=np.float64)
+        r_rtip = np.array([-0.3 * mac, semispan, 0.0], dtype=np.float64)
+        r_tail = np.array([-0.7 * mac, 0.0, 0.015], dtype=np.float64)
+
+        q = state.quaternion
+        z_cg = float(state.position_m[2])
+        z_nose = z_cg + float(body_to_world(q, r_nose)[2])
+        z_ltip = z_cg + float(body_to_world(q, r_ltip)[2])
+        z_rtip = z_cg + float(body_to_world(q, r_rtip)[2])
+        z_tail = z_cg + float(body_to_world(q, r_tail)[2])
+
+        # Altitudes (positive above ground, <= 0 means in contact)
+        alt_nose = -z_nose - ground
+        alt_ltip = -z_ltip - ground
+        alt_rtip = -z_rtip - ground
+        alt_tail = -z_tail - ground
+
+        min_alt = min(altitude_cg, alt_nose, alt_ltip, alt_rtip, alt_tail)
+        if min_alt > 0.0:
             return state
+
         x, y = float(state.position_m[0]), float(state.position_m[1])
         vx, vy, vz = (float(value) for value in state.velocity_mps)
         omega = [float(value) for value in state.angular_velocity_radps]
@@ -2110,6 +2211,33 @@ class FlightSimulator:
         landed = False
         crashed = False
         new_vz = vz
+
+        # Check wingtip strikes before main body contact (altitude_cg > 0 but wingtip below ground)
+        if altitude_cg > 0.0 and (alt_ltip <= 0.0 or alt_rtip <= 0.0):
+            # Asymmetric wingtip strike introduces ground cartwheel torque & damping
+            omega[0] *= damping * 0.4
+            omega[2] *= damping * 0.4
+            if alt_ltip <= 0.0 and alt_rtip > 0.0:
+                # Left tip caught ground: imparts positive roll (rightward tilt) and yaw torque
+                omega[0] += 2.0 * damping
+                omega[2] -= 1.5 * damping
+            elif alt_rtip <= 0.0 and alt_ltip > 0.0:
+                # Right tip caught ground: imparts negative roll (leftward tilt) and yaw torque
+                omega[0] -= 2.0 * damping
+                omega[2] += 1.5 * damping
+            vx *= damping
+            vy *= damping
+            if vz > 0.0:
+                new_vz = -clamp(_finite(self.settings.restitution, 0.0), 0.0, 0.5) * vz
+
+        # Nose strike at high impact speed (crumple deceleration)
+        if alt_nose <= 0.0 and vx > 5.0:
+            # Paper nose crumple absorbs energy rapidly
+            crumple_loss = 0.5 * damping
+            vx *= crumple_loss
+            vy *= damping
+            omega[1] *= damping * 0.3
+
         if vz > 0.0:
             impact = vz
             air = atmosphere_state(self.environment, 0.0, self._chord)
@@ -2134,14 +2262,21 @@ class FlightSimulator:
         else:
             vx *= damping
             vy *= damping
+
+        # If CG penetrates ground plane, clamp position
+        new_z = float(state.position_m[2])
+        if altitude_cg <= 0.0:
+            new_z = -ground
+
         if landed or crashed:
             new_vz = 0.0
             vx *= 0.5
             vy *= 0.5
             omega = [0.0, 0.0, 0.0]
+
         return StateVector(
             time_s=state.time_s,
-            position_m=(x, y, -ground),
+            position_m=(x, y, new_z),
             velocity_mps=(vx, vy, new_vz),
             quaternion=state.quaternion,
             angular_velocity_radps=(omega[0], omega[1], omega[2]),
@@ -2289,6 +2424,8 @@ class FlightSimulator:
             "quaternion_rate_error_radps": rate_error,
             "landed": bool(state.landed),
             "crashed": bool(state.crashed),
+            "aeroelastic_dihedral_deg": core.get("aeroelastic_dihedral_deg", 0.0),
+            "aeroelastic_twist_deg": core.get("aeroelastic_twist_deg", 0.0),
         }
         self._diagnostics_cache = packet
         return packet
@@ -2346,6 +2483,8 @@ class FlightSimulator:
             "quaternion_norm": diag["quaternion_norm"],
             "attitude_consistency_deg": diag["attitude_consistency_deg"],
             "quaternion_rate_error_radps": diag["quaternion_rate_error_radps"],
+            "aeroelastic_dihedral_deg": diag.get("aeroelastic_dihedral_deg", 0.0),
+            "aeroelastic_twist_deg": diag.get("aeroelastic_twist_deg", 0.0),
         }
 
     def _status(self) -> str:

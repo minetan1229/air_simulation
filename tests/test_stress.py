@@ -701,3 +701,130 @@ def test_payload_is_json_safe_and_finite(cfg, env):
     assert isinstance(out["stress_pa"], list)
     assert all(isinstance(row, list) for row in out["stress_pa"])
     assert json.loads(json.dumps(out))["backend"] in ("numpy", "cupy")
+
+
+# ==========================================================================
+# 16. Paper grain anisotropy and effective stiffness
+# ==========================================================================
+def test_effective_paper_stiffness_at_cardinal_angles(cfg):
+    """Test paper fiber grain anisotropy: MD (0 deg) vs CD (90 deg).
+
+    At theta = 0 deg (MD):
+        E(0) = E_MD / sqrt(cos(0)^2 + ratio^2 * sin(0)^2) = E_MD / 1 = E_MD
+        effective_stiffness = cfg.paper_stiffness
+    At theta = 90 deg (CD):
+        E(90) = E_MD / sqrt(0 + ratio^2 * 1) = E_MD / ratio
+        effective_stiffness = cfg.paper_stiffness / ratio
+    """
+    cfg_base = replace(cfg, paper_stiffness=0.40, paper_anisotropy_ratio=2.0)
+
+    # 0 deg (MD)
+    cfg_md = replace(cfg_base, paper_grain_angle_deg=0.0)
+    eff_md = sd.effective_paper_stiffness(cfg_md)
+    assert _relative(eff_md, 0.40) <= REL_TIGHT
+
+    # 90 deg (CD)
+    cfg_cd = replace(cfg_base, paper_grain_angle_deg=90.0)
+    eff_cd = sd.effective_paper_stiffness(cfg_cd)
+    assert _relative(eff_cd, 0.40 / 2.0) <= REL_TIGHT
+    assert eff_md > eff_cd
+    assert _relative(eff_md / eff_cd, 2.0) <= REL_TIGHT
+
+    # 45 deg intermediate angle
+    cfg_45 = replace(cfg_base, paper_grain_angle_deg=45.0)
+    eff_45 = sd.effective_paper_stiffness(cfg_45)
+    # denom = sqrt(0.5 + 4.0 * 0.5) = sqrt(2.5)
+    expected_45 = 0.40 / math.sqrt(2.5)
+    assert _relative(eff_45, expected_45) <= REL_TIGHT
+    assert eff_cd < eff_45 < eff_md
+
+
+def test_effective_paper_stiffness_monotonicity_across_angles(cfg):
+    """Stiffness must decrease monotonically as angle goes from 0 deg (MD) to 90 deg (CD)."""
+    cfg_base = replace(cfg, paper_stiffness=0.35, paper_anisotropy_ratio=1.8)
+    angles = np.linspace(0.0, 90.0, 19)
+    stiffnesses = [
+        sd.effective_paper_stiffness(replace(cfg_base, paper_grain_angle_deg=float(a)))
+        for a in angles
+    ]
+    for prev_s, next_s in zip(stiffnesses, stiffnesses[1:]):
+        assert prev_s >= next_s
+    assert min(stiffnesses) > 0.0
+
+
+def test_paper_grain_affects_stress_distribution(cfg):
+    """Grain direction changes effective stiffness, which influences stress field."""
+    cfg_md = replace(cfg, paper_stiffness=0.35, paper_anisotropy_ratio=2.0, paper_grain_angle_deg=0.0)
+    cfg_cd = replace(cfg, paper_stiffness=0.35, paper_anisotropy_ratio=2.0, paper_grain_angle_deg=90.0)
+
+    out_md = sd.stress_field(cfg_md, 88.2, 1.0)
+    out_cd = sd.stress_field(cfg_cd, 88.2, 1.0)
+
+    # In CD, paper is softer (lower effective stiffness -> smaller Z section modulus -> higher stress)
+    assert out_cd["max_stress_pa"] > out_md["max_stress_pa"]
+
+
+# ==========================================================================
+# 17. Dynamic aeroelastic deformations
+# ==========================================================================
+def test_aeroelastic_deformations_zero_when_gains_are_zero(cfg):
+    """When gains are 0.0, deformations must return exactly 0.0."""
+    cfg_zero = replace(cfg, aeroelastic_flex=0.0, aeroelastic_twist=0.0)
+    res = sd.aeroelastic_deformations(cfg_zero, dynamic_pressure=100.0, nz=2.5)
+    assert res["delta_dihedral_deg"] == 0.0
+    assert res["washout_twist_deg"] == 0.0
+    assert res["effective_stiffness"] > 0.0
+
+
+def test_aeroelastic_deformations_zero_at_zero_dynamic_pressure(cfg):
+    """At q = 0, aeroelastic deformations must be 0.0 even with non-zero gains."""
+    cfg_active = replace(cfg, aeroelastic_flex=0.5, aeroelastic_twist=0.3)
+    res = sd.aeroelastic_deformations(cfg_active, dynamic_pressure=0.0, nz=1.5)
+    assert res["delta_dihedral_deg"] == 0.0
+    assert res["washout_twist_deg"] == 0.0
+
+
+def test_aeroelastic_deformations_scaling_with_dynamic_pressure_and_nz(cfg):
+    """Deformations scale linearly with dynamic pressure and flex scales with nz."""
+    cfg_active = replace(cfg, aeroelastic_flex=0.4, aeroelastic_twist=0.2)
+    q1 = 20.0
+    q2 = 40.0
+    res1 = sd.aeroelastic_deformations(cfg_active, dynamic_pressure=q1, nz=1.0)
+    res2 = sd.aeroelastic_deformations(cfg_active, dynamic_pressure=q2, nz=1.0)
+
+    # 2x dynamic pressure -> 2x flex and twist
+    assert _relative(res2["delta_dihedral_deg"], 2.0 * res1["delta_dihedral_deg"]) <= REL_TIGHT
+    assert _relative(res2["washout_twist_deg"], 2.0 * res1["washout_twist_deg"]) <= REL_TIGHT
+
+    # 2x nz -> 2x flex (twist depends on pitching moment / dynamic pressure, independent of nz)
+    res_nz2 = sd.aeroelastic_deformations(cfg_active, dynamic_pressure=q1, nz=2.0)
+    assert _relative(res_nz2["delta_dihedral_deg"], 2.0 * res1["delta_dihedral_deg"]) <= REL_TIGHT
+    assert _relative(res_nz2["washout_twist_deg"], res1["washout_twist_deg"]) <= REL_TIGHT
+
+
+def test_aeroelastic_deformations_stiffness_influence(cfg):
+    """Softer paper (higher grain angle or lower stiffness) produces larger deformations."""
+    cfg_stiff = replace(
+        cfg,
+        paper_stiffness=0.5,
+        paper_grain_angle_deg=0.0,  # MD
+        paper_anisotropy_ratio=2.0,
+        aeroelastic_flex=0.5,
+        aeroelastic_twist=0.5,
+    )
+    cfg_soft = replace(
+        cfg,
+        paper_stiffness=0.5,
+        paper_grain_angle_deg=90.0,  # CD
+        paper_anisotropy_ratio=2.0,
+        aeroelastic_flex=0.5,
+        aeroelastic_twist=0.5,
+    )
+
+    res_stiff = sd.aeroelastic_deformations(cfg_stiff, dynamic_pressure=30.0, nz=1.5)
+    res_soft = sd.aeroelastic_deformations(cfg_soft, dynamic_pressure=30.0, nz=1.5)
+
+    assert res_soft["delta_dihedral_deg"] > res_stiff["delta_dihedral_deg"]
+    assert res_soft["washout_twist_deg"] > res_stiff["washout_twist_deg"]
+    assert res_soft["effective_stiffness"] < res_stiff["effective_stiffness"]
+

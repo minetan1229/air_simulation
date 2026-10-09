@@ -309,6 +309,18 @@ class AircraftConfig:
     static_margin: float = 0.12
     cg_offset_x: float = 0.0  # metres, + = aft
 
+    # --- advanced physics: aeroelasticity & low-Re thin plate -------------
+    polhamus_kv: float = 0.0  # leading-edge vortex suction gain (0 -> standard thin wing)
+    step_trip_ratio: float = 0.0  # fold step height to chord ratio (turbulator effect, 0..0.02)
+    cp_shift_gain: float = 0.0  # dynamic center of pressure shift with alpha (0..1.0)
+    aeroelastic_flex: float = 0.0  # dynamic dihedral flex gain with dynamic pressure (0..1.0)
+    aeroelastic_twist: float = 0.0  # wingtip washout twist gain with dynamic pressure (0..1.0)
+    paper_grain_angle_deg: float = 0.0  # paper fiber angle: 0 = MD (longitudinal), 90 = CD (transverse)
+    paper_anisotropy_ratio: float = 1.8  # E_MD / E_CD ratio (typical paper 1.5..2.2)
+    added_mass_enabled: bool = False  # apparent mass tensor for lightweight bodies
+    ground_pitch_coupling: float = 0.0  # nose-down pitching moment coupling in ground effect
+    ground_cushion_lift: float = 0.0  # ram pressure cushion lift gain in ground effect
+
     # --- reference quantities -------------------------------------------
     ref_area_m2: float = 0.0  # 0 -> wing_area_m2
     ref_length_m: float = 0.0  # 0 -> mean aerodynamic chord
@@ -354,6 +366,16 @@ class AircraftConfig:
             re_cd0_exponent=clamp(self.re_cd0_exponent, 0.0, 1.0),
             static_margin=clamp(self.static_margin, -1.0, 1.0),
             cg_offset_x=clamp(self.cg_offset_x, -1.0, 1.0),
+            polhamus_kv=clamp(self.polhamus_kv, 0.0, 5.0),
+            step_trip_ratio=clamp(self.step_trip_ratio, 0.0, 0.05),
+            cp_shift_gain=clamp(self.cp_shift_gain, 0.0, 2.0),
+            aeroelastic_flex=clamp(self.aeroelastic_flex, 0.0, 5.0),
+            aeroelastic_twist=clamp(self.aeroelastic_twist, 0.0, 5.0),
+            paper_grain_angle_deg=clamp(self.paper_grain_angle_deg, -90.0, 90.0),
+            paper_anisotropy_ratio=clamp(self.paper_anisotropy_ratio, 1.0, 5.0),
+            added_mass_enabled=bool(self.added_mass_enabled),
+            ground_pitch_coupling=clamp(self.ground_pitch_coupling, 0.0, 5.0),
+            ground_cushion_lift=clamp(self.ground_cushion_lift, 0.0, 5.0),
         )
 
 
@@ -940,6 +962,9 @@ class AeroResult:
     ground_effect_ratio: float = 1.0
     lift_left_n: float = 0.0
     lift_right_n: float = 0.0
+    cp_x_m: float = 0.0
+    aeroelastic_dihedral_deg: float = 0.0
+    aeroelastic_twist_deg: float = 0.0
 
 
 # --------------------------------------------------------------------------

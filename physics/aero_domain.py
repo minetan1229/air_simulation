@@ -92,6 +92,9 @@ __all__ = [
     "circulation",
     "aerodynamic_force_body",
     "pitching_moment_offset_nm",
+    "center_of_pressure_x",
+    "polhamus_lift_coefficient",
+    "effective_stall_alpha_deg",
     "atmosphere_state",
     "evaluate_aero",
     "evaluate_aero_state",
@@ -298,14 +301,44 @@ def wave_drag_coefficient(mach: float, compressible: bool = True) -> float:
 # --------------------------------------------------------------------------
 # 3. Lift coefficient and the stall blend
 # --------------------------------------------------------------------------
+def effective_stall_alpha_deg(cfg: AircraftConfig) -> float:
+    """Stall angle of attack modified by fold step turbulator trip wire.
+
+    When ``cfg.step_trip_ratio > 0``, the fold step acts as a boundary layer trip wire,
+    preventing laminar bubble burst and delaying full stall separation by up to several degrees.
+    """
+    stall_alpha = _finite(cfg.stall_alpha_deg, 14.0)
+    trip_ratio = max(_finite(cfg.step_trip_ratio, 0.0), 0.0)
+    if trip_ratio > 0.0:
+        # Step trip wire delays stall separation: each 0.01 step/c adds ~2.5 deg stall delay (saturating)
+        delay = 250.0 * trip_ratio / (1.0 + 50.0 * trip_ratio)
+        return stall_alpha + delay
+    return stall_alpha
+
+
+def polhamus_lift_coefficient(alpha_deg: float, cfg: AircraftConfig, kp: Optional[float] = None) -> float:
+    """Polhamus suction analogy leading-edge vortex (LEV) lift coefficient.
+
+    ``C_L_polhamus = K_p * sin(alpha) * cos(alpha)^2 + K_v * sin(alpha)^2 * cos(alpha)``
+    where ``K_p`` is the potential lift factor (proportional to ``lift_slope_per_rad``) and
+    ``K_v`` is ``cfg.polhamus_kv`` representing vortex suction force on slender/delta wings.
+    """
+    alpha_rad = deg2rad(_finite(alpha_deg))
+    cos_a = math.cos(alpha_rad)
+    sin_a = math.sin(alpha_rad)
+    k_p = lift_slope_per_rad(cfg, compressible=False) if kp is None else float(kp)
+    k_v = max(_finite(cfg.polhamus_kv, 0.0), 0.0)
+    return k_p * sin_a * (cos_a ** 2) + k_v * (sin_a ** 2) * cos_a
+
+
 def stall_blend_weight(alpha_deg: float, cfg: AircraftConfig) -> float:
     """Smooth logistic blend weight between the linear and post-stall branch.
 
     ``1`` deep post-stall, ``0`` in attached flow, exactly
-    ``0.5 ** STALL_BLEND_ORDER`` at ``cfg.stall_alpha_deg``.
+    ``0.5 ** STALL_BLEND_ORDER`` at effective stall angle.
     """
     alpha = _finite(alpha_deg)
-    stall_alpha = _finite(cfg.stall_alpha_deg, 14.0)
+    stall_alpha = effective_stall_alpha_deg(cfg)
     if alpha >= 0.0:
         offset = alpha - stall_alpha
     else:
@@ -346,7 +379,7 @@ def _post_stall_lift_coefficient(alpha: float, cfg: AircraftConfig, linear_at_st
     """Bounded post-stall lift, anchored to the airframe's own lift curve."""
     sign = 1.0 if alpha >= 0.0 else -1.0
     abs_alpha = abs(alpha)
-    stall_alpha = _finite(cfg.stall_alpha_deg, 14.0)
+    stall_alpha = effective_stall_alpha_deg(cfg)
     ref_cl = abs(linear_at_stall)
     raw = ref_cl + _finite(cfg.post_stall_slope, -0.03) * (abs_alpha - stall_alpha)
     ceiling = max(abs(_finite(cfg.cl_max, 0.90)), ref_cl, 0.1)
@@ -375,8 +408,8 @@ def lift_coefficient(
 ) -> float:
     """Lift coefficient including the stall break, elevon offset and gust-free flow.
 
-    Below the stall this is exactly ``cL0 + cLalpha alpha`` (the blend weight
-    is ~1e-29 there); through the stall it transitions smoothly onto the
+    Below the stall this is exactly ``cL0 + cLalpha alpha`` (or augmented with Polhamus LEV suction
+    when ``cfg.polhamus_kv > 0``); through the stall it transitions smoothly onto the
     post-stall branch ``cl_max + post_stall_slope (alpha - stall_alpha_deg)``,
     whose negative slope keeps it below the linear extrapolation.  Deep in
     stall that unbounded ramp is blended into :func:`flat_plate_lift_coefficient`
@@ -387,9 +420,25 @@ def lift_coefficient(
     """
     alpha = _finite(alpha_deg)
     slope = lift_slope_per_rad(cfg, compressible=compressible, mach=mach)
-    stall_alpha = _finite(cfg.stall_alpha_deg, 14.0)
+    stall_alpha = effective_stall_alpha_deg(cfg)
     linear = _finite(cfg.cL0, 0.0) + slope * deg2rad(alpha)
+
+    # Polhamus LEV suction analogy: when cfg.polhamus_kv > 0, compute vortex lift increment
+    kv = max(_finite(cfg.polhamus_kv, 0.0), 0.0)
+    if kv > 0.0:
+        alpha_rad = deg2rad(alpha)
+        sin_a = math.sin(alpha_rad)
+        cos_a = math.cos(alpha_rad)
+        # Delta vortex lift: K_v * sin^2(alpha) * cos(alpha)
+        # Sign preservation for negative alpha:
+        vortex_cl = math.copysign(kv * (sin_a ** 2) * cos_a, alpha_rad)
+        linear = linear + vortex_cl
+
     linear_at_stall = _finite(cfg.cL0, 0.0) + slope * deg2rad(stall_alpha)
+    if kv > 0.0:
+        stall_rad = deg2rad(stall_alpha)
+        linear_at_stall += math.copysign(kv * (math.sin(stall_rad) ** 2) * math.cos(stall_rad), stall_rad)
+
     post_stall = _post_stall_lift_coefficient(alpha, cfg, linear_at_stall)
     weight = stall_blend_weight(alpha, cfg)
     value = (1.0 - weight) * linear + weight * post_stall + _finite(cl_offset)
@@ -665,6 +714,30 @@ def pitching_moment_offset_nm(
     return float(moment[1])
 
 
+def center_of_pressure_x(alpha_deg: float, cfg: AircraftConfig) -> float:
+    """Dynamic center of pressure position along MAC from the leading edge (in metres).
+
+    For thin plates/airfoils, in linear attached flow at small alpha, the center of pressure
+    lies around 0.25 MAC (aerodynamic center). As angle of attack increases towards stall
+    and separation, the center of pressure shifts aft towards 0.45..0.50 MAC.
+    When ``cfg.cp_shift_gain > 0``, the shift is scaled by ``cp_shift_gain``.
+    """
+    chord = max(_finite(_geom(cfg)["ref_length_m"], 0.075), 1.0e-9)
+    alpha = abs(_finite(alpha_deg))
+    stall_alpha = effective_stall_alpha_deg(cfg)
+
+    # Shift fraction from 0.25 at alpha=0 towards 0.50 at and beyond stall
+    # Normalized progression with alpha / stall_alpha
+    progression = clamp(alpha / max(stall_alpha, 1.0), 0.0, 1.0)
+    # Smooth progression (Hermite smoothstep)
+    progression_smooth = progression * progression * (3.0 - 2.0 * progression)
+
+    # Baseline thin airfoil CP is at 0.25 c; max aft shift at full separation is up to 0.50 c
+    gain = max(_finite(cfg.cp_shift_gain, 0.0), 0.0)
+    cp_frac = 0.25 + 0.25 * progression_smooth * min(gain, 1.0)
+    return float(cp_frac * chord)
+
+
 # --------------------------------------------------------------------------
 # 8. Atmosphere bridge
 # --------------------------------------------------------------------------
@@ -838,6 +911,31 @@ def evaluate_aero(
         + _finite(cfg.cn_yaw_rate) * r_hat
     )
 
+    # Ground cushion lift increment: scaling with cfg.ground_cushion_lift * exp(-4.0 * h / b)
+    cushion_gain = max(_finite(cfg.ground_cushion_lift, 0.0), 0.0)
+    h_b_ratio = safe_div(max(_finite(ground_height_m, 1.0), 0.0), span, 10.0)
+    ground_proximity = math.exp(-4.0 * h_b_ratio) if bool(env.ground_effect_enabled) else 0.0
+    if cushion_gain > 0.0 and ground_proximity > 0.0:
+        delta_cl_cushion = cushion_gain * ground_proximity
+        cl = cl + delta_cl_cushion
+
+    # Nose-down ground pitching moment increment: scaling with cfg.ground_pitch_coupling * C_L * exp(-4.0 * h / b)
+    pitch_coupling = max(_finite(cfg.ground_pitch_coupling, 0.0), 0.0)
+    if pitch_coupling > 0.0 and ground_proximity > 0.0:
+        # Negative increment produces nose-down pitching moment
+        delta_cm_ground = -pitch_coupling * cl * ground_proximity
+        cm = cm + delta_cm_ground
+
+    # Dynamic center of pressure shift: cp_x_m from leading edge
+    # Baseline AC is at 0.25 chord (or including cfg.cg_offset_x)
+    cp_x = center_of_pressure_x(alpha, cfg)
+    cp_gain = max(_finite(cfg.cp_shift_gain, 0.0), 0.0)
+    if cp_gain > 0.0:
+        # Baseline reference aerodynamic center is at 0.25 MAC
+        # When CP shifts aft, delta_cm = - (x_cp - x_ac) / c * C_L
+        delta_cm_cp = - safe_div(cp_x - 0.25 * chord, chord, 0.0) * cl
+        cm = cm + delta_cm_cp
+
     dynamic_pressure = 0.5 * density * speed * speed
     lift_n = dynamic_pressure * area * cl
     # Left and right wing lift partitioning based on total lift and roll moment
@@ -851,13 +949,20 @@ def evaluate_aero(
     rolling_nm = dynamic_pressure * area * span * roll_coeff
     yawing_nm = dynamic_pressure * area * span * yaw_coeff
 
-    stall_angle = _finite(cfg.stall_alpha_deg, 14.0)
+    stall_angle = effective_stall_alpha_deg(cfg)
     # The lift curve breaks exactly at ``stall_alpha_deg`` (see
     # :func:`stall_blend_weight`), so the flag and ``stall_margin`` share the
     # same threshold: the margin is 0 there and the airframe counts as stalled
     # strictly beyond it.
     stalled = bool(alpha > stall_angle)
     stall_margin = safe_div(stall_angle - alpha, abs(stall_angle) if stall_angle != 0.0 else 1.0, 0.0)
+
+    # Aeroelastic deformation estimates from dynamic pressure and stiffness
+    stiffness = max(_finite(cfg.paper_stiffness, 0.35), 0.01)
+    # Reference aeroelastic dynamic pressure scale: q_ref ~ 50 Pa for typical paper glider
+    q_scale = safe_div(dynamic_pressure, 50.0 * stiffness, 0.0)
+    aeroelastic_dihedral = _finite(cfg.aeroelastic_flex, 0.0) * q_scale * 2.5
+    aeroelastic_twist = -_finite(cfg.aeroelastic_twist, 0.0) * q_scale * 1.5
 
     zero_lift = _finite(cfg.cL0) * lift_scale + elevon["dcl"] * lift_scale
     # The reported polar minima are free-air and incompressible (no ground
@@ -901,6 +1006,9 @@ def evaluate_aero(
         ground_effect_ratio=float(ground_ratio),
         lift_left_n=float(lift_left_n),
         lift_right_n=float(lift_right_n),
+        cp_x_m=float(cp_x),
+        aeroelastic_dihedral_deg=float(aeroelastic_dihedral),
+        aeroelastic_twist_deg=float(aeroelastic_twist),
     )
 
 
