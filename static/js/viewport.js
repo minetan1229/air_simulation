@@ -896,6 +896,7 @@ export class Viewport {
 
     const group = new THREE.Group();
     group.name = "ensemble-trajectories";
+    this._ensembleTrajectories = trajectories;
 
     let maxDist = 0;
     trajectories.forEach((tr) => {
@@ -906,17 +907,26 @@ export class Viewport {
     const palette = [
       new THREE.Color(0x1a73e8), // Google Blue
       new THREE.Color(0x34a853), // Google Green
-      new THREE.Color(0xfbbc04), // Google Amber
       new THREE.Color(0x9334e8), // Purple
       new THREE.Color(0x00bcd4), // Cyan
-      new THREE.Color(0xff7043), // Deep Orange
+      new THREE.Color(0x4285f4), // Light Blue
+      new THREE.Color(0x0f9d58), // Green
     ];
+
+    // Sort to determine ranks if not pre-assigned
+    const sorted = [...trajectories].sort((a, b) => (Number(b.landing_distance_m) || 0) - (Number(a.landing_distance_m) || 0));
+    const topIds = new Set(sorted.slice(0, 3).map((t) => t.id));
+    const bestId = sorted.length ? sorted[0].id : null;
 
     trajectories.forEach((tr, idx) => {
       const pts = tr.points;
       if (!pts || pts.length < 2) return;
 
-      const isBest = Math.abs((Number(tr.landing_distance_m) || 0) - maxDist) < 1e-4;
+      const rank = tr.rank || (sorted.findIndex((s) => s.id === tr.id) + 1);
+      const isRank1 = tr.id === bestId || rank === 1;
+      const isRank2 = rank === 2;
+      const isRank3 = rank === 3;
+
       const positions = [];
       pts.forEach((p) => {
         // sim to three: x -> x, height -> y, lateral -> z
@@ -926,37 +936,119 @@ export class Viewport {
       const geom = new THREE.BufferGeometry();
       geom.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
 
-      const col = isBest ? new THREE.Color(0xff2200) : palette[idx % palette.length];
+      let col;
+      let opacity = 0.35;
+      let linewidth = 1;
+
+      if (isRank1) {
+        col = new THREE.Color(0xffb300); // 🏆 Gold
+        opacity = 1.0;
+        linewidth = 3;
+      } else if (isRank2) {
+        col = new THREE.Color(0xb0bec5); // 🥈 Silver
+        opacity = 0.85;
+      } else if (isRank3) {
+        col = new THREE.Color(0xcd7f32); // 🥉 Bronze
+        opacity = 0.75;
+      } else {
+        col = palette[idx % palette.length];
+      }
+
       const mat = new THREE.LineBasicMaterial({
         color: col,
         transparent: true,
-        opacity: isBest ? 0.95 : 0.45,
-        linewidth: isBest ? 3 : 1,
+        opacity: opacity,
+        linewidth: linewidth,
       });
 
       const line = new THREE.Line(geom, mat);
+      line.userData = { trajectoryId: tr.id, rank: rank, isRank1: isRank1 };
       group.add(line);
 
       // Landing ground marker
       const lastPt = pts[pts.length - 1];
       if (lastPt) {
-        const radius = isBest ? 0.30 : 0.12;
-        const markerGeom = new THREE.CircleGeometry(radius, 16);
-        markerGeom.rotateX(-Math.PI / 2);
-        const markerMat = new THREE.MeshBasicMaterial({
-          color: col,
-          transparent: true,
-          opacity: isBest ? 0.95 : 0.65,
-          side: THREE.DoubleSide,
-        });
-        const marker = new THREE.Mesh(markerGeom, markerMat);
-        marker.position.set(Number(lastPt.x) || 0, 0.005, Number(lastPt.y) || 0);
-        group.add(marker);
+        const lx = Number(lastPt.x) || 0;
+        const lz = Number(lastPt.y) || 0;
+
+        if (isRank1) {
+          // 🏆 1st place gold trophy circle and outer pulsating ring
+          const innerGeom = new THREE.CircleGeometry(0.40, 24);
+          innerGeom.rotateX(-Math.PI / 2);
+          const innerMat = new THREE.MeshBasicMaterial({
+            color: 0xffb300,
+            transparent: true,
+            opacity: 0.95,
+            side: THREE.DoubleSide,
+          });
+          const inner = new THREE.Mesh(innerGeom, innerMat);
+          inner.position.set(lx, 0.01, lz);
+          inner.userData = { trajectoryId: tr.id, rank: 1 };
+          group.add(inner);
+
+          const ringGeom = new THREE.RingGeometry(0.48, 0.65, 32);
+          ringGeom.rotateX(-Math.PI / 2);
+          const ringMat = new THREE.MeshBasicMaterial({
+            color: 0xffd54f,
+            transparent: true,
+            opacity: 0.75,
+            side: THREE.DoubleSide,
+          });
+          const ring = new THREE.Mesh(ringGeom, ringMat);
+          ring.position.set(lx, 0.012, lz);
+          group.add(ring);
+        } else {
+          const radius = (isRank2 || isRank3) ? 0.22 : 0.10;
+          const markerGeom = new THREE.CircleGeometry(radius, 16);
+          markerGeom.rotateX(-Math.PI / 2);
+          const markerMat = new THREE.MeshBasicMaterial({
+            color: col,
+            transparent: true,
+            opacity: (isRank2 || isRank3) ? 0.85 : 0.55,
+            side: THREE.DoubleSide,
+          });
+          const marker = new THREE.Mesh(markerGeom, markerMat);
+          marker.position.set(lx, 0.005, lz);
+          marker.userData = { trajectoryId: tr.id, rank: rank };
+          group.add(marker);
+        }
       }
     });
 
     this.scene.add(group);
     this._ensembleGroup = group;
+  }
+
+  focusTrajectory(trajectoryId) {
+    if (!this._ensembleTrajectories) return;
+    const target = this._ensembleTrajectories.find((t) => t.id === trajectoryId);
+    if (!target || !target.points || !target.points.length) return;
+
+    const last = target.points[target.points.length - 1];
+    const targetX = Number(last.x) || 0;
+    const targetY = Number(last.z) || 0;
+    const targetZ = Number(last.y) || 0;
+
+    // Smoothly animate orbit controls target towards landing position
+    if (this.controls) {
+      this.controls.target.set(targetX, Math.max(targetY + 0.5, 0.5), targetZ);
+      this.camera.position.set(targetX - 5.0, Math.max(targetY + 3.0, 3.0), targetZ + 5.0);
+      this.controls.update();
+    }
+  }
+
+  filterEnsembleTracks(mode = "all") {
+    if (!this._ensembleGroup) return;
+    this._ensembleGroup.children.forEach((child) => {
+      const rank = child.userData ? child.userData.rank : 999;
+      if (mode === "top1") {
+        child.visible = rank === 1;
+      } else if (mode === "top3") {
+        child.visible = rank <= 3;
+      } else {
+        child.visible = true;
+      }
+    });
   }
 
   /* ------------------------------------------------ Video Recording */

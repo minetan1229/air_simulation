@@ -987,11 +987,17 @@ def gpu_ensemble_simulation(
 
         landing_time_np = cp.asnumpy(landing_time)
         landing_pos_np = cp.asnumpy(landing_pos)
+        v0_np = cp.asnumpy(v0)
+        pitch_deg_np = cp.asnumpy(pitch_deg)
+        roll_deg_np = cp.asnumpy(roll_deg)
         hist_alt_np = [cp.asnumpy(h) for h in history_altitudes]
         hist_dist_np = [cp.asnumpy(h) for h in history_distances]
     else:
         landing_time_np = np.asarray(landing_time)
         landing_pos_np = np.asarray(landing_pos)
+        v0_np = np.asarray(v0)
+        pitch_deg_np = np.asarray(pitch_deg)
+        roll_deg_np = np.asarray(roll_deg)
         hist_alt_np = [np.asarray(h) for h in history_altitudes]
         hist_dist_np = [np.asarray(h) for h in history_distances]
 
@@ -1019,15 +1025,43 @@ def gpu_ensemble_simulation(
         dist_p10.append(round(float(np.percentile(dists, 10)), 3))
         dist_p90.append(round(float(np.percentile(dists, 90)), 3))
 
-    # Format sample trajectories for visualization
-    sample_trajectories = [
-        {
+    # Format sample trajectories with metrics and rank
+    sample_trajectories = []
+    for k, idx in enumerate(sample_indices):
+        pts = sample_tracks[k]
+        peak_alt = max([float(p[2]) for p in pts], default=0.0)
+        sample_trajectories.append({
             "id": idx,
-            "points": [{"x": pt[0], "y": pt[1], "z": pt[2]} for pt in sample_tracks[k]],
+            "rank": 0,
+            "points": [{"x": pt[0], "y": pt[1], "z": pt[2]} for pt in pts],
             "landing_distance_m": round(float(landing_distances_np[idx]), 3),
             "flight_time_s": round(float(landing_time_np[idx]), 3),
+            "max_altitude_m": round(float(peak_alt), 3),
+            "speed_mps": round(float(v0_np[idx]), 2),
+            "pitch_deg": round(float(pitch_deg_np[idx]), 2),
+            "roll_deg": round(float(roll_deg_np[idx]), 2),
+        })
+
+    # Sort descending by distance to assign ranks
+    sorted_by_dist = sorted(sample_trajectories, key=lambda tr: tr["landing_distance_m"], reverse=True)
+    for rank_idx, tr in enumerate(sorted_by_dist):
+        tr["rank"] = rank_idx + 1
+
+    best_distance_flight = sorted_by_dist[0] if sorted_by_dist else None
+    best_hangtime_flight = max(sample_trajectories, key=lambda tr: tr["flight_time_s"]) if sample_trajectories else None
+    best_altitude_flight = max(sample_trajectories, key=lambda tr: tr["max_altitude_m"]) if sample_trajectories else None
+    leaderboard = [
+        {
+            "rank": tr["rank"],
+            "id": tr["id"],
+            "landing_distance_m": tr["landing_distance_m"],
+            "flight_time_s": tr["flight_time_s"],
+            "max_altitude_m": tr["max_altitude_m"],
+            "speed_mps": tr["speed_mps"],
+            "pitch_deg": tr["pitch_deg"],
+            "roll_deg": tr["roll_deg"],
         }
-        for k, idx in enumerate(sample_indices)
+        for tr in sorted_by_dist[:10]
     ]
 
     # Summary metrics
@@ -1059,6 +1093,10 @@ def gpu_ensemble_simulation(
         "max_distance_m": round(max_d, 3),
         "min_flight_time_s": round(min_t, 3),
         "min_distance_m": round(min_d, 3),
+        "best_flight": best_distance_flight,
+        "best_hangtime": best_hangtime_flight,
+        "best_altitude": best_altitude_flight,
+        "leaderboard": leaderboard,
         "statistics": {
             "flight_time": {
                 "mean": round(mean_t, 3),

@@ -67,6 +67,7 @@ class ConsoleApp {
     this._bindTransport();
     this._bindHeader();
     this._bindKeyboard();
+    this._initQuickLaunchBar();
 
     this.toastHost = $("#toasts");
 
@@ -336,6 +337,39 @@ class ConsoleApp {
       "btn-config-reset",
       "bundle-paste",
       "geom-summary",
+      "vp-flight-status-announcer",
+      "status-dot",
+      "status-text",
+      "vp-controls-guide",
+      "guide-toggle-btn",
+      "guide-content",
+      "ensemble-champion-card",
+      "champ-best-dist",
+      "champ-best-detail",
+      "champ-best-time",
+      "champ-best-time-detail",
+      "champ-best-alt",
+      "champ-best-alt-detail",
+      "champ-avg-dist",
+      "champ-avg-range",
+      "champ-btn-adopt",
+      "champ-btn-focus",
+      "champ-btn-toggle-fleet",
+      "champ-close-btn",
+      "champ-leaderboard-body",
+      "champ-backend-sub",
+      "quick-launch-dock",
+      "quick-btn-throw",
+      "quick-btn-ensemble",
+      "quick-dock-toggle",
+      "quick-dock-toggle-icon",
+      "quick-tuning-panel",
+      "quick-slide-speed",
+      "quick-slide-pitch",
+      "quick-slide-roll",
+      "quick-val-speed",
+      "quick-val-pitch",
+      "quick-val-roll",
     ];
     for (const id of ids) this.dom[id] = document.getElementById(id);
   }
@@ -618,6 +652,248 @@ class ConsoleApp {
         `⚡ GPU 100機同時飛行完了 (${res.trajectories_count || count}機 · ${backendStr})\n最大飛距離: ${maxDist.toFixed(2)}m (平均: ${meanDist.toFixed(2)}m) · 最大滞空: ${maxTime.toFixed(2)}s (平均: ${meanTime.toFixed(2)}s)`,
         "ok"
       );
+
+      // Show comprehensive champion metrics & leaderboard HUD
+      this._showEnsembleChampionHud(res);
+      this._updateFlightStatus("landed", `🏁 100機同時飛行完了 — 🥇 1位最高飛距離: ${maxDist.toFixed(2)}m (平均: ${meanDist.toFixed(2)}m)`);
+    });
+  }
+
+  _showEnsembleChampionHud(res) {
+    if (!res) return;
+    const card = this.dom["ensemble-champion-card"];
+    if (!card) return;
+
+    const bestFlight = res.best_flight || (res.sample_trajectories && res.sample_trajectories[0]) || {};
+    const bestTimeFlight = res.best_hangtime || {};
+    const bestAltFlight = res.best_altitude || {};
+
+    const maxDist = Number(res.max_distance_m || bestFlight.landing_distance_m || 0);
+    const meanDist = Number(res.mean_distance_m || 0);
+    const minDist = Number(res.min_distance_m || 0);
+    const maxTime = Number(res.max_flight_time_s || bestTimeFlight.flight_time_s || 0);
+    const maxAlt = Number(bestAltFlight.max_altitude_m || 0);
+
+    const bestSpeed = bestFlight.speed_mps != null ? bestFlight.speed_mps : "—";
+    const bestPitch = bestFlight.pitch_deg != null ? bestFlight.pitch_deg : "—";
+    const bestRoll = bestFlight.roll_deg != null ? bestFlight.roll_deg : "—";
+    const bestId = bestFlight.id != null ? bestFlight.id : "—";
+
+    if (this.dom["champ-best-dist"]) this.dom["champ-best-dist"].textContent = maxDist.toFixed(2);
+    if (this.dom["champ-best-detail"]) {
+      this.dom["champ-best-detail"].textContent = `機体 #${bestId} · 初速: ${bestSpeed} m/s · 仰角: ${bestPitch}° · ロール: ${bestRoll}°`;
+    }
+    if (this.dom["champ-best-time"]) this.dom["champ-best-time"].textContent = maxTime.toFixed(2);
+    if (this.dom["champ-best-time-detail"]) {
+      this.dom["champ-best-time-detail"].textContent = `機体 #${bestTimeFlight.id ?? "—"} · 距離: ${Number(bestTimeFlight.landing_distance_m || 0).toFixed(2)}m`;
+    }
+    if (this.dom["champ-best-alt"]) this.dom["champ-best-alt"].textContent = maxAlt.toFixed(2);
+    if (this.dom["champ-best-alt-detail"]) {
+      this.dom["champ-best-alt-detail"].textContent = `機体 #${bestAltFlight.id ?? "—"}`;
+    }
+    if (this.dom["champ-avg-dist"]) this.dom["champ-avg-dist"].textContent = meanDist.toFixed(2);
+    if (this.dom["champ-avg-range"]) {
+      this.dom["champ-avg-range"].textContent = `最小 ${minDist.toFixed(2)}m 〜 最大 ${maxDist.toFixed(2)}m (分散)`;
+    }
+    if (this.dom["champ-backend-sub"]) {
+      this.dom["champ-backend-sub"].textContent = `${res.backend_display || res.backend || "CuPy GPU"} · 計 ${res.trajectories_count || 100}機`;
+    }
+
+    // Leaderboard table body
+    const tbody = this.dom["champ-leaderboard-body"];
+    if (tbody) {
+      tbody.innerHTML = "";
+      const list = res.leaderboard || (res.sample_trajectories ? res.sample_trajectories.slice(0, 5) : []);
+      list.slice(0, 5).forEach((item, idx) => {
+        const tr = document.createElement("tr");
+        tr.className = `clickable ${idx === 0 ? "champ-rank-1" : ""}`;
+        const rankMedal = idx === 0 ? "🥇 1位" : idx === 1 ? "🥈 2位" : idx === 2 ? "🥉 3位" : `${idx + 1}位`;
+        tr.innerHTML = `
+          <td><strong>${rankMedal}</strong></td>
+          <td>#${item.id}</td>
+          <td><strong>${Number(item.landing_distance_m || 0).toFixed(2)} m</strong></td>
+          <td>${Number(item.flight_time_s || 0).toFixed(2)} s</td>
+          <td>${Number(item.max_altitude_m || 0).toFixed(2)} m</td>
+          <td>${item.speed_mps != null ? item.speed_mps : "—"} m/s</td>
+          <td>${item.pitch_deg != null ? item.pitch_deg : "—"}°</td>
+        `;
+        tr.title = `クリックして機体 #${item.id} にカメラをフォーカス`;
+        tr.addEventListener("click", () => {
+          if (this.viewport && item.id != null) {
+            this.viewport.focusTrajectory(item.id);
+            this.notify(`機体 #${item.id} (${rankMedal}: ${Number(item.landing_distance_m || 0).toFixed(2)}m) にカメラをフォーカスしました`, "info");
+          }
+        });
+        tbody.appendChild(tr);
+      });
+    }
+
+    this._lastChampionFlight = bestFlight;
+    card.hidden = false;
+  }
+
+  _updateFlightStatus(status, text) {
+    const dot = this.dom["status-dot"];
+    const txt = this.dom["status-text"];
+    if (!dot || !txt) return;
+
+    dot.className = `status-dot ${status}`;
+    txt.textContent = text;
+  }
+
+  _initQuickLaunchBar() {
+    // 1. Throw buttons
+    if (this.dom["quick-btn-throw"]) {
+      this.dom["quick-btn-throw"].addEventListener("click", () => this._launchFlight());
+    }
+    if (this.dom["quick-btn-ensemble"]) {
+      this.dom["quick-btn-ensemble"].addEventListener("click", () => this._runGpuEnsemble(100));
+    }
+
+    // 2. Dock toggle
+    const toggleBtn = this.dom["quick-dock-toggle"];
+    const panel = this.dom["quick-tuning-panel"];
+    if (toggleBtn && panel) {
+      toggleBtn.addEventListener("click", () => {
+        const isHidden = panel.style.display === "none" || panel.hasAttribute("hidden");
+        if (isHidden) {
+          panel.removeAttribute("hidden");
+          panel.style.display = "grid";
+          toggleBtn.innerHTML = "✖ 閉じる";
+        } else {
+          panel.setAttribute("hidden", "");
+          panel.style.display = "none";
+          toggleBtn.innerHTML = "⚙️ 投げ方調整";
+        }
+      });
+    }
+
+    // 3. Quick tuning sliders
+    const slideSpeed = this.dom["quick-slide-speed"];
+    const slidePitch = this.dom["quick-slide-pitch"];
+    const slideRoll = this.dom["quick-slide-roll"];
+
+    const updateQuickLaunch = () => {
+      const spd = Number(slideSpeed ? slideSpeed.value : 10);
+      const pitch = Number(slidePitch ? slidePitch.value : 12);
+      const roll = Number(slideRoll ? slideRoll.value : 0);
+
+      if (this.dom["quick-val-speed"]) this.dom["quick-val-speed"].textContent = `${spd.toFixed(1)} m/s`;
+      if (this.dom["quick-val-pitch"]) this.dom["quick-val-pitch"].textContent = `${pitch.toFixed(1)}°`;
+      if (this.dom["quick-val-roll"]) this.dom["quick-val-roll"].textContent = `${roll.toFixed(1)}°`;
+
+      this.store.set("launch", "launch_speed", spd, "quick-dock");
+      this.store.set("launch", "launch_angle_deg", pitch, "quick-dock");
+      this.store.set("launch", "launch_roll_deg", roll, "quick-dock");
+    };
+
+    if (slideSpeed) slideSpeed.addEventListener("input", updateQuickLaunch);
+    if (slidePitch) slidePitch.addEventListener("input", updateQuickLaunch);
+    if (slideRoll) slideRoll.addEventListener("input", updateQuickLaunch);
+
+    // 4. Preset chips
+    document.querySelectorAll(".quick-tuning-panel .tuning-chip").forEach((chip) => {
+      chip.addEventListener("click", () => {
+        const type = chip.dataset.type;
+        const val = Number(chip.dataset.val);
+        if (type === "speed" && slideSpeed) {
+          slideSpeed.value = val;
+        } else if (type === "pitch" && slidePitch) {
+          slidePitch.value = val;
+        } else if (type === "roll" && slideRoll) {
+          slideRoll.value = val;
+        }
+        chip.parentElement.querySelectorAll(".tuning-chip").forEach((c) => c.classList.remove("active"));
+        chip.classList.add("active");
+        updateQuickLaunch();
+      });
+    });
+
+    // 5. Controls Guide Toggle
+    const guideToggle = this.dom["guide-toggle-btn"];
+    const guideBox = this.dom["vp-controls-guide"];
+    if (guideToggle && guideBox) {
+      guideToggle.addEventListener("click", () => {
+        const isCollapsed = guideBox.classList.toggle("collapsed");
+        guideToggle.textContent = isCollapsed ? "▸" : "▾";
+      });
+    }
+
+    // 6. Champion Card Actions
+    if (this.dom["champ-close-btn"]) {
+      this.dom["champ-close-btn"].addEventListener("click", () => {
+        if (this.dom["ensemble-champion-card"]) this.dom["ensemble-champion-card"].hidden = true;
+      });
+    }
+    if (this.dom["champ-btn-adopt"]) {
+      this.dom["champ-btn-adopt"].addEventListener("click", () => {
+        if (!this._lastChampionFlight) return;
+        const f = this._lastChampionFlight;
+        const speed = f.speed_mps != null ? f.speed_mps : 10;
+        const pitch = f.pitch_deg != null ? f.pitch_deg : 12;
+        const roll = f.roll_deg != null ? f.roll_deg : 0;
+
+        if (slideSpeed) slideSpeed.value = speed;
+        if (slidePitch) slidePitch.value = pitch;
+        if (slideRoll) slideRoll.value = roll;
+        updateQuickLaunch();
+
+        this.notify(`🌟 1位チャンピオンの投げ方を設定に反映しました！ (初速: ${speed}m/s, 仰角: ${pitch}°, ロール: ${roll}°)`, "ok");
+      });
+    }
+    if (this.dom["champ-btn-focus"]) {
+      this.dom["champ-btn-focus"].addEventListener("click", () => {
+        if (!this._lastChampionFlight || this._lastChampionFlight.id == null) return;
+        if (this.viewport) {
+          this.viewport.focusTrajectory(this._lastChampionFlight.id);
+          this.notify(`🏆 1位チャンピオン (機体 #${this._lastChampionFlight.id}) にフォーカスしました`, "info");
+        }
+      });
+    }
+    let ensembleFleetMode = "all";
+    if (this.dom["champ-btn-toggle-fleet"]) {
+      this.dom["champ-btn-toggle-fleet"].addEventListener("click", () => {
+        if (!this.viewport) return;
+        if (ensembleFleetMode === "all") {
+          ensembleFleetMode = "top3";
+          this.dom["champ-btn-toggle-fleet"].textContent = "👀 表示: 上位3機のみ (全100機へ戻す)";
+        } else {
+          ensembleFleetMode = "all";
+          this.dom["champ-btn-toggle-fleet"].textContent = "👀 表示: 全100機 ⇄ 上位3機";
+        }
+        this.viewport.filterEnsembleTracks(ensembleFleetMode);
+      });
+    }
+
+    // Synchronize initial values from store
+    this.store.on("change", ({ section, key, value, origin }) => {
+      if (origin === "quick-dock" || section !== "launch") return;
+      if (key === "launch_speed" && slideSpeed) {
+        slideSpeed.value = value;
+        if (this.dom["quick-val-speed"]) this.dom["quick-val-speed"].textContent = `${Number(value).toFixed(1)} m/s`;
+      } else if (key === "launch_angle_deg" && slidePitch) {
+        slidePitch.value = value;
+        if (this.dom["quick-val-pitch"]) this.dom["quick-val-pitch"].textContent = `${Number(value).toFixed(1)}°`;
+      } else if (key === "launch_roll_deg" && slideRoll) {
+        slideRoll.value = value;
+        if (this.dom["quick-val-roll"]) this.dom["quick-val-roll"].textContent = `${Number(value).toFixed(1)}°`;
+      }
+    });
+
+    this.store.on("adopt", (data) => {
+      const launch = (data && data.launch) || {};
+      if (launch.launch_speed != null && slideSpeed) {
+        slideSpeed.value = launch.launch_speed;
+        if (this.dom["quick-val-speed"]) this.dom["quick-val-speed"].textContent = `${Number(launch.launch_speed).toFixed(1)} m/s`;
+      }
+      if (launch.launch_angle_deg != null && slidePitch) {
+        slidePitch.value = launch.launch_angle_deg;
+        if (this.dom["quick-val-pitch"]) this.dom["quick-val-pitch"].textContent = `${Number(launch.launch_angle_deg).toFixed(1)}°`;
+      }
+      if (launch.launch_roll_deg != null && slideRoll) {
+        slideRoll.value = launch.launch_roll_deg;
+        if (this.dom["quick-val-roll"]) this.dom["quick-val-roll"].textContent = `${Number(launch.launch_roll_deg).toFixed(1)}°`;
+      }
     });
   }
 
@@ -1374,6 +1650,7 @@ class ConsoleApp {
     this.flightDirty = false;
     this._placeAirframeAtLaunch();
     this._updatePill("待機", "idle");
+    this._updateFlightStatus("ready", "🛫 投擲待機中 — [投げる] ボタンまたは Space キーで発射");
   }
 
   _onFrame(frame) {
@@ -1467,6 +1744,9 @@ class ConsoleApp {
       state = "stall";
     }
     this._updatePill(label, state);
+    if (!frame.crashed && !frame.landed && !frame.diverged) {
+      this._updateFlightStatus("flying", `✈️ 飛行中 — 速度: ${fmt(frame.speed_mps, 1)}m/s · 高度: ${fmt(frame.altitude_m, 1)}m · 距離: ${fmt(range, 1)}m`);
+    }
     this._paint();
   }
 
@@ -1497,6 +1777,10 @@ class ConsoleApp {
   }
 
   _onEnded(frame) {
+    const position = frame.position_m || [0, 0, 0];
+    const dist = Math.hypot(position[0], position[1]);
+    const time = Number(frame.time_s) || 0;
+
     if (frame.diverged) {
       this._updatePill("発散", "error");
       this.showSimulationError({
@@ -1507,6 +1791,7 @@ class ConsoleApp {
         icon: "🛑",
       });
       this.notify("数値計算が発散しました", "error");
+      this._updateFlightStatus("diverged", "🛑 計算発散エラー — 初速や迎角を調整してください");
     } else if (frame.crashed && (Number(frame.max_stress_index || 0) >= 1.0 || Number(frame.stress_pa || 0) > 25000)) {
       this._updatePill("破断", "crash");
       this.showSimulationError({
@@ -1517,12 +1802,15 @@ class ConsoleApp {
         icon: "💥",
       });
       this.notify("主翼が空中分解しました", "error");
+      this._updateFlightStatus("crash", `💥 構造破断 — 翼根応力超過 (${fmt(frame.stress_pa || 0, 0)} Pa)`);
     } else if (frame.crashed) {
       this._updatePill("墜落", "crash");
       this.notify("墜落しました", "error");
+      this._updateFlightStatus("crash", `⚠️ 墜落 — 飛距離: ${dist.toFixed(2)}m`);
     } else {
       this._updatePill("着地", "flying");
       this.notify("着地しました", "ok");
+      this._updateFlightStatus("landed", `🏁 着地完了 — 飛距離: ${dist.toFixed(2)}m · 滞空時間: ${time.toFixed(2)}s`);
     }
 
     // 飛行終了時に到達距離と時間をゴースト記録（トップレール）に保存・表示
