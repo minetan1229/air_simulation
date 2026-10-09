@@ -713,6 +713,7 @@ def _thermal_components(P, env: EnvironmentConfig, time_s: float, ops: _Ops):
     distance = xp.sqrt(radial_sq)
     safe = xp.where(distance > _MIN_LENGTH_M, distance, xp.ones_like(distance))
     radial_speed = _THERMAL_ENTRAINMENT_RATIO * strength * (distance / sigma) * gaussian * vertical
+    # Thermal radial divergence/entrainment:
     u = radial_speed * (dx / safe)
     v = radial_speed * (dy / safe)
 

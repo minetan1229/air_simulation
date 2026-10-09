@@ -36,7 +36,15 @@ import sys
 
 import numpy as np
 import pytest
-from scipy.integrate import quad
+
+try:
+    from scipy.integrate import quad
+except ImportError:
+    def quad(func, a, b, **kwargs):
+        h_pts = np.linspace(a, b, 2001)
+        y_pts = np.array([func(h) for h in h_pts])
+        trapz_fn = getattr(np, "trapezoid", getattr(np, "trapz", None))
+        return float(trapz_fn(y_pts, h_pts)), 1.0e-7
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:

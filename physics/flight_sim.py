@@ -2240,13 +2240,16 @@ class FlightSimulator:
 
         if vz > 0.0:
             impact = vz
+            grav = max(abs(_finite(self.environment.gravity)), 1.0e-9)
+            # Deceleration over ground contact crumple time (~0.08s)
+            impact_g = 1.0 + min(abs(impact) / (0.08 * grav), 15.0)
             air = atmosphere_state(self.environment, 0.0, self._chord)
             impact_stress = stress_metrics(
                 self.aircraft,
                 self.environment,
                 self._derived,
                 dynamic_pressure_pa=0.5 * air["density_kgm3"] * impact * impact,
-                g_load=abs(impact) / max(abs(_finite(self.environment.gravity)), 1.0e-9),
+                g_load=impact_g,
                 speed_mps=impact,
                 density_kgm3=air["density_kgm3"],
             )
@@ -2255,7 +2258,8 @@ class FlightSimulator:
             vx *= damping
             vy *= damping
             omega = [value * damping * 0.5 for value in omega]
-            if impact > CRASH_IMPACT_SPEED_MPS or impact_stress["max_stress_index"] >= 1.0:
+            # Only declare crashed if impact speed is violent or catastrophic overstress occurs
+            if impact > CRASH_IMPACT_SPEED_MPS or (impact > 15.0 and impact_stress["max_stress_index"] >= 1.0):
                 crashed = True
             if abs(new_vz) < LANDING_SPEED_THRESHOLD_MPS or self._bounce_count >= MAX_BOUNCES:
                 landed = True

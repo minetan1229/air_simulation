@@ -184,7 +184,7 @@ export class ParameterPanels {
     const btnLaunch = make("button", {
       class: "btn btn-primary btn-throw-launch",
       type: "button",
-      text: "🚀 この機体・設定で投擲 (LAUNCH)",
+      html: `<img src="https://api.iconify.design/material-symbols/rocket-launch.svg?color=%23ffffff" class="ui-icon" alt=""> この機体・設定で投擲 (LAUNCH)`,
       title: "現在の機体寸法・折り畳み・投げ方・風況で飛行シミュレーションを実行します (Enter)",
     });
     btnLaunch.addEventListener("click", () => {

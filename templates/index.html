@@ -67,19 +67,19 @@
         <span class="eta-val num" id="eta-clock">—</span>
         <span class="eta-sub num" id="eta-left">待機中</span>
       </div>
-      <button class="btn btn-primary btn-launch-top" id="btn-top-launch" type="button" title="現在の設定で飛行軌跡を一括シミュレーション計算して再生します (Enter)">🚀 発射</button>
-      <button class="btn btn-gpu" id="btn-top-gpu-ensemble" type="button" title="GPUで100機を同時に一括シミュレーション計算して全軌跡を描画します">⚡ 100機一括</button>
+      <button class="btn btn-primary btn-launch-top" id="btn-top-launch" type="button" title="現在の設定で飛行軌跡を一括シミュレーション計算して再生します (Enter)"><img src="https://api.iconify.design/material-symbols/rocket-launch.svg?color=%23ffffff" class="ui-icon" alt=""> 発射</button>
+      <button class="btn btn-gpu" id="btn-top-gpu-ensemble" type="button" title="GPUで100機を同時に一括シミュレーション計算して全軌跡を描画します"><img src="https://api.iconify.design/material-symbols/electric-bolt.svg?color=%23ffffff" class="ui-icon" alt=""> 100機一括</button>
       <label class="switch" title="風洞モード: 機体を固定して空力係数のみ測定 (U)">
         <input type="checkbox" id="tunnel-toggle">
         <span class="switch-box"></span>
-        <span class="switch-label">風洞</span>
+        <span class="switch-label"><img src="https://api.iconify.design/material-symbols/air.svg?color=%231a73e8" class="ui-icon" alt=""> 風洞</span>
       </label>
-      <button class="btn" id="btn-top-investigate" type="button" title="指定した機体をベースに手で変えられる項目を自動分析・改善">🔍 調査</button>
-      <button class="btn" id="btn-save" type="button" title="設定を JSON で保存 (Ctrl+S)">保存</button>
-      <button class="btn" id="btn-load" type="button" title="設定 JSON の読込">読込</button>
-      <button class="btn" id="btn-csv" type="button" title="飛行ログを CSV で出力 (E)">CSV</button>
-      <button class="btn btn-rec" id="btn-top-record" type="button" title="3D飛行動画を録画して保存 (WebM/MP4)">🎥 録画</button>
-      <button class="btn btn-icon" id="btn-help" type="button" title="ショートカット (?)" aria-label="ショートカット">?</button>
+      <button class="btn" id="btn-top-investigate" type="button" title="指定した機体をベースに手で変えられる項目を自動分析・改善"><img src="https://api.iconify.design/material-symbols/search.svg?color=%235f6368" class="ui-icon" alt=""> 調査</button>
+      <button class="btn" id="btn-save" type="button" title="設定を JSON で保存 (Ctrl+S)"><img src="https://api.iconify.design/material-symbols/save.svg?color=%235f6368" class="ui-icon" alt=""> 保存</button>
+      <button class="btn" id="btn-load" type="button" title="設定 JSON の読込"><img src="https://api.iconify.design/material-symbols/folder-open.svg?color=%235f6368" class="ui-icon" alt=""> 読込</button>
+      <button class="btn" id="btn-csv" type="button" title="飛行ログを CSV で出力 (E)"><img src="https://api.iconify.design/material-symbols/table-chart.svg?color=%235f6368" class="ui-icon" alt=""> CSV</button>
+      <button class="btn btn-rec" id="btn-top-record" type="button" title="3D飛行動画を録画して保存 (WebM/MP4)"><img src="https://api.iconify.design/material-symbols/videocam.svg?color=%23d93025" class="ui-icon" alt=""> 録画</button>
+      <button class="btn btn-icon" id="btn-help" type="button" title="ショートカット (?)" aria-label="ショートカット"><img src="https://api.iconify.design/material-symbols/help-outline.svg?color=%235f6368" class="ui-icon" alt="?"></button>
       <input type="file" id="config-file" accept="application/json,.json" hidden>
     </div>
   </header>
@@ -97,17 +97,17 @@
       <div class="rail-body" id="rail-left-body">
         <div class="rail-launch-hero">
           <button class="btn btn-primary btn-launch-hero" id="btn-rail-launch" type="button" title="現在のパラメータで飛行軌跡を一括シミュレーション計算して再生します (Enter)">
-            🚀 飛行シミュレーション発射
+            <img src="https://api.iconify.design/material-symbols/rocket-launch.svg?color=%23ffffff" class="ui-icon" alt=""> 飛行シミュレーション発射
           </button>
           <button class="btn btn-gpu btn-launch-hero" id="btn-rail-gpu-ensemble" type="button" style="margin-top:6px;" title="NVIDIA RTX 4060 GPUで100機を同時に一括シミュレーション計算">
-            ⚡ GPU 100機一括同時飛行
+            <img src="https://api.iconify.design/material-symbols/electric-bolt.svg?color=%23ffffff" class="ui-icon" alt=""> GPU 100機一括同時飛行
           </button>
         </div>
 
         <!-- ギネス世界記録・投擲モード -->
         <section class="group" data-group="records" open>
           <button class="group-head" type="button" aria-expanded="true">
-            <span class="group-name">🏆 ギネス世界記録・投擲</span><span class="group-en">GUINNESS & THROWS</span>
+            <span class="group-name"><img src="https://api.iconify.design/material-symbols/trophy-outline.svg?color=%231a73e8" class="ui-icon" alt=""> ギネス世界記録・投擲</span><span class="group-en">GUINNESS & THROWS</span>
             <span class="group-chev" aria-hidden="true"></span>
           </button>
           <div class="group-body" data-host="records">
@@ -127,10 +127,10 @@
               <div class="record-section-title">投擲モード選択 (SIMULATION MODE)</div>
               <div class="record-mode-toggle" id="record-mode-toggle">
                 <button type="button" class="btn-mode active" id="btn-mode-calibrated" title="剛体シミュレーターの空力特性に合わせて最適化された投擲。記録級の安定滑空を体験できます">
-                  🌟 記録再現・安定滑空 (推奨)
+                  <img src="https://api.iconify.design/material-symbols/star-outline.svg?color=%231a73e8" class="ui-icon" alt=""> 記録再現・安定滑空 (推奨)
                 </button>
                 <button type="button" class="btn-mode" id="btn-mode-raw" title="公式記録時の極限初速（時速約100km）。急激なGフォースと失速挙動を検証できます">
-                  ⚡ 生の公認記録値 (高G限界)
+                  <img src="https://api.iconify.design/material-symbols/electric-bolt.svg?color=%235f6368" class="ui-icon" alt=""> 生の公認記録値 (高G限界)
                 </button>
               </div>
 
@@ -146,21 +146,21 @@
               </div>
 
               <details class="record-help-details">
-                <summary>💡 なぜ生の記録値だと墜落しやすいの？</summary>
+                <summary><img src="https://api.iconify.design/material-symbols/lightbulb-outline.svg?color=%231a73e8" class="ui-icon" alt=""> なぜ生の記録値だと墜落しやすいの？</summary>
                 <div class="record-help-content">
                   <p><strong>① 巨大なGフォース（30〜50G）:</strong> 時速100kmで投げると通常の滑空時の50〜100倍の揚力が発生し、急激な頭上げで失速します。</p>
                   <p><strong>② 紙のしなり（空力弾性）:</strong> 現実の紙飛行機は時速100kmの風圧で主翼がしなり、矢のように直進してから滑空に戻ります。</p>
                   <p><strong>③ 非公開の内部調整:</strong> ギネス記録ではミリ単位の重心位置や0.1度単位のエレボン角度が非公開です。</p>
-                  <p class="help-rec">👉 <strong>「記録再現モード」</strong>を選択すると、シミュレーター上で安定して記録級のロングフライトを再現できます！</p>
+                  <p class="help-rec"><strong>「記録再現モード」</strong>を選択すると、シミュレーター上で安定して記録級のロングフライトを再現できます。</p>
                 </div>
               </details>
 
               <div class="record-actions">
                 <button type="button" class="btn-record-primary" id="btn-apply-record" title="機体と投げ方をロードして投げる">
-                  🚀 機体＆投げ方をロードして投擲
+                  <img src="https://api.iconify.design/material-symbols/rocket-launch.svg?color=%23ffffff" class="ui-icon" alt=""> 機体＆投げ方をロードして投擲
                 </button>
                 <button type="button" class="btn-record-secondary" id="btn-apply-throw-only" title="現在の機体のまま、この投げ方で投げる">
-                  🎯 投げ方のみ適用して投擲
+                  <img src="https://api.iconify.design/material-symbols/flight-takeoff.svg?color=%231a73e8" class="ui-icon" alt=""> 投げ方のみ適用して投擲
                 </button>
               </div>
             </div>
@@ -231,8 +231,8 @@
         <button class="chip" id="tgl-grip" type="button" data-on="1" title="持ち手接触点 (M)">持ち手</button>
         <button class="chip" id="tgl-follow" type="button" data-on="1" title="機体追従 (C)">追従</button>
         <button class="chip" id="tgl-heat" type="button" data-on="1" title="応力ヒートマップ (H)">応力</button>
-        <button class="chip" id="btn-gpu-ensemble" type="button" title="GPU (CuPy) で100機を同時に一括並列シミュレーション">⚡ GPU 100機同時飛行</button>
-        <button class="chip chip-rec" id="btn-record-video" type="button" title="3Dシミュレーション動画を録画・保存 (WebM/MP4)">🎥 録画</button>
+        <button class="chip" id="btn-gpu-ensemble" type="button" title="GPU (CuPy) で100機を同時に一括並列シミュレーション"><img src="https://api.iconify.design/material-symbols/electric-bolt.svg?color=%23188038" class="ui-icon" alt=""> GPU 100機同時飛行</button>
+        <button class="chip chip-rec" id="btn-record-video" type="button" title="3Dシミュレーション動画を録画・保存 (WebM/MP4)"><img src="https://api.iconify.design/material-symbols/videocam.svg?color=%23d93025" class="ui-icon" alt=""> 録画</button>
         <button class="chip" id="btn-view-reset" type="button" title="視点を初期化 (V)">視点</button>
       </div>
 
@@ -265,189 +265,7 @@
         </div>
       </div>
 
-      <!-- シミュレーションエラー・ステータス表示バナー -->
-      <div class="sim-error-banner" id="sim-error-banner" hidden>
-        <div class="sim-error-icon" id="sim-error-icon">⚠️</div>
-        <div class="sim-error-body">
-          <div class="sim-error-header">
-            <span class="sim-error-title" id="sim-error-title">シミュレーションエラー</span>
-            <span class="sim-error-badge" id="sim-error-badge">ERROR</span>
-          </div>
-          <div class="sim-error-message" id="sim-error-msg">エラー詳細がここに表示されます</div>
-          <div class="sim-error-hint" id="sim-error-hint" hidden></div>
-        </div>
-        <button class="sim-error-close" id="sim-error-close" type="button" title="エラー表示を閉じる">✕</button>
-      </div>
-
-      <!-- フライト状態アナウンス (現在何が起きているかひと目でわかる) -->
-      <div class="vp-flight-status-announcer" id="vp-flight-status-announcer">
-        <span class="status-dot ready" id="status-dot"></span>
-        <span class="status-text" id="status-text">🛫 投擲待機中 — [投げる] ボタンまたは Space キーで発射</span>
-      </div>
-
-      <!-- 操作ガイドHUD (マウス・キーボード操作が3秒でわかる) -->
-      <div class="vp-controls-guide collapsed" id="vp-controls-guide">
-        <div class="guide-header">
-          <span class="guide-icon">🎮</span>
-          <span class="guide-title">操作ガイド</span>
-          <button class="guide-toggle-btn" id="guide-toggle-btn" type="button" title="ガイドを開く/折りたたむ">▸</button>
-        </div>
-        <div class="guide-content" id="guide-content">
-          <div class="guide-item">
-            <span class="guide-badge">🖱️ マウス</span>
-            <span class="guide-desc">左ドラッグで<strong>視点回転</strong> · 右ドラッグで<strong>移動</strong> · ホイールで<strong>ズーム</strong></span>
-          </div>
-          <div class="guide-item">
-            <span class="guide-badge">⌨️ キー</span>
-            <span class="guide-desc"><kbd>Space</kbd> 投げる/停止 · <kbd>R</kbd> 最初へ · <kbd>V</kbd> 機体注目</span>
-          </div>
-        </div>
-      </div>
-
-      <!-- 🏆 100機一斉飛行・最高記録＆チャンピオンHUD (100体飛ばしたときの最高値表示) -->
-      <div class="ensemble-champion-card" id="ensemble-champion-card" hidden>
-        <div class="champ-head">
-          <div class="champ-title-group">
-            <span class="champ-trophy">🏆</span>
-            <div>
-              <div class="champ-title">100機一斉飛行 最高記録 & 統計分析</div>
-              <div class="champ-sub" id="champ-backend-sub">NVIDIA RTX 4060 GPU 並列演算</div>
-            </div>
-          </div>
-          <button class="champ-close-btn" id="champ-close-btn" type="button" title="閉じる">✕</button>
-        </div>
-
-        <!-- 最高値ハイライトグリッド -->
-        <div class="champ-grid">
-          <div class="champ-stat-card champ-gold">
-            <div class="champ-stat-label">🥇 最長飛距離 (1位チャンピオン)</div>
-            <div class="champ-stat-value"><span class="num" id="champ-best-dist">—</span><span class="unit"> m</span></div>
-            <div class="champ-stat-extra" id="champ-best-detail">機体 #— · 初速: — · 角度: —</div>
-          </div>
-
-          <div class="champ-stat-card">
-            <div class="champ-stat-label">⏱️ 最長滞空時間</div>
-            <div class="champ-stat-value"><span class="num" id="champ-best-time">—</span><span class="unit"> s</span></div>
-            <div class="champ-stat-extra" id="champ-best-time-detail">機体 #—</div>
-          </div>
-
-          <div class="champ-stat-card">
-            <div class="champ-stat-label">⛰️ 最高到達高度</div>
-            <div class="champ-stat-value"><span class="num" id="champ-best-alt">—</span><span class="unit"> m</span></div>
-            <div class="champ-stat-extra" id="champ-best-alt-detail">機体 #—</div>
-          </div>
-
-          <div class="champ-stat-card">
-            <div class="champ-stat-label">📊 100機 平均飛距離</div>
-            <div class="champ-stat-value"><span class="num" id="champ-avg-dist">—</span><span class="unit"> m</span></div>
-            <div class="champ-stat-extra" id="champ-avg-range">最小 —m 〜 最大 —m</div>
-          </div>
-        </div>
-
-        <!-- チャンピオン機のアクション -->
-        <div class="champ-actions">
-          <button class="btn btn-primary btn-sm champ-btn" id="champ-btn-adopt" type="button" title="最も飛んだ機体の初速・仰角を現在の機体設定にコピーして再現">
-            🌟 1位の投げ方を現在の設定に反映
-          </button>
-          <button class="btn btn-sm champ-btn" id="champ-btn-focus" type="button" title="1位の機体の着地点・軌跡にカメラをズーム">
-            🎥 1位の機体にフォーカス
-          </button>
-          <button class="btn btn-sm champ-btn" id="champ-btn-toggle-fleet" type="button" title="全100機表示と上位トップ3表示を切り替え">
-            👀 表示: 全100機 ⇄ 上位3機
-          </button>
-        </div>
-
-        <!-- トップランキング一覧テーブル -->
-        <div class="champ-table-wrap">
-          <div class="champ-table-title">🏅 飛距離ランキング TOP 5 (クリックでその機体をフォーカス)</div>
-          <table class="champ-table">
-            <thead>
-              <tr>
-                <th>順位</th>
-                <th>機体ID</th>
-                <th>飛距離</th>
-                <th>滞空時間</th>
-                <th>最高高度</th>
-                <th>初速</th>
-                <th>発射角</th>
-              </tr>
-            </thead>
-            <tbody id="champ-leaderboard-body">
-              <!-- 動的生成 -->
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      <!-- 🚀 直感型クイック投擲バー (Floating Quick Launch Bar) -->
-      <div class="quick-launch-dock" id="quick-launch-dock">
-        <!-- メイン操作ボタン群 -->
-        <div class="quick-launch-actions">
-          <button class="btn-main-throw" id="quick-btn-throw" type="button" title="現在の設定で飛行機を投げる (Space / Enter)">
-            <span class="throw-icon">🚀</span>
-            <div class="throw-text-wrap">
-              <span class="throw-title">投げる</span>
-              <span class="throw-hint">SPACE / ENTER</span>
-            </div>
-          </button>
-          
-          <button class="btn-ensemble-throw" id="quick-btn-ensemble" type="button" title="GPU/並列計算で100機を同時に一斉投擲！最高記録を競います">
-            <span class="ensemble-icon">⚡</span>
-            <div class="ensemble-text-wrap">
-              <span class="ensemble-title">100機一斉飛行</span>
-              <span class="ensemble-sub">GPU 100機同時シミュレーション</span>
-            </div>
-          </button>
-
-          <button class="btn-dock-toggle" id="quick-dock-toggle" type="button" title="投げ方（初速・角度）のクイック調整を開閉">
-            <span id="quick-dock-toggle-icon">⚙️ 投げ方調整</span>
-          </button>
-        </div>
-
-        <!-- 投げ方クイック調整パネル (初速・角度・バンクの即座変更) -->
-        <div class="quick-tuning-panel" id="quick-tuning-panel" hidden>
-          <div class="tuning-col">
-            <div class="tuning-head">
-              <span class="tuning-label">初速 (スピード)</span>
-              <span class="tuning-val num" id="quick-val-speed">10.0 m/s</span>
-            </div>
-            <input type="range" class="tuning-slider" id="quick-slide-speed" min="3" max="30" step="0.5" value="10">
-            <div class="tuning-presets">
-              <button class="tuning-chip" type="button" data-type="speed" data-val="5">🍃 ふわっと (5m/s)</button>
-              <button class="tuning-chip active" type="button" data-type="speed" data-val="10">✈️ 標準 (10m/s)</button>
-              <button class="tuning-chip" type="button" data-type="speed" data-val="16">💨 強投 (16m/s)</button>
-              <button class="tuning-chip" type="button" data-type="speed" data-val="25">⚡ 全力 (25m/s)</button>
-            </div>
-          </div>
-
-          <div class="tuning-col">
-            <div class="tuning-head">
-              <span class="tuning-label">投擲角度 (仰角)</span>
-              <span class="tuning-val num" id="quick-val-pitch">12.0°</span>
-            </div>
-            <input type="range" class="tuning-slider" id="quick-slide-pitch" min="-5" max="40" step="1" value="12">
-            <div class="tuning-presets">
-              <button class="tuning-chip" type="button" data-type="pitch" data-val="0">➡️ 水平 (0°)</button>
-              <button class="tuning-chip active" type="button" data-type="pitch" data-val="12">↗️ 浅め (12°)</button>
-              <button class="tuning-chip" type="button" data-type="pitch" data-val="20">🚀 上向き (20°)</button>
-              <button class="tuning-chip" type="button" data-type="pitch" data-val="30">🧗 高角 (30°)</button>
-            </div>
-          </div>
-
-          <div class="tuning-col">
-            <div class="tuning-head">
-              <span class="tuning-label">傾き (バンク角)</span>
-              <span class="tuning-val num" id="quick-val-roll">0.0°</span>
-            </div>
-            <input type="range" class="tuning-slider" id="quick-slide-roll" min="-25" max="25" step="1" value="0">
-            <div class="tuning-presets">
-              <button class="tuning-chip" type="button" data-type="roll" data-val="-10">↖️ 左傾き (-10°)</button>
-              <button class="tuning-chip active" type="button" data-type="roll" data-val="0">⚖️ 水平 (0°)</button>
-              <button class="tuning-chip" type="button" data-type="roll" data-val="10">↗️ 右傾き (+10°)</button>
-            </div>
-          </div>
-        </div>
-      </div>
+      <!-- Viewport notices -->
 
       <div class="vp-notice" id="vp-notice" hidden>
         <strong>3D ビューを初期化できませんでした</strong>
@@ -521,12 +339,12 @@
   <!-- ==================== workbench ==================== -->
   <section class="workbench" id="workbench" data-open="0" aria-label="作業台">
     <nav class="wb-tabs" role="tablist">
-      <button class="wb-tab" id="wb-tab-investigate" role="tab" aria-selected="true" data-tab="investigate">🔍 Auto調査<small>INVESTIGATE</small></button>
-      <button class="wb-tab" id="wb-tab-optimizer" role="tab" aria-selected="false" data-tab="optimizer">最適化<small>OPTIMIZER</small></button>
-      <button class="wb-tab" id="wb-tab-model" role="tab" aria-selected="false" data-tab="model">3D モデル<small>MESH</small></button>
-      <button class="wb-tab" id="wb-tab-data" role="tab" aria-selected="false" data-tab="data">データ<small>EXPORT</small></button>
+      <button class="wb-tab" id="wb-tab-investigate" role="tab" aria-selected="true" data-tab="investigate"><img src="https://api.iconify.design/material-symbols/search.svg?color=%231a73e8" class="ui-icon" alt=""> Auto調査<small>INVESTIGATE</small></button>
+      <button class="wb-tab" id="wb-tab-optimizer" role="tab" aria-selected="false" data-tab="optimizer"><img src="https://api.iconify.design/material-symbols/tune.svg?color=%235f6368" class="ui-icon" alt=""> 最適化<small>OPTIMIZER</small></button>
+      <button class="wb-tab" id="wb-tab-model" role="tab" aria-selected="false" data-tab="model"><img src="https://api.iconify.design/material-symbols/view-in-ar.svg?color=%235f6368" class="ui-icon" alt=""> 3D モデル<small>MESH</small></button>
+      <button class="wb-tab" id="wb-tab-data" role="tab" aria-selected="false" data-tab="data"><img src="https://api.iconify.design/material-symbols/table-chart.svg?color=%235f6368" class="ui-icon" alt=""> データ<small>EXPORT</small></button>
       <div class="wb-spacer"></div>
-<button class="wb-toggle" id="wb-toggle" type="button" title="作業台を開閉 (W)" aria-expanded="false">
+      <button class="wb-toggle" id="wb-toggle" type="button" title="作業台を開閉 (W)" aria-expanded="false">
         <span class="wb-toggle-glyph" aria-hidden="true"></span>
       </button>
     </nav>
@@ -542,12 +360,12 @@
           <div class="inv-config-group">
             <label class="inv-label">調査目標 (TARGET OBJECTIVE)</label>
             <select id="inv-target-select" class="inv-select">
-              <option value="distance">🚀 最大飛距離を伸ばす (Max Distance)</option>
-              <option value="flight_time">⏱ 滞空時間を伸ばす (Max Flight Time)</option>
+              <option value="distance">最大飛距離を伸ばす (Max Distance)</option>
+              <option value="flight_time">滞空時間を伸ばす (Max Flight Time)</option>
             </select>
           </div>
           <div class="btn-row" style="margin-top: 12px;">
-            <button class="btn btn-primary" id="inv-run" type="button">🔍 調査開始</button>
+            <button class="btn btn-primary" id="inv-run" type="button"><img src="https://api.iconify.design/material-symbols/search.svg?color=%23ffffff" class="ui-icon" alt=""> 調査開始</button>
             <button class="btn" id="inv-cancel" type="button" disabled>中断</button>
           </div>
           <div class="prog" style="margin-top: 12px;">
@@ -592,7 +410,7 @@
                 <div class="inv-comp-label">水平到達距離</div>
                 <div class="inv-comp-row">
                   <span class="muted">現在:</span> <span class="num" id="inv-comp-dist-base">—</span>
-                  <span class="inv-arrow">➔</span>
+                  <span class="inv-arrow">&rarr;</span>
                   <span class="num inv-comp-val" id="inv-comp-dist-rec">—</span>
                 </div>
                 <div class="inv-comp-gain"><span id="inv-comp-dist-gain" class="num">—</span></div>
@@ -601,7 +419,7 @@
                 <div class="inv-comp-label">滞空時間</div>
                 <div class="inv-comp-row">
                   <span class="muted">現在:</span> <span class="num" id="inv-comp-time-base">—</span>
-                  <span class="inv-arrow">➔</span>
+                  <span class="inv-arrow">&rarr;</span>
                   <span class="num inv-comp-val" id="inv-comp-time-rec">—</span>
                 </div>
                 <div class="inv-comp-gain"><span id="inv-comp-time-gain" class="num">—</span></div>
@@ -611,7 +429,7 @@
             <!-- 改善アドバイスカード -->
             <div style="display: flex; align-items: center; justify-content: space-between; margin-top: 14px;">
               <h4 class="wb-h" style="margin: 0;">実践的な折り方・投げ方アドバイス<small>ACTIONABLE ADVICE</small></h4>
-              <button class="btn btn-primary btn-mini" id="inv-adopt" type="button" disabled>🌟 推奨設定を機体に適用</button>
+              <button class="btn btn-primary btn-mini" id="inv-adopt" type="button" disabled><img src="https://api.iconify.design/material-symbols/check-circle.svg?color=%23ffffff" class="ui-icon" alt=""> 推奨設定を機体に適用</button>
             </div>
             <div id="inv-advice-list" class="inv-advice-list"></div>
 
@@ -620,7 +438,7 @@
             <div id="inv-sens-list" class="inv-sens-list"></div>
           </div>
           <div id="inv-empty-prompt" class="chart-empty" style="padding: 40px 16px; text-align: center;">
-            <div style="font-size: 24px; margin-bottom: 8px;">✈️</div>
+            <div style="margin-bottom: 8px;"><img src="https://api.iconify.design/material-symbols/flight.svg?color=%231a73e8" style="width: 28px; height: 28px;" alt=""></div>
             <div>「調査開始」をクリックすると、現在の機体を診断し、もっと飛ぶようになるための調整手順とアドバイスを自動作成します。</div>
           </div>
         </div>
@@ -734,24 +552,24 @@
   <!-- ==================== transport ==================== -->
   <footer class="transport">
     <div class="tp-badge">
-      <span class="tp-badge-icon">🎬</span>
+      <img src="https://api.iconify.design/material-symbols/play-circle-outline.svg?color=%235f6368" class="ui-icon" alt="">
       <span class="tp-badge-text">再生プレイヤー</span>
     </div>
     <div class="tp-controls">
       <button class="tp-btn tp-btn-launch" id="tp-launch" type="button" title="現在の機体・設定でシミュレーションを実行して投げる (Space / Enter)">
-        <span class="tp-icon-btn">🚀</span><span class="tp-label" id="tp-launch-label">投げる</span>
+        <img src="https://api.iconify.design/material-symbols/rocket-launch.svg?color=%231a73e8" class="ui-icon" alt=""><span class="tp-label" id="tp-launch-label">投げる</span>
       </button>
       <button class="tp-btn" id="tp-reset" type="button" title="最初に戻る / 待機状態 (R)">
-        <span class="tp-icon-btn">⏮️</span><span class="tp-label">最初へ</span>
+        <img src="https://api.iconify.design/material-symbols/replay.svg?color=%235f6368" class="ui-icon" alt=""><span class="tp-label">最初へ</span>
       </button>
       <button class="tp-btn" id="tp-prev" type="button" title="1 フレーム戻る (←)">
-        <span class="tp-icon-btn">⏪</span><span class="tp-label">戻る</span>
+        <img src="https://api.iconify.design/material-symbols/skip-previous.svg?color=%235f6368" class="ui-icon" alt=""><span class="tp-label">戻る</span>
       </button>
       <button class="tp-btn tp-play" id="tp-play" type="button" title="再生 / 一時停止 (Space)">
-        <span class="tp-icon-btn" id="tp-play-glyph">▶️</span><span class="tp-label" id="tp-play-label">再生</span>
+        <img src="https://api.iconify.design/material-symbols/play-arrow.svg?color=%231a73e8" class="ui-icon" id="tp-play-img" alt=""><span class="tp-label" id="tp-play-label">再生</span>
       </button>
       <button class="tp-btn" id="tp-next" type="button" title="1 フレーム進む (→)">
-        <span class="tp-icon-btn">⏩</span><span class="tp-label">進む</span>
+        <img src="https://api.iconify.design/material-symbols/skip-next.svg?color=%235f6368" class="ui-icon" alt=""><span class="tp-label">進む</span>
       </button>
     </div>
 
@@ -794,7 +612,7 @@
   <div class="modal" id="gpu-modal" hidden>
     <div class="modal-card gpu-dialog-card">
       <div class="gpu-dialog-header">
-        <h3>⚡ GPU 動作ステータス &amp; 切り替えガイド</h3>
+        <h3><img src="https://api.iconify.design/material-symbols/electric-bolt.svg?color=%23188038" class="ui-icon" alt=""> GPU 動作ステータス &amp; 切り替えガイド</h3>
         <button class="btn btn-icon" id="gpu-modal-close-x" type="button" aria-label="閉じる">×</button>
       </div>
 
@@ -814,38 +632,38 @@
 
       <div class="gpu-action-banner" style="margin: 12px 0; display: flex; flex-direction: column; gap: 8px;">
         <button class="btn btn-primary" id="btn-force-gpu-chrome" type="button" style="width: 100%; padding: 10px; font-weight: 600; background: #1a73e8; color: #fff;">
-          🚀 Chrome を RTX 4060 強制モードで新しく開く
+          <img src="https://api.iconify.design/material-symbols/rocket-launch.svg?color=%23ffffff" class="ui-icon" alt=""> Chrome を RTX 4060 強制モードで新しく開く
         </button>
         <button class="btn" id="btn-force-gpu-edge" type="button" style="width: 100%; padding: 8px; font-weight: 600;">
-          ⚡ Edge を RTX 4060 強制モードで開く (※現在EdgeはdGPUで即稼働可)
+          <img src="https://api.iconify.design/material-symbols/electric-bolt.svg?color=%23188038" class="ui-icon" alt=""> Edge を RTX 4060 強制モードで開く (※現在EdgeはdGPUで即稼働可)
         </button>
         <button class="btn btn-sm" id="btn-modal-test-gpu" type="button" style="width: 100%; padding: 8px;">
-          ⚡ RTX 4060 物理演算テスト (100機一括並列シミュレーション)
+          <img src="https://api.iconify.design/material-symbols/speed.svg?color=%235f6368" class="ui-icon" alt=""> RTX 4060 物理演算テスト (100機一括並列シミュレーション)
         </button>
       </div>
 
       <div class="gpu-warning-box" id="gpu-warning-box">
-        <strong>⚠️ なぜ 3D描画 (RENDER) だけ Intel 内蔵GPUになるのか？</strong>
+        <strong><img src="https://api.iconify.design/material-symbols/warning.svg?color=%23f29900" class="ui-icon" alt=""> なぜ 3D描画 (RENDER) だけ Intel 内蔵GPUになるのか？</strong>
         <p>Windows ノートPC (Optimus) では、バッテリー節約のためブラウザの WebGL 描画に自動で Intel 内蔵GPU が割り当てられます。<br>
         さらに、<strong>Chrome がバックグラウンドで起動しっぱなしになっている場合、Windows の設定変更後も古い GPU プロセスが居座り続ける</strong>ため、Intel のままになってしまいます。</p>
-        <p style="margin-top: 6px; font-weight: 600; color: #1a73e8;">👉 上記の「RTX 4060 強制モードで開く」ボタンを押すか、プロジェクト内の <code>launch_gpu_render.bat</code> を実行すると、確実に RTX 4060 で描画されます。</p>
+        <p style="margin-top: 6px; font-weight: 600; color: #1a73e8;">上記の「RTX 4060 強制モードで開く」ボタンを押すか、プロジェクト内の <code>launch_gpu_render.bat</code> を実行すると、確実に RTX 4060 で描画されます。</p>
       </div>
 
       <div class="gpu-guide-accordion">
         <details open>
-          <summary><strong>🚀 最短解決: launch_gpu_render.bat または PowerShell コマンド</strong></summary>
+          <summary><strong><img src="https://api.iconify.design/material-symbols/rocket-launch.svg?color=%231a73e8" class="ui-icon" alt=""> 最短解決: launch_gpu_render.bat または PowerShell コマンド</strong></summary>
           <div class="gpu-guide-body">
             <p>プロジェクト直下の <code>launch_gpu_render.bat</code> をダブルクリックするか、PowerShell に以下を貼り付けて実行すると、古い常駐プロセスをリフレッシュして RTX 4060 強制フラグ付きで起動します。</p>
             <div class="code-box">
               <pre id="gpu-ps-command">New-Item -Path "HKCU:\Software\Microsoft\DirectX\UserGpuPreferences" -Force | Out-Null; Set-ItemProperty -Path "HKCU:\Software\Microsoft\DirectX\UserGpuPreferences" -Name "C:\Program Files\Google\Chrome\Application\chrome.exe" -Value "GpuPreference=2;AutoHDREnable=0;"; Set-ItemProperty -Path "HKCU:\Software\Microsoft\DirectX\UserGpuPreferences" -Name "C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe" -Value "GpuPreference=2;AutoHDREnable=0;"</pre>
-              <button class="btn btn-sm" id="btn-copy-gpu-cmd" type="button">📋 コマンドをコピー</button>
+              <button class="btn btn-sm" id="btn-copy-gpu-cmd" type="button"><img src="https://api.iconify.design/material-symbols/content-copy.svg?color=%235f6368" class="ui-icon" alt=""> コマンドをコピー</button>
             </div>
             <p class="muted">※実行後、ブラウザのバックグラウンド常駐プロセスを終了して再起動すると RTX 4060 が即時適用されます。</p>
           </div>
         </details>
 
         <details>
-          <summary><strong>🛠️ 手動方法①: Windows の設定画面から設定</strong></summary>
+          <summary><strong><img src="https://api.iconify.design/material-symbols/build.svg?color=%235f6368" class="ui-icon" alt=""> 手動方法①: Windows の設定画面から設定</strong></summary>
           <div class="gpu-guide-body">
             <ol>
               <li>Windows の「設定」(Win + I) を開く</li>
@@ -858,7 +676,7 @@
         </details>
 
         <details>
-          <summary><strong>⚙️ 手動方法②: NVIDIA コントロールパネルから設定</strong></summary>
+          <summary><strong><img src="https://api.iconify.design/material-symbols/settings.svg?color=%235f6368" class="ui-icon" alt=""> 手動方法②: NVIDIA コントロールパネルから設定</strong></summary>
           <div class="gpu-guide-body">
             <ol>
               <li>デスクトップの何もない場所を右クリックし、「NVIDIA コントロールパネル」を開く</li>

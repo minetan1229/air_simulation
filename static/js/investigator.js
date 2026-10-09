@@ -272,7 +272,7 @@ export class InvestigatorPanel {
           make("div", { class: "inv-sens-bar-track" }, [
             make("div", { class: "inv-sens-bar-fill", style: `width: ${barPct}%;` }),
           ]),
-          make("div", { class: "inv-sens-desc muted" }, `現在: ${fmt(s.baseline_val, 2)}${s.unit} ➔ 推奨: ${fmt(s.best_val, 2)}${s.unit}`),
+          make("div", { class: "inv-sens-desc muted" }, `現在: ${fmt(s.baseline_val, 2)}${s.unit} → 推奨: ${fmt(s.best_val, 2)}${s.unit}`),
         ]);
         this.dom.sensHost.appendChild(row);
       });

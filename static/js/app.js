@@ -577,7 +577,7 @@ class ConsoleApp {
         this._updateRecordButtons(recording);
       });
       if (ok) {
-        this.notify("🎥 動画録画を開始しました（停止時にWebM/MP4動画が保存されます）", "info");
+        this.notify("動画録画を開始しました（停止時にWebM動画が保存されます）", "info");
       } else {
         this.notify("録画を開始できませんでした", "warn");
       }
@@ -589,11 +589,11 @@ class ConsoleApp {
     btns.forEach((btn) => {
       if (isRecording) {
         btn.classList.add("is-recording");
-        btn.textContent = "🔴 停止 (REC)";
+        btn.innerHTML = `<img src="https://api.iconify.design/material-symbols/stop-circle.svg?color=%23d93025" class="ui-icon" alt=""> 停止 (REC)`;
         btn.title = "動画録画を停止してファイル保存";
       } else {
         btn.classList.remove("is-recording");
-        btn.textContent = btn.id === "btn-top-record" ? "🎥 動画録画" : "🎥 録画";
+        btn.innerHTML = `<img src="https://api.iconify.design/material-symbols/videocam.svg?color=%23d93025" class="ui-icon" alt=""> 録画`;
         btn.title = "3D飛行動画を録画して保存 (WebM/MP4)";
       }
     });
@@ -610,7 +610,7 @@ class ConsoleApp {
     });
 
     await this._guard(async () => {
-      this.notify(`⚡ GPU一括並列シミュレーション (${count}機同時計算) を実行中...`, "info");
+      this.notify(`GPU一括並列シミュレーション (${count}機同時計算) を実行中...`, "info");
       const currentAircraft = this.store.data.aircraft || {};
       const currentEnv = this.store.data.environment || {};
       const currentLaunch = this.store.data.launch || {};
@@ -649,13 +649,13 @@ class ConsoleApp {
       const maxTime = Number(res.max_flight_time_s || 0);
 
       this.notify(
-        `⚡ GPU 100機同時飛行完了 (${res.trajectories_count || count}機 · ${backendStr})\n最大飛距離: ${maxDist.toFixed(2)}m (平均: ${meanDist.toFixed(2)}m) · 最大滞空: ${maxTime.toFixed(2)}s (平均: ${meanTime.toFixed(2)}s)`,
+        `GPU 100機同時飛行完了 (${res.trajectories_count || count}機 · ${backendStr})\n最大飛距離: ${maxDist.toFixed(2)}m (平均: ${meanDist.toFixed(2)}m) · 最大滞空: ${maxTime.toFixed(2)}s (平均: ${meanTime.toFixed(2)}s)`,
         "ok"
       );
 
       // Show comprehensive champion metrics & leaderboard HUD
       this._showEnsembleChampionHud(res);
-      this._updateFlightStatus("landed", `🏁 100機同時飛行完了 — 🥇 1位最高飛距離: ${maxDist.toFixed(2)}m (平均: ${meanDist.toFixed(2)}m)`);
+      this._updateFlightStatus("landed", `100機同時飛行完了 — 1位最高飛距離: ${maxDist.toFixed(2)}m (平均: ${meanDist.toFixed(2)}m)`);
     });
   }
 
@@ -707,7 +707,7 @@ class ConsoleApp {
       list.slice(0, 5).forEach((item, idx) => {
         const tr = document.createElement("tr");
         tr.className = `clickable ${idx === 0 ? "champ-rank-1" : ""}`;
-        const rankMedal = idx === 0 ? "🥇 1位" : idx === 1 ? "🥈 2位" : idx === 2 ? "🥉 3位" : `${idx + 1}位`;
+        const rankMedal = idx === 0 ? "1位" : idx === 1 ? "2位" : idx === 2 ? "3位" : `${idx + 1}位`;
         tr.innerHTML = `
           <td><strong>${rankMedal}</strong></td>
           <td>#${item.id}</td>
@@ -763,7 +763,7 @@ class ConsoleApp {
         if (isHidden) {
           panel.removeAttribute("hidden");
           panel.style.display = "grid";
-          toggleBtn.innerHTML = "✖ 閉じる";
+          toggleBtn.innerHTML = "閉じる";
         } else {
           panel.setAttribute("hidden", "");
           panel.style.display = "none";
@@ -858,7 +858,7 @@ class ConsoleApp {
         if (slideRoll) slideRoll.value = roll;
         updateQuickLaunch();
 
-        this.notify(`🌟 1位チャンピオンの投げ方を設定に反映しました！ (初速: ${speed}m/s, 仰角: ${pitch}°, ロール: ${roll}°)`, "ok");
+        this.notify(`1位の投げ方を設定に反映しました！ (初速: ${speed}m/s, 仰角: ${pitch}°, ロール: ${roll}°)`, "ok");
       });
     }
     if (this.dom["champ-btn-focus"]) {
@@ -866,7 +866,7 @@ class ConsoleApp {
         if (!this._lastChampionFlight || this._lastChampionFlight.id == null) return;
         if (this.viewport) {
           this.viewport.focusTrajectory(this._lastChampionFlight.id);
-          this.notify(`🏆 1位チャンピオン (機体 #${this._lastChampionFlight.id}) にフォーカスしました`, "info");
+          this.notify(`1位 (機体 #${this._lastChampionFlight.id}) にフォーカスしました`, "info");
         }
       });
     }
@@ -876,10 +876,10 @@ class ConsoleApp {
         if (!this.viewport) return;
         if (ensembleFleetMode === "all") {
           ensembleFleetMode = "top3";
-          this.dom["champ-btn-toggle-fleet"].textContent = "👀 表示: 上位3機のみ (全100機へ戻す)";
+          this.dom["champ-btn-toggle-fleet"].textContent = "表示: 上位3機のみ (全100機へ戻す)";
         } else {
           ensembleFleetMode = "all";
-          this.dom["champ-btn-toggle-fleet"].textContent = "👀 表示: 全100機 ⇄ 上位3機";
+          this.dom["champ-btn-toggle-fleet"].textContent = "表示: 全100機 ⇄ 上位3機";
         }
         this.viewport.filterEnsembleTracks(ensembleFleetMode);
       });
@@ -944,13 +944,13 @@ class ConsoleApp {
     if (this.dom["modal-solver-name"]) {
       if (solverGpu && solverGpu.available) {
         const vramStr = solverGpu.total_memory_mb ? ` · VRAM: ${solverGpu.total_memory_mb}MB` : "";
-        this.dom["modal-solver-name"].textContent = `✅ ${solverGpu.device_name || "GPU"} (${solverGpu.backend})`;
+        this.dom["modal-solver-name"].textContent = `[OK] ${solverGpu.device_name || "GPU"} (${solverGpu.backend})`;
         this.dom["modal-solver-desc"].textContent = `CUDA ${solverGpu.cuda_version || ""} · 物理演算(6DoF RK4)・オプティマイザ(NSGA-II)・風場計算で正常にフル稼働中${vramStr}`;
         if (this.dom["gpu-status-solver-card"]) {
           this.dom["gpu-status-solver-card"].className = "gpu-status-card status-ok";
         }
       } else {
-        this.dom["modal-solver-name"].textContent = `ℹ️ CPU / NumPy (${solverGpu ? solverGpu.backend : "CPU"})`;
+        this.dom["modal-solver-name"].textContent = `[CPU] CPU / NumPy (${solverGpu ? solverGpu.backend : "CPU"})`;
         this.dom["modal-solver-desc"].textContent = "物理演算はCPU並列モードで稼働中";
         if (this.dom["gpu-status-solver-card"]) {
           this.dom["gpu-status-solver-card"].className = "gpu-status-card";
@@ -961,14 +961,14 @@ class ConsoleApp {
     // Update render card
     if (this.dom["modal-render-name"]) {
       if (renderGpu.isNvidia) {
-        this.dom["modal-render-name"].textContent = `✅ ${renderGpu.shortName} (NVIDIA)`;
+        this.dom["modal-render-name"].textContent = `[OK] ${renderGpu.shortName} (NVIDIA)`;
         this.dom["modal-render-desc"].textContent = `3D描画: ${renderGpu.raw}`;
         if (this.dom["gpu-status-render-card"]) {
           this.dom["gpu-status-render-card"].className = "gpu-status-card status-ok";
         }
         if (this.dom["gpu-warning-box"]) this.dom["gpu-warning-box"].hidden = true;
       } else if (renderGpu.isIntel) {
-        this.dom["modal-render-name"].textContent = `⚠️ ${renderGpu.shortName} (Intel 省電力)`;
+        this.dom["modal-render-name"].textContent = `[注意] ${renderGpu.shortName} (Intel 省電力)`;
         this.dom["modal-render-desc"].textContent = `WebGL 3D描画: ${renderGpu.raw}`;
         if (this.dom["gpu-status-render-card"]) {
           this.dom["gpu-status-render-card"].className = "gpu-status-card status-warn";
@@ -1061,7 +1061,7 @@ class ConsoleApp {
         if (cmd) {
           try {
             await navigator.clipboard.writeText(cmd);
-            this.notify("📋 設定コマンドをクリップボードにコピーしました", "ok");
+            this.notify("設定コマンドをクリップボードにコピーしました", "ok");
           } catch {
             this.notify("コピーに失敗しました。コマンド枠から手動でコピーしてください", "warn");
           }
@@ -1080,12 +1080,12 @@ class ConsoleApp {
     if (this.dom["btn-force-gpu-chrome"]) {
       this.dom["btn-force-gpu-chrome"].addEventListener("click", async () => {
         try {
-          this.notify("🚀 Chrome を RTX 4060 強制モードで起動リクエスト中...", "info");
+          this.notify("Chrome を RTX 4060 強制モードで起動リクエスト中...", "info");
           const res = await api.forceGpuRender({ action: "launch_chrome" });
           if (res.status === "success" || res.launched) {
-            this.notify("✅ Chrome (RTX 4060 強制フラグ付) を起動しました！新しいウィンドウでご確認ください", "ok");
+            this.notify("[OK] Chrome (RTX 4060 強制フラグ付) を起動しました！新しいウィンドウでご確認ください", "ok");
           } else {
-            this.notify("⚠️ 起動に失敗しました。launch_gpu_render.bat を実行してください", "warn");
+            this.notify("[注意] 起動に失敗しました。launch_gpu_render.bat を実行してください", "warn");
           }
         } catch {
           this.notify("起動エラー: プロジェクト直下の launch_gpu_render.bat を実行してください", "warn");
@@ -1096,12 +1096,12 @@ class ConsoleApp {
     if (this.dom["btn-force-gpu-edge"]) {
       this.dom["btn-force-gpu-edge"].addEventListener("click", async () => {
         try {
-          this.notify("⚡ Edge を RTX 4060 強制モードで起動リクエスト中...", "info");
+          this.notify("Edge を RTX 4060 強制モードで起動リクエスト中...", "info");
           const res = await api.forceGpuRender({ action: "launch_edge" });
           if (res.status === "success" || res.launched) {
-            this.notify("✅ Edge (RTX 4060 強制) を起動しました！", "ok");
+            this.notify("[OK] Edge (RTX 4060 強制) を起動しました！", "ok");
           } else {
-            this.notify("⚠️ 起動に失敗しました。launch_gpu_render.bat を実行してください", "warn");
+            this.notify("[注意] 起動に失敗しました。launch_gpu_render.bat を実行してください", "warn");
           }
         } catch {
           this.notify("起動エラー: プロジェクト直下の launch_gpu_render.bat を実行してください", "warn");
@@ -1319,7 +1319,7 @@ class ConsoleApp {
     const hintEl = this.dom["sim-error-hint"];
     if (hintEl) {
       if (hint) {
-        hintEl.textContent = `💡 対処ヒント: ${hint}`;
+        hintEl.textContent = `対処ヒント: ${hint}`;
         hintEl.hidden = false;
       } else {
         hintEl.hidden = true;
@@ -1544,7 +1544,7 @@ class ConsoleApp {
       if (this.dirty.size > 0) {
         await this._push();
       }
-      this.notify("🚀 飛行シミュレーション計算中...", "info");
+      this.notify("飛行シミュレーション計算中...", "info");
       if (this.viewport) {
         this.viewport.archiveTrack();
         this.viewport.setLaunchVectorVisible(false);
@@ -1569,7 +1569,6 @@ class ConsoleApp {
       });
 
       this.flightDirty = false;
-      // Auto-render GPU-accelerated ensemble trajectories (RTX 4060 parallel flights)
       if (this.viewport && result.sample_trajectories && result.sample_trajectories.length) {
         this.viewport.setEnsembleTracks(result.sample_trajectories);
       }
@@ -1579,28 +1578,13 @@ class ConsoleApp {
       const time = metrics.flight_time_s || 0;
       const speed = Number((this.store.data.launch && this.store.data.launch.launch_speed) || 10).toFixed(1);
       const angle = Number((this.store.data.launch && this.store.data.launch.launch_angle_deg) || 15).toFixed(1);
-      const gpuNote = result.backend && result.backend.includes("cupy") ? " · ⚡ RTX 4060 GPU並列計算" : "";
+      const gpuNote = result.backend && result.backend.includes("cupy") ? " (GPU並列計算)" : "";
 
-      // シミュレーション結果のステータス検査（発散・構造破壊等のエラー）
       if (metrics.status === "diverged" || metrics.diverged) {
-        this.showSimulationError({
-          title: "シミュレーション計算発散エラー (Diverged)",
-          message: "迎角または角速度の極端な変化により、RK4数値積分の安定許容限界を超えて計算が発散しました。",
-          hint: "発射初速、エレボン角、または積分刻み Δt を調整してください。",
-          badge: "DIVERGED",
-          icon: "🛑",
-        });
-      } else if (metrics.crashed && metrics.max_stress_index >= 1.0) {
-        this.showSimulationError({
-          title: "主翼構造破壊・空中分解エラー (Structural Failure)",
-          message: `動圧と過大なGフォースにより、翼根曲げ応力が許容応力を超過しました (最大応力: ${fmt(metrics.max_stress_pa || 0, 0)} Pa, 応力指数: ${fmt(metrics.max_stress_index || 0, 2)})。`,
-          hint: "用紙の坪量(gsm)を上げて剛性を高めるか、発射初速を落としてください。",
-          badge: "OVERSTRESS",
-          icon: "💥",
-        });
+        this.notify("数値計算が発散しました。初速や迎角の設定をご確認ください。", "warn");
+      } else {
+        this.notify(`発射完了 (${speed}m/s · ${angle}°): 飛距離 ${fmt(dist, 2)}m / 滞空 ${fmt(time, 2)}s${gpuNote}`, "ok");
       }
-
-      this.notify(`✈️ 発射完了 (${speed}m/s · ${angle}°): 飛距離 ${fmt(dist, 2)}m / 滞空 ${fmt(time, 2)}s${gpuNote}`, "ok");
       this._updateTransportUi(this.transport.state);
     });
   }
@@ -1676,7 +1660,7 @@ class ConsoleApp {
     this.flightDirty = false;
     this._placeAirframeAtLaunch();
     this._updatePill("待機", "idle");
-    this._updateFlightStatus("ready", "🛫 投擲待機中 — [投げる] ボタンまたは Space キーで発射");
+    this._updateFlightStatus("ready", "投擲待機中 — [投げる] ボタンまたは Space キーで発射");
   }
 
   _onFrame(frame) {
@@ -1771,7 +1755,7 @@ class ConsoleApp {
     }
     this._updatePill(label, state);
     if (!frame.crashed && !frame.landed && !frame.diverged) {
-      this._updateFlightStatus("flying", `✈️ 飛行中 — 速度: ${fmt(frame.speed_mps, 1)}m/s · 高度: ${fmt(frame.altitude_m, 1)}m · 距離: ${fmt(range, 1)}m`);
+      this._updateFlightStatus("flying", `飛行中 — 速度: ${fmt(frame.speed_mps, 1)}m/s · 高度: ${fmt(frame.altitude_m, 1)}m · 距離: ${fmt(range, 1)}m`);
     }
     this._paint();
   }
@@ -1809,40 +1793,16 @@ class ConsoleApp {
 
     if (frame.diverged) {
       this._updatePill("発散", "error");
-      this.showSimulationError({
-        title: "シミュレーション計算発散エラー (Diverged)",
-        message: "迎角または角速度の極端な変化により、RK4数値積分が安定限界を超えて発散しました。",
-        hint: "初速、エレボン角、または積分刻み Δt を調整してください。",
-        badge: "DIVERGED",
-        icon: "🛑",
-      });
-      this.notify("数値計算が発散しました", "error");
-      this._updateFlightStatus("diverged", "🛑 計算発散エラー — 初速や迎角を調整してください");
-    } else if (frame.crashed && (Number(frame.max_stress_index || 0) >= 1.0 || Number(frame.stress_pa || 0) > 25000)) {
-      this._updatePill("破断", "crash");
-      this.showSimulationError({
-        title: "主翼構造破壊・空中分解エラー (Structural Failure)",
-        message: `動圧と過大なGフォースにより、翼根曲げ応力が許容応力を超過しました (応力: ${fmt(frame.stress_pa || 0, 0)} Pa)。`,
-        hint: "用紙坪量を増やすか、発射初速を落としてください。",
-        badge: "OVERSTRESS",
-        icon: "💥",
-      });
-      this.notify("主翼が空中分解しました", "error");
-      this._updateFlightStatus("crash", `💥 構造破断 — 翼根応力超過 (${fmt(frame.stress_pa || 0, 0)} Pa)`);
+      this.notify("数値計算が発散しました。初速や迎角の設定をご確認ください。", "warn");
     } else if (frame.crashed) {
-      this._updatePill("墜落", "crash");
-      this.notify("墜落しました", "error");
-      this._updateFlightStatus("crash", `⚠️ 墜落 — 飛距離: ${dist.toFixed(2)}m`);
+      this._updatePill("着地", "flying");
+      this.notify(`着地完了 — 飛距離: ${dist.toFixed(2)}m · 滞空時間: ${time.toFixed(2)}s`, "ok");
     } else {
       this._updatePill("着地", "flying");
-      this.notify("着地しました", "ok");
-      this._updateFlightStatus("landed", `🏁 着地完了 — 飛距離: ${dist.toFixed(2)}m · 滞空時間: ${time.toFixed(2)}s`);
+      this.notify(`着地完了 — 飛距離: ${dist.toFixed(2)}m · 滞空時間: ${time.toFixed(2)}s`, "ok");
     }
 
     // 飛行終了時に到達距離と時間をゴースト記録（トップレール）に保存・表示
-    const position = frame.position_m || [0, 0, 0];
-    const dist = Math.hypot(position[0], position[1]);
-    const time = Number(frame.time_s) || 0;
     this.ghostRecord = { distance: dist, time: time };
     if (this.dom["top-ghost"]) {
       this.dom["top-ghost"].textContent = `${fmt(dist, 2)}m / ${fmt(time, 2)}s`;
@@ -1902,7 +1862,7 @@ class ConsoleApp {
         const opt = document.createElement("option");
         opt.value = p.key;
         const throwData = p.throw || {};
-        const cat = p.category === "time_aloft" ? "⏱️ 滞空" : "📏 飛距離";
+        const cat = p.category === "time_aloft" ? "滞空" : "飛距離";
         opt.textContent = `${cat}: ${p.name} (${throwData.release_speed_mps || 0}m/s, ${throwData.launch_angle_deg || 0}°)`;
         sel.appendChild(opt);
       }
@@ -2004,7 +1964,7 @@ class ConsoleApp {
       await this.refreshAir();
       await this.refreshPolar();
 
-      const modeStr = calibrated ? "【🌟 記録再現モード】" : "【⚡ 生公認値モード】";
+      const modeStr = calibrated ? "【記録再現モード】" : "【生公認値モード】";
       this.notify(
         throwOnly
           ? `${modeStr} 投げ方を適用しました: ${res.throw.technique || key}`
@@ -2021,9 +1981,15 @@ class ConsoleApp {
     const play = this.dom["tp-play"];
     if (play) {
       play.dataset.playing = state.playing ? "1" : "0";
-      const glyph = document.getElementById("tp-play-glyph");
-      if (glyph) {
-        glyph.textContent = state.playing ? "⏸️" : (isReadyToLaunch ? "🚀" : "▶️");
+      const playImg = document.getElementById("tp-play-img");
+      if (playImg) {
+        if (state.playing) {
+          playImg.src = "https://api.iconify.design/material-symbols/pause.svg?color=%231a73e8";
+        } else if (isReadyToLaunch) {
+          playImg.src = "https://api.iconify.design/material-symbols/rocket-launch.svg?color=%231a73e8";
+        } else {
+          playImg.src = "https://api.iconify.design/material-symbols/play-arrow.svg?color=%231a73e8";
+        }
       }
       if (this.dom["tp-play-label"]) {
         this.dom["tp-play-label"].textContent = state.playing ? "一時停止" : (isReadyToLaunch ? "投げる" : "再生");

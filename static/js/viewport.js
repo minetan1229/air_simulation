@@ -941,14 +941,14 @@ export class Viewport {
       let linewidth = 1;
 
       if (isRank1) {
-        col = new THREE.Color(0xffb300); // 🏆 Gold
+        col = new THREE.Color(0xffb300); // 1st Gold
         opacity = 1.0;
         linewidth = 3;
       } else if (isRank2) {
-        col = new THREE.Color(0xb0bec5); // 🥈 Silver
+        col = new THREE.Color(0xb0bec5); // 2nd Silver
         opacity = 0.85;
       } else if (isRank3) {
-        col = new THREE.Color(0xcd7f32); // 🥉 Bronze
+        col = new THREE.Color(0xcd7f32); // 3rd Bronze
         opacity = 0.75;
       } else {
         col = palette[idx % palette.length];
@@ -972,7 +972,7 @@ export class Viewport {
         const lz = Number(lastPt.y) || 0;
 
         if (isRank1) {
-          // 🏆 1st place gold trophy circle and outer pulsating ring
+          // 1st place gold landing circle and outer pulsating ring
           const innerGeom = new THREE.CircleGeometry(0.40, 24);
           innerGeom.rotateX(-Math.PI / 2);
           const innerMat = new THREE.MeshBasicMaterial({
