@@ -279,6 +279,176 @@
         <button class="sim-error-close" id="sim-error-close" type="button" title="エラー表示を閉じる">✕</button>
       </div>
 
+      <!-- フライト状態アナウンス (現在何が起きているかひと目でわかる) -->
+      <div class="vp-flight-status-announcer" id="vp-flight-status-announcer">
+        <span class="status-dot ready" id="status-dot"></span>
+        <span class="status-text" id="status-text">🛫 投擲待機中 — [投げる] ボタンまたは Space キーで発射</span>
+      </div>
+
+      <!-- 操作ガイドHUD (マウス・キーボード操作が3秒でわかる) -->
+      <div class="vp-controls-guide" id="vp-controls-guide">
+        <div class="guide-header">
+          <span class="guide-icon">🎮</span>
+          <span class="guide-title">操作ガイド</span>
+          <button class="guide-toggle-btn" id="guide-toggle-btn" type="button" title="ガイドを折りたたむ">▾</button>
+        </div>
+        <div class="guide-content" id="guide-content">
+          <div class="guide-item">
+            <span class="guide-badge">🖱️ マウス</span>
+            <span class="guide-desc">左ドラッグで<strong>視点回転</strong> · 右ドラッグで<strong>移動</strong> · ホイールで<strong>ズーム</strong></span>
+          </div>
+          <div class="guide-item">
+            <span class="guide-badge">⌨️ キー</span>
+            <span class="guide-desc"><kbd>Space</kbd> 投げる/停止 · <kbd>R</kbd> 最初へ · <kbd>V</kbd> 機体注目</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- 🏆 100機一斉飛行・最高記録＆チャンピオンHUD (100体飛ばしたときの最高値表示) -->
+      <div class="ensemble-champion-card" id="ensemble-champion-card" hidden>
+        <div class="champ-head">
+          <div class="champ-title-group">
+            <span class="champ-trophy">🏆</span>
+            <div>
+              <div class="champ-title">100機一斉飛行 最高記録 & 統計分析</div>
+              <div class="champ-sub" id="champ-backend-sub">NVIDIA RTX 4060 GPU 並列演算</div>
+            </div>
+          </div>
+          <button class="champ-close-btn" id="champ-close-btn" type="button" title="閉じる">✕</button>
+        </div>
+
+        <!-- 最高値ハイライトグリッド -->
+        <div class="champ-grid">
+          <div class="champ-stat-card champ-gold">
+            <div class="champ-stat-label">🥇 最長飛距離 (1位チャンピオン)</div>
+            <div class="champ-stat-value"><span class="num" id="champ-best-dist">—</span><span class="unit"> m</span></div>
+            <div class="champ-stat-extra" id="champ-best-detail">機体 #— · 初速: — · 角度: —</div>
+          </div>
+
+          <div class="champ-stat-card">
+            <div class="champ-stat-label">⏱️ 最長滞空時間</div>
+            <div class="champ-stat-value"><span class="num" id="champ-best-time">—</span><span class="unit"> s</span></div>
+            <div class="champ-stat-extra" id="champ-best-time-detail">機体 #—</div>
+          </div>
+
+          <div class="champ-stat-card">
+            <div class="champ-stat-label">⛰️ 最高到達高度</div>
+            <div class="champ-stat-value"><span class="num" id="champ-best-alt">—</span><span class="unit"> m</span></div>
+            <div class="champ-stat-extra" id="champ-best-alt-detail">機体 #—</div>
+          </div>
+
+          <div class="champ-stat-card">
+            <div class="champ-stat-label">📊 100機 平均飛距離</div>
+            <div class="champ-stat-value"><span class="num" id="champ-avg-dist">—</span><span class="unit"> m</span></div>
+            <div class="champ-stat-extra" id="champ-avg-range">最小 —m 〜 最大 —m</div>
+          </div>
+        </div>
+
+        <!-- チャンピオン機のアクション -->
+        <div class="champ-actions">
+          <button class="btn btn-primary btn-sm champ-btn" id="champ-btn-adopt" type="button" title="最も飛んだ機体の初速・仰角を現在の機体設定にコピーして再現">
+            🌟 1位の投げ方を現在の設定に反映
+          </button>
+          <button class="btn btn-sm champ-btn" id="champ-btn-focus" type="button" title="1位の機体の着地点・軌跡にカメラをズーム">
+            🎥 1位の機体にフォーカス
+          </button>
+          <button class="btn btn-sm champ-btn" id="champ-btn-toggle-fleet" type="button" title="全100機表示と上位トップ3表示を切り替え">
+            👀 表示: 全100機 ⇄ 上位3機
+          </button>
+        </div>
+
+        <!-- トップランキング一覧テーブル -->
+        <div class="champ-table-wrap">
+          <div class="champ-table-title">🏅 飛距離ランキング TOP 5 (クリックでその機体をフォーカス)</div>
+          <table class="champ-table">
+            <thead>
+              <tr>
+                <th>順位</th>
+                <th>機体ID</th>
+                <th>飛距離</th>
+                <th>滞空時間</th>
+                <th>最高高度</th>
+                <th>初速</th>
+                <th>発射角</th>
+              </tr>
+            </thead>
+            <tbody id="champ-leaderboard-body">
+              <!-- 動的生成 -->
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- 🚀 直感型クイック投擲バー (Floating Quick Launch Bar) -->
+      <div class="quick-launch-dock" id="quick-launch-dock">
+        <!-- メイン操作ボタン群 -->
+        <div class="quick-launch-actions">
+          <button class="btn-main-throw" id="quick-btn-throw" type="button" title="現在の設定で飛行機を投げる (Space / Enter)">
+            <span class="throw-icon">🚀</span>
+            <div class="throw-text-wrap">
+              <span class="throw-title">投げる</span>
+              <span class="throw-hint">SPACE / ENTER</span>
+            </div>
+          </button>
+          
+          <button class="btn-ensemble-throw" id="quick-btn-ensemble" type="button" title="GPU/並列計算で100機を同時に一斉投擲！最高記録を競います">
+            <span class="ensemble-icon">⚡</span>
+            <div class="ensemble-text-wrap">
+              <span class="ensemble-title">100機一斉飛行</span>
+              <span class="ensemble-sub">GPU 100機同時シミュレーション</span>
+            </div>
+          </button>
+
+          <button class="btn-dock-toggle" id="quick-dock-toggle" type="button" title="投げ方（初速・角度）のクイック調整を開閉">
+            <span id="quick-dock-toggle-icon">⚙️ 投げ方調整</span>
+          </button>
+        </div>
+
+        <!-- 投げ方クイック調整パネル (初速・角度・バンクの即座変更) -->
+        <div class="quick-tuning-panel" id="quick-tuning-panel">
+          <div class="tuning-col">
+            <div class="tuning-head">
+              <span class="tuning-label">初速 (スピード)</span>
+              <span class="tuning-val num" id="quick-val-speed">10.0 m/s</span>
+            </div>
+            <input type="range" class="tuning-slider" id="quick-slide-speed" min="3" max="30" step="0.5" value="10">
+            <div class="tuning-presets">
+              <button class="tuning-chip" type="button" data-type="speed" data-val="5">🍃 ふわっと (5m/s)</button>
+              <button class="tuning-chip active" type="button" data-type="speed" data-val="10">✈️ 標準 (10m/s)</button>
+              <button class="tuning-chip" type="button" data-type="speed" data-val="16">💨 強投 (16m/s)</button>
+              <button class="tuning-chip" type="button" data-type="speed" data-val="25">⚡ 全力 (25m/s)</button>
+            </div>
+          </div>
+
+          <div class="tuning-col">
+            <div class="tuning-head">
+              <span class="tuning-label">投擲角度 (仰角)</span>
+              <span class="tuning-val num" id="quick-val-pitch">12.0°</span>
+            </div>
+            <input type="range" class="tuning-slider" id="quick-slide-pitch" min="-5" max="40" step="1" value="12">
+            <div class="tuning-presets">
+              <button class="tuning-chip" type="button" data-type="pitch" data-val="0">➡️ 水平 (0°)</button>
+              <button class="tuning-chip active" type="button" data-type="pitch" data-val="12">↗️ 浅め (12°)</button>
+              <button class="tuning-chip" type="button" data-type="pitch" data-val="20">🚀 上向き (20°)</button>
+              <button class="tuning-chip" type="button" data-type="pitch" data-val="30">🧗 高角 (30°)</button>
+            </div>
+          </div>
+
+          <div class="tuning-col">
+            <div class="tuning-head">
+              <span class="tuning-label">傾き (バンク角)</span>
+              <span class="tuning-val num" id="quick-val-roll">0.0°</span>
+            </div>
+            <input type="range" class="tuning-slider" id="quick-slide-roll" min="-25" max="25" step="1" value="0">
+            <div class="tuning-presets">
+              <button class="tuning-chip" type="button" data-type="roll" data-val="-10">↖️ 左傾き (-10°)</button>
+              <button class="tuning-chip active" type="button" data-type="roll" data-val="0">⚖️ 水平 (0°)</button>
+              <button class="tuning-chip" type="button" data-type="roll" data-val="10">↗️ 右傾き (+10°)</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
       <div class="vp-notice" id="vp-notice" hidden>
         <strong>3D ビューを初期化できませんでした</strong>
         <p id="vp-notice-msg"></p>

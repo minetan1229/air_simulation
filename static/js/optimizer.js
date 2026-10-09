@@ -30,11 +30,13 @@ const ALGORITHM_LABELS = {
 const TERMINAL = new Set(["completed", "failed", "cancelled"]);
 
 export class OptimizerPanel {
-  constructor({ api, store, dom, notify }) {
+  constructor({ api, store, dom, notify, setGlobalEta, onError }) {
     this.api = api;
     this.store = store;
     this.dom = dom;
     this.notify = notify || (() => {});
+    this.setGlobalEta = setGlobalEta || null;
+    this.onError = onError || null;
     this.objectives = new Map();
     this.variables = new Map();
     this.weights = { max_distance: 1, min_max_stress: 0.5 };
@@ -302,6 +304,14 @@ export class OptimizerPanel {
         await this.loadResult();
       } else if (record.status === "failed") {
         this.notify(`探索が失敗しました: ${record.message || record.status}`, "error");
+        if (this.onError) {
+          this.onError({
+            title: "最適化探索シミュレーションエラー",
+            message: record.message || "最適化ジョブの実行中にエラーが発生しました",
+            hint: "探索設計変数の上下限値や目的関数設定を見直してください。",
+            badge: "OPT_FAILED",
+          });
+        }
         this.dom.chartEmpty.hidden = false;
         this.dom.chartEmpty.textContent = record.message || "failed";
       } else {
@@ -315,32 +325,52 @@ export class OptimizerPanel {
     const terminal = TERMINAL.has(record.status);
     if (terminal) {
       const at = record.finished_at || record.estimated_completion;
-      this.dom.etaClock.textContent = at ? at.slice(11, 19) : "—";
-      this.dom.etaLeft.textContent = record.status === "completed" ? "完了" : record.status;
+      const clockText = at ? at.slice(11, 19) : "—";
+      const leftText = record.status === "completed" ? "完了" : record.status;
+      if (this.dom.etaClock) this.dom.etaClock.textContent = clockText;
+      if (this.dom.etaLeft) this.dom.etaLeft.textContent = leftText;
+      if (this.dom.etaRowClock) this.dom.etaRowClock.textContent = clockText;
+      if (this.dom.etaRowLeft) this.dom.etaRowLeft.textContent = leftText;
       if (this.dom.eta) {
         this.dom.eta.dataset.active = "0";
         this.dom.eta.title = `状態: ${record.status} (評価数: ${record.evaluated_count || 0})`;
       }
+      if (this.setGlobalEta) {
+        this.setGlobalEta({ clock: clockText, left: leftText, active: false, title: `最適化: ${leftText}` });
+      }
       return;
     }
     if (!record.active) {
-      this.dom.etaClock.textContent = "—";
-      this.dom.etaLeft.textContent = record.status || "idle";
+      if (this.dom.etaClock) this.dom.etaClock.textContent = "—";
+      if (this.dom.etaLeft) this.dom.etaLeft.textContent = record.status || "待機中";
+      if (this.dom.etaRowClock) this.dom.etaRowClock.textContent = "—";
+      if (this.dom.etaRowLeft) this.dom.etaRowLeft.textContent = record.status || "待機中";
       if (this.dom.eta) {
         this.dom.eta.dataset.active = "0";
         this.dom.eta.title = "最適化エンジン待機中";
       }
+      if (this.setGlobalEta) {
+        this.setGlobalEta({ clock: "—", left: record.status || "待機中", active: false });
+      }
       return;
     }
-    this.dom.etaClock.textContent = record.completion_clock || clockFmt(record.eta_seconds);
-    this.dom.etaLeft.textContent = `残 ${record.eta_display || clockFmt(record.eta_seconds)}`;
+    const clockText = record.completion_clock || clockFmt(record.eta_seconds);
+    const leftText = `残 ${record.eta_display || clockFmt(record.eta_seconds)}`;
+    if (this.dom.etaClock) this.dom.etaClock.textContent = clockText;
+    if (this.dom.etaLeft) this.dom.etaLeft.textContent = leftText;
+    if (this.dom.etaRowClock) this.dom.etaRowClock.textContent = clockText;
+    if (this.dom.etaRowLeft) this.dom.etaRowLeft.textContent = leftText;
     if (this.dom.eta) {
       this.dom.eta.dataset.active = "1";
       const total = Number(record.total_evaluations) || 0;
       const done = Number(record.evaluated_count) || 0;
       const pct = total > 0 ? ((done / total) * 100).toFixed(1) : "0.0";
       const rate = Number(record.evals_per_second) > 0 ? `${fmt(record.evals_per_second, 1)} eval/s` : record.backend || "";
-      this.dom.eta.title = `探索進捗: ${done}/${total} (${pct}%)\n速度: ${rate}\n完了予定: ${record.completion_clock || "—"}`;
+      const infoTitle = `最適化進捗: ${done}/${total} (${pct}%)\n速度: ${rate}\n完了予定: ${record.completion_clock || "—"}`;
+      this.dom.eta.title = infoTitle;
+      if (this.setGlobalEta) {
+        this.setGlobalEta({ clock: clockText, left: leftText, active: true, title: infoTitle });
+      }
     }
   }
 

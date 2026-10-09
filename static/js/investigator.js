@@ -13,11 +13,13 @@ import { clockFmt, clear, fmt, make, sig } from "./lib.js";
 const POLL_INTERVAL_MS = 600;
 
 export class InvestigatorPanel {
-  constructor({ api, store, dom, notify }) {
+  constructor({ api, store, dom, notify, setGlobalEta, onError }) {
     this.api = api;
     this.store = store;
     this.dom = dom;
     this.notify = notify || (() => {});
+    this.setGlobalEta = setGlobalEta || null;
+    this.onError = onError || null;
     this.jobId = null;
     this.pollTimer = 0;
     this.result = null;
@@ -56,6 +58,17 @@ export class InvestigatorPanel {
     if (this.dom.progFill) this.dom.progFill.style.width = "0%";
     if (this.dom.resultArea) this.dom.resultArea.style.display = "none";
 
+    if (this.dom.etaClock) this.dom.etaClock.textContent = "計算中...";
+    if (this.dom.etaLeft) this.dom.etaLeft.textContent = "残 約4秒";
+    if (this.setGlobalEta) {
+      this.setGlobalEta({
+        clock: "計算中...",
+        left: "残 約4秒",
+        active: true,
+        title: "Auto調査シミュレーション中...",
+      });
+    }
+
     try {
       const res = await this.api.investigateRun(payload);
       this.jobId = res.job_id;
@@ -65,6 +78,19 @@ export class InvestigatorPanel {
       this.notify(`調査開始に失敗しました: ${err.message}`, "error");
       if (this.dom.run) this.dom.run.disabled = false;
       if (this.dom.cancel) this.dom.cancel.disabled = true;
+      if (this.dom.etaClock) this.dom.etaClock.textContent = "—";
+      if (this.dom.etaLeft) this.dom.etaLeft.textContent = "待機中";
+      if (this.setGlobalEta) {
+        this.setGlobalEta({ clock: "—", left: "待機中", active: false });
+      }
+      if (this.onError) {
+        this.onError({
+          title: "Auto調査起動エラー",
+          message: err.message || String(err),
+          hint: "サーバー接続および機体設定値を確認してください。",
+          badge: "ERROR",
+        });
+      }
     }
   }
 
@@ -90,9 +116,34 @@ export class InvestigatorPanel {
         this.dom.statusText.textContent = snap.message || "飛行シミュレーション中...";
       }
 
+      const etaClock = snap.completion_clock || (snap.eta_seconds ? clockFmt(snap.eta_seconds) : "—");
+      const etaLeft = snap.eta_display ? `残 ${snap.eta_display}` : (snap.eta_seconds ? `残 ${clockFmt(snap.eta_seconds)}` : "評価中");
+      if (this.dom.etaClock) this.dom.etaClock.textContent = etaClock;
+      if (this.dom.etaLeft) this.dom.etaLeft.textContent = etaLeft;
+      if (this.setGlobalEta && snap.status === "running") {
+        this.setGlobalEta({
+          clock: etaClock,
+          left: etaLeft,
+          active: true,
+          title: `Auto調査中: ${snap.message || ""} (完了予定: ${etaClock})`,
+        });
+      }
+
       if (snap.status === "completed") {
         clearInterval(this.pollTimer);
         this.pollTimer = 0;
+        const doneClock = snap.finished_at ? snap.finished_at.slice(11, 19) : (snap.completion_clock || "完了");
+        const doneLeft = snap.elapsed_display ? `所要 ${snap.elapsed_display}` : "完了";
+        if (this.dom.etaClock) this.dom.etaClock.textContent = doneClock;
+        if (this.dom.etaLeft) this.dom.etaLeft.textContent = doneLeft;
+        if (this.setGlobalEta) {
+          this.setGlobalEta({
+            clock: doneClock,
+            left: doneLeft,
+            active: false,
+            title: `Auto調査完了 (${doneLeft})`,
+          });
+        }
         await this._fetchResult();
       } else if (snap.status === "failed" || snap.status === "cancelled") {
         clearInterval(this.pollTimer);
@@ -100,6 +151,19 @@ export class InvestigatorPanel {
         this.jobId = null;
         if (this.dom.run) this.dom.run.disabled = false;
         if (this.dom.cancel) this.dom.cancel.disabled = true;
+        if (this.dom.etaClock) this.dom.etaClock.textContent = snap.status === "failed" ? "失敗" : "中断";
+        if (this.dom.etaLeft) this.dom.etaLeft.textContent = snap.status === "failed" ? "エラー" : "中止";
+        if (this.setGlobalEta) {
+          this.setGlobalEta({ clock: snap.status === "failed" ? "エラー" : "中断", left: snap.status, active: false });
+        }
+        if (snap.status === "failed" && this.onError) {
+          this.onError({
+            title: "Auto調査シミュレーションエラー",
+            message: snap.message || "調査中にシミュレーションエラーが発生しました",
+            hint: "機体設定値を確認し、再度調査をお試しください。",
+            badge: "INV_FAIL",
+          });
+        }
         this.notify(`調査が${snap.status === "failed" ? "失敗" : "中断"}しました: ${snap.message || ""}`, "warn");
       }
     } catch (err) {

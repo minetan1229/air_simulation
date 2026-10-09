@@ -131,9 +131,14 @@ class ConsoleApp {
         eta: $("#eta-widget"),
         etaClock: $("#eta-clock"),
         etaLeft: $("#eta-left"),
+        etaRow: $("#opt-eta-row"),
+        etaRowClock: $("#opt-eta-clock"),
+        etaRowLeft: $("#opt-eta-left"),
         frontAxes: $("#opt-front-axes"),
       },
       notify: (message, tone) => this.notify(message, tone),
+      setGlobalEta: (opts) => this.setGlobalEta(opts),
+      onError: (opts) => this.showSimulationError(opts),
     });
     this.optimizer.mount(this.meta);
 
@@ -148,6 +153,9 @@ class ConsoleApp {
         progFill: $("#inv-fill"),
         progText: $("#inv-prog-pct"),
         statusText: $("#inv-status"),
+        etaRow: $("#inv-eta-row"),
+        etaRowClock: $("#inv-eta-clock"),
+        etaRowLeft: $("#inv-eta-left"),
         resultArea: $("#inv-result-area"),
         emptyPrompt: $("#inv-empty-prompt"),
         diagBadge: $("#inv-diag-badge"),
@@ -163,6 +171,8 @@ class ConsoleApp {
         sensHost: $("#inv-sens-list"),
       },
       notify: (message, tone) => this.notify(message, tone),
+      setGlobalEta: (opts) => this.setGlobalEta(opts),
+      onError: (opts) => this.showSimulationError(opts),
     });
     this.investigator.mount();
 
@@ -219,6 +229,22 @@ class ConsoleApp {
       "view-canvas",
       "vp-notice",
       "vp-notice-msg",
+      "sim-error-banner",
+      "sim-error-icon",
+      "sim-error-title",
+      "sim-error-badge",
+      "sim-error-msg",
+      "sim-error-hint",
+      "sim-error-close",
+      "eta-widget",
+      "eta-clock",
+      "eta-left",
+      "inv-eta-row",
+      "inv-eta-clock",
+      "inv-eta-left",
+      "opt-eta-row",
+      "opt-eta-clock",
+      "opt-eta-left",
       "flight-pill",
       "rec-count",
       "rec-cursor",
@@ -457,7 +483,15 @@ class ConsoleApp {
     });
     t.on("metrics", (metrics) => this._onMetrics(metrics));
     t.on("ended", (frame) => this._onEnded(frame));
-    t.on("error", (error) => this.notify(`シミュレーションエラー: ${error.message}`, "error"));
+    t.on("error", (error) => {
+      this.showSimulationError({
+        title: "シミュレーション計算エラー",
+        message: error.message || String(error),
+        hint: "機体パラメータの設定値や通信状態をご確認ください。",
+        badge: "ERROR",
+      });
+      this.notify(`シミュレーションエラー: ${error.message}`, "error");
+    });
   }
 
   _bindViewportToggles() {
@@ -487,6 +521,10 @@ class ConsoleApp {
     const btnGpuEnsemble = document.getElementById("btn-gpu-ensemble");
     if (btnGpuEnsemble) {
       btnGpuEnsemble.addEventListener("click", () => this._runGpuEnsemble(100));
+    }
+
+    if (this.dom["sim-error-close"]) {
+      this.dom["sim-error-close"].addEventListener("click", () => this.hideSimulationError());
     }
 
     // Bind recording buttons
@@ -528,6 +566,15 @@ class ConsoleApp {
   }
 
   async _runGpuEnsemble(count = 100) {
+    this.hideSimulationError();
+    const tStart = performance.now();
+    this.setGlobalEta({
+      clock: "GPU計算中...",
+      left: "残 約1.2秒",
+      active: true,
+      title: `GPU並列シミュレーション (${count}機同時計算) を実行中...`,
+    });
+
     await this._guard(async () => {
       this.notify(`⚡ GPU一括並列シミュレーション (${count}機同時計算) を実行中...`, "info");
       const currentAircraft = this.store.data.aircraft || {};
@@ -542,6 +589,14 @@ class ConsoleApp {
         settings: { ...currentSettings, duration_s: 25.0, dt_max: 0.01 },
         n_trajectories: count,
         max_sample_tracks: count,
+      });
+
+      const elapsedSec = ((performance.now() - tStart) / 1000).toFixed(2);
+      this.setGlobalEta({
+        clock: `${elapsedSec}s`,
+        left: "GPU完了",
+        active: false,
+        title: `GPU 100機同時シミュレーション完了 (所要時間: ${elapsedSec}秒)`,
       });
 
       if (!res || !res.sample_trajectories) {
@@ -933,13 +988,73 @@ class ConsoleApp {
     try {
       await action();
     } catch (error) {
-      this.notify(this._describe(error), "error");
+      const msg = this._describe(error);
+      this.notify(msg, "error");
+      this.showSimulationError({
+        title: "シミュレーション実行エラー",
+        message: msg,
+        hint: "入力パラメータの設定値またはサーバー通信状態をご確認ください。",
+        badge: "ERROR",
+      });
     }
   }
 
   _describe(error) {
     if (error instanceof ApiError) return `${error.message} (HTTP ${error.status})`;
     return error && error.message ? error.message : String(error);
+  }
+
+  showSimulationError({
+    title = "シミュレーションエラー",
+    message = "",
+    hint = "",
+    badge = "ERROR",
+    icon = "⚠️",
+  } = {}) {
+    const banner = this.dom["sim-error-banner"];
+    if (!banner) return;
+    if (this.dom["sim-error-icon"]) this.dom["sim-error-icon"].textContent = icon;
+    if (this.dom["sim-error-title"]) this.dom["sim-error-title"].textContent = title;
+    if (this.dom["sim-error-badge"]) {
+      this.dom["sim-error-badge"].textContent = badge;
+      this.dom["sim-error-badge"].dataset.type = badge.toLowerCase();
+    }
+    if (this.dom["sim-error-msg"]) this.dom["sim-error-msg"].textContent = message;
+    const hintEl = this.dom["sim-error-hint"];
+    if (hintEl) {
+      if (hint) {
+        hintEl.textContent = `💡 対処ヒント: ${hint}`;
+        hintEl.hidden = false;
+      } else {
+        hintEl.hidden = true;
+      }
+    }
+    banner.hidden = false;
+    this._updatePill(badge === "DIVERGED" ? "発散" : "エラー", "error");
+    if (this.dom["top-state"]) this.dom["top-state"].textContent = "ERROR";
+  }
+
+  hideSimulationError() {
+    if (this.dom["sim-error-banner"]) {
+      this.dom["sim-error-banner"].hidden = true;
+    }
+  }
+
+  setGlobalEta({
+    clock = "—",
+    left = "待機中",
+    active = false,
+    title = "計算完了予想時間 (ETA)",
+  } = {}) {
+    const widget = this.dom["eta-widget"];
+    const clockEl = this.dom["eta-clock"];
+    const leftEl = this.dom["eta-left"];
+    if (clockEl) clockEl.textContent = clock;
+    if (leftEl) leftEl.textContent = left;
+    if (widget) {
+      widget.dataset.active = active ? "1" : "0";
+      widget.title = title;
+    }
   }
 
   /* ------------------------------------------------------- configuration */
@@ -1114,6 +1229,15 @@ class ConsoleApp {
   }
 
   async _launchFlight() {
+    this.hideSimulationError();
+    const tStart = performance.now();
+    this.setGlobalEta({
+      clock: "計算中...",
+      left: "残 約1秒",
+      active: true,
+      title: "6DoF RK4 飛行シミュレーション軌跡を計算中...",
+    });
+
     await this._guard(async () => {
       if (this.dirty.size > 0) {
         await this._push();
@@ -1134,6 +1258,14 @@ class ConsoleApp {
         duration_s: 25.0,
       });
 
+      const elapsedSec = ((performance.now() - tStart) / 1000).toFixed(2);
+      this.setGlobalEta({
+        clock: `${elapsedSec}s`,
+        left: "計算完了",
+        active: false,
+        title: `飛行シミュレーション計算完了 (所要時間: ${elapsedSec}秒)`,
+      });
+
       this.flightDirty = false;
       // Auto-render GPU-accelerated ensemble trajectories (RTX 4060 parallel flights)
       if (this.viewport && result.sample_trajectories && result.sample_trajectories.length) {
@@ -1146,6 +1278,26 @@ class ConsoleApp {
       const speed = Number((this.store.data.launch && this.store.data.launch.launch_speed) || 10).toFixed(1);
       const angle = Number((this.store.data.launch && this.store.data.launch.launch_angle_deg) || 15).toFixed(1);
       const gpuNote = result.backend && result.backend.includes("cupy") ? " · ⚡ RTX 4060 GPU並列計算" : "";
+
+      // シミュレーション結果のステータス検査（発散・構造破壊等のエラー）
+      if (metrics.status === "diverged" || metrics.diverged) {
+        this.showSimulationError({
+          title: "シミュレーション計算発散エラー (Diverged)",
+          message: "迎角または角速度の極端な変化により、RK4数値積分の安定許容限界を超えて計算が発散しました。",
+          hint: "発射初速、エレボン角、または積分刻み Δt を調整してください。",
+          badge: "DIVERGED",
+          icon: "🛑",
+        });
+      } else if (metrics.crashed && metrics.max_stress_index >= 1.0) {
+        this.showSimulationError({
+          title: "主翼構造破壊・空中分解エラー (Structural Failure)",
+          message: `動圧と過大なGフォースにより、翼根曲げ応力が許容応力を超過しました (最大応力: ${fmt(metrics.max_stress_pa || 0, 0)} Pa, 応力指数: ${fmt(metrics.max_stress_index || 0, 2)})。`,
+          hint: "用紙の坪量(gsm)を上げて剛性を高めるか、発射初速を落としてください。",
+          badge: "OVERSTRESS",
+          icon: "💥",
+        });
+      }
+
       this.notify(`✈️ 発射完了 (${speed}m/s · ${angle}°): 飛距離 ${fmt(dist, 2)}m / 滞空 ${fmt(time, 2)}s${gpuNote}`, "ok");
       this._updateTransportUi(this.transport.state);
     });
@@ -1168,6 +1320,8 @@ class ConsoleApp {
   }
 
   async _resetFlight(clearHistory = true) {
+    this.hideSimulationError();
+    this.setGlobalEta({ clock: "—", left: "待機中", active: false });
     if (this.viewport) {
       this.viewport.archiveTrack();
       this.viewport.setLaunchVectorVisible(true);
@@ -1343,8 +1497,33 @@ class ConsoleApp {
   }
 
   _onEnded(frame) {
-    this._updatePill(frame.crashed ? "墜落" : "着地", frame.crashed ? "crash" : "flying");
-    this.notify(frame.crashed ? "墜落しました" : "着地しました", frame.crashed ? "error" : "ok");
+    if (frame.diverged) {
+      this._updatePill("発散", "error");
+      this.showSimulationError({
+        title: "シミュレーション計算発散エラー (Diverged)",
+        message: "迎角または角速度の極端な変化により、RK4数値積分が安定限界を超えて発散しました。",
+        hint: "初速、エレボン角、または積分刻み Δt を調整してください。",
+        badge: "DIVERGED",
+        icon: "🛑",
+      });
+      this.notify("数値計算が発散しました", "error");
+    } else if (frame.crashed && (Number(frame.max_stress_index || 0) >= 1.0 || Number(frame.stress_pa || 0) > 25000)) {
+      this._updatePill("破断", "crash");
+      this.showSimulationError({
+        title: "主翼構造破壊・空中分解エラー (Structural Failure)",
+        message: `動圧と過大なGフォースにより、翼根曲げ応力が許容応力を超過しました (応力: ${fmt(frame.stress_pa || 0, 0)} Pa)。`,
+        hint: "用紙坪量を増やすか、発射初速を落としてください。",
+        badge: "OVERSTRESS",
+        icon: "💥",
+      });
+      this.notify("主翼が空中分解しました", "error");
+    } else if (frame.crashed) {
+      this._updatePill("墜落", "crash");
+      this.notify("墜落しました", "error");
+    } else {
+      this._updatePill("着地", "flying");
+      this.notify("着地しました", "ok");
+    }
 
     // 飛行終了時に到達距離と時間をゴースト記録（トップレール）に保存・表示
     const position = frame.position_m || [0, 0, 0];
