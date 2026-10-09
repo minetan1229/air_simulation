@@ -2036,14 +2036,231 @@ class ConsoleApp {
         btnApplyAll.addEventListener("click", () => this._applyRecordPreset(false));
       }
 
-      const btnApplyThrow = this.dom["btn-apply-throw-only"];
-      if (btnApplyThrow) {
-        btnApplyThrow.addEventListener("click", () => this._applyRecordPreset(true));
+      const btnOpenStudio = document.getElementById("btn-open-guinness-studio");
+      if (btnOpenStudio) {
+        btnOpenStudio.addEventListener("click", () => {
+          const tab = document.getElementById("wb-tab-guinness");
+          if (tab) tab.click();
+          this.setWorkbench(true);
+        });
       }
+
+      // Initialize dedicated Guinness Studio workbench pane
+      await this._initGuinnessStudioPane(presets);
     } catch (err) {
       console.warn("Failed to load record presets:", err);
     }
   }
+
+  async _initGuinnessStudioPane(presets) {
+    const studioSel = document.getElementById("wb-guinness-select");
+    if (!studioSel) return;
+
+    this.studioGuinnessCalibrated = false; // Dedicated studio defaults to pure authentic raw data
+    const btnRaw = document.getElementById("wb-guinness-btn-raw");
+    const btnCal = document.getElementById("wb-guinness-btn-cal");
+
+    if (btnRaw && btnCal) {
+      btnRaw.addEventListener("click", () => {
+        this.studioGuinnessCalibrated = false;
+        btnRaw.classList.add("active");
+        btnCal.classList.remove("active");
+        this._updateGuinnessStudioSpecs();
+      });
+      btnCal.addEventListener("click", () => {
+        this.studioGuinnessCalibrated = true;
+        btnCal.classList.add("active");
+        btnRaw.classList.remove("active");
+        this._updateGuinnessStudioSpecs();
+      });
+    }
+
+    // Populate studio select dropdown
+    for (const p of presets) {
+      const opt = document.createElement("option");
+      opt.value = p.key;
+      const throwData = p.throw || {};
+      const cat = p.category === "indoor_duration" ? "滞空" : "飛距離";
+      opt.textContent = `【${cat}】${p.name_ja || p.name} (${throwData.release_speed_mps || 0} m/s)`;
+      studioSel.appendChild(opt);
+    }
+
+    studioSel.addEventListener("change", async () => {
+      const key = studioSel.value;
+      if (!key) return;
+      await this._loadGuinnessStudioPreset(key);
+    });
+
+    // Default select first entry if available
+    if (presets.length > 0) {
+      studioSel.value = presets[0].key;
+      await this._loadGuinnessStudioPreset(presets[0].key);
+    }
+
+    const btnFly = document.getElementById("wb-guinness-btn-fly");
+    if (btnFly) {
+      btnFly.addEventListener("click", () => this._runGuinnessStudioFlight());
+    }
+
+    const btnMatrix = document.getElementById("wb-guinness-btn-verify-matrix");
+    if (btnMatrix) {
+      btnMatrix.addEventListener("click", () => this._showGuinnessVerificationMatrix());
+    }
+  }
+
+  async _loadGuinnessStudioPreset(key) {
+    try {
+      const p = await api.recordPreset(key);
+      this.studioGuinnessPreset = p;
+      this._updateGuinnessStudioSpecs();
+    } catch (err) {
+      this.notify(`ギネス諸元の読込失敗: ${err.message}`, "error");
+    }
+  }
+
+  _updateGuinnessStudioSpecs() {
+    const p = this.studioGuinnessPreset;
+    if (!p) return;
+
+    const ach = p.achievement || {};
+    const throwInfo = (this.studioGuinnessCalibrated && p.calibration) ? p.calibration : (p.throw || {});
+    const geom = p.derived_geometry || {};
+    const air = p.aircraft || {};
+
+    const nameEl = document.getElementById("wb-g-name");
+    const holderEl = document.getElementById("wb-g-holder");
+    const valEl = document.getElementById("wb-g-val");
+    if (nameEl) nameEl.textContent = p.name_ja || p.name;
+    if (holderEl) holderEl.textContent = `${p.holder || ach.holder || ""} (${p.year || ach.date || ""}) · ${ach.venue || ""}`;
+    if (valEl) valEl.textContent = ach.value_display || (p.category === "indoor_duration" ? `${ach.value || ach.duration_s || 0} 秒` : `${ach.value || ach.distance_m || 0} m`);
+
+    const spdEl = document.getElementById("wb-g-speed");
+    const angEl = document.getElementById("wb-g-angle");
+    const massEl = document.getElementById("wb-g-mass");
+    const geomEl = document.getElementById("wb-g-geom");
+    const techEl = document.getElementById("wb-g-technique");
+    const citEl = document.getElementById("wb-g-citation");
+
+    if (spdEl) spdEl.textContent = `${throwInfo.release_speed_mps || 0} m/s (時速 ${( (throwInfo.release_speed_mps || 0) * 3.6 ).toFixed(1)} km/h)`;
+    if (angEl) angEl.textContent = `${throwInfo.launch_angle_deg || 0}° (高度 ${throwInfo.release_height_m || 1.8} m)`;
+    if (massEl) massEl.textContent = `${((air.mass_kg || geom.mass_kg || 0.005) * 1000).toFixed(2)} g (A4用紙: ${air.paper_gsm || geom.paper_gsm || 100} g/m²)`;
+    if (geomEl) geomEl.textContent = `翼幅 ${((geom.wingspan_m || air.wingspan_m || 0.32) * 100).toFixed(1)} cm / 翼面積 ${( (geom.wing_area_m2 || air.wing_area_m2 || 0.014) * 10000 ).toFixed(1)} cm²`;
+    if (techEl) techEl.textContent = throwInfo.technique_ja || throwInfo.technique || "公認投擲フォーム";
+    if (citEl) {
+      const cits = (p.citations || []).map(c => `・${c.title || c.citation || c.key || ""}`).join("<br>");
+      citEl.innerHTML = `<strong>【公認ルール・出処】</strong><br>${cits || "Guinness World Records 公認レギュレーション"}<br><span style="color:#1a73e8; margin-top:4px; display:inline-block;">${p.notes_ja || p.notes || ""}</span>`;
+    }
+  }
+
+  async _runGuinnessStudioFlight() {
+    const p = this.studioGuinnessPreset;
+    if (!p) {
+      this.notify("ギネス記録を選択してください", "warn");
+      return;
+    }
+
+    await this._guard(async () => {
+      this.startEtaCountdown({
+        title: "ギネス公式数値で6DoF軌道計算中...",
+        clock: "計算中...",
+        estimatedSec: 0.8,
+      });
+
+      const res = await api.guinnessSimulate({
+        key: p.key,
+        calibrated: Boolean(this.studioGuinnessCalibrated),
+        duration_s: 60.0,
+      });
+
+      this.stopEtaCountdown();
+      this.setGlobalEta({ active: false });
+
+      if (!res.ok) throw new Error(res.message || "ギネス計算に失敗しました");
+
+      // Display verification results
+      const emptyMsg = document.getElementById("wb-guinness-empty-msg");
+      const content = document.getElementById("wb-guinness-result-content");
+      if (emptyMsg) emptyMsg.style.display = "none";
+      if (content) content.style.display = "block";
+
+      const badge = document.getElementById("wb-g-res-badge");
+      const title = document.getElementById("wb-g-res-title");
+      const summary = document.getElementById("wb-g-res-summary");
+      const target = document.getElementById("wb-g-res-target");
+      const sim = document.getElementById("wb-g-res-sim");
+      const ratio = document.getElementById("wb-g-res-ratio");
+      const gEl = document.getElementById("wb-g-res-g");
+      const list = document.getElementById("wb-g-limitations-list");
+
+      const comp = res.comparison || {};
+      const unit = comp.unit || "";
+      if (target) target.textContent = `${comp.measured_value || 0} ${unit}`;
+      if (sim) sim.textContent = `${(comp.simulated_value || 0).toFixed(2)} ${unit}`;
+      if (ratio) ratio.textContent = `${((comp.ratio || 0) * 100).toFixed(1)} % (${comp.gap_percent > 0 ? "+" : ""}${(comp.gap_percent || 0).toFixed(1)}%)`;
+      if (gEl) gEl.textContent = `${(res.pull_factor_g || 0).toFixed(1)} G`;
+
+      const ratioVal = comp.ratio || 0;
+      if (ratioVal >= 0.8) {
+        if (badge) { badge.textContent = "VERIFIED"; badge.className = "inv-badge pass"; }
+        if (title) title.textContent = "公認記録再現に成功";
+      } else {
+        if (badge) { badge.textContent = "PHYSICS GAP"; badge.className = "inv-badge warn"; }
+        if (title) title.textContent = "剛体モデルと実機の物理的乖離を検出";
+      }
+
+      if (summary) {
+        summary.textContent = this.studioGuinnessCalibrated
+          ? `校正済み投擲パラメータにより、公認記録（${comp.measured_value}${unit}）に対して ${(ratioVal * 100).toFixed(1)}% の再現率を達成しました。`
+          : `公認の生初速（時速約100km / Gフォース ${(res.pull_factor_g || 0).toFixed(1)}G）で剛体シミュレーションを実行しました。`;
+      }
+
+      if (list) {
+        list.innerHTML = "";
+        const limitations = res.limitations || [];
+        for (const lim of limitations) {
+          const item = document.createElement("div");
+          item.style.padding = "6px 8px";
+          item.style.background = lim.severity === "high" ? "#fce8e6" : "#f1f3f4";
+          item.style.borderLeft = lim.severity === "high" ? "3px solid #d93025" : "3px solid #1a73e8";
+          item.style.borderRadius = "2px";
+          item.innerHTML = `<strong>${lim.severity === "high" ? "【過大負荷】" : "【診断】"}</strong> ${lim.message_ja || lim.message}`;
+          list.appendChild(item);
+        }
+      }
+
+      // Replay trajectory seamlessly on 3D viewport without contaminating user session
+      if (res.samples && res.samples.length > 0) {
+        if (this.viewport && this.viewport.trackPoints.length > 0) {
+          this.viewport.archiveTrack();
+        }
+        this.transport.pause();
+        this.transport.history = res.samples;
+        this.transport.metrics = res.metrics;
+        this.transport.frames = res.samples.length;
+        this.transport.playIndex = 0;
+        this.transport.seek(0);
+        this.transport.emit("metrics", res.metrics);
+        this.transport.emit("state", this.transport.state);
+        this.transport.play();
+      }
+
+      this.notify(`ギネス公式数値での飛行計算が完了しました (${(res.metrics.flight_time_s || 0).toFixed(2)}s, ${(res.metrics.distance_m || 0).toFixed(2)}m)`, "ok");
+    });
+  }
+
+  async _showGuinnessVerificationMatrix() {
+    await this._guard(async () => {
+      const rep = await api.guinnessVerification();
+      const rows = rep.rows || [];
+      let summaryText = `【ギネス世界記録 一括検証マトリクス (${rows.length}機体)】\n\n`;
+      for (const r of rows) {
+        const gap = r.gap_percent != null ? `${r.gap_percent > 0 ? "+" : ""}${r.gap_percent.toFixed(1)}%` : "N/A";
+        summaryText += `・${r.name_ja || r.name} (${r.category}): 公認=${r.measured_value} ${r.unit} | シミュ=${r.simulated_value != null ? r.simulated_value.toFixed(1) : "—"} (乖離: ${gap})\n`;
+      }
+      alert(summaryText);
+    });
+  }
+
 
   _updateRecordSpecsDisplay() {
     const p = this.selectedRecordPreset;

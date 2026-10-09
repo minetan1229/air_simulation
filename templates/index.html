@@ -156,11 +156,11 @@
               </details>
 
               <div class="record-actions">
-                <button type="button" class="btn-record-primary" id="btn-apply-record" title="機体と投げ方をロードして投げる">
-                  <img src="https://api.iconify.design/material-symbols/rocket-launch.svg?color=%23ffffff" class="ui-icon" alt=""> 機体＆投げ方をロードして投擲
+                <button type="button" class="btn-record-primary" id="btn-apply-record" title="通常セッションにロードして投げる">
+                  <img src="https://api.iconify.design/material-symbols/rocket-launch.svg?color=%23ffffff" class="ui-icon" alt=""> 通常セッションにロード
                 </button>
-                <button type="button" class="btn-record-secondary" id="btn-apply-throw-only" title="現在の機体のまま、この投げ方で投げる">
-                  <img src="https://api.iconify.design/material-symbols/flight-takeoff.svg?color=%231a73e8" class="ui-icon" alt=""> 投げ方のみ適用して投擲
+                <button type="button" class="btn-record-secondary" id="btn-open-guinness-studio" style="border-color: #f9ab00; color: #b06000;" title="設定を汚染せず、ギネス公認数値のみで飛ばす独立検証スタジオを開く">
+                  <img src="https://api.iconify.design/material-symbols/trophy-outline.svg?color=%23f29900" class="ui-icon" alt=""> ギネス独立検証スタジオを開く
                 </button>
               </div>
             </div>
@@ -272,6 +272,78 @@
         <strong>3D ビューを初期化できませんでした</strong>
         <p id="vp-notice-msg"></p>
         <p class="muted">設定・数値計算・最適化はそのまま利用できます。</p>
+      </div>
+
+      <!-- 🚀 直感型クイック投擲・3D操作バー (Floating Quick Launch Bar) -->
+      <div class="quick-launch-dock" id="quick-launch-dock">
+        <!-- メイン操作ボタン群 -->
+        <div class="quick-launch-actions">
+          <button class="btn-main-throw" id="quick-btn-throw" type="button" title="現在の設定で飛行機を投げる (Space / Enter)">
+            <img src="https://api.iconify.design/material-symbols/rocket-launch.svg?color=%23ffffff" class="ui-icon" alt="">
+            <div class="throw-text-wrap">
+              <span class="throw-title">投げる</span>
+              <span class="throw-hint">SPACE / ENTER</span>
+            </div>
+          </button>
+          
+          <button class="btn-ensemble-throw" id="quick-btn-ensemble" type="button" title="GPU並列計算で100機を同時に一斉投擲！最高記録を競います">
+            <img src="https://api.iconify.design/material-symbols/electric-bolt.svg?color=%23188038" class="ui-icon" alt="">
+            <div class="ensemble-text-wrap">
+              <span class="ensemble-title">100機一斉飛行</span>
+              <span class="ensemble-sub">GPU 100機同時</span>
+            </div>
+          </button>
+
+          <button class="btn-dock-toggle" id="quick-dock-toggle" type="button" title="投げ方・旋回バンク（初速・角度・左右傾き）のクイック調整を開閉">
+            <span id="quick-dock-toggle-icon">⚙️ 投げ方調整</span>
+          </button>
+        </div>
+
+        <!-- 投げ方クイック調整パネル (初速・角度・ロール傾き・左右曲がりの即座変更) -->
+        <div class="quick-tuning-panel" id="quick-tuning-panel" hidden>
+          <div class="tuning-col">
+            <div class="tuning-head">
+              <span class="tuning-label">初速 (スピード)</span>
+              <span class="tuning-val num" id="quick-val-speed">12.0 m/s</span>
+            </div>
+            <input type="range" class="tuning-slider" id="quick-slide-speed" min="3" max="30" step="0.5" value="12">
+            <div class="tuning-presets">
+              <button class="tuning-chip" type="button" data-type="speed" data-val="6">ふわっと (6m/s)</button>
+              <button class="tuning-chip active" type="button" data-type="speed" data-val="12">標準 (12m/s)</button>
+              <button class="tuning-chip" type="button" data-type="speed" data-val="18">強投 (18m/s)</button>
+              <button class="tuning-chip" type="button" data-type="speed" data-val="25">全力 (25m/s)</button>
+            </div>
+          </div>
+
+          <div class="tuning-col">
+            <div class="tuning-head">
+              <span class="tuning-label">投擲角度 (仰角)</span>
+              <span class="tuning-val num" id="quick-val-pitch">12.0°</span>
+            </div>
+            <input type="range" class="tuning-slider" id="quick-slide-pitch" min="-5" max="40" step="1" value="12">
+            <div class="tuning-presets">
+              <button class="tuning-chip" type="button" data-type="pitch" data-val="0">水平 (0°)</button>
+              <button class="tuning-chip active" type="button" data-type="pitch" data-val="12">浅め (12°)</button>
+              <button class="tuning-chip" type="button" data-type="pitch" data-val="20">上向き (20°)</button>
+              <button class="tuning-chip" type="button" data-type="pitch" data-val="30">高角 (30°)</button>
+            </div>
+          </div>
+
+          <div class="tuning-col">
+            <div class="tuning-head">
+              <span class="tuning-label">傾き (3Dバンク旋回)</span>
+              <span class="tuning-val num" id="quick-val-roll">0.0°</span>
+            </div>
+            <input type="range" class="tuning-slider" id="quick-slide-roll" min="-30" max="30" step="1" value="0">
+            <div class="tuning-presets">
+              <button class="tuning-chip" type="button" data-type="roll" data-val="-12">↺ 左旋回 (-12°)</button>
+              <button class="tuning-chip" type="button" data-type="roll" data-val="-5">左微傾 (-5°)</button>
+              <button class="tuning-chip active" type="button" data-type="roll" data-val="0">水平 (0°)</button>
+              <button class="tuning-chip" type="button" data-type="roll" data-val="5">右微傾 (+5°)</button>
+              <button class="tuning-chip" type="button" data-type="roll" data-val="12">↻ 右旋回 (+12°)</button>
+            </div>
+          </div>
+        </div>
       </div>
 
       <!-- 🏆 100機一括飛行・最高値/最下位/平均値 統計記録カード (100機シミュレーション記録HUD) -->
@@ -458,6 +530,7 @@
     <nav class="wb-tabs" role="tablist">
       <button class="wb-tab" id="wb-tab-investigate" role="tab" aria-selected="true" data-tab="investigate"><img src="https://api.iconify.design/material-symbols/search.svg?color=%231a73e8" class="ui-icon" alt=""> Auto調査<small>INVESTIGATE</small></button>
       <button class="wb-tab" id="wb-tab-optimizer" role="tab" aria-selected="false" data-tab="optimizer"><img src="https://api.iconify.design/material-symbols/tune.svg?color=%235f6368" class="ui-icon" alt=""> 最適化<small>OPTIMIZER</small></button>
+      <button class="wb-tab" id="wb-tab-guinness" role="tab" aria-selected="false" data-tab="guinness"><img src="https://api.iconify.design/material-symbols/trophy-outline.svg?color=%23f29900" class="ui-icon" alt=""> ギネス独立検証<small>GUINNESS</small></button>
       <button class="wb-tab" id="wb-tab-model" role="tab" aria-selected="false" data-tab="model"><img src="https://api.iconify.design/material-symbols/view-in-ar.svg?color=%235f6368" class="ui-icon" alt=""> 3D モデル<small>MESH</small></button>
       <button class="wb-tab" id="wb-tab-data" role="tab" aria-selected="false" data-tab="data"><img src="https://api.iconify.design/material-symbols/table-chart.svg?color=%235f6368" class="ui-icon" alt=""> データ<small>EXPORT</small></button>
       <div class="wb-spacer"></div>
@@ -602,6 +675,93 @@
             <button class="btn btn-mini" id="opt-adopt" type="button" disabled>この設計を反映</button>
           </div>
           <div class="best-grid" id="opt-best"><p class="chart-empty">未実行</p></div>
+        </div>
+      </div>
+
+      <!-- guinness dedicated sandbox pane -->
+      <div class="wb-pane" data-pane="guinness" role="tabpanel" hidden>
+        <div class="wb-col wb-col-1">
+          <h4 class="wb-h">公認ギネス記録モデル<small>OFFICIAL WORLD RECORDS</small></h4>
+          <p class="muted" style="margin: 4px 0 10px; font-size: 11px; line-height: 1.4;">
+            通常セッション（現在の機体設定や風洞）とは完全に隔離された独立システムです。ギネス公式発表の生数値（時速約100km、A4規定用紙質量等）をそのまま用いて飛行・診断します。
+          </p>
+          <div class="field">
+            <label class="field-key" for="wb-guinness-select">記録選択</label>
+            <select id="wb-guinness-select" class="inv-select" aria-label="世界記録モデル選択">
+              <option value="">-- 公式世界記録を選択 --</option>
+            </select>
+          </div>
+          <div class="inv-config-group" style="margin-top: 10px;">
+            <label class="inv-label">数値モード (NUMERICAL FIDELITY)</label>
+            <div style="display: flex; gap: 6px; margin-top: 4px;">
+              <button type="button" class="btn btn-sm btn-mode active" id="wb-guinness-btn-raw" style="flex: 1;" title="公認の生初速（22〜27m/s、30G超）を一切変更せずそのまま投入">
+                生公認値 (完全公式)
+              </button>
+              <button type="button" class="btn btn-sm btn-mode" id="wb-guinness-btn-cal" style="flex: 1;" title="剛体シミュレータ向け校正値">
+                記録再現 (校正値)
+              </button>
+            </div>
+          </div>
+          <div class="btn-row" style="margin-top: 14px;">
+            <button class="btn btn-primary" id="wb-guinness-btn-fly" type="button" style="width: 100%; font-weight: 600; background: #e37400; color: #fff;">
+              <img src="https://api.iconify.design/material-symbols/trophy-outline.svg?color=%23ffffff" class="ui-icon" alt=""> ギネス公式数値で単独飛行
+            </button>
+          </div>
+          <div class="btn-row" style="margin-top: 6px;">
+            <button class="btn btn-sm" id="wb-guinness-btn-verify-matrix" type="button" style="width: 100%;">
+              全公認記録の一括検証マトリクスを取得
+            </button>
+          </div>
+        </div>
+
+        <div class="wb-col wb-col-2" style="overflow-y: auto;">
+          <h4 class="wb-h">公認諸元 &amp; 出典<small>SPECIFICATIONS &amp; PROVENANCE</small></h4>
+          <div id="wb-guinness-spec-card" style="font-size: 11px;">
+            <div style="padding: 10px; background: #fdf8e2; border: 1px solid #f9ab00; border-radius: 6px; margin-bottom: 10px;">
+              <div style="font-weight: 700; font-size: 14px; color: #b06000;" id="wb-g-name">記録を選択してください</div>
+              <div style="color: #5f6368; margin-top: 2px;" id="wb-g-holder">—</div>
+              <div style="font-size: 18px; font-weight: 800; color: #1a73e8; margin-top: 6px;" class="num" id="wb-g-val">—</div>
+            </div>
+
+            <div class="metric-table" style="margin-bottom: 10px;">
+              <div class="metric-row"><span class="metric-k">公認初速</span><span class="metric-v num" id="wb-g-speed">—</span></div>
+              <div class="metric-row"><span class="metric-k">投擲角度</span><span class="metric-v num" id="wb-g-angle">—</span></div>
+              <div class="metric-row"><span class="metric-k">機体質量 (A4規約)</span><span class="metric-v num" id="wb-g-mass">—</span></div>
+              <div class="metric-row"><span class="metric-k">翼幅 / 翼面積</span><span class="metric-v num" id="wb-g-geom">—</span></div>
+              <div class="metric-row"><span class="metric-k">公認投擲フォーム</span><span class="metric-v" id="wb-g-technique">—</span></div>
+            </div>
+
+            <div style="background: #f8f9fa; border: 1px solid #dadce0; border-radius: 6px; padding: 8px;">
+              <div style="font-weight: 600; color: #3c4043; margin-bottom: 4px;">出典・公式規約ルール</div>
+              <div id="wb-g-citation" style="color: #5f6368; line-height: 1.4;">—</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="wb-col wb-col-3" style="overflow-y: auto;">
+          <h4 class="wb-h">公式検証レポート<small>VERIFICATION REPORT</small></h4>
+          <div id="wb-guinness-result-panel">
+            <p class="chart-empty" id="wb-guinness-empty-msg">「ギネス公式数値で単独飛行」を実行すると、計算結果と公認記録の乖離・物理的要因（過大Gフォース・失速遷移）が表示されます。</p>
+            <div id="wb-guinness-result-content" style="display: none;">
+              <div class="inv-diag-box" style="margin-bottom: 10px;">
+                <div class="inv-diag-header">
+                  <span id="wb-g-res-badge" class="inv-badge">RESULT</span>
+                  <span id="wb-g-res-title" class="inv-diag-title">—</span>
+                </div>
+                <div id="wb-g-res-summary" class="inv-diag-desc">—</div>
+              </div>
+
+              <div class="metric-table" style="margin-bottom: 10px;">
+                <div class="metric-row"><span class="metric-k">公認値</span><span class="metric-v num" id="wb-g-res-target">—</span></div>
+                <div class="metric-row"><span class="metric-k">シミュレーション到達値</span><span class="metric-v num" id="wb-g-res-sim">—</span></div>
+                <div class="metric-row"><span class="metric-k">再現率 (比率)</span><span class="metric-v num" id="wb-g-res-ratio">—</span></div>
+                <div class="metric-row"><span class="metric-k">投擲初頭Gフォース</span><span class="metric-v num" id="wb-g-res-g">—</span></div>
+              </div>
+
+              <h4 class="wb-h" style="margin: 8px 0 4px;">物理的要因 &amp; 診断</h4>
+              <div id="wb-g-limitations-list" style="font-size: 11px; line-height: 1.4; display: flex; flex-direction: column; gap: 6px;"></div>
+            </div>
+          </div>
         </div>
       </div>
 

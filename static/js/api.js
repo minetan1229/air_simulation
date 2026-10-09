@@ -178,4 +178,6 @@ export const api = {
   recordPreset: (key) => get(`/records/presets/${encodeURIComponent(key)}`),
   recordApply: (payload) => post("/records/apply", payload),
   recordThrowTechniques: () => get("/records/throw_techniques"),
+  guinnessSimulate: (payload) => post("/guinness/simulate", payload),
+  guinnessVerification: (category) => get(`/guinness/verification${category ? `?category=${encodeURIComponent(category)}` : ""}`),
 };

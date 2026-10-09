@@ -1405,7 +1405,7 @@ input[type="range"]:focus-visible { outline: 2px solid var(--accent); outline-of
   .transport { grid-template-columns: auto minmax(0, 1fr) auto; }
   .tp-badge { display: none; }
   .tp-rate { display: none; }
-  .toprail-readouts .readout:nth-child(n+3) { display: none; }
+  .toprail-readouts .readout:nth-child(n+4) { display: none; }
   .wb-panes { height: 60vh; }
   .wb-pane { grid-template-columns: minmax(0, 1fr); }
 }
@@ -2378,4 +2378,194 @@ input[type="range"]:focus-visible { outline: 2px solid var(--accent); outline-of
 }
 .champ-table tr.champ-rank-worst td {
   color: #c5221f;
-}
+}
+
+/* 🚀 Quick Launch Dock & 3D Tuning Panel */
+.quick-launch-dock {
+  position: absolute;
+  bottom: 14px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 15;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  max-width: 90%;
+  pointer-events: auto;
+}
+
+.quick-launch-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: rgba(255, 255, 255, 0.94);
+  backdrop-filter: blur(12px);
+  padding: 8px 14px;
+  border-radius: 28px;
+  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.12), 0 1px 4px rgba(0, 0, 0, 0.06);
+  border: 1px solid rgba(218, 220, 224, 0.8);
+}
+
+.btn-main-throw {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--blue, #1a73e8);
+  color: #ffffff;
+  border: none;
+  border-radius: 20px;
+  padding: 8px 20px;
+  font-family: inherit;
+  cursor: pointer;
+  box-shadow: 0 2px 8px rgba(26, 115, 232, 0.35);
+  transition: all 0.18s ease;
+}
+.btn-main-throw:hover {
+  background: #1765cc;
+  box-shadow: 0 4px 12px rgba(26, 115, 232, 0.45);
+  transform: translateY(-1px);
+}
+.btn-main-throw:active {
+  transform: translateY(1px);
+  box-shadow: 0 1px 4px rgba(26, 115, 232, 0.25);
+}
+.btn-main-throw .throw-text-wrap {
+  display: flex;
+  flex-direction: column;
+  text-align: left;
+  line-height: 1.1;
+}
+.btn-main-throw .throw-title {
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+.btn-main-throw .throw-hint {
+  font-size: 9px;
+  opacity: 0.85;
+  font-weight: 500;
+  letter-spacing: 0.05em;
+}
+
+.btn-ensemble-throw {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: #f1f8e9;
+  color: #1e4620;
+  border: 1px solid #c8e6c9;
+  border-radius: 20px;
+  padding: 7px 16px;
+  font-family: inherit;
+  cursor: pointer;
+  transition: all 0.18s ease;
+}
+.btn-ensemble-throw:hover {
+  background: #e8f5e9;
+  border-color: #a5d6a7;
+  transform: translateY(-1px);
+}
+.btn-ensemble-throw .ensemble-text-wrap {
+  display: flex;
+  flex-direction: column;
+  text-align: left;
+  line-height: 1.1;
+}
+.btn-ensemble-throw .ensemble-title {
+  font-size: 12px;
+  font-weight: 700;
+  color: #188038;
+}
+.btn-ensemble-throw .ensemble-sub {
+  font-size: 9px;
+  color: #2e7d32;
+}
+
+.btn-dock-toggle {
+  background: #f1f3f4;
+  color: var(--ink, #202124);
+  border: 1px solid #dadce0;
+  border-radius: 18px;
+  padding: 7px 14px;
+  font-family: inherit;
+  font-size: 11.5px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+.btn-dock-toggle:hover {
+  background: #e8eaed;
+}
+
+.quick-tuning-panel {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(180px, 1fr));
+  gap: 12px;
+  background: rgba(255, 255, 255, 0.96);
+  backdrop-filter: blur(12px);
+  padding: 14px 18px;
+  border-radius: 16px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+  border: 1px solid rgba(218, 220, 224, 0.85);
+  width: 100%;
+  max-width: 780px;
+}
+.quick-tuning-panel[hidden] {
+  display: none !important;
+}
+
+.tuning-col {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.tuning-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.tuning-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--muted, #5f6368);
+}
+.tuning-val {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--ink, #202124);
+  font-family: var(--mono);
+}
+.tuning-slider {
+  width: 100%;
+  height: 4px;
+  border-radius: 2px;
+  accent-color: var(--blue, #1a73e8);
+  cursor: pointer;
+}
+.tuning-presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.tuning-chip {
+  background: #f1f3f4;
+  color: var(--ink, #3c4043);
+  border: 1px solid #dadce0;
+  border-radius: 12px;
+  padding: 2px 7px;
+  font-size: 9.5px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.12s ease;
+}
+.tuning-chip:hover {
+  background: #e8eaed;
+}
+.tuning-chip.active {
+  background: #e8f0fe;
+  color: #1a73e8;
+  border-color: #1a73e8;
+  font-weight: 600;
+}
+

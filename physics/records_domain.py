@@ -2003,9 +2003,11 @@ def simulate_preset(
     summary = flight_sim.evaluate_flight(
         as_dict(air), as_dict(env_cfg), as_dict(lch), duration_s=settings.duration_s
     )
-    metrics = flight_sim.FlightSimulator(
+    sim = flight_sim.FlightSimulator(
         aircraft=air, environment=env_cfg, launch=lch, settings=settings
-    ).simulate(settings.duration_s, record=True)
+    )
+    metrics = sim.simulate(settings.duration_s, record=True)
+    samples = [as_dict(s) for s in sim.history()]
     throw = flight_sim.resolve_throw(lch, air, env_cfg)
     measured = entry.achievement.value
     sim_key = RECORD_METRICS.get(entry.achievement.metric, {}).get("sim_key", "flight_time_s")
@@ -2025,6 +2027,11 @@ def simulate_preset(
         "calibrated": bool(calibrated),
         "throw": as_dict(throw),
         "metrics": metrics,
+        "samples": samples,
+        "total_frames": len(samples),
+        "aircraft": as_dict(air),
+        "launch": as_dict(lch),
+        "environment": as_dict(env_cfg),
         "optimizer_payload": summary,
         "achievement": entry.achievement.as_payload(),
         "comparison": {

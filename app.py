@@ -1512,6 +1512,46 @@ def get_throw_techniques():
     return jsonify({"throw_rules": rules, "competition_rules": comp_rules})
 
 
+@app.post("/api/v1/guinness/simulate")
+def guinness_simulate():
+    """Fly a Guinness world record preset in isolation without polluting user session."""
+    from physics import records_domain
+    payload = body()
+    key = payload.get("key")
+    if not key:
+        raise BadRequest("'key' is required")
+    # By default in isolated guinness system, use the authentic published values (raw, uncalibrated)
+    calibrated = bool(payload.get("calibrated", False))
+    duration_s = as_float(payload.get("duration_s", 60.0), "duration_s")
+
+    try:
+        result = records_domain.simulate_preset(
+            key,
+            duration_s=duration_s,
+            calibrated=calibrated,
+        )
+    except KeyError:
+        raise NotFound(f"Unknown record preset key: '{key}'")
+    except Exception as exc:
+        raise BadRequest(f"Guinness simulation error: {exc}")
+
+    return jsonify({"ok": True, **result})
+
+
+@app.get("/api/v1/guinness/verification")
+def guinness_verification():
+    """Get the verification matrix of all Guinness world records side by side."""
+    from physics import records_domain
+    category = request.args.get("category")
+    keys = None
+    if category:
+        presets = records_domain.list_presets(category=category)
+        keys = [p["key"] for p in presets]
+    report = records_domain.verification_report(keys=keys)
+    return jsonify(report)
+
+
+
 # ---------------------------------------------------------------------------
 # 9. UI entry point
 # ---------------------------------------------------------------------------
