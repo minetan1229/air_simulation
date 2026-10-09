@@ -17,6 +17,7 @@ import json
 import logging
 import os
 import struct
+import subprocess
 import threading
 import traceback
 from typing import Any, Callable, Dict, Optional, Tuple
@@ -387,6 +388,72 @@ def meta_health():
 def system_gpu():
     parallel = _domain("parallel_engine")
     return jsonify(parallel.get_gpu_info())
+
+
+@app.post("/api/v1/system/force-gpu-render")
+def force_gpu_render():
+    """Configure Windows DirectX UserGpuPreferences to force discrete high-performance GPU (RTX 4060)
+    for browsers, and optionally launch or re-launch browser with high-performance flags.
+    """
+    payload = request.get_json(silent=True) or {}
+    action = payload.get("action", "configure")  # "configure" | "launch_chrome" | "launch_edge"
+
+    registered = []
+    error_msg = None
+
+    try:
+        import winreg
+        key_path = r"Software\Microsoft\DirectX\UserGpuPreferences"
+        key = winreg.CreateKey(winreg.HKEY_CURRENT_USER, key_path)
+        browser_paths = [
+            r"C:\Program Files\Google\Chrome\Application\chrome.exe",
+            r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
+        ]
+        local_app = os.environ.get("LOCALAPPDATA", "")
+        if local_app:
+            browser_paths.extend([
+                os.path.join(local_app, r"Google\Chrome\Application\chrome.exe"),
+                os.path.join(local_app, r"Microsoft\Edge\Application\msedge.exe"),
+            ])
+
+        for bp in browser_paths:
+            if os.path.exists(bp):
+                winreg.SetValueEx(key, bp, 0, winreg.REG_SZ, "GpuPreference=2;AutoHDREnable=0;")
+                registered.append(bp)
+        winreg.CloseKey(key)
+    except Exception as ex:
+        error_msg = str(ex)
+
+    launched = False
+    if action in ("launch_chrome", "launch_edge"):
+        target_exe = (
+            r"C:\Program Files\Google\Chrome\Application\chrome.exe"
+            if action == "launch_chrome"
+            else r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe"
+        )
+        if os.path.exists(target_exe):
+            flags = [
+                target_exe,
+                "--force_high_performance_gpu",
+                "--gpu-preference=high-performance",
+                "--enable-gpu-rasterization",
+                "--ignore-gpu-blocklist",
+                "http://127.0.0.1:5000/",
+            ]
+            try:
+                subprocess.Popen(flags)
+                launched = True
+            except Exception as ex:
+                error_msg = str(ex)
+
+    return jsonify({
+        "status": "success" if not error_msg else "partial_error",
+        "registered_paths": registered,
+        "launched": launched,
+        "error": error_msg,
+        "gpu_preference": 2,
+        "preference_name": "High Performance (NVIDIA dGPU)",
+    })
 
 
 # ---------------------------------------------------------------------------

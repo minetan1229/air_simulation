@@ -248,6 +248,8 @@ class ConsoleApp {
       "gpu-warning-box",
       "btn-copy-gpu-cmd",
       "gpu-ps-command",
+      "btn-force-gpu-chrome",
+      "btn-force-gpu-edge",
       "top-ghost",
       "btn-top-launch",
       "btn-rail-launch",
@@ -721,6 +723,38 @@ class ConsoleApp {
       btnModalTest.addEventListener("click", () => {
         if (this.dom["gpu-modal"]) this.dom["gpu-modal"].hidden = true;
         this._runGpuEnsemble(100);
+      });
+    }
+
+    if (this.dom["btn-force-gpu-chrome"]) {
+      this.dom["btn-force-gpu-chrome"].addEventListener("click", async () => {
+        try {
+          this.notify("🚀 Chrome を RTX 4060 強制モードで起動リクエスト中...", "info");
+          const res = await api.forceGpuRender({ action: "launch_chrome" });
+          if (res.status === "success" || res.launched) {
+            this.notify("✅ Chrome (RTX 4060 強制フラグ付) を起動しました！新しいウィンドウでご確認ください", "ok");
+          } else {
+            this.notify("⚠️ 起動に失敗しました。launch_gpu_render.bat を実行してください", "warn");
+          }
+        } catch {
+          this.notify("起動エラー: プロジェクト直下の launch_gpu_render.bat を実行してください", "warn");
+        }
+      });
+    }
+
+    if (this.dom["btn-force-gpu-edge"]) {
+      this.dom["btn-force-gpu-edge"].addEventListener("click", async () => {
+        try {
+          this.notify("⚡ Edge を RTX 4060 強制モードで起動リクエスト中...", "info");
+          const res = await api.forceGpuRender({ action: "launch_edge" });
+          if (res.status === "success" || res.launched) {
+            this.notify("✅ Edge (RTX 4060 強制) を起動しました！", "ok");
+          } else {
+            this.notify("⚠️ 起動に失敗しました。launch_gpu_render.bat を実行してください", "warn");
+          }
+        } catch {
+          this.notify("起動エラー: プロジェクト直下の launch_gpu_render.bat を実行してください", "warn");
+        }
       });
     }
 

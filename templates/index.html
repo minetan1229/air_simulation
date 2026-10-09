@@ -62,10 +62,10 @@
     </div>
 
     <div class="toprail-actions">
-      <div class="header-eta" id="eta-widget">
-        <span class="eta-key">ETA</span>
+      <div class="header-eta" id="eta-widget" title="計算完了予想時間 (ETA)">
+        <span class="eta-key">完了予想</span>
         <span class="eta-val num" id="eta-clock">—</span>
-        <span class="eta-sub num" id="eta-left">idle</span>
+        <span class="eta-sub num" id="eta-left">待機中</span>
       </div>
       <button class="btn btn-primary btn-launch-top" id="btn-top-launch" type="button" title="現在の設定で飛行軌跡を一括シミュレーション計算して再生します (Enter)">🚀 シミュレーション発射</button>
       <button class="btn btn-gpu" id="btn-top-gpu-ensemble" type="button" title="NVIDIA RTX 4060 GPUで100機を同時に一括シミュレーション計算して全軌跡を描画します">⚡ GPU 100機同時飛行</button>
@@ -265,6 +265,20 @@
         </div>
       </div>
 
+      <!-- シミュレーションエラー・ステータス表示バナー -->
+      <div class="sim-error-banner" id="sim-error-banner" hidden>
+        <div class="sim-error-icon" id="sim-error-icon">⚠️</div>
+        <div class="sim-error-body">
+          <div class="sim-error-header">
+            <span class="sim-error-title" id="sim-error-title">シミュレーションエラー</span>
+            <span class="sim-error-badge" id="sim-error-badge">ERROR</span>
+          </div>
+          <div class="sim-error-message" id="sim-error-msg">エラー詳細がここに表示されます</div>
+          <div class="sim-error-hint" id="sim-error-hint" hidden></div>
+        </div>
+        <button class="sim-error-close" id="sim-error-close" type="button" title="エラー表示を閉じる">✕</button>
+      </div>
+
       <div class="vp-notice" id="vp-notice" hidden>
         <strong>3D ビューを初期化できませんでした</strong>
         <p id="vp-notice-msg"></p>
@@ -372,6 +386,11 @@
               <span class="num" id="inv-prog-pct">0%</span>
               <span class="muted" id="inv-status">待機中</span>
             </div>
+            <div class="prog-eta" id="inv-eta-row">
+              <span class="eta-row-label">計算完了予想:</span>
+              <span class="num eta-row-clock" id="inv-eta-clock">—</span>
+              <span class="eta-row-left" id="inv-eta-left">(待機中)</span>
+            </div>
           </div>
           <h4 class="wb-h" style="margin-top: 16px;">調整可能変数（固定変数は除外）<small>HAND-ADJUSTABLE</small></h4>
           <ul class="inv-var-list muted" style="font-size: 11px; padding-left: 16px; margin: 4px 0;">
@@ -457,6 +476,11 @@
             <div class="prog-meta">
               <span class="num" id="opt-count">0 / 0</span>
               <span class="num" id="opt-rate">—</span>
+            </div>
+            <div class="prog-eta" id="opt-eta-row">
+              <span class="eta-row-label">計算完了予想:</span>
+              <span class="num eta-row-clock" id="opt-eta-clock">—</span>
+              <span class="eta-row-left" id="opt-eta-left">(待機中)</span>
             </div>
           </div>
           <h4 class="wb-h">ジョブ<small>JOBS</small></h4>
@@ -618,28 +642,35 @@
         </div>
       </div>
 
-      <div class="gpu-action-banner" style="margin: 12px 0; text-align: center;">
-        <button class="btn btn-primary" id="btn-modal-test-gpu" type="button" style="width: 100%; padding: 10px; font-weight: 600;">
-          ⚡ RTX 4060 GPU 動作テスト (100機一括並列シミュレーション実行)
+      <div class="gpu-action-banner" style="margin: 12px 0; display: flex; flex-direction: column; gap: 8px;">
+        <button class="btn btn-primary" id="btn-force-gpu-chrome" type="button" style="width: 100%; padding: 10px; font-weight: 600; background: #1a73e8; color: #fff;">
+          🚀 Chrome を RTX 4060 強制モードで新しく開く
+        </button>
+        <button class="btn" id="btn-force-gpu-edge" type="button" style="width: 100%; padding: 8px; font-weight: 600;">
+          ⚡ Edge を RTX 4060 強制モードで開く (※現在EdgeはdGPUで即稼働可)
+        </button>
+        <button class="btn btn-sm" id="btn-modal-test-gpu" type="button" style="width: 100%; padding: 8px;">
+          ⚡ RTX 4060 物理演算テスト (100機一括並列シミュレーション)
         </button>
       </div>
 
       <div class="gpu-warning-box" id="gpu-warning-box">
-        <strong>⚠️ 3D描画 (RENDER) で Intel 内蔵GPUが使われている場合について:</strong>
-        <p>Windows ノートPCでは、バッテリー節約のため Web ブラウザ（Chrome / Edge 等）が自動的に内蔵GPU (Intel) に割り当てられる仕様になっています。<br>
-        10万粒子風流線や高精度シェーダーを <strong>NVIDIA GeForce RTX 4060</strong> で描画させるには、以下のいずれかの方法でブラウザを高パフォーマンスGPUに設定してください。</p>
+        <strong>⚠️ なぜ 3D描画 (RENDER) だけ Intel 内蔵GPUになるのか？</strong>
+        <p>Windows ノートPC (Optimus) では、バッテリー節約のためブラウザの WebGL 描画に自動で Intel 内蔵GPU が割り当てられます。<br>
+        さらに、<strong>Chrome がバックグラウンドで起動しっぱなしになっている場合、Windows の設定変更後も古い GPU プロセスが居座り続ける</strong>ため、Intel のままになってしまいます。</p>
+        <p style="margin-top: 6px; font-weight: 600; color: #1a73e8;">👉 上記の「RTX 4060 強制モードで開く」ボタンを押すか、プロジェクト内の <code>launch_gpu_render.bat</code> を実行すると、確実に RTX 4060 で描画されます。</p>
       </div>
 
       <div class="gpu-guide-accordion">
         <details open>
-          <summary><strong>🚀 最短方法: PowerShell コマンドで一発設定（再起動後反映）</strong></summary>
+          <summary><strong>🚀 最短解決: launch_gpu_render.bat または PowerShell コマンド</strong></summary>
           <div class="gpu-guide-body">
-            <p>PowerShell を管理者権限不要で開き、以下のコマンドを貼り付けて実行すると、Windows のグラフィック設定に Chrome / Edge の高パフォーマンス（RTX 4060）設定が即時登録されます。</p>
+            <p>プロジェクト直下の <code>launch_gpu_render.bat</code> をダブルクリックするか、PowerShell に以下を貼り付けて実行すると、古い常駐プロセスをリフレッシュして RTX 4060 強制フラグ付きで起動します。</p>
             <div class="code-box">
-              <pre id="gpu-ps-command">New-Item -Path "HKCU:\Software\Microsoft\DirectX\UserGpuPreferences" -Force | Out-Null; Set-ItemProperty -Path "HKCU:\Software\Microsoft\DirectX\UserGpuPreferences" -Name "C:\Program Files\Google\Chrome\Application\chrome.exe" -Value "GpuPreference=2;"; Set-ItemProperty -Path "HKCU:\Software\Microsoft\DirectX\UserGpuPreferences" -Name "C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe" -Value "GpuPreference=2;"</pre>
+              <pre id="gpu-ps-command">New-Item -Path "HKCU:\Software\Microsoft\DirectX\UserGpuPreferences" -Force | Out-Null; Set-ItemProperty -Path "HKCU:\Software\Microsoft\DirectX\UserGpuPreferences" -Name "C:\Program Files\Google\Chrome\Application\chrome.exe" -Value "GpuPreference=2;AutoHDREnable=0;"; Set-ItemProperty -Path "HKCU:\Software\Microsoft\DirectX\UserGpuPreferences" -Name "C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe" -Value "GpuPreference=2;AutoHDREnable=0;"</pre>
               <button class="btn btn-sm" id="btn-copy-gpu-cmd" type="button">📋 コマンドをコピー</button>
             </div>
-            <p class="muted">※実行後、ブラウザを完全に閉じて再起動すると RTX 4060 で WebGL が動作します。</p>
+            <p class="muted">※実行後、ブラウザのバックグラウンド常駐プロセスを終了して再起動すると RTX 4060 が即時適用されます。</p>
           </div>
         </details>
 

@@ -109,6 +109,7 @@ export const api = {
   schemas: () => get("/meta/schemas"),
   health: () => get("/meta/health"),
   gpuInfo: () => get("/system/gpu"),
+  forceGpuRender: (payload) => post("/system/force-gpu-render", payload || {}),
 
   /* configuration */
   snapshot: () => post("/environment/config", {}),

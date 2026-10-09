@@ -89,8 +89,31 @@ export class Viewport {
     this.followTarget = new THREE.Vector3();
     this._budget = 0.65;
 
+    // Explicitly request WebGL2 with high-performance power preference
+    let glContext = null;
+    try {
+      glContext =
+        canvas.getContext("webgl2", {
+          powerPreference: "high-performance",
+          antialias: true,
+          alpha: false,
+          preserveDrawingBuffer: true,
+          failIfMajorPerformanceCaveat: false,
+          desynchronized: true,
+        }) ||
+        canvas.getContext("webgl", {
+          powerPreference: "high-performance",
+          antialias: true,
+          alpha: false,
+          preserveDrawingBuffer: true,
+        });
+    } catch {
+      // Fall back to Three.js internal context creation
+    }
+
     this.renderer = new THREE.WebGLRenderer({
       canvas,
+      context: glContext || undefined,
       antialias: true,
       alpha: false,
       powerPreference: "high-performance",
@@ -158,6 +181,7 @@ export class Viewport {
               this.gpuInfo.isIntel = false;
               this.gpuInfo.shortName = "RTX 4060";
               this.gpuInfo.raw = `WebGPU: ${this.webgpuInfo.raw} (WebGL: ${this.gpuInfo.raw})`;
+              this.onStats({ fps: 60, elapsed: this.elapsed, particles: this.particles?.activeCount || 0, gpu: this.gpuInfo });
             }
           }).catch(() => {});
         }
