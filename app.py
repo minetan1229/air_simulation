@@ -23,7 +23,7 @@ import traceback
 from typing import Any, Callable, Dict, Optional, Tuple
 
 from flask import Flask, Response, jsonify, request
-from werkzeug.exceptions import BadRequest, HTTPException
+from werkzeug.exceptions import HTTPException
 from werkzeug.utils import secure_filename
 
 from physics.config_schema import (
@@ -101,6 +101,10 @@ class BadRequest(ValueError):
     """Raised by handlers for any client-side input problem."""
 
 
+class NotFound(KeyError):
+    """Raised when an entity or preset is not found."""
+
+
 # ---------------------------------------------------------------------------
 # Error handling
 # ---------------------------------------------------------------------------
@@ -111,6 +115,11 @@ def _error(message: str, status: int = 400) -> Tuple[Response, int]:
 @app.errorhandler(BadRequest)
 def _handle_bad_request(exc: BadRequest):
     return _error(exc, 400)
+
+
+@app.errorhandler(NotFound)
+def _handle_not_found(exc: NotFound):
+    return _error(str(exc), 404)
 
 
 @app.errorhandler(ServiceUnavailable)
@@ -780,7 +789,7 @@ def simulation_launch():
             SESSION.set_launch(build(LaunchConfig, payload["launch"]))
         if payload.get("simulation"):
             SESSION.set_settings(build(SimulationSettings, payload["simulation"]))
-        
+
         SESSION.simulator = None
         simulator = SESSION.simulator_instance()
         simulator.reset(launch=SESSION.launch)

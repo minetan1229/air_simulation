@@ -14,7 +14,7 @@ def test_default_gravity_modifier() -> None:
     """Test default values conform to STANDARD_GRAVITY."""
     modifier = GravityModifier()
     assert math.isclose(modifier.get_effective_gravity(), STANDARD_GRAVITY, rel_tol=1e-6)
-    
+
     vec = modifier.get_gravity_vector_ned()
     assert vec[0] == 0.0
     assert vec[1] == 0.0
@@ -43,7 +43,7 @@ def test_altitude_decay() -> None:
     modifier = GravityModifier(GravityConfig(altitude_decay=True))
     g_ground = modifier.get_effective_gravity(0.0)
     g_10km = modifier.get_effective_gravity(10000.0)
-    
+
     expected_ratio = (EARTH_RADIUS_M / (EARTH_RADIUS_M + 10000.0)) ** 2
     assert math.isclose(g_10km, g_ground * expected_ratio, rel_tol=1e-6)
     assert g_10km < g_ground
@@ -67,7 +67,7 @@ def test_apply_to_environment() -> None:
     """Test applying modified gravity to EnvironmentConfig dataclass."""
     env = EnvironmentConfig(gravity=STANDARD_GRAVITY)
     modifier = GravityModifier(GravityConfig(anti_gravity_factor=0.8))
-    
+
     updated_env = modifier.apply_to_environment(env)
     assert math.isclose(updated_env.gravity, STANDARD_GRAVITY * 0.2, rel_tol=1e-6)
     # Ensure other environment parameters remain intact
@@ -79,7 +79,7 @@ def test_environment_safety_and_module_isolation() -> None:
     """Test that environment inspection handles mock or standard antigravity gracefully."""
     class DummyAntigravity:
         geohash = "mock"
-    
+
     # Inject dummy module to verify _validate_environment does not crash
     sys.modules["antigravity"] = DummyAntigravity()
     try:

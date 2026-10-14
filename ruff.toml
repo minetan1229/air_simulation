@@ -1,0 +1,25 @@
+# Ruff configuration for 3D Paper Airplane CFD Simulator
+line-length = 120
+target-version = "py311"
+
+exclude = [
+    ".git",
+    "__pycache__",
+    ".pytest_cache",
+    "models",
+]
+
+[lint]
+select = [
+    "E",
+    "F",
+    "W",
+]
+ignore = [
+    "E501",  # line length
+    "E402",  # module import not at top (needed for sys.path configuration)
+    "E731",  # lambda assignment
+    "E741",  # single-letter variables (e.g. l for lift/length in aero formulas)
+    "F401",  # unused imports in __init__ or re-exports
+    "F841",  # unused variables in scientific formulas / unpacks
+]
