@@ -1475,6 +1475,7 @@ def apply_record_preset():
     apply_aircraft_only = bool(payload.get("aircraft_only", False))
     # calibrated defaults to True for full presets, but False when isolating a throw technique
     calibrated = bool(payload.get("calibrated", not apply_throw_only))
+    flight_mode = payload.get("flight_mode")
 
     with SESSION.lock:
         try:
@@ -1482,22 +1483,28 @@ def apply_record_preset():
         except KeyError:
             raise NotFound(f"Unknown preset key: '{key}'")
 
+        try:
+            new_launch = entry.launch_config(SESSION.launch, calibrated=calibrated, flight_mode=flight_mode)
+        except ValueError as exc:
+            raise BadRequest(str(exc))
         if not apply_throw_only:
             SESSION.set_aircraft(entry.aircraft_config(SESSION.aircraft))
         if not apply_aircraft_only:
-            SESSION.set_launch(entry.launch_config(SESSION.launch, calibrated=calibrated))
+            SESSION.set_launch(new_launch)
             SESSION.set_environment(entry.environment_config(SESSION.environment))
 
         SESSION.simulator = None
         state = SESSION.reset()
         snapshot = SESSION.current_snapshot()
 
-    chosen_throw = entry.calibration if calibrated and entry.calibration else entry.throw
+    chosen_throw, selection = entry.flight_selection(calibrated=calibrated, flight_mode=flight_mode)
     return jsonify({
         "ok": True,
         "key": key,
         "preset_name": entry.name,
         "calibrated": calibrated,
+        "flight_mode": SESSION.launch.flight_mode,
+        "flight_selection": selection,
         "throw": as_dict(chosen_throw),
         "state": state,
         **snapshot,
@@ -1522,6 +1529,7 @@ def guinness_simulate():
         raise BadRequest("'key' is required")
     # By default in isolated guinness system, use the authentic published values (raw, uncalibrated)
     calibrated = bool(payload.get("calibrated", False))
+    flight_mode = payload.get("flight_mode")
     duration_s = as_float(payload.get("duration_s", 60.0), "duration_s")
 
     try:
@@ -1529,6 +1537,7 @@ def guinness_simulate():
             key,
             duration_s=duration_s,
             calibrated=calibrated,
+            flight_mode=flight_mode,
         )
     except KeyError:
         raise NotFound(f"Unknown record preset key: '{key}'")

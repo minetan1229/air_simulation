@@ -1078,10 +1078,13 @@ def test_mesh_library_rebuilds_the_index_and_maps_to_aircraft(tmp_path):
     assert config.taper_ratio == pytest.approx(metrics.taper_ratio, rel=1e-15)
     assert config.aspect_ratio == pytest.approx(metrics.aspect_ratio, rel=1e-15)
     assert config.sheet_area_m2 > 0.0
-    principal = np.sort(np.linalg.eigvalsh(np.asarray(metrics.inertia_tensor).reshape(3, 3)))
-    assert config.roll_inertia_kgm2 == pytest.approx(principal[0], rel=1e-9)
-    assert config.pitch_inertia_kgm2 == pytest.approx(principal[1], rel=1e-9)
-    assert config.yaw_inertia_kgm2 == pytest.approx(principal[2], rel=1e-9)
+    tensor = np.asarray(metrics.inertia_tensor).reshape(3, 3)
+    assert config.roll_inertia_kgm2 == pytest.approx(tensor[0, 0], rel=1e-9)
+    assert config.pitch_inertia_kgm2 == pytest.approx(tensor[1, 1], rel=1e-9)
+    assert config.yaw_inertia_kgm2 == pytest.approx(tensor[2, 2], rel=1e-9)
+    assert config.inertia_xy_kgm2 == pytest.approx(tensor[0, 1], abs=1e-18)
+    assert config.inertia_xz_kgm2 == pytest.approx(tensor[0, 2], abs=1e-18)
+    assert config.inertia_yz_kgm2 == pytest.approx(tensor[1, 2], abs=1e-18)
     assert base.mass_kg == 0.007  # the original template is untouched
 
     default_config = revived.to_aircraft_config(metrics.model_id)

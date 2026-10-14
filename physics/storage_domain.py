@@ -6,7 +6,8 @@ Implements AGENTS.md 2.3 and 7.5 (persistence + export):
   doubled embedded quotes) and ``JSON`` round-trips of
   :class:`physics.config_schema.FlightLogSample`.  The CSV header is always
   :data:`physics.config_schema.FLIGHT_LOG_COLUMNS` in declaration order.
-* **Optimiser results** -- flattened to one CSV row per history entry with the
+* **Optimiser results** -codex approval
+- flattened to one CSV row per history entry with the
   header ``evaluation,score,<objectives...>,<design variables...>``.
 * **Configuration bundles** -- validated against the contract dataclasses
   (``AircraftConfig`` / ``EnvironmentConfig`` / ``LaunchConfig`` /
@@ -268,12 +269,15 @@ def parse_json(text: str) -> Dict[str, Any]:
 # --------------------------------------------------------------------------
 # Flight log
 # --------------------------------------------------------------------------
-#: ``FlightLogSample`` columns whose value is a boolean (everything else is a
-#: float).  Resolved from the dataclass itself so it can never drift.
+#: Resolve column types from defaults, including legacy metadata defaults.
 _BOOL_COLUMNS = frozenset(
     name
     for name, spec in FlightLogSample.__dataclass_fields__.items()
     if isinstance(spec.default, bool)
+)
+_STRING_COLUMNS = frozenset(
+    name for name, spec in FlightLogSample.__dataclass_fields__.items()
+    if isinstance(spec.default, str)
 )
 
 
@@ -322,6 +326,9 @@ def sample_from_row(row: Mapping[str, Any], index: int = -1) -> FlightLogSample:
     for column in FLIGHT_LOG_COLUMNS:
         default = FlightLogSample.__dataclass_fields__[column].default
         raw = row.get(column, "")
+        if column in _STRING_COLUMNS:
+            values[column] = default if raw is None or raw == "" else str(raw)
+            continue
         if column in _BOOL_COLUMNS:
             values[column] = raw if isinstance(raw, bool) else bool(_decode_value(str(raw))) if str(raw) != "" else default
             continue

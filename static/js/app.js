@@ -821,9 +821,15 @@ class ConsoleApp {
   }
 
   _initQuickLaunchBar() {
-    // 1. Throw buttons
+    // 1. Throw & Playback buttons
     if (this.dom["quick-btn-throw"]) {
       this.dom["quick-btn-throw"].addEventListener("click", () => this._launchFlight());
+    }
+    if (this.dom["quick-btn-play"]) {
+      this.dom["quick-btn-play"].addEventListener("click", () => this._togglePlay());
+    }
+    if (this.dom["quick-btn-reset"]) {
+      this.dom["quick-btn-reset"].addEventListener("click", () => this._guard(() => this._resetFlight(true)));
     }
     if (this.dom["quick-btn-ensemble"]) {
       this.dom["quick-btn-ensemble"].addEventListener("click", () => this._runGpuEnsemble(100));
@@ -835,7 +841,7 @@ class ConsoleApp {
     if (toggleBtn && panel) {
       panel.setAttribute("hidden", "");
       panel.style.display = "none";
-      toggleBtn.innerHTML = "⚙️ 投げ方調整";
+      toggleBtn.innerHTML = '<img src="https://api.iconify.design/material-symbols/tune.svg?color=%235f6368" class="ui-icon" alt=""> 投げ方調整';
 
       toggleBtn.addEventListener("click", () => {
         const isHidden = panel.style.display === "none" || panel.hasAttribute("hidden");
@@ -846,7 +852,7 @@ class ConsoleApp {
         } else {
           panel.setAttribute("hidden", "");
           panel.style.display = "none";
-          toggleBtn.innerHTML = "⚙️ 投げ方調整";
+          toggleBtn.innerHTML = '<img src="https://api.iconify.design/material-symbols/tune.svg?color=%235f6368" class="ui-icon" alt=""> 投げ方調整';
         }
       });
     }
@@ -1088,6 +1094,9 @@ class ConsoleApp {
   _bindHeader() {
     if (this.dom["btn-top-launch"]) {
       this.dom["btn-top-launch"].addEventListener("click", () => this._launchFlight());
+    }
+    if (this.dom["btn-top-play"]) {
+      this.dom["btn-top-play"].addEventListener("click", () => this._togglePlay());
     }
     if (this.dom["btn-rail-launch"]) {
       this.dom["btn-rail-launch"].addEventListener("click", () => this._launchFlight());
@@ -1697,7 +1706,8 @@ class ConsoleApp {
           environment: this.store.data.environment,
           launch: this.store.data.launch,
           simulation: this.store.data.simulation,
-          duration_s: 25.0,
+          duration_s: Math.max(Number(this.store.data.simulation?.duration_s) || 25,
+            this.store.data.launch?.flight_mode === "full_flight" ? 60 : 25),
         });
 
         const elapsedSec = ((performance.now() - tStart) / 1000).toFixed(2);
@@ -1715,6 +1725,9 @@ class ConsoleApp {
         }
 
         const metrics = result.metrics || {};
+        if (this.viewport && this.store.data.launch?.flight_mode !== "legacy") {
+          this.viewport.frameTrajectory(this.transport.history);
+        }
         const dist = metrics.horizontal_range_m || metrics.distance_m || 0;
         const time = metrics.flight_time_s || 0;
         const speed = Number((this.store.data.launch && this.store.data.launch.launch_speed) || 10).toFixed(1);
@@ -1750,6 +1763,7 @@ class ConsoleApp {
       }
       if (!this.transport.playing && this.transport.playIndex >= (this.transport.history.length - 1)) {
         this.transport.seek(0);
+        this.viewport?.frameTrajectory(this.transport.history);
       }
       if (!this.transport.playing && this.viewport) {
         this.viewport.setLaunchVectorVisible(false);
@@ -1824,7 +1838,8 @@ class ConsoleApp {
     this.recorder.push(frame);
     this.dom["rec-count"].textContent = String(this.recorder.length);
     if (this.viewport && !this.tunnelMode) {
-      this.viewport.setPose(frame.position_m, frame.quaternion);
+      if (frame.position_m) this.viewport.setPose(frame.position_m, frame.quaternion);
+      else this.viewport.setPoseFromSample(frame);
       this.viewport.appendTrack(frame);
     }
     this._renderFrame(frame);
@@ -1922,37 +1937,57 @@ class ConsoleApp {
 
   _onReplay(sample) {
     if (!sample) return;
-    if (this.viewport) this.viewport.setPoseFromSample(sample);
+    if (this.viewport) {
+      if (Number(sample.time_s) < (this._lastReplayTime ?? -1)) {
+        this.viewport.clearTrack();
+        for (const previous of this.transport.history.slice(0, this.transport.playIndex + 1)) {
+          this.viewport.appendTrack(previous);
+        }
+      }
+      this.viewport.setPoseFromSample(sample);
+      this._lastReplayTime = Number(sample.time_s);
+    }
     this._renderFrame({
       ...sample,
+      position_m: [sample.x_m, sample.y_m, sample.z_m],
       x_m: sample.x_m,
       y_m: sample.y_m,
       frames: this.transport.frames,
       backend: "numpy",
       status: "replay",
     });
-    this._updatePill("再生", "flying");
+    const metrics = this.transport.metrics || {};
+    const glideStart = metrics.glide_entry_time_s;
+    const label = sample.landed ? "着地" : sample.crashed ? "墜落" : sample.stalled ? "失速" :
+      Number(sample.vz_mps) < 0 ? "上昇" :
+      glideStart != null && Number(sample.time_s) >= glideStart ? "下降・滑空" : "頂点後・遷移";
+    this._updatePill(label, sample.stalled ? "stall" : "flying");
   }
 
   _onMetrics(metrics) {
     this.dom["tp-flight"].textContent = fmt(metrics.flight_time_s, 2);
     this.dom["tp-dist"].textContent = fmt(metrics.distance_m, 2);
+    this.dom["tp-flight"].title = `頂点後 ${fmt(metrics.post_apogee_time_s || 0, 2)}秒 / 最長安定滑空 ${fmt(metrics.stable_glide_duration_s || 0, 2)}秒`;
   }
 
   _onEnded(frame) {
-    const position = frame.position_m || [0, 0, 0];
+    const position = frame.position_m || [frame.x_m || 0, frame.y_m || 0, frame.z_m || 0];
     const dist = Math.hypot(position[0], position[1]);
     const time = Number(frame.time_s) || 0;
 
-    if (frame.diverged) {
+    const metrics = this.transport.metrics || {};
+    if (frame.diverged || metrics.diverged || metrics.status === "diverged") {
       this._updatePill("発散", "error");
       this.notify("数値計算が発散しました。初速や迎角の設定をご確認ください。", "warn");
-    } else if (frame.crashed) {
+    } else if (frame.crashed || metrics.crashed) {
+      this._updatePill("墜落", "crash");
+      this.notify(`衝突終了 — 飛距離: ${dist.toFixed(2)}m · 飛行時間: ${time.toFixed(2)}s`, "warn");
+    } else if (frame.landed || metrics.landed || metrics.status === "landed") {
       this._updatePill("着地", "flying");
       this.notify(`着地完了 — 飛距離: ${dist.toFixed(2)}m · 滞空時間: ${time.toFixed(2)}s`, "ok");
     } else {
-      this._updatePill("着地", "flying");
-      this.notify(`着地完了 — 飛距離: ${dist.toFixed(2)}m · 滞空時間: ${time.toFixed(2)}s`, "ok");
+      this._updatePill("計算区間終了", "idle");
+      this.notify(`計算時間 ${time.toFixed(2)}s に到達しました。着地は未確認です。`, "info");
     }
 
     // 飛行終了時に到達距離と時間をゴースト記録（トップレール）に保存・表示
@@ -1976,15 +2011,16 @@ class ConsoleApp {
     const sel = this.dom["record-preset-select"];
     if (!sel) return;
 
-    this.recordModeCalibrated = true;
+    this.recordFlightMode = "full_flight";
+    this.recordModeCalibrated = false;
 
     const btnCal = document.getElementById("btn-mode-calibrated");
     const btnRaw = document.getElementById("btn-mode-raw");
 
     if (btnCal && btnRaw) {
       btnCal.addEventListener("click", async () => {
-        if (this.recordModeCalibrated) return;
-        this.recordModeCalibrated = true;
+        if (this.recordFlightMode === "full_flight") return;
+        this.recordFlightMode = "full_flight";
         btnCal.classList.add("active");
         btnRaw.classList.remove("active");
         if (this.selectedRecordPreset) {
@@ -1994,8 +2030,8 @@ class ConsoleApp {
       });
 
       btnRaw.addEventListener("click", async () => {
-        if (!this.recordModeCalibrated) return;
-        this.recordModeCalibrated = false;
+        if (this.recordFlightMode === "apex_glide") return;
+        this.recordFlightMode = "apex_glide";
         btnRaw.classList.add("active");
         btnCal.classList.remove("active");
         if (this.selectedRecordPreset) {
@@ -2015,7 +2051,7 @@ class ConsoleApp {
         const opt = document.createElement("option");
         opt.value = p.key;
         const throwData = p.throw || {};
-        const cat = p.category === "time_aloft" ? "滞空" : "飛距離";
+        const cat = p.category === "indoor_duration" ? "滞空" : "飛距離";
         opt.textContent = `${cat}: ${p.name} (${throwData.release_speed_mps || 0}m/s, ${throwData.launch_angle_deg || 0}°)`;
         sel.appendChild(opt);
       }
@@ -2056,19 +2092,20 @@ class ConsoleApp {
     const studioSel = document.getElementById("wb-guinness-select");
     if (!studioSel) return;
 
-    this.studioGuinnessCalibrated = false; // Dedicated studio defaults to pure authentic raw data
+    this.studioFlightMode = "full_flight";
+    this.studioGuinnessCalibrated = false;
     const btnRaw = document.getElementById("wb-guinness-btn-raw");
     const btnCal = document.getElementById("wb-guinness-btn-cal");
 
     if (btnRaw && btnCal) {
       btnRaw.addEventListener("click", () => {
-        this.studioGuinnessCalibrated = false;
+        this.studioFlightMode = "full_flight";
         btnRaw.classList.add("active");
         btnCal.classList.remove("active");
         this._updateGuinnessStudioSpecs();
       });
       btnCal.addEventListener("click", () => {
-        this.studioGuinnessCalibrated = true;
+        this.studioFlightMode = "apex_glide";
         btnCal.classList.add("active");
         btnRaw.classList.remove("active");
         this._updateGuinnessStudioSpecs();
@@ -2121,9 +2158,16 @@ class ConsoleApp {
   _updateGuinnessStudioSpecs() {
     const p = this.studioGuinnessPreset;
     if (!p) return;
+    if (!p.flight_modes?.[this.studioFlightMode]) this.studioFlightMode = "full_flight";
+    const apexButton = document.getElementById("wb-guinness-btn-cal");
+    if (apexButton) {
+      apexButton.disabled = !p.flight_modes?.apex_glide;
+      apexButton.classList.toggle("active", this.studioFlightMode === "apex_glide");
+    }
+    document.getElementById("wb-guinness-btn-raw")?.classList.toggle("active", this.studioFlightMode === "full_flight");
 
     const ach = p.achievement || {};
-    const throwInfo = (this.studioGuinnessCalibrated && p.calibration) ? p.calibration : (p.throw || {});
+    const throwInfo = p.flight_modes?.[this.studioFlightMode] || p.throw || {};
     const geom = p.derived_geometry || {};
     const air = p.aircraft || {};
 
@@ -2161,7 +2205,7 @@ class ConsoleApp {
 
     await this._guard(async () => {
       this.startEtaCountdown({
-        title: "ギネス公式数値で6DoF軌道計算中...",
+        title: "記録機体の6DoF軌道計算中...",
         clock: "計算中...",
         estimatedSec: 0.8,
       });
@@ -2169,6 +2213,7 @@ class ConsoleApp {
       const res = await api.guinnessSimulate({
         key: p.key,
         calibrated: Boolean(this.studioGuinnessCalibrated),
+        flight_mode: this.studioFlightMode,
         duration_s: 60.0,
       });
 
@@ -2200,18 +2245,12 @@ class ConsoleApp {
       if (gEl) gEl.textContent = `${(res.pull_factor_g || 0).toFixed(1)} G`;
 
       const ratioVal = comp.ratio || 0;
-      if (ratioVal >= 0.8) {
-        if (badge) { badge.textContent = "VERIFIED"; badge.className = "inv-badge pass"; }
-        if (title) title.textContent = "公認記録再現に成功";
-      } else {
-        if (badge) { badge.textContent = "PHYSICS GAP"; badge.className = "inv-badge warn"; }
-        if (title) title.textContent = "剛体モデルと実機の物理的乖離を検出";
-      }
+      if (badge) { badge.textContent = "MODEL RESULT"; badge.className = "inv-badge warn"; }
+      if (title) title.textContent = this.studioFlightMode === "apex_glide" ? "頂点からの滑空計算結果" : "手元からの全飛行計算結果";
 
       if (summary) {
-        summary.textContent = this.studioGuinnessCalibrated
-          ? `校正済み投擲パラメータにより、公認記録（${comp.measured_value}${unit}）に対して ${(ratioVal * 100).toFixed(1)}% の再現率を達成しました。`
-          : `公認の生初速（時速約100km / Gフォース ${(res.pull_factor_g || 0).toFixed(1)}G）で剛体シミュレーションを実行しました。`;
+        const modeLabel = this.studioFlightMode === "apex_glide" ? "頂点滑空のみ（上昇時間を含みません）" : "フルフライト（手元から着地まで）";
+        summary.textContent = `${modeLabel}。記録値に対する計算値の比は ${(ratioVal * 100).toFixed(1)}%。機体・投擲条件には再構成値を含み、実機性能の検証は未完了です。`;
       }
 
       if (list) {
@@ -2239,12 +2278,13 @@ class ConsoleApp {
         this.transport.frames = res.samples.length;
         this.transport.playIndex = 0;
         this.transport.seek(0);
+        this.viewport?.frameTrajectory(res.samples);
         this.transport.emit("metrics", res.metrics);
         this.transport.emit("state", this.transport.state);
         this.transport.play();
       }
 
-      this.notify(`ギネス公式数値での飛行計算が完了しました (${(res.metrics.flight_time_s || 0).toFixed(2)}s, ${(res.metrics.distance_m || 0).toFixed(2)}m)`, "ok");
+      this.notify(`記録機体の飛行計算が完了しました (${(res.metrics.flight_time_s || 0).toFixed(2)}s, ${(res.metrics.distance_m || 0).toFixed(2)}m)`, "ok");
     });
   }
 
@@ -2265,15 +2305,22 @@ class ConsoleApp {
   _updateRecordSpecsDisplay() {
     const p = this.selectedRecordPreset;
     if (!p) return;
-    const throwInfo = (this.recordModeCalibrated && p.calibration) ? p.calibration : (p.throw || {});
+    if (!p.flight_modes?.[this.recordFlightMode]) this.recordFlightMode = "full_flight";
+    const apexButton = document.getElementById("btn-mode-raw");
+    if (apexButton) {
+      apexButton.disabled = !p.flight_modes?.apex_glide;
+      apexButton.classList.toggle("active", this.recordFlightMode === "apex_glide");
+    }
+    document.getElementById("btn-mode-calibrated")?.classList.toggle("active", this.recordFlightMode === "full_flight");
+    const throwInfo = p.flight_modes?.[this.recordFlightMode] || p.throw || {};
 
     this.dom["rec-speed"].textContent = `${throwInfo.release_speed_mps || 0} m/s`;
     this.dom["rec-angle"].textContent = `${throwInfo.launch_angle_deg || 0}°`;
     this.dom["rec-height"].textContent = `${throwInfo.release_height_m || 1.8} m`;
     this.dom["rec-style"].textContent = throwInfo.throw_style || "—";
 
-    if (this.recordModeCalibrated && p.calibration_note) {
-      this.dom["record-technique"].textContent = `${p.calibration_note} (校正済)`;
+    if (this.recordFlightMode === "apex_glide" && p.calibration_note) {
+      this.dom["record-technique"].textContent = `${p.calibration_note}（上昇を含まないモデル条件）`;
     } else {
       const rawThrow = p.throw || {};
       this.dom["record-technique"].textContent = rawThrow.technique_ja || rawThrow.technique || "公認投擲値";
@@ -2297,8 +2344,8 @@ class ConsoleApp {
 
       const achievement = p.achievement || {};
 
-      this.dom["record-badge"].textContent = p.category === "time_aloft" ? "滞空世界記録" : "飛距離世界記録";
-      this.dom["record-value"].textContent = achievement.value_display || (p.category === "time_aloft" ? `${achievement.duration_s || 0} s` : `${achievement.distance_m || 0} m`);
+      this.dom["record-badge"].textContent = p.category === "indoor_duration" ? "滞空世界記録" : "飛距離世界記録";
+      this.dom["record-value"].textContent = achievement.value_display || `${achievement.value || 0} ${achievement.unit || ""}`;
       this.dom["record-name"].textContent = p.name_ja || p.name;
       this.dom["record-holder"].textContent = `${p.holder || ""} (${p.year || achievement.year || ""}) · ${achievement.venue || ""}`;
       this.dom["record-notes"].textContent = p.description_ja || p.description || p.notes_ja || p.notes || "世界記録の機体と初期パラメータです。";
@@ -2325,7 +2372,7 @@ class ConsoleApp {
       }
 
       const calibrated = Boolean(this.recordModeCalibrated !== false);
-      const res = await api.recordApply({ key, throw_only: throwOnly, calibrated });
+      const res = await api.recordApply({ key, throw_only: throwOnly, calibrated, flight_mode: this.recordFlightMode });
       if (!res.ok) throw new Error(res.message || "プリセットの適用に失敗しました");
 
       this.store.adopt(res);
@@ -2334,7 +2381,7 @@ class ConsoleApp {
       await this.refreshAir();
       await this.refreshPolar();
 
-      const modeStr = calibrated ? "【記録再現モード】" : "【生公認値モード】";
+      const modeStr = this.recordFlightMode === "apex_glide" ? "【頂点滑空のみ】" : "【フルフライト】";
       this.notify(
         throwOnly
           ? `${modeStr} 投げ方を適用しました: ${res.throw.technique || key}`
@@ -2348,23 +2395,61 @@ class ConsoleApp {
 
   _updateTransportUi(state) {
     const isReadyToLaunch = this.flightDirty || !this.transport.history || !this.transport.history.length;
+    const isPlaying = Boolean(state.playing);
+
+    // 1. Bottom Transport Play Button
     const play = this.dom["tp-play"];
     if (play) {
-      play.dataset.playing = state.playing ? "1" : "0";
+      play.dataset.playing = isPlaying ? "1" : "0";
       const playImg = document.getElementById("tp-play-img");
       if (playImg) {
-        if (state.playing) {
-          playImg.src = "https://api.iconify.design/material-symbols/pause.svg?color=%231a73e8";
-        } else if (isReadyToLaunch) {
-          playImg.src = "https://api.iconify.design/material-symbols/rocket-launch.svg?color=%231a73e8";
+        if (isPlaying) {
+          playImg.innerHTML = '<path d="M6 19h4V5H6zm8-14v14h4V5z"/>';
         } else {
-          playImg.src = "https://api.iconify.design/material-symbols/play-arrow.svg?color=%231a73e8";
+          playImg.innerHTML = '<path d="M8 5v14l11-7z"/>';
         }
       }
       if (this.dom["tp-play-label"]) {
-        this.dom["tp-play-label"].textContent = state.playing ? "一時停止" : (isReadyToLaunch ? "投げる" : "再生");
+        this.dom["tp-play-label"].textContent = isPlaying ? "一時停止" : "再生";
       }
     }
+
+    // 2. Toprail Play Button
+    const topPlay = this.dom["btn-top-play"];
+    if (topPlay) {
+      topPlay.dataset.playing = isPlaying ? "1" : "0";
+      const topPlayIcon = document.getElementById("top-play-icon");
+      if (topPlayIcon) {
+        if (isPlaying) {
+          topPlayIcon.innerHTML = '<path d="M6 19h4V5H6zm8-14v14h4V5z"/>';
+        } else {
+          topPlayIcon.innerHTML = '<path d="M8 5v14l11-7z"/>';
+        }
+      }
+      const topPlayLabel = document.getElementById("top-play-label");
+      if (topPlayLabel) {
+        topPlayLabel.textContent = isPlaying ? "一時停止" : "再生";
+      }
+    }
+
+    // 3. Quick Launch Dock Play Button (in 3D viewport)
+    const quickPlay = this.dom["quick-btn-play"];
+    if (quickPlay) {
+      quickPlay.dataset.playing = isPlaying ? "1" : "0";
+      const quickPlayIcon = document.getElementById("quick-play-icon");
+      if (quickPlayIcon) {
+        if (isPlaying) {
+          quickPlayIcon.innerHTML = '<path d="M6 19h4V5H6zm8-14v14h4V5z"/>';
+        } else {
+          quickPlayIcon.innerHTML = '<path d="M8 5v14l11-7z"/>';
+        }
+      }
+      const quickPlayTitle = document.getElementById("quick-play-title");
+      if (quickPlayTitle) {
+        quickPlayTitle.textContent = isPlaying ? "一時停止" : "再生";
+      }
+    }
+
     for (const button of document.querySelectorAll(".rate-btn")) {
       button.setAttribute("aria-pressed", Number(button.dataset.rate) === state.rate ? "true" : "false");
     }

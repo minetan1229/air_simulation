@@ -523,6 +523,7 @@ def evaluate_flight_surrogate(
         "status": status,
         # Extra diagnostics (never used as objective inputs) -----------------
         "surrogate": True,
+        **_approximate_model_metadata("analytical_glide_surrogate"),
         "airspeed_mps": float(airspeed),
         "stall_speed_mps": float(v_stall),
         "load_factor": float(load_factor),
@@ -583,7 +584,9 @@ def evaluate_case(case: Dict[str, Any]) -> Dict[str, Any]:
         try:
             result = module.evaluate_flight(aircraft, environment, launch, duration, dt_max)
             if isinstance(result, dict):
-                return result
+                return {**result, "model": "rigid_body_6dof", "approximate": False,
+                        "physics_verification_eligible": not bool(result.get("status") in ("failed", "diverged")),
+                        "limitations": ["Aerodynamic and material coefficients require experimental calibration."]}
         except Exception as exc:
             return {
                 "status": "failed",
@@ -686,6 +689,21 @@ def parallel_evaluate(
 # --------------------------------------------------------------------------
 # GPU ensemble batch simulation (CuPy with NumPy fallback)
 # --------------------------------------------------------------------------
+def _approximate_model_metadata(model: str) -> Dict[str, Any]:
+    """Identify reduced-order outputs separately from the repaired 6-DoF model."""
+    return {
+        "model": model,
+        "approximate": True,
+        "physics_verification_eligible": False,
+        "limitations": [
+            "No coupled 6-DoF rigid-body attitude integration or full inertia tensor.",
+            "Does not implement the repaired linked trailing-edge and relative-flow dynamics.",
+            "Cannot verify launch-to-apex recovery or stable glide performance.",
+            "Reduced stress and atmosphere models are not P1 physics verification results.",
+        ],
+    }
+
+
 def gpu_ensemble_simulation(
     aircraft: Optional[Any] = None,
     environment: Optional[Any] = None,
@@ -1098,6 +1116,7 @@ def gpu_ensemble_simulation(
     return {
         "backend": backend,
         "backend_display": backend_display,
+        **_approximate_model_metadata("translational_ensemble"),
         "device_name": device_name,
         "gpu_available": bool(backend == "cupy"),
         "trajectories_count": N,
@@ -1467,6 +1486,7 @@ def gpu_batch_evaluate_cases(
             "status": status_str,
             "backend": backend,
             "device_name": device_name,
+            **_approximate_model_metadata("translational_ensemble"),
         }
         results.append(res)
 

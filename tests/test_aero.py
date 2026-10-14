@@ -65,6 +65,67 @@ from physics.config_schema import (
 TEST_RE: float = 1.0e4
 
 
+def test_local_atmosphere_controls_pressure_and_reynolds(cfg, env):
+    result = evaluate_aero(cfg, env, 12.0, 4.0, density_kgm3=0.9,
+                           kinematic_viscosity_m2s=2.0e-5)
+    chord = derived_properties(cfg)["ref_length_m"]
+    assert result.dynamic_pressure_pa == pytest.approx(0.5 * 0.9 * 12.0 ** 2, rel=1e-12)
+    assert result.reynolds == pytest.approx(12.0 * chord / 2.0e-5, rel=1e-12)
+    baseline = evaluate_aero(cfg, env, 12.0, 4.0, density_kgm3=1.8,
+                             kinematic_viscosity_m2s=2.0e-5)
+    assert baseline.lift_n == pytest.approx(2.0 * result.lift_n, rel=1e-12)
+    assert baseline.drag_n == pytest.approx(2.0 * result.drag_n, rel=1e-12)
+
+
+@pytest.mark.parametrize("value", [0.0, -1.0, float("nan"), float("inf")])
+@pytest.mark.parametrize("parameter", ["density_kgm3", "kinematic_viscosity_m2s"])
+def test_invalid_local_atmosphere_is_rejected(cfg, env, parameter, value):
+    with pytest.raises(ValueError, match=parameter):
+        evaluate_aero(cfg, env, 12.0, 4.0, **{parameter: value})
+
+
+@pytest.mark.parametrize("alpha", [-170.0, -120.0, -90.0, 90.0, 120.0, 170.0])
+def test_separated_pressure_drag_uses_projected_area(cfg, env, alpha):
+    # Fully separated plate closure is empirical; this checks its geometric
+    # limit, not agreement with a particular real paper airplane.
+    pressure_cd = aero_domain.separated_pressure_drag_coefficient(alpha, cfg)
+    assert pressure_cd == pytest.approx(2.0 * math.sin(math.radians(alpha)) ** 2, rel=1e-12)
+    result = evaluate_aero(cfg, env, 6.0, alpha)
+    assert result.cd >= pressure_cd
+    assert result.drag_n >= 0.0
+    assert result.stalled and result.stall_margin < 0.0
+
+
+def test_pressure_drag_transition_is_continuous_and_preserves_attached_polar(cfg):
+    for threshold in (cfg.stall_alpha_deg, -max(cfg.stall_alpha_deg + 15.0, 30.0)):
+        values = [aero_domain.separated_pressure_drag_coefficient(threshold + offset, cfg)
+                  for offset in (-1e-5, 0.0, 1e-5)]
+        assert max(values) < 1e-10
+    assert aero_domain.separated_pressure_drag_coefficient(4.0, cfg) == 0.0
+    assert aero_domain.separated_pressure_drag_coefficient(180.0, cfg) == pytest.approx(0.0, abs=1e-15)
+
+
+def test_negative_stall_flag_and_margin_use_same_threshold(cfg, env):
+    threshold = max(cfg.stall_alpha_deg + 15.0, 30.0)
+    boundary = evaluate_aero(cfg, env, 6.0, -threshold)
+    beyond = evaluate_aero(cfg, env, 6.0, -threshold - 1.0)
+    assert boundary.stall_margin == pytest.approx(0.0, abs=1e-12)
+    assert not boundary.stalled
+    assert beyond.stalled
+    assert beyond.stall_margin == pytest.approx(-1.0 / threshold, rel=1e-12)
+
+
+def test_pitch_damping_opposes_rotation_with_standard_rate_normalization(cfg, env):
+    speed = 9.0
+    chord = derived_properties(cfg)["ref_length_m"]
+    zero = evaluate_aero(cfg, env, speed, 0.0)
+    for pitch_rate in (-1.0, 1.0):
+        rotating = evaluate_aero(cfg, env, speed, 0.0, angular_rate=(0.0, pitch_rate, 0.0))
+        expected = (cfg.cm_q + cfg.cm_pitch_rate) * pitch_rate * chord / (2.0 * speed)
+        assert rotating.cm - zero.cm == pytest.approx(expected, rel=1e-12)
+        assert (rotating.pitching_moment_nm - zero.pitching_moment_nm) * pitch_rate < 0.0
+
+
 def _analytic_config() -> AircraftConfig:
     """Airframe with an exactly known lift slope and an analytic stall peak.
 
@@ -558,7 +619,7 @@ def test_evaluate_aero_forces_match_their_definitions(cfg: AircraftConfig, env: 
     expected_cm = (
         cfg.cm0
         + cfg.cm_alpha * deg2rad(alpha)
-        + 0.5 * cfg.cm_q * q_hat
+        + cfg.cm_q * q_hat
         + elevon_effects(cfg.elevon_deg, cfg)["dcm"]
         + cfg.cm_roll_rate * p_hat
         + cfg.cm_pitch_rate * q_hat

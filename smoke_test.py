@@ -839,7 +839,7 @@ def main() -> int:
 
     print("=" * 78)
     print("  3D PAPER AIRPLANE SIMULATOR - END-TO-END SMOKE TEST")
-    print(f"  backend: numpy fallback (no CUDA device detected by the test harness)")
+    print("  backend: reported by each stage (CPU/CUDA capabilities vary by domain)")
     print("=" * 78)
 
     started = time.perf_counter()

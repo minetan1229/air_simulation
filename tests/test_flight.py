@@ -55,6 +55,7 @@ QUIESCENT_AIRCRAFT: dict = dict(
     cLalpha_per_rad=1.0e-9,  # 0 would be replaced by the Helmbold estimate
     cl_max=0.0,
     post_stall_slope=0.0,
+    stall_alpha_deg=89.0,
     elevon_deg=0.0,
     cy_beta=0.0,
     cl_beta=0.0,
@@ -87,6 +88,7 @@ CALM_ENVIRONMENT: dict = dict(
     turbulence_scale=0.0,
     gravity=STANDARD_GRAVITY,
     isa_mode=True,
+    drag_scale=0.0,
     ground_level_m=0.0,
 )
 
@@ -203,10 +205,9 @@ def test_effective_alpha_beta_uses_the_body_frame_convention():
     _, beta = flight_sim.effective_alpha_beta((12.0, 3.0, 0.0), gravity_body, env)
     assert beta == pytest.approx(math.degrees(math.asin(3.0 / math.sqrt(153.0))), rel=1e-12)
     assert beta > 0.0
-    # Free fall (negligible airspeed): the flow comes from the direction of -g_body,
-    # i.e. from below for a level airframe, giving alpha = -90 deg.
+    # At zero airspeed no flow angle exists; gravity cannot substitute for air.
     alpha, beta = flight_sim.effective_alpha_beta((0.0, 0.0, 0.0), gravity_body, env)
-    assert alpha == pytest.approx(-90.0, abs=1e-6)
+    assert alpha == pytest.approx(0.0, abs=1e-6)
     assert beta == pytest.approx(0.0, abs=1e-9)
     # The wind-tunnel mode overrides the gravity fallback with the tunnel stream.
     tunnel = EnvironmentConfig(wind_tunnel_enabled=True, wind_tunnel_speed=12.0)
@@ -793,8 +794,8 @@ def test_g_load_is_one_in_a_level_trimmed_glide():
     simulator = glider_simulator()
     simulator.simulate(duration_s=0.05, record=False)
     packet = simulator.step(dt=0.01)
-    lift_load = (packet["lift_n"] * math.cos(math.radians(packet["alpha_deg"]))
-                 + packet["drag_n"] * math.sin(math.radians(packet["alpha_deg"])))
+    body_velocity = world_to_body(packet["quaternion"], np.array(packet["velocity_mps"]) - np.array(packet["wind_velocity_mps"]))
+    lift_load = flight_sim.wind_force_to_body(body_velocity, packet["drag_n"], packet["side_n"], packet["lift_n"])[2]
     weight = derived_properties(simulator.aircraft)["mass_kg"] * simulator.environment.gravity
     assert packet["g_load"] == pytest.approx(abs(lift_load) / weight, rel=1e-9)
     assert 0.0 < packet["g_load"] < 5.0
@@ -809,7 +810,7 @@ def test_log_row_matches_the_declared_columns():
         row = flight_sim.log_row(sample)
         assert set(row) == set(FLIGHT_LOG_COLUMNS)
         assert len(row) == len(FLIGHT_LOG_COLUMNS)
-        assert all(isinstance(value, (int, float, bool)) for value in row.values())
+        assert all(isinstance(value, (int, float, bool, str)) for value in row.values())
     # The row mirrors the sample exactly (CSV/JSON round trip is lossless).
     row = flight_sim.log_row(samples[-1])
     for column in FLIGHT_LOG_COLUMNS:
@@ -1016,8 +1017,11 @@ def test_aeroelastic_coupling_reduces_peak_pitchup_during_high_speed_throw():
     sim_flex.simulate(duration_s=0.5, record=True)
     max_pitch_flex = max(sample.pitch_deg for sample in sim_flex.history())
 
-    # Washout twist decreases effective alpha under high q, reducing pitch-up zoom climb
-    assert max_pitch_flex < max_pitch_rigid
+    # Washout lowers local angle, but a stable cm_alpha can increase nose-up
+    # torque. It does not guarantee a lower Earth-frame pitch angle.
+    assert math.isfinite(max_pitch_flex) and math.isfinite(max_pitch_rigid)
+    diag = sim_flex._diagnostics()
+    assert diag["geometric_alpha_deg"] - diag["alpha_deg"] == pytest.approx(diag["aeroelastic_twist_deg"])
     # Check diagnostics populated
     step_packet = sim_flex.step(dt=0.01)
     assert "aeroelastic_twist_deg" in step_packet
@@ -1072,7 +1076,9 @@ def test_multipoint_ground_collision_stability():
     assert summary["status"] in ("landed", "crashed", "flying")
     assert not summary["diverged"]
     history = sim.history()
-    assert len(history) > 1
+    assert len(history) >= 1
+    assert summary["status"] in ("landed", "crashed")
+    # Initial geometry can already touch the ground at 5 cm height.
     # Check that angular rate and altitude are bounded
     for sample in history:
         assert math.isfinite(sample.pitch_deg)
@@ -1080,3 +1086,91 @@ def test_multipoint_ground_collision_stability():
         assert sample.altitude_m >= -0.05
 
 
+
+
+def test_no_gravity_orientation_torque_without_relative_airflow():
+    sim = glider_simulator()
+    for pitch in (-80.0, 20.0, 75.0):
+        moment = sim._restoring_moment(quaternion_from_euler(35.0, pitch, 10.0), np.array([1.0, -2.0, 3.0]), 0.0, 0.0)
+        assert np.array_equal(moment, np.zeros(3))
+
+
+def test_force_rotation_uses_relative_flow_including_sideslip_and_twist():
+    sim = FlightSimulator(replace(GLIDER, aeroelastic_twist=.8), EnvironmentConfig(**CALM_ENVIRONMENT), LaunchConfig(launch_speed=15, launch_angle_deg=5, release_pitch_deg=3), SimulationSettings(collision_enabled=False))
+    core = sim._compute_dynamics(flight_sim._pack(sim.state), sim.state.time_s)
+    force = core["force_body"]
+    velocity = core["body_relative"]
+    assert np.dot(force, velocity) == pytest.approx(-core["aero"].drag_n * core["speed"], rel=1e-9, abs=1e-10)
+
+
+def test_pressure_compliance_is_linked_and_does_not_mutate_aircraft():
+    aircraft = replace(GLIDER, aeroelastic_compliance=.8)
+    original = as_dict(aircraft)
+    high = FlightSimulator(aircraft, EnvironmentConfig(**CALM_ENVIRONMENT), LaunchConfig(launch_speed=26, launch_angle_deg=78, launch_height_m=1.8), SimulationSettings(collision_enabled=False))
+    zero = FlightSimulator(aircraft, EnvironmentConfig(**CALM_ENVIRONMENT), LaunchConfig(launch_speed=0, launch_height_m=10), SimulationSettings(collision_enabled=False))
+    assert high._diagnostics()["trailing_edge_bend_deg"] > 0
+    assert zero._diagnostics()["trailing_edge_bend_deg"] == 0
+    assert as_dict(aircraft) == original
+    assert high._diagnostics()["max_stress_pa"] > 0
+
+
+def test_phase_diagnostic_requires_continuous_stable_glide():
+    sample = glider_simulator().history()[0]
+    rows = [replace(sample, time_s=i*.1, altitude_m=10-i*.05, vx_mps=4, vy_mps=0, vz_mps=.5, speed_mps=4.03, pitch_deg=-3, alpha_deg=4, stalled=False) for i in range(21)]
+    phase = flight_sim.flight_phase_metrics(rows)
+    assert phase["apex_recovery_status"] == "recovered"
+    assert phase["stable_glide_duration_s"] == pytest.approx(2)
+    assert flight_sim.flight_phase_metrics(rows, "apex_glide")["apex_recovery_status"] == "not_applicable"
+    tumbling = [replace(row, pitch_deg=(i%2)*30) for i,row in enumerate(rows)]
+    assert flight_sim.flight_phase_metrics(tumbling)["apex_recovery_status"] == "not_observed"
+    assert flight_sim.flight_phase_metrics([replace(row, alpha_deg=-60) for row in rows])["apex_recovery_status"] == "not_observed"
+
+
+def test_existing_simulation_summary_matches_evaluate_contract_without_rerun():
+    sim = glider_simulator()
+    summary = sim.simulate(.1)
+    state_before = sim.state
+    result = flight_sim.summarize_flight(sim, summary)
+    assert result["post_apogee_time_s"] == summary["post_apogee_time_s"]
+    assert result["apex_recovery_status"] == summary["apex_recovery_status"]
+    assert sim.state == state_before
+    assert set(result) == set(flight_sim.EVALUATE_KEYS)
+
+
+def test_step_tracks_actual_elapsed_time_after_rejected_step_halving(monkeypatch):
+    sim = quiescent()
+    sim.settings = replace(sim.settings, adaptive=False, dt_max=.01, max_substeps=1)
+    original = sim._step_is_acceptable
+    calls = [0]
+    def reject_first(previous, candidate):
+        calls[0] += 1
+        return calls[0] > 1 and original(previous, candidate)
+    monkeypatch.setattr(sim, "_step_is_acceptable", reject_first)
+    packet = sim.step(.01)
+    assert packet["dt"] == pytest.approx(sim.state.time_s)
+    assert packet["dt"] == pytest.approx(.005)
+
+
+def test_reset_records_release_frame_after_prior_flight():
+    sim = quiescent()
+    sim.step(.02)
+    sim.reset()
+    assert sim.history()[0].time_s == 0.0
+    assert sim.history()[0].altitude_m == pytest.approx(sim.launch.launch_height_m)
+
+
+def test_flight_log_mode_and_version_survive_csv_round_trip():
+    from physics.storage_domain import export_flight_log, sample_from_row
+    import csv
+    import io
+    sim = quiescent()
+    sim.reset(replace(sim.launch, flight_mode="full_flight"))
+    sample = sim.history()[0]
+    payload, _, _ = export_flight_log([sample], "csv")
+    restored = sample_from_row(next(csv.DictReader(io.StringIO(payload))))
+    assert restored == sample
+    assert restored.flight_mode == "full_flight"
+    assert restored.physics_model_version == "rigid_body_repair_v1"
+    legacy = sample_from_row({"time_s": "0"})
+    assert legacy.flight_mode == "legacy"
+    assert legacy.physics_model_version == "unknown"

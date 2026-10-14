@@ -138,6 +138,11 @@ RESULT_KEYS: Tuple[str, ...] = (
     "design_variables",
     "elapsed_s",
     "status",
+    "physics_models",
+    "approximate",
+    "physics_verification_eligible",
+    "limitations",
+    "best_physics",
 )
 
 #: Design variables that land on :class:`~physics.config_schema.LaunchConfig`.
@@ -356,6 +361,8 @@ class _Run:
         self._progress_cb = progress_cb
         self._cancel_cb = cancel_cb
         self._used_gpu = False
+        self.physics_trace: List[Dict[str, Any]] = []
+        self.best_physics: Dict[str, Any] = {}
 
     # -- protocol ----------------------------------------------------------
     def poll_cancel(self) -> bool:
@@ -387,7 +394,7 @@ class _Run:
         if len(batch) == 1:
             outcome = self._single(batch[0])
             self.evaluations += 1
-            self._record(outcome["vector"], outcome["objectives"])
+            self._record(outcome["vector"], outcome["objectives"], outcome["flight"])
             self.notify()
             return [outcome]
 
@@ -416,7 +423,7 @@ class _Run:
         for offset, (vector, flight) in enumerate(zip(batch, flights), start=1):
             self.evaluations = before + offset
             objectives = _objectives_from_flight(self.objectives, flight)
-            self._record(vector, objectives)
+            self._record(vector, objectives, flight)
             results.append(
                 {
                     "objectives": objectives,
@@ -454,17 +461,22 @@ class _Run:
             "flight": flight,
         }
 
-    def _record(self, vector: Sequence[float], objectives: Dict[str, float]) -> None:
+    def _record(self, vector: Sequence[float], objectives: Dict[str, float], flight: Dict[str, Any]) -> None:
         vector = [float(value) for value in vector]
         score = aggregate_score(objectives, self.weights, self.objectives)
         self.history.append(
             {"evaluation": int(self.evaluations), "score": float(score), "objectives": dict(objectives)}
         )
         self.archive.append((list(vector), dict(objectives)))
+        physics = {"model": flight.get("model", "unknown"), "approximate": flight.get("approximate", True),
+                   "physics_verification_eligible": flight.get("physics_verification_eligible", False),
+                   "limitations": list(flight.get("limitations", ["Evaluation model not identified."]))}
+        self.physics_trace.append(physics)
         if score > self.best_score or not self.best_vector:
             self.best_score = float(score)
             self.best_vector = list(vector)
             self.best_objectives = dict(objectives)
+            self.best_physics = dict(physics)
 
     # -- payload -----------------------------------------------------------
     def result(self, population_size: int) -> Dict[str, Any]:
@@ -484,6 +496,7 @@ class _Run:
                     "objectives": dict(objectives),
                     "vector": list(vector),
                     "params": params_for_vector(self.variables, vector),
+                    "physics": dict(self.physics_trace[index]),
                 }
             )
         if not front:
@@ -492,12 +505,23 @@ class _Run:
                     "objectives": dict(self.best_objectives),
                     "vector": list(self.best_vector),
                     "params": params_for_vector(self.variables, self.best_vector),
+                    "physics": dict(self.best_physics),
                 }
             ]
         from .parallel_engine import get_gpu_info
         gpu_info = get_gpu_info()
+        models = sorted({str(row["model"]) for row in self.physics_trace})
+        approximate = any(row["approximate"] for row in self.physics_trace)
+        limitations = sorted({str(value) for row in self.physics_trace for value in row["limitations"]})
+        if len(models) > 1:
+            limitations.append("Candidates use different physics models; their objective values are not validated for direct comparison.")
         return {
             "algorithm": self.algorithm,
+            "physics_models": models,
+            "approximate": approximate,
+            "physics_verification_eligible": bool(self.physics_trace) and not approximate and len(models) == 1 and all(row["physics_verification_eligible"] for row in self.physics_trace),
+            "limitations": limitations,
+            "best_physics": dict(self.best_physics),
             "best_vector": list(self.best_vector),
             "best_params": params_for_vector(self.variables, self.best_vector),
             "best_objectives": dict(self.best_objectives),
@@ -1062,7 +1086,7 @@ def run_nelder_mead(
         vector = [clamp(float(value), low, high) for value, low, high in zip(x, lows, highs)]
         outcome = run._single(vector)
         run.evaluations += 1
-        run._record(vector, outcome["objectives"])
+        run._record(vector, outcome["objectives"], outcome["flight"])
         run.notify()
         state["seen"] += 1
         state["score"] = run.best_score
@@ -1110,7 +1134,7 @@ def run_differential_evolution(
         vector = [clamp(float(value), low, high) for value, low, high in zip(x, lows, highs)]
         outcome = run._single(vector)
         run.evaluations += 1
-        run._record(vector, outcome["objectives"])
+        run._record(vector, outcome["objectives"], outcome["flight"])
         run.notify()
         return -float(outcome["score"])
 
@@ -1266,6 +1290,9 @@ def _result_from_front(
             "objectives": dict(objectives),
             "vector": [float(value) for value in vector],
             "params": params_for_vector(run.variables, vector),
+            "physics": next((dict(run.physics_trace[index]) for index in range(len(run.archive)-1, -1, -1)
+                             if run.archive[index][0] == list(vector) and run.archive[index][1] == objectives),
+                            {"model": "unknown", "approximate": True, "physics_verification_eligible": False}),
         }
         for vector, objectives in front_points
     ]

@@ -1254,6 +1254,36 @@ export class Viewport {
 
   setFollow(enabled) {
     this.follow = Boolean(enabled);
+    this.followTarget.copy(this.lastPose);
+  }
+
+  /** Fit the actual recorded path, including the ground below its start. */
+  frameTrajectory(samples) {
+    if (!samples?.length) return;
+    const bounds = new THREE.Box3();
+    for (const sample of samples) {
+      if ([sample.x_m, sample.y_m, sample.z_m].every(Number.isFinite)) {
+        bounds.expandByPoint(new THREE.Vector3(sample.x_m, -sample.z_m, sample.y_m));
+      }
+    }
+    if (bounds.isEmpty()) return;
+    bounds.expandByPoint(new THREE.Vector3(samples[0].x_m, 0, samples[0].y_m));
+    const sphere = bounds.getBoundingSphere(new THREE.Sphere());
+    const halfFov = THREE.MathUtils.degToRad(this.camera.fov / 2);
+    const effectiveFov = Math.min(halfFov, Math.atan(Math.tan(halfFov) * this.camera.aspect));
+    const distance = Math.max(sphere.radius / Math.sin(effectiveFov) * 1.12, 2);
+    const direction = new THREE.Vector3(0.2, 0.3, 1).normalize();
+    this.controls.target.copy(sphere.center);
+    this.camera.position.copy(sphere.center).addScaledVector(direction, distance);
+    this.camera.far = Math.max(400, distance + sphere.radius * 4);
+    this.camera.updateProjectionMatrix();
+    if (this.scene.fog) {
+      this.scene.fog.near = distance + sphere.radius;
+      this.scene.fog.far = distance + sphere.radius * 4 + 10;
+    }
+    // Start follow from this target to avoid jumping away on the next frame.
+    this.followTarget.copy(sphere.center);
+    this.controls.update();
   }
 
   /**

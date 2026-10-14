@@ -33,6 +33,8 @@ REL_TIGHT = 1.0e-12
 REL_LOOSE = 1.0e-6
 
 REQUIRED_KEYS = {
+    "backend",
+    "material_model_validated",
     "stress_index",
     "stress_pa",
     "spanwise",
@@ -182,10 +184,10 @@ def test_trim_lift_coefficient_is_bounded_and_finite(cfg):
 # ==========================================================================
 def test_wing_root_moment_matches_k_times_span(cfg):
     q, area, span, nz = 88.2, 0.015, 0.2, 3.25
-    expected = q * area * (span / 2.0) * nz * 0.35
+    expected = q * area * (span / 2.0) * nz * 0.25
     got = sd.wing_root_bending_moment(q, area, span, nz)
     assert _relative(got, expected) <= REL_TIGHT
-    assert sd.SPAN_LOADING_FACTOR == 0.35
+    assert sd.SPAN_LOADING_FACTOR == 0.25
 
 
 def test_wing_root_moment_is_linear_in_every_argument(cfg):
@@ -405,7 +407,7 @@ def test_stress_field_passes_through_its_inputs(cfg):
     out = sd.stress_field(cfg, 41.5, 2.75, beta_deg=6.0)
     assert out["dynamic_pressure_pa"] == 41.5
     assert out["load_factor"] == 2.75
-    assert _relative(out["wing_root_moment_nm"], 41.5 * 0.015 * 0.1 * 2.75 * 0.35) <= REL_TIGHT
+    assert _relative(out["wing_root_moment_nm"], sd.wing_root_bending_moment(41.5, cfg.wing_area_m2, cfg.wingspan_m, 2.75, cfg)) <= REL_TIGHT
     assert _relative(out["dihedral_rad"], math.radians(cfg.dihedral_deg)) <= REL_TIGHT
     assert out["status"] in STATUS_VALUES
     assert _relative(
@@ -417,7 +419,7 @@ def test_stress_field_passes_through_its_inputs(cfg):
 
 
 def test_stress_field_is_finite_at_zero_dynamic_pressure(cfg):
-    out = sd.stress_field(cfg, 0.0, 1.0)
+    out = sd.stress_field(cfg, 0.0, 0.0)
     assert _all_finite(out)
     assert out["max_stress_pa"] == 0.0
     assert out["wing_root_moment_nm"] == 0.0
@@ -441,12 +443,12 @@ def test_stress_field_clamps_its_grid_size(cfg):
 # ==========================================================================
 # 9. stress scaling with dynamic pressure
 # ==========================================================================
-def test_peak_stress_is_linear_in_dynamic_pressure(cfg):
-    """stress ~ M_root ~ q, so doubling q must exactly double the peak."""
+def test_explicit_load_stress_is_independent_of_dynamic_pressure(cfg):
+    """Specified nz fixes normal force; q must not be counted again."""
     single = sd.stress_field(cfg, 88.2, 1.0)["max_stress_pa"]
     double = sd.stress_field(cfg, 2.0 * 88.2, 1.0)["max_stress_pa"]
-    assert double > single
-    assert _relative(double, 2.0 * single) <= 1.0e-9
+    assert double == single
+    assert _relative(double, single) <= 1.0e-9
 
 
 def test_peak_stress_is_linear_in_load_factor(cfg):
@@ -520,10 +522,10 @@ def test_elevon_raises_the_trailing_edge_row(cfg):
 
 
 def test_trailing_edge_fold_shortens_the_effective_chord(cfg):
-    """A TE fold removes effective chord, so the whole field softens."""
+    """A TE fold reduces section modulus and raises stress at fixed load."""
     flat = sd.stress_field(replace(cfg, fold_trailing_deg=0.0), 88.2, 1.0)
     folded = sd.stress_field(replace(cfg, fold_trailing_deg=40.0), 88.2, 1.0)
-    assert folded["max_stress_pa"] < flat["max_stress_pa"]
+    assert folded["max_stress_pa"] > flat["max_stress_pa"]
 
 
 # ==========================================================================
@@ -615,23 +617,19 @@ def test_analyse_honours_an_explicit_load_factor(cfg, env):
     assert out["load_factor"] == 2.5
     assert _relative(
         out["wing_root_moment_nm"],
-        0.5 * 1.225 * 144.0 * 0.015 * 0.1 * 2.5 * 0.35,
+        sd.wing_root_bending_moment(88.2, cfg.wing_area_m2, cfg.wingspan_m, 2.5, cfg, env.gravity),
     ) <= REL_TIGHT
     # a negative load factor is floored, never propagated
     assert sd.analyse(cfg, env, 12.0, 1.225, load_factor=-3.0)["load_factor"] == 0.0
 
 
-def test_analyse_reaches_every_status_band(cfg, env):
-    # The failure index grows with the dynamic pressure, so the three UI
-    # colour bands appear over increasing speed.  Sweep densely instead of
-    # pinning magic speeds: the exact band edges move whenever the trim lift
-    # coefficient is recalibrated, but all three bands must stay reachable for
-    # the shipped default airframe.
-    seen = {
-        sd.analyse(cfg, env, v, 1.225)["status"]
-        for v in np.linspace(0.5, 20.0, 400)
-    }
-    assert {"ok", "high_load", "failed"} <= seen
+def test_failure_bands_follow_load_without_recalibrating_material(cfg, env):
+    baseline = sd.analyse(cfg, env, 5.0, 1.225, load_factor=1.0)
+    for target, status in ((0.2, "ok"), (0.8, "high_load"), (1.2, "failed")):
+        nz = target / baseline["failure_index"]
+        out = sd.analyse(cfg, env, 5.0, 1.225, load_factor=nz)
+        assert out["failure_index"] == pytest.approx(target, rel=1e-12)
+        assert out["status"] == status
 
 
 def test_analyse_rejects_degenerate_inputs_gracefully(cfg, env):
@@ -665,7 +663,7 @@ def test_gravity_acts_only_through_the_load_factor(cfg, env):
     assert light["dynamic_pressure_pa"] == heavy_field["dynamic_pressure_pa"]
     # and the structural response is only reachable through the load factor
     pinned = sd.analyse(cfg, heavy, 12.0, 1.225, load_factor=light["load_factor"])
-    assert _relative(pinned["max_stress_pa"], light["max_stress_pa"]) <= REL_TIGHT
+    assert _relative(pinned["max_stress_pa"], 2.0 * light["max_stress_pa"]) <= REL_TIGHT
 
 
 # ==========================================================================
@@ -785,15 +783,15 @@ def test_aeroelastic_deformations_zero_at_zero_dynamic_pressure(cfg):
 
 
 def test_aeroelastic_deformations_scaling_with_dynamic_pressure_and_nz(cfg):
-    """Deformations scale linearly with dynamic pressure and flex scales with nz."""
+    """Flex scales with specified normal load; torsion scales with dynamic pressure."""
     cfg_active = replace(cfg, aeroelastic_flex=0.4, aeroelastic_twist=0.2)
     q1 = 20.0
     q2 = 40.0
     res1 = sd.aeroelastic_deformations(cfg_active, dynamic_pressure=q1, nz=1.0)
     res2 = sd.aeroelastic_deformations(cfg_active, dynamic_pressure=q2, nz=1.0)
 
-    # 2x dynamic pressure -> 2x flex and twist
-    assert _relative(res2["delta_dihedral_deg"], 2.0 * res1["delta_dihedral_deg"]) <= REL_TIGHT
+    # Fixed nz means fixed bending load; torsional pressure still doubles
+    assert _relative(res2["delta_dihedral_deg"], res1["delta_dihedral_deg"]) <= REL_TIGHT
     assert _relative(res2["washout_twist_deg"], 2.0 * res1["washout_twist_deg"]) <= REL_TIGHT
 
     # 2x nz -> 2x flex (twist depends on pitching moment / dynamic pressure, independent of nz)
@@ -828,3 +826,63 @@ def test_aeroelastic_deformations_stiffness_influence(cfg):
     assert res_soft["washout_twist_deg"] > res_stiff["washout_twist_deg"]
     assert res_soft["effective_stiffness"] < res_stiff["effective_stiffness"]
 
+
+
+def test_uniform_cantilever_root_stress_matches_si_section_modulus(cfg):
+    rectangular = replace(cfg, taper_ratio=1.0, dihedral_deg=0.0, fold_tip_deg=0.0, fold_trailing_deg=0.0, elevon_deg=0.0)
+    force = rectangular.mass_kg * 9.80665 * 2.0
+    moment = force * rectangular.wingspan_m / 8.0
+    chord = rectangular.wing_area_m2 / rectangular.wingspan_m
+    thickness = rectangular.paper_gsm / 800000.0
+    gain = sd.Z_SCALE_OFFSET + sd.Z_SCALE_GAIN * sd.effective_paper_stiffness(rectangular)
+    expected = sd.KAPPA_SIGMA * moment / (chord * thickness**2 * gain / 6.0)
+    field = sd.stress_field(rectangular, 100.0, 2.0, spanwise=25)
+    assert field["wing_root_moment_nm"] == pytest.approx(moment, rel=1e-12)
+    assert field["max_stress_pa"] == pytest.approx(expected, rel=1e-12)
+    grid = np.array(field["stress_pa"])
+    assert np.all(grid[:, [0,-1]] == 0.0)
+    assert field["material_model_validated"] is False
+
+
+def test_peak_stress_independent_of_grid(cfg):
+    peaks = [sd.stress_field(cfg, 40.0, 2.0, spanwise=n)["max_stress_pa"] for n in (25,49,97)]
+    assert peaks == pytest.approx([peaks[0]]*3, rel=1e-12)
+
+
+def test_derived_load_stress_scales_as_speed_squared(cfg,env):
+    slow = sd.analyse(cfg,env,3.0,1.225)
+    fast = sd.analyse(cfg,env,6.0,1.225)
+    assert fast["max_stress_pa"] == pytest.approx(4.0*slow["max_stress_pa"],rel=1e-12)
+
+
+def test_numpy_backend_fallback(cfg,monkeypatch):
+    monkeypatch.setattr(sd,"_CUPY_MODULE",None)
+    out = sd.stress_field(cfg,10.0,1.0,backend="cupy")
+    assert out["backend"] == "numpy"
+    assert sd.active_backend() == "numpy"
+
+
+def test_tapered_root_moment_matches_independent_load_quadrature(cfg):
+    from scipy.integrate import quad
+    for taper in (0.05, 0.4, 1.0):
+        wing = replace(cfg, taper_ratio=taper)
+        force = wing.mass_kg * 9.80665 * 3.0
+        half_span = wing.wingspan_m / 2.0
+        # Each half-wing carries half the total load, with lift proportional to chord.
+        load_per_m = lambda y: force / (half_span * (1.0+taper)) * (1.0-(1.0-taper)*y/half_span)
+        expected = quad(lambda y: load_per_m(y)*y,0.0,half_span,epsabs=1e-12)[0]
+        actual = sd.wing_root_bending_moment(50.0,wing.wing_area_m2,wing.wingspan_m,3.0,wing)
+        assert actual == pytest.approx(expected,rel=1e-12)
+
+
+def test_derived_stress_is_independent_of_gravity_at_fixed_aero_load(cfg,env):
+    normal = sd.analyse(cfg,env,6.0,1.225)
+    double_g = sd.analyse(cfg,replace(env,gravity=2.0*env.gravity),6.0,1.225)
+    assert double_g["load_factor"] == pytest.approx(normal["load_factor"]/2.0,rel=1e-12)
+    assert double_g["max_stress_pa"] == pytest.approx(normal["max_stress_pa"],rel=1e-12)
+
+
+def test_fixed_nz_stress_independent_of_mass_normalized_grid(cfg,env):
+    normal = sd.analyse(cfg,env,6.0,1.225,load_factor=2.0)
+    heavy = sd.analyse(replace(cfg,mass_kg=2.0*cfg.mass_kg),env,6.0,1.225,load_factor=2.0)
+    assert heavy["max_stress_pa"] == pytest.approx(2.0*normal["max_stress_pa"],rel=1e-12)

@@ -294,6 +294,42 @@ def inertia_tensor_box(mass: float, dx: float, dy: float, dz: float) -> np.ndarr
     )
 
 
+def wind_force_to_body(relative_velocity: Sequence[float], drag: float, side: float, lift: float) -> np.ndarray:
+    """Resolve wind-axis forces with actual flow, independently of wing twist.
+
+    +z points down. The spanwise wind axis is orthogonal to the velocity
+    and the x-z lift axis, including sideslip. At zero speed no axis exists.
+    """
+    velocity = vec3(relative_velocity)
+    speed = float(np.linalg.norm(velocity))
+    if speed <= 1.0e-12:
+        return np.zeros(3)
+    drag_axis = velocity / speed
+    horizontal = math.hypot(float(velocity[0]), float(velocity[2]))
+    lift_axis = (np.array([velocity[2], 0.0, -velocity[0]]) / horizontal
+                 if horizontal > 1.0e-12 else np.array([0.0, 0.0, -1.0]))
+    side_axis = np.cross(drag_axis, lift_axis)
+    side_axis /= np.linalg.norm(side_axis)
+    return -float(drag) * drag_axis + float(side) * side_axis + float(lift) * lift_axis
+
+
+def body_inertia_tensor(properties: dict) -> np.ndarray:
+    """Build and validate a realizable symmetric inertia tensor in body axes."""
+    tensor = np.diag([properties['roll_inertia_kgm2'], properties['pitch_inertia_kgm2'],
+                      properties['yaw_inertia_kgm2']]).astype(float)
+    for i, j, key in [(0, 1, 'inertia_xy_kgm2'), (0, 2, 'inertia_xz_kgm2'),
+                      (1, 2, 'inertia_yz_kgm2')]:
+        tensor[i, j] = tensor[j, i] = properties.get(key, 0.0)
+    if not np.isfinite(tensor).all():
+        raise ValueError('inertia tensor must contain finite components')
+    principal = np.linalg.eigvalsh(tensor)
+    if principal[0] <= 0.0:
+        raise ValueError('inertia tensor must be positive definite')
+    if principal[-1] > principal[0] + principal[1] + 1e-12 * principal[-1]:
+        raise ValueError('inertia tensor violates the principal-moment triangle inequality')
+    return tensor
+
+
 def principal_inertia_from_matrix(matrix: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
     """Eigen decomposition of an inertia tensor.
 

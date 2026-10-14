@@ -67,19 +67,20 @@
         <span class="eta-val num" id="eta-clock">—</span>
         <span class="eta-sub num" id="eta-left">待機中</span>
       </div>
-      <button class="btn btn-primary btn-launch-top" id="btn-top-launch" type="button" title="現在の設定で飛行軌跡を一括シミュレーション計算して再生します (Enter)"><img src="https://api.iconify.design/material-symbols/rocket-launch.svg?color=%23ffffff" class="ui-icon" alt=""> 発射</button>
-      <button class="btn btn-gpu" id="btn-top-gpu-ensemble" type="button" title="GPUで100機を同時に一括シミュレーション計算して全軌跡を描画します"><img src="https://api.iconify.design/material-symbols/electric-bolt.svg?color=%23ffffff" class="ui-icon" alt=""> 100機一括</button>
+      <button class="btn btn-primary btn-launch-top" id="btn-top-launch" type="button" title="現在の設定で飛行軌跡を一括シミュレーション計算して再生します (Enter)"><svg class="ui-icon" viewBox="0 0 24 24" fill="currentColor"><path d="m13.13 22.19-1.63-3.83c1.57-.58 3.04-1.5 4.35-2.73l-2.72 6.56M5.64 12.5l-3.83-1.63 6.56-2.72c-1.23 1.31-2.15 2.78-2.73 4.35m8.58-8.58C12.9 5.24 11.23 7.31 9.77 9.77l4.46 4.46c2.46-1.46 4.53-3.13 5.85-4.45 1.54-1.54 2.42-3.15 2.58-4.24.03-.22-.05-.44-.22-.61-.17-.17-.39-.25-.61-.22-1.09.16-2.7 1.04-4.24 2.58M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2"/></svg> 発射</button>
+      <button class="btn btn-top-play" id="btn-top-play" type="button" title="飛行の再生 / 一時停止 (Space)"><svg class="ui-icon" id="top-play-icon" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg> <span id="top-play-label">再生</span></button>
+      <button class="btn btn-gpu" id="btn-top-gpu-ensemble" type="button" title="GPUで100機を同時に一括シミュレーション計算して全軌跡を描画します"><svg class="ui-icon" viewBox="0 0 24 24" fill="currentColor"><path d="M11 21h-1l1-7H7.5c-.88 0-.33-.75-.31-.78C8.48 10.94 10.42 7.54 13 3h1l-1 7h3.5c.49 0 .56.33.47.51l-.07.15L11 21z"/></svg> 100機一括</button>
       <label class="switch" title="風洞モード: 機体を固定して空力係数のみ測定 (U)">
         <input type="checkbox" id="tunnel-toggle">
         <span class="switch-box"></span>
-        <span class="switch-label"><img src="https://api.iconify.design/material-symbols/air.svg?color=%231a73e8" class="ui-icon" alt=""> 風洞</span>
+        <span class="switch-label"><svg class="ui-icon" viewBox="0 0 24 24" fill="currentColor"><path d="M14.5 17c0 1.65-1.35 3-3 3s-3-1.35-3-3h2c0 .55.45 1 1 1s1-.45 1-1-.45-1-1-1H2v-2h9.5c1.65 0 3 1.35 3 3m3.5-6c0 1.65-1.35 3-3 3H2v-2h13c.55 0 1-.45 1-1s-.45-1-1-1-1 .45-1 1h-2c0-1.65 1.35-3 3-3s3 1.35 3 3m1.5-6C19.5 3.35 18.15 2 16.5 2s-3 1.35-3 3h2c0-.55.45-1 1-1s1 .45 1 1-.45 1-1 1H2v2h14.5c1.65 0 3-1.35 3-3"/></svg> 風洞</span>
       </label>
-      <button class="btn" id="btn-top-investigate" type="button" title="指定した機体をベースに手で変えられる項目を自動分析・改善"><img src="https://api.iconify.design/material-symbols/search.svg?color=%235f6368" class="ui-icon" alt=""> 調査</button>
-      <button class="btn" id="btn-save" type="button" title="設定を JSON で保存 (Ctrl+S)"><img src="https://api.iconify.design/material-symbols/save.svg?color=%235f6368" class="ui-icon" alt=""> 保存</button>
-      <button class="btn" id="btn-load" type="button" title="設定 JSON の読込"><img src="https://api.iconify.design/material-symbols/folder-open.svg?color=%235f6368" class="ui-icon" alt=""> 読込</button>
-      <button class="btn" id="btn-csv" type="button" title="飛行ログを CSV で出力 (E)"><img src="https://api.iconify.design/material-symbols/table-chart.svg?color=%235f6368" class="ui-icon" alt=""> CSV</button>
-      <button class="btn btn-rec" id="btn-top-record" type="button" title="3D飛行動画を録画して保存 (WebM/MP4)"><img src="https://api.iconify.design/material-symbols/videocam.svg?color=%23d93025" class="ui-icon" alt=""> 録画</button>
-      <button class="btn btn-icon" id="btn-help" type="button" title="ショートカット (?)" aria-label="ショートカット"><img src="https://api.iconify.design/material-symbols/help-outline.svg?color=%235f6368" class="ui-icon" alt="?"></button>
+      <button class="btn" id="btn-top-investigate" type="button" title="指定した機体をベースに手で変えられる項目を自動分析・改善"><svg class="ui-icon" viewBox="0 0 24 24" fill="currentColor"><path d="M15.5 14h-.79l-.28-.27A6.471 6.471 0 0 0 16 9.5 6.5 6.5 0 1 0 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14"/></svg> 調査</button>
+      <button class="btn" id="btn-save" type="button" title="設定を JSON で保存 (Ctrl+S)"><svg class="ui-icon" viewBox="0 0 24 24" fill="currentColor"><path d="M17 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V7zm2 16H5V5h11.17L19 7.83zm-7-7c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3M6 6h9v4H6z"/></svg> 保存</button>
+      <button class="btn" id="btn-load" type="button" title="設定 JSON の読込"><svg class="ui-icon" viewBox="0 0 24 24" fill="currentColor"><path d="M20 6h-8l-2-2H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2m0 12H4V8h16z"/></svg> 読込</button>
+      <button class="btn" id="btn-csv" type="button" title="飛行ログを CSV で出力 (E)"><svg class="ui-icon" viewBox="0 0 24 24" fill="currentColor"><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2m0 16H5V5h14zM7 10h2v7H7zm4-3h2v10h-2zm4 6h2v4h-2z"/></svg> CSV</button>
+      <button class="btn btn-rec" id="btn-top-record" type="button" title="3D飛行動画を録画して保存 (WebM/MP4)"><svg class="ui-icon" viewBox="0 0 24 24" fill="#d93025"><path d="M17 10.5V7a1 1 0 0 0-1-1H4a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-3.5l4 4v-11z"/></svg> 録画</button>
+      <button class="btn btn-icon" id="btn-help" type="button" title="ショートカット (?)" aria-label="ショートカット"><svg class="ui-icon" viewBox="0 0 24 24" fill="currentColor"><path d="M11 18h2v-2h-2zm1-16C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2m0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8m0-14c-2.21 0-4 1.79-4 4h2c0-1.1.9-2 2-2s2 .9 2 2c0 2-3 1.75-3 5h2c0-2.25 3-2.5 3-5 0-2.21-1.79-4-4-4"/></svg></button>
       <input type="file" id="config-file" accept="application/json,.json" hidden>
     </div>
   </header>
@@ -126,11 +127,11 @@
               
               <div class="record-section-title">投擲モード選択 (SIMULATION MODE)</div>
               <div class="record-mode-toggle" id="record-mode-toggle">
-                <button type="button" class="btn-mode active" id="btn-mode-calibrated" title="剛体シミュレーターの空力特性に合わせて最適化された投擲。記録級の安定滑空を体験できます">
-                  <img src="https://api.iconify.design/material-symbols/star-outline.svg?color=%231a73e8" class="ui-icon" alt=""> 記録再現・安定滑空 (推奨)
+                <button type="button" class="btn-mode active" id="btn-mode-calibrated" title="プリセットの手元高度・初速・投射角から、上昇と下降を連続計算します。到達高度と滞空時間は計算結果です。">
+                  <img src="https://api.iconify.design/material-symbols/rocket-launch.svg?color=%231a73e8" class="ui-icon" alt=""> フルフライト（手元投擲〜上昇〜滑空）
                 </button>
-                <button type="button" class="btn-mode" id="btn-mode-raw" title="公式記録時の極限初速（時速約100km）。急激なGフォースと失速挙動を検証できます">
-                  <img src="https://api.iconify.design/material-symbols/electric-bolt.svg?color=%235f6368" class="ui-icon" alt=""> 生の公認記録値 (高G限界)
+                <button type="button" class="btn-mode" id="btn-mode-raw" title="保存された頂点開始条件から滑空を計算します。上昇時間は含みません。">
+                  <img src="https://api.iconify.design/material-symbols/flight.svg?color=%235f6368" class="ui-icon" alt=""> 頂点滑空のみ（最高到達点から開始）
                 </button>
               </div>
 
@@ -146,12 +147,11 @@
               </div>
 
               <details class="record-help-details">
-                <summary><img src="https://api.iconify.design/material-symbols/lightbulb-outline.svg?color=%231a73e8" class="ui-icon" alt=""> なぜ生の記録値だと墜落しやすいの？</summary>
+                <summary><img src="https://api.iconify.design/material-symbols/lightbulb-outline.svg?color=%231a73e8" class="ui-icon" alt=""> 投擲モードの違いと空力弾性について</summary>
                 <div class="record-help-content">
-                  <p><strong>① 巨大なGフォース（30〜50G）:</strong> 時速100kmで投げると通常の滑空時の50〜100倍の揚力が発生し、急激な頭上げで失速します。</p>
-                  <p><strong>② 紙のしなり（空力弾性）:</strong> 現実の紙飛行機は時速100kmの風圧で主翼がしなり、矢のように直進してから滑空に戻ります。</p>
-                  <p><strong>③ 非公開の内部調整:</strong> ギネス記録ではミリ単位の重心位置や0.1度単位のエレボン角度が非公開です。</p>
-                  <p class="help-rec"><strong>「記録再現モード」</strong>を選択すると、シミュレーター上で安定して記録級のロングフライトを再現できます。</p>
+                  <p><strong>① フルフライト（手元投擲〜上昇〜滑空）:</strong> プリセットの手元高度・初速・投射角から上昇と下降を連続計算します。機体や投擲には再構成した条件を含みます。動圧による後縁変形を計算しますが、実機への校正と長時間滑空の目標達成は未検証です。</p>
+                  <p><strong>② 頂点滑空のみ（最高到達点から開始）:</strong> 上昇フェーズをスキップし、最高到達点（12〜17m）での定常滑空挙動を純粋に検証・観察したい場合のモードです。</p>
+                  <p class="help-rec"><strong>「フルフライト」</strong>は手元からの全軌道を確認するモードです。頂点からの滑空時間と、上昇を含む全飛行時間を区別して比較してください。</p>
                 </div>
               </details>
 
@@ -279,23 +279,36 @@
         <!-- メイン操作ボタン群 -->
         <div class="quick-launch-actions">
           <button class="btn-main-throw" id="quick-btn-throw" type="button" title="現在の設定で飛行機を投げる (Space / Enter)">
-            <img src="https://api.iconify.design/material-symbols/rocket-launch.svg?color=%23ffffff" class="ui-icon" alt="">
+            <svg class="ui-icon" viewBox="0 0 24 24" fill="currentColor"><path d="m13.13 22.19-1.63-3.83c1.57-.58 3.04-1.5 4.35-2.73l-2.72 6.56M5.64 12.5l-3.83-1.63 6.56-2.72c-1.23 1.31-2.15 2.78-2.73 4.35m8.58-8.58C12.9 5.24 11.23 7.31 9.77 9.77l4.46 4.46c2.46-1.46 4.53-3.13 5.85-4.45 1.54-1.54 2.42-3.15 2.58-4.24.03-.22-.05-.44-.22-.61-.17-.17-.39-.25-.61-.22-1.09.16-2.7 1.04-4.24 2.58M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2"/></svg>
             <div class="throw-text-wrap">
               <span class="throw-title">投げる</span>
-              <span class="throw-hint">SPACE / ENTER</span>
+              <span class="throw-hint">ENTER</span>
             </div>
+          </button>
+
+          <button class="btn-quick-play" id="quick-btn-play" type="button" title="飛行軌跡の再生 / 一時停止 (Space)">
+            <svg class="ui-icon" id="quick-play-icon" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
+            <div class="play-text-wrap">
+              <span class="play-title" id="quick-play-title">再生</span>
+              <span class="play-hint">SPACE</span>
+            </div>
+          </button>
+
+          <button class="btn-quick-reset" id="quick-btn-reset" type="button" title="最初の投擲位置に戻る (R)">
+            <svg class="ui-icon" viewBox="0 0 24 24" fill="currentColor"><path d="M12 5V1L7 6l5 5V7c3.31 0 6 2.69 6 6s-2.69 6-6 6-6-2.69-6-6H4c0 4.42 3.58 8 8 8s8-3.58 8-8-3.58-8-8-8z"/></svg>
+            <span class="quick-btn-label">最初へ</span>
           </button>
           
           <button class="btn-ensemble-throw" id="quick-btn-ensemble" type="button" title="GPU並列計算で100機を同時に一斉投擲！最高記録を競います">
-            <img src="https://api.iconify.design/material-symbols/electric-bolt.svg?color=%23188038" class="ui-icon" alt="">
+            <svg class="ui-icon" viewBox="0 0 24 24" fill="#188038"><path d="M11 21h-1l1-7H7.5c-.88 0-.33-.75-.31-.78C8.48 10.94 10.42 7.54 13 3h1l-1 7h3.5c.49 0 .56.33.47.51l-.07.15L11 21z"/></svg>
             <div class="ensemble-text-wrap">
-              <span class="ensemble-title">100機一斉飛行</span>
-              <span class="ensemble-sub">GPU 100機同時</span>
+              <span class="ensemble-title">100機一斉</span>
+              <span class="ensemble-sub">GPU 100機</span>
             </div>
           </button>
 
           <button class="btn-dock-toggle" id="quick-dock-toggle" type="button" title="投げ方・旋回バンク（初速・角度・左右傾き）のクイック調整を開閉">
-            <span id="quick-dock-toggle-icon">⚙️ 投げ方調整</span>
+            <span id="quick-dock-toggle-icon"><img src="https://api.iconify.design/material-symbols/tune.svg?color=%235f6368" class="ui-icon" alt=""> 投げ方調整</span>
           </button>
         </div>
 
@@ -336,17 +349,17 @@
             </div>
             <input type="range" class="tuning-slider" id="quick-slide-roll" min="-30" max="30" step="1" value="0">
             <div class="tuning-presets">
-              <button class="tuning-chip" type="button" data-type="roll" data-val="-12">↺ 左旋回 (-12°)</button>
+              <button class="tuning-chip" type="button" data-type="roll" data-val="-12">左旋回 (-12°)</button>
               <button class="tuning-chip" type="button" data-type="roll" data-val="-5">左微傾 (-5°)</button>
               <button class="tuning-chip active" type="button" data-type="roll" data-val="0">水平 (0°)</button>
               <button class="tuning-chip" type="button" data-type="roll" data-val="5">右微傾 (+5°)</button>
-              <button class="tuning-chip" type="button" data-type="roll" data-val="12">↻ 右旋回 (+12°)</button>
+              <button class="tuning-chip" type="button" data-type="roll" data-val="12">右旋回 (+12°)</button>
             </div>
           </div>
         </div>
       </div>
 
-      <!-- 🏆 100機一括飛行・最高値/最下位/平均値 統計記録カード (100機シミュレーション記録HUD) -->
+      <!-- 100機一括飛行・最高値/最下位/平均値 統計記録カード (100機シミュレーション記録HUD) -->
       <div class="ensemble-champion-card" id="ensemble-champion-card" hidden>
         <div class="champ-head">
           <div class="champ-title-group">
@@ -441,7 +454,7 @@
         <!-- ランキング・記録テーブル (TOP & WORST) -->
         <div class="champ-table-wrap">
           <div class="champ-table-header-row">
-            <div class="champ-table-title">🏅 飛距離ランキング TOP 5 & 最下位 (行クリックでその機体をフォーカス)</div>
+            <div class="champ-table-title"><img src="https://api.iconify.design/material-symbols/trophy.svg?color=%23f9ab00" class="ui-icon" alt=""> 飛距離ランキング TOP 5 &amp; 最下位 (行クリックでその機体をフォーカス)</div>
           </div>
           <table class="champ-table">
             <thead>
@@ -694,17 +707,17 @@
           <div class="inv-config-group" style="margin-top: 10px;">
             <label class="inv-label">数値モード (NUMERICAL FIDELITY)</label>
             <div style="display: flex; gap: 6px; margin-top: 4px;">
-              <button type="button" class="btn btn-sm btn-mode active" id="wb-guinness-btn-raw" style="flex: 1;" title="公認の生初速（22〜27m/s、30G超）を一切変更せずそのまま投入">
-                生公認値 (完全公式)
+              <button type="button" class="btn btn-sm btn-mode active" id="wb-guinness-btn-raw" style="flex: 1;" title="手元から上昇・下降・着地を連続計算します。実機性能の検証は未完了です。">
+                フルフライト（手元投擲）
               </button>
-              <button type="button" class="btn btn-sm btn-mode" id="wb-guinness-btn-cal" style="flex: 1;" title="剛体シミュレータ向け校正値">
-                記録再現 (校正値)
+              <button type="button" class="btn btn-sm btn-mode" id="wb-guinness-btn-cal" style="flex: 1;" title="最高到達点からの定常滑空のみをシミュレーション">
+                頂点滑空のみ
               </button>
             </div>
           </div>
           <div class="btn-row" style="margin-top: 14px;">
             <button class="btn btn-primary" id="wb-guinness-btn-fly" type="button" style="width: 100%; font-weight: 600; background: #e37400; color: #fff;">
-              <img src="https://api.iconify.design/material-symbols/trophy-outline.svg?color=%23ffffff" class="ui-icon" alt=""> ギネス公式数値で単独飛行
+              <img src="https://api.iconify.design/material-symbols/trophy-outline.svg?color=%23ffffff" class="ui-icon" alt=""> 記録機体の単独飛行を計算
             </button>
           </div>
           <div class="btn-row" style="margin-top: 6px;">
@@ -724,7 +737,7 @@
             </div>
 
             <div class="metric-table" style="margin-bottom: 10px;">
-              <div class="metric-row"><span class="metric-k">公認初速</span><span class="metric-v num" id="wb-g-speed">—</span></div>
+              <div class="metric-row"><span class="metric-k">計算初速</span><span class="metric-v num" id="wb-g-speed">—</span></div>
               <div class="metric-row"><span class="metric-k">投擲角度</span><span class="metric-v num" id="wb-g-angle">—</span></div>
               <div class="metric-row"><span class="metric-k">機体質量 (A4規約)</span><span class="metric-v num" id="wb-g-mass">—</span></div>
               <div class="metric-row"><span class="metric-k">翼幅 / 翼面積</span><span class="metric-v num" id="wb-g-geom">—</span></div>
@@ -829,21 +842,24 @@
   <!-- ==================== transport ==================== -->
   <footer class="transport">
     <div class="tp-badge">
-      <img src="https://api.iconify.design/material-symbols/play-circle-outline.svg?color=%235f6368" class="ui-icon" alt="">
+      <svg class="ui-icon" viewBox="0 0 24 24" fill="#a8c7fa"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 14.5v-9l6 4.5-6 4.5z"/></svg>
       <span class="tp-badge-text">再生プレイヤー</span>
     </div>
     <div class="tp-controls">
+      <button class="tp-btn tp-btn-launch" id="tp-launch" type="button" title="現在の設定で飛行シミュレーションを発射 (Enter)">
+        <svg class="ui-icon" viewBox="0 0 24 24" fill="currentColor"><path d="m13.13 22.19-1.63-3.83c1.57-.58 3.04-1.5 4.35-2.73l-2.72 6.56M5.64 12.5l-3.83-1.63 6.56-2.72c-1.23 1.31-2.15 2.78-2.73 4.35m8.58-8.58C12.9 5.24 11.23 7.31 9.77 9.77l4.46 4.46c2.46-1.46 4.53-3.13 5.85-4.45 1.54-1.54 2.42-3.15 2.58-4.24.03-.22-.05-.44-.22-.61-.17-.17-.39-.25-.61-.22-1.09.16-2.7 1.04-4.24 2.58M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2"/></svg><span class="tp-label">発射</span>
+      </button>
       <button class="tp-btn" id="tp-reset" type="button" title="最初に戻る / 待機状態 (R)">
-        <img src="https://api.iconify.design/material-symbols/replay.svg?color=%235f6368" class="ui-icon" alt=""><span class="tp-label">最初へ</span>
+        <svg class="ui-icon" viewBox="0 0 24 24" fill="currentColor"><path d="M12 5V1L7 6l5 5V7c3.31 0 6 2.69 6 6s-2.69 6-6 6-6-2.69-6-6H4c0 4.42 3.58 8 8 8s8-3.58 8-8-3.58-8-8-8z"/></svg><span class="tp-label">最初へ</span>
       </button>
       <button class="tp-btn" id="tp-prev" type="button" title="1 フレーム戻る (←)">
-        <img src="https://api.iconify.design/material-symbols/skip-previous.svg?color=%235f6368" class="ui-icon" alt=""><span class="tp-label">戻る</span>
+        <svg class="ui-icon" viewBox="0 0 24 24" fill="currentColor"><path d="M6 6h2v12H6zm3.5 6 8.5 6V6z"/></svg><span class="tp-label">戻る</span>
       </button>
       <button class="tp-btn tp-play" id="tp-play" type="button" title="再生 / 一時停止 (Space)">
-        <img src="https://api.iconify.design/material-symbols/play-arrow.svg?color=%231a73e8" class="ui-icon" id="tp-play-img" alt=""><span class="tp-label" id="tp-play-label">再生</span>
+        <svg class="ui-icon" id="tp-play-img" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg><span class="tp-label" id="tp-play-label">再生</span>
       </button>
       <button class="tp-btn" id="tp-next" type="button" title="1 フレーム進む (→)">
-        <img src="https://api.iconify.design/material-symbols/skip-next.svg?color=%235f6368" class="ui-icon" alt=""><span class="tp-label">進む</span>
+        <svg class="ui-icon" viewBox="0 0 24 24" fill="currentColor"><path d="m6 18 8.5-6L6 6v12zM16 6v12h2V6h-2z"/></svg><span class="tp-label">進む</span>
       </button>
     </div>
 

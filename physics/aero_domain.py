@@ -446,6 +446,24 @@ def lift_coefficient(
     return clamp(value, -ceiling, ceiling)
 
 
+def separated_pressure_drag_coefficient(alpha_deg: float, cfg: AircraftConfig) -> float:
+    """Empirical separated-plate pressure drag, C_D = 2 sin²(alpha).
+
+    A C1 smooth transition starts at the lift model's corresponding stall
+    threshold and reaches the plate limit at broadside incidence. This is
+    an uncalibrated thin-plate approximation, not a measured airframe polar.
+    Attached-flow analytic polars remain unchanged. Reverse flow is handled
+    by the same projected-area law; edge-on flow retains parasite drag.
+    """
+    alpha = (_finite(alpha_deg) + 180.0) % 360.0 - 180.0
+    threshold = effective_stall_alpha_deg(cfg)
+    if alpha < 0.0:
+        threshold = max(threshold + 15.0, 30.0)
+    transition = clamp((abs(alpha) - threshold) / max(90.0 - threshold, 1.0), 0.0, 1.0)
+    weight = transition * transition * (3.0 - 2.0 * transition)
+    return weight * 2.0 * math.sin(deg2rad(alpha)) ** 2
+
+
 def drag_coefficient(
     alpha_deg: float,
     cfg: AircraftConfig,
@@ -455,7 +473,7 @@ def drag_coefficient(
     compressible: bool = True,
     cl_offset: float = 0.0,
 ) -> float:
-    """Drag polar ``C_D = C_D0(Re) + C_L^2 / (pi e AR)`` plus wave drag.
+    """Attached polar plus separated pressure drag and wave drag.
 
     ``ground_height_m=None`` evaluates the free-air polar; a height attenuates
     the **induced** part only, because a ground effect does not change the
@@ -464,7 +482,7 @@ def drag_coefficient(
     cl = lift_coefficient(alpha_deg, cfg, compressible=compressible, mach=mach, cl_offset=cl_offset)
     induced = cl * cl / _polar_constant(cfg)
     factor = 1.0 if ground_height_m is None else ground_effect_factor(ground_height_m, _span(cfg), True)
-    return parasite_drag_coefficient(cfg, reynolds) + induced * factor + wave_drag_coefficient(
+    return parasite_drag_coefficient(cfg, reynolds) + induced * factor + separated_pressure_drag_coefficient(alpha_deg, cfg) + wave_drag_coefficient(
         mach, compressible
     )
 
@@ -824,6 +842,8 @@ def evaluate_aero(
     reynolds: Optional[float] = None,
     ground_height_m: float = 1.0,
     angular_rate: Sequence[float] = (0.0, 0.0, 0.0),
+    density_kgm3: Optional[float] = None,
+    kinematic_viscosity_m2s: Optional[float] = None,
 ) -> AeroResult:
     """Complete 6-DoF aerodynamic evaluation at one instant.
 
@@ -831,6 +851,10 @@ def evaluate_aero(
     and ``env.compressibility_enabled`` directly, so mutating the environment
     changes the returned forces with no hidden caching.  ``reynolds`` / ``mach``
     default to the values derived from ``speed_mps`` and the environment.
+    Optional local density and kinematic viscosity override the environment
+    atmosphere for dynamic pressure and Reynolds number, respectively. An
+    explicit Reynolds number still takes precedence. ``cm_q`` multiplies the
+    standard nondimensional pitch rate ``q * chord / (2 * speed)`` once.
     """
     geom = _geom(cfg)
     area = max(_finite(geom["ref_area_m2"], 0.015), 1.0e-9)
@@ -842,10 +866,20 @@ def evaluate_aero(
     beta = _finite(beta_deg)
     state = atmosphere_state(env, speed, reference_chord_m=chord)
     density = max(state["density_kgm3"], 1.0e-6)
+    kinematic = state["kinematic_viscosity_m2s"]
+    if density_kgm3 is not None:
+        density = float(density_kgm3)
+        if not math.isfinite(density) or density <= 0.0:
+            raise ValueError("density_kgm3 must be finite and positive")
+    if kinematic_viscosity_m2s is not None:
+        kinematic = float(kinematic_viscosity_m2s)
+        if not math.isfinite(kinematic) or kinematic <= 0.0:
+            raise ValueError("kinematic_viscosity_m2s must be finite and positive")
+    local_reynolds = speed * chord / kinematic
 
-    re_value = abs(_finite(reynolds, 0.0)) if reynolds is not None else float(state["reynolds"])
+    re_value = abs(_finite(reynolds, 0.0)) if reynolds is not None else local_reynolds
     if re_value <= 0.0:
-        re_value = float(state["reynolds"])
+        re_value = local_reynolds
     mach_value = abs(_finite(mach, 0.0))
     if mach_value <= 0.0:
         mach_value = float(state["mach"])
@@ -865,6 +899,7 @@ def evaluate_aero(
     cd = (
         cd0
         + (cl * cl / _polar_constant(cfg)) * ground_ratio
+        + separated_pressure_drag_coefficient(alpha, cfg)
         + wave_drag_coefficient(mach_value, compressible)
     ) * drag_scale
 
@@ -895,7 +930,7 @@ def evaluate_aero(
     cm = (
         _finite(cfg.cm0)
         + _finite(cfg.cm_alpha) * deg2rad(alpha)
-        + 0.5 * _finite(cfg.cm_q) * q_hat
+        + _finite(cfg.cm_q) * q_hat
         + elevon["dcm"]
         + cm_roll
         + _finite(cfg.cm_pitch_rate) * q_hat
@@ -950,12 +985,12 @@ def evaluate_aero(
     yawing_nm = dynamic_pressure * area * span * yaw_coeff
 
     stall_angle = effective_stall_alpha_deg(cfg)
-    # The lift curve breaks exactly at ``stall_alpha_deg`` (see
-    # :func:`stall_blend_weight`), so the flag and ``stall_margin`` share the
-    # same threshold: the margin is 0 there and the airframe counts as stalled
-    # strictly beyond it.
-    stalled = bool(alpha > stall_angle)
-    stall_margin = safe_div(stall_angle - alpha, abs(stall_angle) if stall_angle != 0.0 else 1.0, 0.0)
+    # Match both sign-dependent thresholds in stall_blend_weight. The wider
+    # negative threshold is an existing empirical recovery assumption, not
+    # evidence of a measured negative-angle polar for every airframe.
+    stall_threshold = stall_angle if alpha >= 0.0 else max(stall_angle + 15.0, 30.0)
+    stalled = bool(abs(alpha) > stall_threshold)
+    stall_margin = safe_div(stall_threshold - abs(alpha), abs(stall_threshold) if stall_threshold != 0.0 else 1.0, 0.0)
 
     # Aeroelastic deformation estimates from dynamic pressure and stiffness
     stiffness = max(_finite(cfg.paper_stiffness, 0.35), 0.01)

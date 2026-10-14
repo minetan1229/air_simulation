@@ -9,9 +9,8 @@ Conventions (identical to :mod:`physics.config_schema`)
   (``v_world = R(q) @ v_body``), exactly as in :mod:`physics.geometry_utils`.
 * Euler angles are aviation ZYX degrees ``(roll, pitch, yaw)``; a positive pitch
   means nose up, a positive roll means right wing down.
-* Body axes carry the principal inertias from ``derived_properties``:
-  ``x -> roll_inertia_kgm2``, ``y -> pitch_inertia_kgm2``,
-  ``z -> yaw_inertia_kgm2``.
+* Inertia is the symmetric tensor in the declared body frame, including
+  products of inertia; principal values are never reassigned to body axes.
 
 Integration
 -----------
@@ -79,6 +78,7 @@ from .config_schema import (
 )
 from .geometry_utils import (
     angular_acceleration_body,
+    body_inertia_tensor,
     body_to_world,
     cross,
     dot,
@@ -94,6 +94,7 @@ from .geometry_utils import (
     quaternion_to_matrix,
     vec3,
     world_to_body,
+    wind_force_to_body,
 )
 
 __all__ = [
@@ -144,6 +145,10 @@ EVALUATE_KEYS: Tuple[str, ...] = (
     "backend",
     "status",
     "apogee_time_s",
+    "post_apogee_time_s",
+    "glide_entry_time_s",
+    "stable_glide_duration_s",
+    "apex_recovery_status",
 )
 
 # --------------------------------------------------------------------------
@@ -176,7 +181,7 @@ RK4_STIFFNESS_SAFETY = 1.2
 STIFFNESS_CACHE_TOLERANCE = 0.05
 #: Fraction of the mean aerodynamic chord the airframe may travel in one step.
 TRAVEL_FRACTION_PER_STEP = 0.5
-#: Airspeed below which the flow direction comes from gravity / wind tunnel.
+#: Legacy low-speed scale retained for compatible imports; flow uses actual airspeed.
 EFFECTIVE_SPEED_FLOOR_MPS = 0.05
 #: Airspeed handed to the aerodynamics solver (keeps ``q*area`` finite).
 AERO_SPEED_CAP_MPS = 250.0
@@ -184,16 +189,8 @@ AERO_SPEED_CAP_MPS = 250.0
 SPEED_STAT_FLOOR_MPS = 1.0
 
 # --------------------------------------------------------------------------
-# Aeroelastic attitude stabilisation (prompt.md 2.3 restoring torque)
+# Relative-flow keel damping
 # --------------------------------------------------------------------------
-#: Restoring stiffness as a fraction of ``m*g*MAC`` per radian.  Deliberately
-#: small: the aerodynamic ``cm_alpha`` is the dominant pitch stiffness, the
-#: folded keel and the dihedral only remove the slow drift and the spiral mode.
-ELASTIC_RESTORE_GAIN = 0.12
-#: Damping ratio of the structural attitude mode.
-ELASTIC_DAMPING_RATIO = 0.7
-#: Fraction of the pitch stiffness the keel may add in yaw.
-ELASTIC_YAW_GAIN = 0.05
 #: Nondimensional roll / yaw damping of the folded keel, ``C_lp`` and ``C_nr``
 #: referred to the wing span (``moment = q*S*b*C*p_hat`` with
 #: ``p_hat = omega*b/(2V)``). Paper wings have enormous relative damping against
@@ -963,6 +960,8 @@ def aero_forces(
                 "reynolds": None if reynolds is None else clamp(_finite(reynolds, 1.0e5), 1.0e2, 1.0e9),
                 "ground_height_m": max(_finite(ground_height_m, 1.0), 0.0),
                 "angular_rate": vec3(angular_rate),
+                "density_kgm3": density,
+                "kinematic_viscosity_m2s": kinematic_viscosity,
             },
         )
         if out is not None:
@@ -1016,11 +1015,10 @@ def _local_stress(
     dynamic_pressure_pa: float,
     g_load: float,
 ) -> Dict[str, float]:
-    """Wing-root bending stress from the dynamic pressure and the G load.
+    """CPU fallback: tapered distributed lift, folded-root beam estimate.
 
-    ``M_root = q*S*b/2 + m*g_load*g*(|cg_offset_x| + 0.05*MAC)`` and
-    ``sigma = M_root*c_root/I_root`` for the folded root section, normalised by
-    the allowable stress of :data:`ALLOWABLE_STRESS_PA_PER_GSM` per g/m2.
+    Load factor already includes aerodynamic force; pressure is not multiplied
+    again. This reduced section model is not a validated paper failure law.
     """
     area = max(derived["wing_area_m2"], 1.0e-9)
     span = max(derived["wingspan_m"], 1.0e-6)
@@ -1035,8 +1033,9 @@ def _local_stress(
     q = max(_finite(dynamic_pressure_pa), 0.0)
     load = max(_finite(g_load), 0.0)
     gravity = abs(_finite(env.gravity))
-    inertial = mass * load * gravity * (abs(_finite(aircraft.cg_offset_x)) + G_LOAD_LEVER_FRACTION * mac)
-    root_moment = q * area * span * 0.5 + inertial
+    taper = clamp(_finite(aircraft.taper_ratio, 0.5), 0.05, 1.0)
+    root_moment = mass * load * gravity * span * (1.0 + 2.0 * taper) / (12.0 * (1.0 + taper))
+    inertial = 0.0
     sigma = root_moment * lever / inertia
     allowable = ALLOWABLE_STRESS_PA_PER_GSM * gsm
     return {
@@ -1044,7 +1043,7 @@ def _local_stress(
         "allowable_stress_pa": allowable,
         "max_stress_index": sigma / allowable,
         "root_moment_nm": root_moment,
-        "aerodynamic_moment_nm": q * area * span * 0.5,
+        "aerodynamic_moment_nm": root_moment,
         "inertial_moment_nm": inertial,
         "backend": "numpy",
     }
@@ -1106,7 +1105,7 @@ def stress_metrics(
                 "ground_height_m": _finite(ground_height_m),
                 "angular_rate": vec3(angular_rate),
                 "time_s": 0.0,
-                "spanwise": 2,
+                "spanwise": 3,
                 "chordwise": 2,
                 "backend": "numpy",
             },
@@ -1171,26 +1170,12 @@ def effective_alpha_beta(
     attitude relative to the flow gives a positive ``alpha`` and a velocity
     towards the right wing gives a positive ``beta``.
 
-    ``gravity`` is consulted only when the airspeed collapses below
-    :data:`EFFECTIVE_SPEED_FLOOR_MPS` (the first RK4 stages of a hover, or a
-    free-fall trajectory).  It is then interpreted as **already rotated into the
-    body frame**, so the flow is taken to arrive from the direction the airframe
-    falls towards (``-g``) instead of from numerical noise.  With
-    ``env.wind_tunnel_enabled`` the tunnel flow along the body x axis is used
-    instead, which is the physical limit for a stationary model in a tunnel.
+    At zero airspeed no flow direction exists and both angles are defined as
+    zero. Gravity is retained in the signature for caller compatibility, but
+    never substitutes for relative airflow.
     """
     vector = vec3(velocity_body)
     speed = float(np.linalg.norm(vector))
-    if speed < EFFECTIVE_SPEED_FLOOR_MPS:
-        tunnel = bool(getattr(env, "wind_tunnel_enabled", False)) if env is not None else False
-        if tunnel:
-            vector = np.array(
-                [max(_finite(getattr(env, "wind_tunnel_speed", 0.0)), EFFECTIVE_SPEED_FLOOR_MPS), 0.0, 0.0],
-                dtype=np.float64,
-            )
-        else:
-            vector = -normalize(vec3(gravity), fallback=(0.0, 0.0, -1.0)) * EFFECTIVE_SPEED_FLOOR_MPS
-        speed = float(np.linalg.norm(vector))
     if speed < _EPS:
         return 0.0, 0.0
     alpha = math.degrees(math.atan2(float(vector[2]), float(vector[0])))
@@ -1459,6 +1444,9 @@ def resolve_throw(
     )
     moment = np.cross(grip, force_body)
     efficiency = clamp(_finite(cfg.throw_torque_efficiency, 0.15), 0.0, 1.0)
+    inertia[0, 1] = inertia[1, 0] = derived.get("inertia_xy_kgm2", 0.0)
+    inertia[0, 2] = inertia[2, 0] = derived.get("inertia_xz_kgm2", 0.0)
+    inertia[1, 2] = inertia[2, 1] = derived.get("inertia_yz_kgm2", 0.0)
     torque_rate = np.linalg.solve(inertia, moment * duration * efficiency)
     rates = np.array(
         [
@@ -1667,24 +1655,7 @@ class FlightSimulator:
         self._derived: Dict[str, float] = derived
         self._mass: float = max(derived["mass_kg"], 1.0e-9)
         self._chord: float = max(derived["mac_m"], 1.0e-4)
-        self._inertia: np.ndarray = np.diag(
-            [
-                max(derived["roll_inertia_kgm2"], 1.0e-12),
-                max(derived["pitch_inertia_kgm2"], 1.0e-12),
-                max(derived["yaw_inertia_kgm2"], 1.0e-12),
-            ]
-        )
-        self._restoring_gain = (
-            ELASTIC_RESTORE_GAIN
-            * clamp(_finite(self.aircraft.paper_stiffness, 0.35), 0.0, 1.0)
-            * self._mass
-            * abs(_finite(self.environment.gravity))
-            * self._chord
-        )
-        self._restoring_damping = 2.0 * ELASTIC_DAMPING_RATIO * math.sqrt(
-            max(self._restoring_gain * self._mass * self._chord, 0.0)
-            * max(derived["roll_inertia_kgm2"], 1.0e-12)
-        )
+        self._inertia: np.ndarray = body_inertia_tensor(derived)
         self._trim_pitch_deg = self._resolve_trim_pitch()
 
     def _resolve_trim_pitch(self) -> float:
@@ -1716,34 +1687,16 @@ class FlightSimulator:
 
     def _restoring_moment(
         self, quaternion: np.ndarray, omega: np.ndarray, dynamic_pressure: float, speed: float,
-        effective_dihedral_deg: Optional[float] = None,
+        effective_dihedral_deg: Optional[float] = None, beta_deg: float = 0.0,
     ) -> np.ndarray:
-        """Aeroelastic restoring and damping moment about the body axes.
+        """Flow-dependent keel damping and sideslip/dihedral stability.
 
-        Two structural effects are combined, both physically real for a folded
-        paper sheet and both required by prompt.md 2.3 ("attitude stabilisation
-        restoring torque"):
-
-        * a **keel damping** proportional to the roll and yaw rates, scaled by
-          the dynamic pressure and the nondimensional rate ``omega*b/(2V)`` (see
-          :data:`KEEL_ROLL_DAMPING`);
-        * a weak **pendulum restoring** moment of the folded mass towards the
-          elevon trim angle and towards wings level, with critical-ish damping.
-
-        The keel term is small next to the aerodynamic moments in magnitude but
-        it is the only convergent term for the roll and yaw modes.
+        A freely flying body has no gravity-driven orientation stiffness.
+        Static pitch stability and pitch-rate damping belong to aero_domain.
         """
-        roll_deg, pitch_deg, _ = euler_zyx_from_quaternion(quaternion)
-        pitch_error = deg2rad(_finite(pitch_deg) - self._trim_pitch_deg)
-        roll_error = deg2rad(_finite(roll_deg))
         d_deg = _finite(effective_dihedral_deg) if effective_dihedral_deg is not None else _finite(self.aircraft.dihedral_deg)
         dihedral = math.sin(deg2rad(d_deg))
         moment = np.zeros(3, dtype=np.float64)
-        moment[1] = -self._restoring_gain * pitch_error - self._restoring_damping * float(omega[1])
-        moment[0] = (
-            -0.5 * self._restoring_gain * dihedral * roll_error - 0.5 * self._restoring_damping * float(omega[0])
-        )
-        moment[2] = -ELASTIC_YAW_GAIN * self._restoring_gain * float(omega[2])
         area = max(self._derived["wing_area_m2"], 1.0e-9)
         span = max(self._derived["wingspan_m"], 1.0e-6)
         airspeed = max(_finite(speed), 0.0)
@@ -1752,10 +1705,7 @@ class FlightSimulator:
         keel = max(_finite(dynamic_pressure), 0.0) * area * span * rate_hat * scale
         moment[0] += keel * KEEL_ROLL_DAMPING * float(omega[0])
         moment[2] += keel * KEEL_YAW_DAMPING * float(omega[2])
-        # Aerodynamic dihedral restoring couple proportional to dynamic pressure
-        if abs(dihedral) > 1.0e-6 and abs(roll_error) > 1.0e-6:
-            aero_dihedral = -max(_finite(dynamic_pressure), 0.0) * area * span * 0.04 * dihedral * math.sin(roll_error) * scale
-            moment[0] += aero_dihedral
+        moment[0] -= max(_finite(dynamic_pressure), 0.0) * area * span * 0.04 * dihedral * math.sin(deg2rad(beta_deg)) * scale
         return moment
 
     # -- lifecycle --------------------------------------------------------
@@ -1781,7 +1731,7 @@ class FlightSimulator:
             beta = float(getattr(self.environment, "wind_tunnel_beta_deg", 0.0))
             pitch_rad = math.radians(alpha)
             yaw_rad = math.radians(-beta)
-            q = quaternion_from_euler(0.0, pitch_rad, yaw_rad)
+            q = quaternion_from_euler(0.0, alpha, -beta)
             self._state = StateVector(
                 time_s=0.0,
                 position_m=(0.0, 0.0, -1.2),
@@ -1799,6 +1749,7 @@ class FlightSimulator:
         self._rolled_back = False
         self._bounce_count = 0
         self._history.clear()
+        self._next_record_time = float(self._state.time_s)
         self._diagnostics_cache = None
         self._stiffness_cache = None
         self._refresh_derived()
@@ -2004,8 +1955,21 @@ class FlightSimulator:
         effective_alpha_deg = alpha_deg - aero_twist_deg
         effective_dihedral_deg = float(self.aircraft.dihedral_deg) + aero_dihedral_deg
 
+        # Quasi-static trailing-edge bend: bounded pressure response, one
+        # effective fold shared by lift and pitch instead of independent cL0/cm0
+        # scaling. Positive fold is trailing-edge down and therefore nose down.
+        # Compliance is an empirical control-authority parameter, not measured
+        # material elasticity; this model does not describe flutter or hysteresis.
+        # The 8-degree travel ceiling is a conservative empirical control bound,
+        # not a measured material constant or a performance calibration.
+        aero_comp_gain = max(_finite(getattr(self.aircraft, "aeroelastic_compliance", 0.0)), 0.0)
+        stiffness_val = max(_finite(self.aircraft.paper_stiffness, 0.35), 0.05)
+        pressure_ratio = aero_comp_gain * q_dyn / (60.0 * stiffness_val)
+        trailing_edge_bend_deg = 8.0 * pressure_ratio / (1.0 + pressure_ratio)
+        aero_cfg = replace(self.aircraft, elevon_deg=clamp(float(self.aircraft.elevon_deg) + trailing_edge_bend_deg, -45.0, 45.0))
+
         result = aero_forces(
-            self.aircraft,
+            aero_cfg,
             self.environment,
             speed,
             effective_alpha_deg,
@@ -2017,21 +1981,15 @@ class FlightSimulator:
             air["density_kgm3"],
             air["kinematic_viscosity_m2s"],
         )
-        alpha_rad = deg2rad(effective_alpha_deg)
-        cos_a, sin_a = math.cos(alpha_rad), math.sin(alpha_rad)
-        force_body = np.array(
-            [
-                -result.drag_n * cos_a + result.lift_n * sin_a,
-                result.side_n,
-                -result.drag_n * sin_a - result.lift_n * cos_a,
-            ],
-            dtype=np.float64,
-        )
+        force_body = wind_force_to_body(body_relative, result.drag_n, result.side_n, result.lift_n)
 
         # Apparent / Added Mass Tensor:
         # When self.aircraft.added_mass_enabled is True:
         # thin plate added mass normal to the wing m_add_z = (pi / 4.0) * rho * span * chord^2.
         # The effective mass along normal acceleration is m_eff = m + m_add_z.
+        # Optional translational approximation only: rotation-dependent fluid
+        # momentum, wake memory, and added rotational inertia are omitted.
+        # It is unsuitable for quantitative tumbling or apex recovery claims.
         # Adjust linear acceleration in body normal direction accordingly.
         span = max(self._derived["wingspan_m"], 1.0e-6)
         if bool(getattr(self.aircraft, "added_mass_enabled", False)):
@@ -2053,21 +2011,8 @@ class FlightSimulator:
                 [result.rolling_moment_nm, result.pitching_moment_nm, result.yawing_moment_nm],
                 dtype=np.float64,
             )
-            + self._restoring_moment(quaternion, omega, result.dynamic_pressure_pa, speed, effective_dihedral_deg=effective_dihedral_deg)
+            + self._restoring_moment(quaternion, omega, result.dynamic_pressure_pa, speed, effective_dihedral_deg=effective_dihedral_deg, beta_deg=beta_deg)
         )
-
-        # Ground Pitch Coupling:
-        # When near ground (altitude < span), if self.aircraft.ground_pitch_coupling > 0,
-        # add nose-down ground pitching moment to moment_body.
-        ground_pitch_gain = max(_finite(getattr(self.aircraft, "ground_pitch_coupling", 0.0)), 0.0)
-        if ground_pitch_gain > 0.0 and altitude < span and altitude >= -1.0:
-            h_eff = max(altitude, 0.01)
-            # Factor grows as h -> 0: (1 - h/b)
-            proximity = max(0.0, 1.0 - (h_eff / span))
-            # Dynamic pressure * S * c * gain * proximity gives nose-down (negative) pitching moment
-            area = max(self._derived["wing_area_m2"], 1.0e-9)
-            m_ground_pitch = -ground_pitch_gain * proximity * q_dyn * area * self._chord
-            moment_body[1] += m_ground_pitch
 
         angular_acceleration = angular_acceleration_body(self._inertia, omega, moment_body)
         specific_force_body = world_to_body(quaternion, acceleration - gravity_world)
@@ -2100,6 +2045,8 @@ class FlightSimulator:
             "air": air,
             "aeroelastic_dihedral_deg": aero_dihedral_deg,
             "aeroelastic_twist_deg": aero_twist_deg,
+            "trailing_edge_bend_deg": trailing_edge_bend_deg,
+            "geometric_alpha_deg": alpha_deg,
         }
 
     def _derivative(self, y: np.ndarray, time_s: float, core: Optional[Dict[str, Any]] = None) -> np.ndarray:
@@ -2325,6 +2272,8 @@ class FlightSimulator:
             stalled=bool(diag["stalled"]),
             landed=bool(state.landed),
             crashed=bool(state.crashed),
+            flight_mode=self.launch.flight_mode,
+            physics_model_version="rigid_body_repair_v1",
         )
 
     def _record_sample(self) -> None:
@@ -2433,6 +2382,8 @@ class FlightSimulator:
             "crashed": bool(state.crashed),
             "aeroelastic_dihedral_deg": core.get("aeroelastic_dihedral_deg", 0.0),
             "aeroelastic_twist_deg": core.get("aeroelastic_twist_deg", 0.0),
+            "trailing_edge_bend_deg": core.get("trailing_edge_bend_deg", 0.0),
+            "geometric_alpha_deg": core["geometric_alpha_deg"],
         }
         self._diagnostics_cache = packet
         return packet
@@ -2492,6 +2443,8 @@ class FlightSimulator:
             "quaternion_rate_error_radps": diag["quaternion_rate_error_radps"],
             "aeroelastic_dihedral_deg": diag.get("aeroelastic_dihedral_deg", 0.0),
             "aeroelastic_twist_deg": diag.get("aeroelastic_twist_deg", 0.0),
+            "trailing_edge_bend_deg": diag.get("trailing_edge_bend_deg", 0.0),
+            "geometric_alpha_deg": diag.get("geometric_alpha_deg", diag["alpha_deg"]),
         }
 
     def _status(self) -> str:
@@ -2551,7 +2504,7 @@ class FlightSimulator:
             beta = float(getattr(self.environment, "wind_tunnel_beta_deg", 0.0))
             pitch_rad = math.radians(alpha)
             yaw_rad = math.radians(-beta)
-            q = quaternion_from_euler(0.0, pitch_rad, yaw_rad)
+            q = quaternion_from_euler(0.0, alpha, -beta)
             self._state = replace(
                 self._state,
                 position_m=(0.0, 0.0, -1.2),
@@ -2577,7 +2530,7 @@ class FlightSimulator:
             h = min(self._timestep_from(core, y0, time_s), total - travelled)
             if not self._advance(h, y0, time_s, self._derivative(y0, time_s, core)):
                 break
-            travelled += h
+            travelled += float(self._state.time_s) - time_s
             used += 1
             self._state = self._apply_ground_contact(self._state)
             self._diagnostics_cache = None
@@ -2633,6 +2586,7 @@ class FlightSimulator:
         final_x = float(final.x_m) if final else 0.0
         final_y = float(final.y_m) if final else 0.0
         return {
+            **flight_phase_metrics(samples, self._launch.flight_mode),
             "frames": int(len(samples)),
             "points": int(len(samples)),
             "flight_time_s": max(_finite(self._state.time_s), 0.0),
@@ -2642,6 +2596,7 @@ class FlightSimulator:
             "horizontal_range_m": math.hypot(final_x - launch_x, final_y - launch_y),
             "max_altitude_m": max_altitude,
             "apogee_time_s": apogee_time,
+            "post_apogee_time_s": max(_finite(self._state.time_s) - apogee_time, 0.0),
             "max_speed_mps": max_speed,
             "final_speed_mps": diag["speed_mps"],
             "final_altitude_m": diag["altitude_m"],
@@ -2805,6 +2760,10 @@ def evaluate_flight(
         "backend": BACKEND,
         "status": "diverged",
         "apogee_time_s": 0.0,
+        "post_apogee_time_s": 0.0,
+        "glide_entry_time_s": None,
+        "stable_glide_duration_s": 0.0,
+        "apex_recovery_status": "not_observed",
     }
     try:
         aircraft = (
@@ -2835,6 +2794,54 @@ def evaluate_flight(
         samples = simulator.history()
     except Exception:
         return empty
+    return summarize_flight(simulator, summary)
+
+
+def flight_phase_metrics(samples: Sequence[FlightLogSample], mode: str = "legacy") -> Dict[str, Any]:
+    """Operational glide diagnostic, distinct from total apex-to-landing time.
+
+    A qualifying segment descends at <=20 degrees, has airspeed >=1.5 m/s,
+    sink <=2 m/s, |alpha|<=20 degrees, and |pitch rate|<=20 deg/s, and is not
+    stalled. Pitch rate uses wrapped Euler differences, so segments near the
+    Euler singularity (|pitch|>=80 degrees) cannot qualify.
+    One continuous second is required to call recovery.
+    These thresholds are diagnostics, not forces or controller inputs.
+    """
+    if not samples:
+        return {"glide_entry_time_s": None, "stable_glide_duration_s": 0.0, "apex_recovery_status": "not_observed"}
+    apex = max(samples, key=lambda row: row.altitude_m).time_s
+    start = None
+    longest = 0.0
+    entry = None
+    for previous, current in zip(samples, samples[1:]):
+        dt = current.time_s - previous.time_s
+        pitch_change = (current.pitch_deg - previous.pitch_deg + 180.0) % 360.0 - 180.0
+        pitch_rate = abs(pitch_change / dt) if dt > 0 else float("inf")
+        descent_angle = math.degrees(math.atan2(current.vz_mps, math.hypot(current.vx_mps, current.vy_mps)))
+        qualifies = (current.time_s >= apex and 0.0 <= current.vz_mps <= 2.0
+                     and current.speed_mps >= 1.5 and not current.stalled
+                     and abs(current.alpha_deg) <= 20.0 and pitch_rate <= 20.0
+                     and abs(current.pitch_deg) < 80.0 and 0.0 <= descent_angle <= 20.0)
+        if qualifies:
+            if start is None:
+                start = max(previous.time_s, apex)
+            duration = current.time_s - start
+            longest = max(longest, duration)
+            if duration >= 1.0 and entry is None:
+                entry = start
+        else:
+            start = None
+    return {"glide_entry_time_s": entry, "stable_glide_duration_s": longest, "apex_recovery_status": ("not_applicable" if mode == "apex_glide" else "recovered" if entry is not None else "not_observed")}
+
+
+def summarize_flight(simulator: FlightSimulator, summary: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    """Evaluate an existing recorded trajectory without running it twice."""
+    aircraft = simulator.aircraft
+    environment = simulator.environment
+    launch = simulator.launch
+    samples = simulator.history()
+    summary = simulator.metrics() if summary is None else summary
+    total = summary.get("duration_requested_s", simulator.settings.duration_s)
     stall_alpha = abs(_finite(aircraft.stall_alpha_deg, 14.0))
     distance = 0.0
     max_altitude = 0.0
@@ -2893,7 +2900,9 @@ def evaluate_flight(
         "backend": BACKEND,
         "status": status,
         "apogee_time_s": max(_finite(apogee_time), 0.0),
+        "post_apogee_time_s": max(_finite(summary.get("flight_time_s", 0.0)) - apogee_time, 0.0),
     }
+    payload.update(flight_phase_metrics(samples, launch.flight_mode))
     return {key: payload[key] for key in EVALUATE_KEYS}
 
 

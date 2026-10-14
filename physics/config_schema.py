@@ -315,6 +315,7 @@ class AircraftConfig:
     cp_shift_gain: float = 0.0  # dynamic center of pressure shift with alpha (0..1.0)
     aeroelastic_flex: float = 0.0  # dynamic dihedral flex gain with dynamic pressure (0..1.0)
     aeroelastic_twist: float = 0.0  # wingtip washout twist gain with dynamic pressure (0..1.0)
+    aeroelastic_compliance: float = 0.0  # dynamic camber compliance gain under launch pressure (0..5.0)
     paper_grain_angle_deg: float = 0.0  # paper fiber angle: 0 = MD (longitudinal), 90 = CD (transverse)
     paper_anisotropy_ratio: float = 1.8  # E_MD / E_CD ratio (typical paper 1.5..2.2)
     added_mass_enabled: bool = False  # apparent mass tensor for lightweight bodies
@@ -328,6 +329,9 @@ class AircraftConfig:
     roll_inertia_kgm2: float = 0.0  # 0 -> derived from geometry
     pitch_inertia_kgm2: float = 0.0
     yaw_inertia_kgm2: float = 0.0
+    inertia_xy_kgm2: float = 0.0
+    inertia_xz_kgm2: float = 0.0
+    inertia_yz_kgm2: float = 0.0
 
     def resolved(self) -> Dict[str, float]:
         """Return the reference quantities actually used by the solvers."""
@@ -371,6 +375,7 @@ class AircraftConfig:
             cp_shift_gain=clamp(self.cp_shift_gain, 0.0, 2.0),
             aeroelastic_flex=clamp(self.aeroelastic_flex, 0.0, 5.0),
             aeroelastic_twist=clamp(self.aeroelastic_twist, 0.0, 5.0),
+            aeroelastic_compliance=clamp(self.aeroelastic_compliance, 0.0, 5.0),
             paper_grain_angle_deg=clamp(self.paper_grain_angle_deg, -90.0, 90.0),
             paper_anisotropy_ratio=clamp(self.paper_anisotropy_ratio, 1.0, 5.0),
             added_mass_enabled=bool(self.added_mass_enabled),
@@ -798,6 +803,7 @@ class LaunchConfig:
     launch_yaw_deg: float = 0.0
     launch_height_m: float = 1.20
     launch_position_m: Tuple[float, float, float] = (0.0, 0.0, 0.0)
+    flight_mode: str = "legacy"  # legacy | full_flight | apex_glide; persisted with initial conditions
 
     # --- throwing technique ("投げ方") -----------------------------------
     throw_style: str = "direct"
@@ -1214,6 +1220,8 @@ class FlightLogSample:
     stalled: bool = False
     landed: bool = False
     crashed: bool = False
+    flight_mode: str = "legacy"
+    physics_model_version: str = "unknown"
 
 
 FLIGHT_LOG_COLUMNS: Tuple[str, ...] = tuple(
@@ -1262,9 +1270,16 @@ def derived_properties(cfg: AircraftConfig) -> Dict[str, float]:
     mac = (2.0 / 3.0) * root_chord * (1.0 + taper + taper * taper) / (1.0 + taper)
     sheet_area = max(float(cfg.sheet_area_m2), 1.0e-9)
     mass = max(float(cfg.mass_kg), 1.0e-9)
-    inertia_roll = mass * (span * span) / 12.0
-    inertia_pitch = mass * (mac * mac) / 12.0 + mass * 0.05 * area
-    inertia_yaw = inertia_pitch
+    # Uniform, chord-centred trapezoidal sheet. Integrate c(y)*y^2 and
+    # c(y)^3/12 across the span; a rectangular sheet recovers m*b^2/12
+    # and m*c^2/12. Imported meshes can supply the full body-frame tensor.
+    second_y = span * span * (1.0 + 3.0 * taper) / (24.0 * (1.0 + taper))
+    second_x = root_chord * root_chord * (1.0 + taper + taper**2 + taper**3) / (24.0 * (1.0 + taper))
+    thickness = max(float(cfg.paper_gsm), 0.0) * 1.0e-3 / 800.0
+    second_z = thickness * thickness / 12.0
+    inertia_roll = mass * (second_y + second_z)
+    inertia_pitch = mass * (second_x + second_z)
+    inertia_yaw = mass * (second_x + second_y)
     return {
         "wingspan_m": span,
         "wing_area_m2": area,
@@ -1290,6 +1305,9 @@ def derived_properties(cfg: AircraftConfig) -> Dict[str, float]:
         "yaw_inertia_kgm2": float(cfg.yaw_inertia_kgm2)
         if cfg.yaw_inertia_kgm2 > 0.0
         else inertia_yaw,
+        "inertia_xy_kgm2": float(cfg.inertia_xy_kgm2),
+        "inertia_xz_kgm2": float(cfg.inertia_xz_kgm2),
+        "inertia_yz_kgm2": float(cfg.inertia_yz_kgm2),
     }
 
 

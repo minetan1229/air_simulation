@@ -984,7 +984,7 @@ def test_flight_log_rows_use_the_contract_header():
     samples = [FlightLogSample(time_s=0.01, x_m=1.0, stalled=True)]
     rows = flight_log_to_rows(samples)
     assert set(rows[0]) == set(FLIGHT_LOG_COLUMNS)
-    assert len(FLIGHT_LOG_COLUMNS) == 24
+    assert len(FLIGHT_LOG_COLUMNS) == 26
     text = rows_to_csv(rows)
     assert text.split("\r\n")[0].split(",") == list(FLIGHT_LOG_COLUMNS)
     assert parse_csv(text)[0]["stalled"] is True
@@ -1446,6 +1446,8 @@ def test_storage_flight_log_round_trips_fifty_samples(tmp_path):
             right = getattr(copy, column)
             if isinstance(left, bool):
                 assert right is left, column
+            elif isinstance(left, str):
+                assert right == left, column
             else:
                 assert float(right) == pytest.approx(float(left), abs=1e-9, rel=0.0), column
     with open(path, "r", encoding="utf-8", newline="") as handle:

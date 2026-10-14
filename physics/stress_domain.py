@@ -1,106 +1,15 @@
-"""Structural stress domain: wing bending, paper failure and the heat map.
+"""Wing cantilever loads and grid-independent bending stress.
 
-Physics
--------
-Dynamic pressure (indecompressible, ISA level flight)::
+For total normal force F, a linearly tapered half wing carries F/2.
+Its root moment is F*b*(1+2*taper)/(12*(1+taper)). At station y,
+M(y) is the integral of the outboard load times its lever arm. Stress is
+M/Z, with Z = local_chord * thickness**2 * folded_gain / 6 [m^3].
 
-    q = 0.5 * rho * V^2                                       [Pa]
-
-Load factor (steady trimmed glide, lift taken at the mean CL, weight
-``W = m * g``)::
-
-    nz = L / W ,   L = q * S * CL_trim ,   W = m * g
-
-Wing-root bending moment of a linearly tapered half wing, with the
-span-loading factor ``k`` (see :data:`SPAN_LOADING_FACTOR`)::
-
-    M_root = q * S * (b / 2) * nz * k                        [N m]
-
-Exact stress formula
---------------------
-The heat map is a ``chordwise x spanwise`` grid.  ``chordwise`` is indexed
-``j = 0 .. nc-1`` from the **leading edge** to the trailing edge and
-``spanwise`` is indexed ``i = 0 .. ns-1`` across the **full** span, so the
-fuselage centre-line sits at ``i_c = (ns-1)/2`` (port ``y < 0`` for
-``i < i_c``) and the two wing tips sit at the two ends::
-
-    y_i    = (i - i_c) / i_c                                  signed semi-span fraction
-    a_i    = |y_i|                                             absolute semi-span fraction
-
-    # --- 1. local planform chord of a linearly tapered wing ----------------
-    c_root  = 2 S / (b (1 + lambda))                           root chord
-    c_loc_i = c_root * (1 - (1 - lambda) a_i)                  chord at station i
-    c_loc_i = c_loc_i * (1 - TE_FOLD_CHORD_REDUCTION sin|fold_trailing|)
-
-    # --- 2. spanwise bending-moment distribution ---------------------------
-    #   exponent 1 -> uniform span load, 2 -> fully triangular tip load;
-    #   positive dihedral moves the load outboard.
-    p        = 1 + SPAN_SHIFT_GAIN |tan(dihedral)|
-    M_tip    = M_root * TIP_MOMENT_GAIN sin|fold_tip|           winglet fold cantilever
-    M_span_i = 0.5 M_root (1 - a_i)^p + M_tip a_i^3
-
-    # --- 3. dihedral roll couple + sideslip side load ----------------------
-    #   Both are antisymmetric about the centre-line, so flipping the sign of
-    #   the dihedral (or of the sideslip) mirrors the field exactly: the
-    #   raised / windward semi-wing is loaded and the other is relieved.
-    w_i      = 1 - DIHEDRAL_LOAD_COUPLING  tan(dihedral) y_i
-    g_i      = 1 + DIHEDRAL_MOMENT_COUPLING tan(dihedral) y_i
-    f_i      = 1 + SIDELOAD_COUPLING tan(beta) y_i
-    M_span_i = M_span_i * w_i * g_i * f_i
-
-    # --- 4. chordwise thin-plate section-modulus shape ---------------------
-    x_j      = j / (nc - 1)                                    0 = LE, 1 = TE
-    t        = (gsm/1000) / PAPER_THICKNESS_DENOMINATOR          sheet thickness [m]
-              (i.e. gsm/800 mm), clamped to >= 1e-6 m
-    Z        = Z_SCALE_OFFSET + Z_SCALE_GAIN * paper_stiffness  folded section modulus gain
-    arm      = ELEVON_ARM_GAIN (|elevon| + |fold_trailing|)    trailing-edge moment arm [rad]
-    psi_j    = (1 - x_j)^CHORDWISE_EXPONENT + ELEVON_TE_GAIN arm x_j^4
-
-    # --- 5. cell bending stress -------------------------------------------
-    w_cell   = b / ns                                          spanwise panel width
-    sigma_ij = KAPPA_SIGMA 6 M_span_i c_loc_i psi_j / (w_cell t^2 Z)
-
-    # --- 6. colour-code index ----------------------------------------------
-    shape_j  = normalise_heatmap(sigma_ij)                     relative distribution 0..1
-    head     = min(1, max sigma / INDEX_REFERENCE_PA)          absolute severity 0..1
-    index_ij = head * shape_j                                  final 0..1 heat map
-
-Constants (all dimensionless unless noted) are defined below with the
-reasoning for their value.
-
-Calibration and stated limitations
-----------------------------------
-The literal flat-plate value in step 5 for the default 100 g/m^2,
-stiffness 0.35 glider at 12 m/s is 1.155e9 Pa: a 0.125 mm sheet genuinely
-cannot carry 0.57 N m of root bending in pure plate bending.  Real paper
-airframes do not fail that way - they fail by tearing the root crease and
-by flutter - so :data:`KAPPA_SIGMA` converts the ideal flat-plate value to
-the folded-crease value actually reached by the keel and leading-edge
-folds.  It is a single documented calibration constant, chosen so that the
-default glider reaches:
-
-* 67.9 Pa / ``failure_index`` 0.031 / ``ok`` at its own trim speed
-  (3.411 m/s, ``q`` = 7.127 Pa, ``nz`` = 1.0, ``M_root`` = 3.742e-3 N m),
-* 10 396 Pa / ``failure_index`` 4.73 / ``failed`` at 12 m/s,
-* the ``high_load`` and ``failed`` thresholds at 7.163 m/s (2.100 x trim)
-  and 8.139 m/s (2.386 x trim).
-
-Every other constant is either exact (:data:`SPAN_LOADING_FACTOR`) or a
-documented dimensionless coupling.  The model therefore reports a paper
-airplane as structurally sound through its whole trimmed glide and only
-fails it when it is thrown at more than roughly 2.4 x trim speed, which is
-the physical regime in which paper airframes really do tear.
-
-Backend
--------
-The grid is at most 256 x 256 cells (65 536 elements); a CUDA launch
-would be pure launch-latency overhead, so the vectorised NumPy path is
-used unconditionally and :func:`active_backend` reports ``"numpy"``.
-The results are plain Python/NumPy types, which is what the Flask layer
-needs to serialise.
-
-Frame conventions follow :mod:`physics.config_schema`: ``x`` forward,
-``y`` right wing, ``z`` down.
+KAPPA_SIGMA, folded_gain, allowable strength, and fold/load couplings are
+empirical crease approximations, not experimentally validated paper material
+properties. Reported failure status is an unvalidated indicator, not a
+certified fracture prediction. NumPy is the CPU fallback; CuPy is optional.
+Body axes follow config_schema: x forward, y right, z down.
 """
 
 from __future__ import annotations
@@ -166,15 +75,10 @@ __all__ = [
 # --------------------------------------------------------------------------
 # Model constants
 # --------------------------------------------------------------------------
-#: Linear-taper span-loading factor.  ``M_root = q S (b/2) nz k`` assumes the
-#: root carries ``k`` of the "load at the semi-span"; for a uniformly loaded
-#: half wing the root moment is exactly 1/4 of (load x semi-span), and a
-#: tip-loaded (triangular) distribution gives 1/3.  0.35 sits between the
-#: quarter-chord and mid-chord load centres of a real paper planform.
-SPAN_LOADING_FACTOR: float = 0.35
+#: Uniform half-wing root moment divided by total normal load times semispan.
+SPAN_LOADING_FACTOR: float = 0.25
 
-#: Flat-plate bending stress -> folded-crease stress calibration (see the
-#: module docstring).  1 / 1.2e5.
+#: Unvalidated empirical folded-crease stress reduction; retained without retuning.
 KAPPA_SIGMA: float = 9.0e-6
 
 #: Dynamic pressure -> load factor -> root moment -> cell stress is exact;
@@ -425,21 +329,21 @@ def wing_root_bending_moment(
     wingspan_m: float,
     load_factor: float = 1.0,
     cfg: Optional[AircraftConfig] = None,
+    gravity: float = 9.80665,
 ) -> float:
-    """Return the wing-root bending moment ``M = q S (b/2) nz k`` in N m.
+    """Half-wing root moment from a single normal load.
 
-    ``SPAN_LOADING_FACTOR`` (``k = 0.35``) is the linear-taper span-loading
-    factor.  Exactly zero at ``q = 0`` and linear in each argument.
-    If ``cfg`` is provided and has paper grain anisotropy, the moment or load
-    distribution accounts for effective paper stiffness.
+    With cfg, load_factor is aircraft nz and F = m*g*abs(nz); q is not
+    multiplied again. Without cfg, the fourth argument is a normal-force
+    coefficient and F=q*S*abs(coefficient), with uniform span loading.
     """
-    q = _finite_or(float(dynamic_pressure_pa), 0.0)
-    area = _finite_or(float(wing_area_m2), 0.0)
-    span = _finite_or(float(wingspan_m), 0.0)
-    nz = _finite_or(float(load_factor), 0.0)
-    if q <= 0.0 or area <= 0.0 or span <= 0.0 or nz <= 0.0:
-        return 0.0
-    return q * area * (span * 0.5) * nz * SPAN_LOADING_FACTOR
+    q = max(_finite_or(dynamic_pressure_pa, 0.0), 0.0)
+    area = max(_finite_or(wing_area_m2, 0.0), 0.0)
+    span = max(_finite_or(wingspan_m, 0.0), 0.0)
+    nz = abs(_finite_or(load_factor, 0.0))
+    force = q * area * nz if cfg is None else max(cfg.mass_kg, 0.0) * max(gravity, 0.0) * nz
+    taper = 1.0 if cfg is None else clamp(cfg.taper_ratio, 0.05, 1.0)
+    return force * span * (1.0 + 2.0 * taper) / (12.0 * (1.0 + taper))
 
 
 def effective_paper_stiffness(cfg: AircraftConfig) -> float:
@@ -507,12 +411,11 @@ def aeroelastic_deformations(
     t3 = max(thickness ** 3, 1.0e-18)
     denom = max(eff_stiff * t3, 1.0e-18)
 
-    # Reference normalisation constants:
-    # Under typical flight conditions (q ~ 10 Pa, S ~ 0.015, b/2 ~ 0.1, t ~ 1.25e-4 m),
-    # q * S * (b/2) * nz / (E_eff * t^3) is dimensionless bending parameter.
-    # Normalised so gain 1.0 produces ~ 10 deg at high q.
+    # Empirical compliance [deg*m^2/N]; paper_stiffness is dimensionless.
+    # nz already carries dynamic pressure through L/W, so use force only once.
     norm_scale = 1.0e-10
-    delta_dihedral = (q * area * (span * 0.5) * load * flex_gain * norm_scale) / denom
+    normal_force = max(cfg.mass_kg, 0.0) * 9.80665 * load
+    delta_dihedral = (normal_force * (span * 0.5) * flex_gain * norm_scale) / denom
     washout_twist = (q * area * c_mac * twist_gain * norm_scale) / denom
 
     return {
@@ -550,8 +453,8 @@ def paper_allowable_stress(paper_gsm: float, paper_stiffness: float) -> float:
 
     ``A = 2500 (gsm/100)^0.5 (0.6 + 0.8 stiffness)``
 
-    The base value 2500 Pa is the fold-tear stress of 100 g/m^2 uncreped
-    stock.  The square-root grammage scaling follows the tear force of a
+    The base value 2500 Pa is an unvalidated empirical calibration for
+    100 g/m^2 stock, not a measured material strength.  The square-root grammage scaling follows the tear force of a
     crease, which grows with the number of stacked fibres; the linear
     stiffness term models the loss of fold sharpness (and therefore of
     usable tear strength) as the paper is made stiffer.  Monotonically
@@ -708,9 +611,12 @@ def stress_field(
     chordwise: int = 16,
     beta_deg: float = 0.0,
     backend: str = "auto",
+    gravity: float = 9.80665,
 ) -> Dict[str, Any]:
     """Build the ``chordwise x spanwise`` wing stress heat map.
 
+    load_factor is the prescribed aircraft normal load divided by m*g.
+    Dynamic pressure is metadata here; it is not multiplied into nz again.
     Accelerated on CUDA GPU via CuPy when available.
     """
     derived = derived_properties(cfg)
@@ -741,7 +647,7 @@ def stress_field(
     semispan = (span * 0.5) * (1.0 - TIP_SPAN_REDUCTION * tip_factor)
 
     # --- root moment -------------------------------------------------------
-    root_moment = wing_root_bending_moment(q, area, span, nz)
+    root_moment = wing_root_bending_moment(q, area, span, nz, cfg, gravity)
 
     # --- local chord -------------------------------------------------------
     chord_root = _root_chord(area, span, taper)
@@ -757,16 +663,19 @@ def stress_field(
 
     # --- spanwise axis (full span, centre-line at i_c) ---------------------
     centre = (ns - 1) * 0.5
-    half_index = max(centre, 1.0)
+    half_index = max(centre, _EPS)
     i_axis = xp.arange(ns, dtype=float)
     y_signed = (i_axis - centre) / half_index
     y_abs = xp.abs(y_signed)
 
-    # span-loading exponent: 1 = uniform load, 2 = triangular tip load
-    exponent = 1.0 + SPAN_SHIFT_GAIN * abs(tilt)
-    tip_moment = root_moment * TIP_MOMENT_GAIN * tip_factor
-    moment = 0.5 * root_moment * xp.power(xp.clip(1.0 - y_abs, 0.0, 1.0), exponent)
-    moment = moment + tip_moment * xp.power(y_abs, 3.0)
+    # Exact cantilever integral for w(u) proportional to 1-(1-taper)*u.
+    # Integral_a^1 [1-(1-taper)*u]*(u-a) du.
+    remaining = xp.clip(1.0 - y_abs, 0.0, 1.0)
+    integral = taper * remaining**2 / 2.0 + (1.0 - taper) * remaining**3 / 6.0
+    root_integral = (1.0 + 2.0 * taper) / 6.0
+    moment = root_moment * integral / root_integral
+    # A tip fold modifies the section capacity, not a fictitious free-tip moment.
+    moment = moment * (1.0 + TIP_MOMENT_GAIN * tip_factor)
 
     # dihedral roll couple + span load transfer + sideslip side load
     load_mult = 1.0 - DIHEDRAL_LOAD_COUPLING * tilt * y_signed
@@ -789,10 +698,8 @@ def stress_field(
     shape = shape + ELEVON_TE_GAIN * arm * xp.power(x_axis, 4.0)
 
     # --- cell bending stress [Pa] -----------------------------------------
-    panel_width = max(span / ns, _EPS)
-    scale = KAPPA_SIGMA * 6.0 / (panel_width * thickness * thickness * z_gain)
-    stress = (moment[:, xp.newaxis] * local_chord[:, xp.newaxis]) * shape[xp.newaxis, :]
-    stress = stress * scale
+    section_modulus = xp.maximum(local_chord * thickness * thickness * z_gain / 6.0, 1.0e-30)
+    stress = (KAPPA_SIGMA * moment / section_modulus)[:, xp.newaxis] * shape[xp.newaxis, :]
     stress = xp.nan_to_num(stress.T, nan=0.0, posinf=0.0, neginf=0.0)
     stress = xp.maximum(stress, 0.0)
 
@@ -824,8 +731,10 @@ def stress_field(
     ]
 
     return {
+        "backend": actual_backend,
+        "material_model_validated": False,
         "stress_index": [[float(v) for v in row] for row in index_grid],
-        "stress_pa": [[float(v) for v in row] for row in stress],
+        "stress_pa": [[float(v) for v in row] for row in stress_np],
         "spanwise": ns,
         "chordwise": nc,
         "max_stress_index": float(index_grid.max()),
@@ -884,6 +793,7 @@ def analyse(
         chordwise=chordwise,
         beta_deg=beta_deg,
         backend=backend,
+        gravity=env.gravity,
     )
     out["speed_mps"] = float(speed)
     out["density_kgm3"] = float(density)

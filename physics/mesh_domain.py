@@ -1821,13 +1821,17 @@ def compute_metrics(
     specific = inertia_tensor_mesh(verts, tris, max(mass, 1.0e-12), cg)
     trace = float(np.trace(specific))
     if not np.all(np.isfinite(specific)) or trace <= 0.0:
-        # No enclosed volume (open/flat sheet): thin-plate reference estimate.
-        specific = inertia_tensor_box(
-            1.0,
-            max(float(planform["wingspan_m"]), 1.0e-6),
-            max(float(planform["mean_chord_m"]), 1.0e-6),
-            PAPER_THICKNESS_M,
-        )
+        # Uniform surface mass on an open paper sheet. Exact triangle
+        # second moments preserve body axes and off-diagonal components.
+        corners = verts[tris] - np.asarray(cg)
+        areas = 0.5 * np.linalg.norm(np.cross(corners[:, 1] - corners[:, 0],
+                                            corners[:, 2] - corners[:, 0]), axis=1)
+        weights = areas / max(float(areas.sum()), 1.0e-30) / 12.0
+        sums = corners.sum(axis=1)
+        second = np.einsum("i,ij,ik->jk", weights, sums, sums)
+        for index in range(3):
+            second += np.einsum("i,ij,ik->jk", weights, corners[:, index], corners[:, index])
+        specific = np.trace(second) * np.eye(3) - second
     inertia = specific * mass
 
     metrics = MeshMetrics(
@@ -2193,7 +2197,6 @@ class MeshLibrary:
         config = dataclasses.replace(template)
 
         tensor = np.asarray(metrics.inertia_tensor, dtype=np.float64).reshape(3, 3)
-        principal, _axes = principal_inertia_from_matrix(tensor)
         sheet_area = max(float(metrics.planform_area_m2), float(metrics.surface_area_m2), 1.0e-9)
 
         config.wing_area_m2 = max(float(metrics.planform_area_m2), 1.0e-9)
@@ -2202,10 +2205,14 @@ class MeshLibrary:
         config.aspect_ratio = max(float(metrics.aspect_ratio), 1.0e-3)
         config.mass_kg = max(float(metrics.mass_kg), 1.0e-9)
         config.sheet_area_m2 = sheet_area
-        # Principal moments sorted ascending: roll (span axis) < pitch < yaw.
-        config.roll_inertia_kgm2 = max(float(principal[0]), 1.0e-12)
-        config.pitch_inertia_kgm2 = max(float(principal[1]), 1.0e-12)
-        config.yaw_inertia_kgm2 = max(float(principal[2]), 1.0e-12)
+        # Keep the tensor in the geometry's body frame. Eigenvalue ordering
+        # does not identify the roll, pitch or yaw axes.
+        config.roll_inertia_kgm2 = max(float(tensor[0, 0]), 1.0e-12)
+        config.pitch_inertia_kgm2 = max(float(tensor[1, 1]), 1.0e-12)
+        config.yaw_inertia_kgm2 = max(float(tensor[2, 2]), 1.0e-12)
+        config.inertia_xy_kgm2 = float(tensor[0, 1])
+        config.inertia_xz_kgm2 = float(tensor[0, 2])
+        config.inertia_yz_kgm2 = float(tensor[1, 2])
         return config
 
 

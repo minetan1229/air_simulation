@@ -343,7 +343,7 @@ def test_algorithm_payload_is_complete_and_finite(surrogate_path: bool, algorith
 
     assert result["pareto_front"]
     for member in result["pareto_front"]:
-        assert set(member) == {"objectives", "vector", "params"}
+        assert set(member) == {"objectives", "vector", "params", "physics"}
         assert set(member["objectives"]) == set(cfg.objectives)
         assert len(member["vector"]) == len(FAST_VARIABLES)
         assert all(finite(value) for value in member["vector"])
@@ -668,3 +668,45 @@ def test_optimiser_module_has_no_placeholder_tokens() -> None:
     engine_source = open(parallel_engine.__file__, encoding="utf-8").read()
     for token in ("TODO", "FIXME", "NotImplementedError", "XXX"):
         assert token not in engine_source
+
+
+def test_flight_evaluator_exposes_model_fidelity(surrogate_path):
+    result = parallel_engine.evaluate_case({"aircraft": {}, "environment": {}, "launch": {}, "duration_s": .1})
+    assert result["model"] == "analytical_glide_surrogate"
+    assert result["approximate"] is True
+    assert result["physics_verification_eligible"] is False
+
+
+def test_gpu_optimizer_batch_identifies_approximate_model():
+    info = parallel_engine.get_gpu_info()
+    if not (info["available"] and info["backend"] == "cupy"):
+        pytest.skip("CuPy CUDA device unavailable")
+    rows = parallel_engine.gpu_batch_evaluate_cases([{"aircraft": {}, "environment": {}, "launch": {}, "duration_s": .1}]*2)
+    assert len(rows) == 2
+    assert all(row["backend"] == "cupy" and row["model"] == "translational_ensemble" and row["approximate"] and not row["physics_verification_eligible"] for row in rows)
+
+
+def test_real_evaluator_metadata_does_not_claim_reduced_model(monkeypatch):
+    from types import SimpleNamespace
+    monkeypatch.setattr(parallel_engine, "_flight_module", lambda: SimpleNamespace(evaluate_flight=lambda *args: {"status": "landed", "backend": "numpy"}))
+    result = parallel_engine.evaluate_case({})
+    assert result["model"] == "rigid_body_6dof"
+    assert result["approximate"] is False
+    assert result["backend"] == "numpy"
+    assert "calibration" in result["limitations"][0]
+
+
+def test_optimizer_result_preserves_mixed_physics_warning(monkeypatch):
+    import physics.optimizer_domain as domain
+    cfg = make_cfg("grid", objectives=["max_distance"], weights={"max_distance":1.0})
+    run = domain._Run("grid", cfg, cfg.resolved_variables(), 2, None, None)
+    for model, approximate, score in [("rigid_body_6dof", False, 1), ("translational_ensemble", True, 2)]:
+        run.evaluations += 1
+        run._record([variable.low for variable in run.variables], {name:score for name in run.objectives}, {"model":model, "approximate":approximate, "physics_verification_eligible":not approximate, "limitations":[]})
+    result = run.result(2)
+    assert result["physics_models"] == ["rigid_body_6dof", "translational_ensemble"]
+    assert result["approximate"] is True
+    assert result["physics_verification_eligible"] is False
+    assert any("direct comparison" in value for value in result["limitations"])
+    assert result["best_physics"]["model"] == "translational_ensemble"
+    assert all("physics" in row for row in result["pareto_front"])

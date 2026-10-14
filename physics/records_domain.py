@@ -614,15 +614,53 @@ class RecordPreset:
         source.update(self.aircraft)
         return AircraftConfig(**source)
 
+    @property
+    def has_apex_glide(self) -> bool:
+        """Only fixed-wing duration entries with an apex recipe support this mode."""
+        return bool(self.category == "indoor_duration" and self.calibration is not None
+                    and self.calibration.release_height_m > self.throw.release_height_m + 1.0)
+
+    def flight_selection(self, calibrated: bool = False, flight_mode: Optional[str] = None) -> Tuple[ThrowRecipe, Dict[str, Any]]:
+        if flight_mode not in (None, "full_flight", "apex_glide"):
+            raise ValueError("flight_mode must be full_flight or apex_glide")
+        if flight_mode == "apex_glide" and not self.has_apex_glide:
+            raise ValueError("apex_glide is unavailable for this preset; use full_flight")
+        requested_source = "calibration" if calibrated else "documented_throw"
+        if flight_mode is None:
+            recipe = self.calibration if calibrated and self.calibration else self.throw
+        elif flight_mode == "apex_glide":
+            recipe = self.calibration
+        elif calibrated and self.calibration is not None and not self.has_apex_glide:
+            recipe = self.calibration
+        else:
+            recipe = self.throw
+        source = "calibration" if recipe is self.calibration else "documented_throw"
+        resolved_mode = "apex_glide" if self.has_apex_glide and recipe is self.calibration else "full_flight"
+        fallback = source != requested_source
+        return recipe, {
+            "requested_flight_mode": flight_mode,
+            "flight_mode": resolved_mode,
+            "recipe_source": source,
+            "requested_recipe_source": requested_source,
+            "source_fallback": fallback,
+            "source_fallback_reason": "Requested source has no recipe for the selected start mode; available recipe retained." if fallback else "",
+            "performance_validated": False,
+        }
+
+    def throw_recipe(self, calibrated: bool = False, flight_mode: Optional[str] = None) -> ThrowRecipe:
+        """Resolve the actual recipe for API/UI reporting and launch construction."""
+        return self.flight_selection(calibrated, flight_mode)[0]
+
     def launch_config(
-        self, base: Optional[LaunchConfig] = None, calibrated: bool = False
+        self, base: Optional[LaunchConfig] = None, calibrated: bool = False,
+        flight_mode: Optional[str] = None,
     ) -> LaunchConfig:
         """The preset throw condition.
 
-        ``calibrated=True`` swaps in :attr:`calibration` (the throw this solver
-        can actually fly stably) instead of the documented one.
+        An explicit start mode is independent of calibration-source selection.
+        Omitting the mode preserves the historical calibrated flag behavior.
         """
-        recipe = self.calibration if calibrated and self.calibration else self.throw
+        recipe, _ = self.flight_selection(calibrated, flight_mode)
         source = as_dict(base) if base is not None else {}
         source.update(self.launch)
         # The airframe is trimmed for RECORD_TRIM_ALPHA_DEG, so the hand has to
@@ -634,6 +672,7 @@ class RecordPreset:
                 "launch_speed": recipe.release_speed_mps,
                 "launch_angle_deg": recipe.launch_angle_deg,
                 "launch_height_m": recipe.release_height_m,
+                "flight_mode": flight_mode or "legacy",
             }
         )
         if recipe.hand_force_n > 0.0 and recipe.hand_duration_s > 0.0:
@@ -642,8 +681,8 @@ class RecordPreset:
             source["throw_speed_source"] = "impulse"
             source["throw_force_n"] = recipe.hand_force_n
             source["throw_duration_s"] = recipe.hand_duration_s
-        elif not calibrated and source.get("throw_speed_source") == "impulse":
-            # For uncalibrated presets with direct documented release speeds, use direct mode
+        elif source.get("throw_speed_source") == "impulse":
+            # A recipe with an explicit release speed must not inherit a hand impulse.
             source["throw_speed_source"] = "direct"
         return LaunchConfig(**source)
 
@@ -670,6 +709,8 @@ class RecordPreset:
             "design_class_ld_ceiling": spec.get("ld_ceiling", 0.0),
             "achievement": self.achievement.as_payload(),
             "throw": self.throw.as_payload(),
+            "default_flight_mode": "full_flight",
+            "flight_modes": {"full_flight": self.throw.as_payload()},
             "citations": [
                 CITATIONS[key].as_payload() for key in self.citations if key in CITATIONS
             ],
@@ -693,9 +734,11 @@ class RecordPreset:
         if self.calibration is not None:
             payload["calibration"] = self.calibration.as_payload()
             payload["calibration_note"] = self.calibration_note
+        if self.has_apex_glide:
+            payload["flight_modes"]["apex_glide"] = self.calibration.as_payload()
         if include_configs:
             payload["aircraft"] = as_dict(aircraft)
-            payload["launch"] = as_dict(self.launch_config())
+            payload["launch"] = as_dict(self.launch_config(flight_mode="full_flight"))
             payload["environment"] = as_dict(self.environment_config())
         return payload
 
@@ -1064,10 +1107,10 @@ RECORD_PRESET_CATALOGUE: Tuple[RecordPreset, ...] = (
         throw=ThrowRecipe(
             technique="Full-power indoor throw, no run-up",
             technique_ja="全力投擲�E�助走なし�E室冁E��E",
-            throw_style="direct",
-            release_speed_mps=3.5,
-            launch_angle_deg=-3.4,
-            release_height_m=14.0,
+            throw_style="record_overhand",
+            release_speed_mps=26.0,
+            launch_angle_deg=80.0,
+            release_height_m=2.0,
             provenance=Provenance.RECONSTRUCTED,
             rules=("blackburn_vertical", "blackburn_speed", "unite_full_power", "winter_conditions"),
             hand_force_n=0.0,
@@ -1088,17 +1131,18 @@ RECORD_PRESET_CATALOGUE: Tuple[RecordPreset, ...] = (
             wingspan_m=0.3600,
             mass_kg=0.0050,
             cL0=0.25,
-            cd0=0.0115,
+            cd0=0.0112,
             cm0=0.035,
             cm_alpha=-0.40,
-            cm_q=-1.0,
+            cm_q=-3.5,
+            aeroelastic_compliance=0.8,
             elevon_deg=0.0,
         ),
         launch={
             "launch_position_m": (0.0, 0.0, 0.0),
-            "launch_speed": 3.3,
-            "launch_angle_deg": -2.8,
-            "launch_height_m": 17.3,
+            "launch_speed": 26.0,
+            "launch_angle_deg": 80.0,
+            "launch_height_m": 2.0,
             "launch_roll_deg": 0.0,
             "launch_yaw_deg": 0.0,
             "release_pitch_deg": 1.8,
@@ -1161,7 +1205,7 @@ RECORD_PRESET_CATALOGUE: Tuple[RecordPreset, ...] = (
             technique="Full-power indoor throw, no run-up",
             technique_ja="全力投擲�E�助走なし�E室冁E��E",
             throw_style="record_overhand",
-            release_speed_mps=27.0,
+            release_speed_mps=26.0,
             launch_angle_deg=80.0,
             release_height_m=2.0,
             provenance=Provenance.RECONSTRUCTED,
@@ -1183,14 +1227,15 @@ RECORD_PRESET_CATALOGUE: Tuple[RecordPreset, ...] = (
             cd0=0.0118,
             cm0=0.035,
             cm_alpha=-0.40,
-            cm_q=-1.0,
+            cm_q=-3.5,
+            aeroelastic_compliance=0.8,
             elevon_deg=0.0,
         ),
         launch={
             "launch_position_m": (0.0, 0.0, 0.0),
-            "launch_speed": 3.3,
-            "launch_angle_deg": -2.8,
-            "launch_height_m": 16.5,
+            "launch_speed": 26.0,
+            "launch_angle_deg": 80.0,
+            "launch_height_m": 2.0,
             "launch_roll_deg": 0.0,
             "launch_yaw_deg": 0.0,
             "release_pitch_deg": 1.8,
@@ -1344,17 +1389,18 @@ RECORD_PRESET_CATALOGUE: Tuple[RecordPreset, ...] = (
             wingspan_m=0.3600,
             mass_kg=0.0048,
             cL0=0.245,
-            cd0=0.0116,
+            cd0=0.0090,
             cm0=0.035,
             cm_alpha=-0.40,
-            cm_q=-1.0,
+            cm_q=-3.5,
+            aeroelastic_compliance=0.8,
             elevon_deg=0.0,
         ),
         launch={
             "launch_position_m": (0.0, 0.0, 0.0),
-            "launch_speed": 3.15,
-            "launch_angle_deg": -2.5,
-            "launch_height_m": 16.12,
+            "launch_speed": 22.0,
+            "launch_angle_deg": 78.0,
+            "launch_height_m": 2.0,
             "launch_roll_deg": 0.0,
             "launch_yaw_deg": 0.0,
             "release_pitch_deg": 1.8,
@@ -1418,18 +1464,22 @@ RECORD_PRESET_CATALOGUE: Tuple[RecordPreset, ...] = (
         aircraft=_airframe(
             name="Blackburn glider",
             mass_kg=0.0055,
-            wing_area_m2=0.0175,
-            wingspan_m=0.2800,
-            cd0=0.0135,
-            cL0=0.230,
+            wing_area_m2=0.0125,
+            wingspan_m=0.2400,
+            cd0=0.0385,
+            cL0=0.250,
+            cm0=0.035,
+            cm_alpha=-0.40,
+            cm_q=-3.5,
+            aeroelastic_compliance=0.8,
             elevon_deg=0.0,
             paper_stiffness=0.45,
         ),
         launch={
             "launch_position_m": (0.0, 0.0, 0.0),
-            "launch_speed": 3.3,
-            "launch_angle_deg": -2.5,
-            "launch_height_m": 11.8,
+            "launch_speed": 26.9,
+            "launch_angle_deg": 80.0,
+            "launch_height_m": 2.0,
             "launch_roll_deg": 0.0,
             "launch_yaw_deg": 0.0,
             "release_pitch_deg": 1.8,
@@ -1493,7 +1543,7 @@ RECORD_PRESET_CATALOGUE: Tuple[RecordPreset, ...] = (
             wing_area_m2=0.0120,
             wingspan_m=0.3000,
             mass_kg=0.0050,
-            cd0=0.0135,
+            cd0=0.0385,
             cm0=0.010,
             cm_q=0.0,
             elevon_deg=0.5,
@@ -1957,17 +2007,19 @@ def apply_preset(
     launch: Optional[LaunchConfig] = None,
     environment: Optional[EnvironmentConfig] = None,
     calibrated: bool = False,
+    flight_mode: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Merge a record preset onto the caller's configs and return all three."""
     entry = preset(key)
     new_aircraft = entry.aircraft_config(aircraft)
-    new_launch = entry.launch_config(launch, calibrated=calibrated)
+    new_launch = entry.launch_config(launch, calibrated=calibrated, flight_mode=flight_mode)
     new_environment = entry.environment_config(environment)
     return {
         "aircraft": as_dict(new_aircraft),
         "launch": as_dict(new_launch),
         "environment": as_dict(new_environment),
         "calibrated": bool(calibrated),
+        **entry.flight_selection(calibrated, flight_mode)[1],
         "preset": entry.as_payload(include_configs=False),
     }
 
@@ -1983,30 +2035,29 @@ def simulate_preset(
     launch: Optional[LaunchConfig] = None,
     environment: Optional[EnvironmentConfig] = None,
     record_interval_s: float = 0.05,
+    flight_mode: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Fly a record preset and compare the result with the published figure.
 
-    Runs the throw that is actually documented when ``calibrated`` is false, and
-    the throw this solver can fly stably when it is true, so the payload always
-    shows both the physics and the model-fidelity gap.
+    Explicit modes choose the start condition independently of recipe source.
+    Historical calibration recipes remain available, but are not certified
+    against the repaired engine. The comparison exposes actual performance.
     """
     from . import flight_sim
 
     entry = preset(key)
     air = entry.aircraft_config(aircraft)
     env_cfg = entry.environment_config(environment)
-    lch = entry.launch_config(launch, calibrated=calibrated)
+    lch = entry.launch_config(launch, calibrated=calibrated, flight_mode=flight_mode)
     settings = SimulationSettings(
         duration_s=max(float(duration_s), 0.1),
         record_interval_s=max(float(record_interval_s), 1.0e-3),
-    )
-    summary = flight_sim.evaluate_flight(
-        as_dict(air), as_dict(env_cfg), as_dict(lch), duration_s=settings.duration_s
     )
     sim = flight_sim.FlightSimulator(
         aircraft=air, environment=env_cfg, launch=lch, settings=settings
     )
     metrics = sim.simulate(settings.duration_s, record=True)
+    summary = flight_sim.summarize_flight(sim, metrics)
     samples = [as_dict(s) for s in sim.history()]
     throw = flight_sim.resolve_throw(lch, air, env_cfg)
     measured = entry.achievement.value
@@ -2025,6 +2076,7 @@ def simulate_preset(
         "name": entry.name,
         "name_ja": entry.name_ja,
         "calibrated": bool(calibrated),
+        **entry.flight_selection(calibrated, flight_mode)[1],
         "throw": as_dict(throw),
         "metrics": metrics,
         "samples": samples,
@@ -2084,17 +2136,14 @@ def _limitations(
                 "key": "pull_factor",
                 "severity": "high",
                 "message": (
-                    f"The documented throw pulls {pull:.1f} g on the "
-                    f"reconstructed airframe. Past about 6 g the solver's pitch "
-                    "mode diverges and the glider pitches over instead of "
-                    "settling, so the trajectory is dominated by a "
-                    "numerical trim excursion rather than by the throw."
+                    f"The selected release speed gives an estimated trim-load "
+                    f"factor of {pull:.1f} g on the reconstructed airframe. "
+                    "This static estimate is not the measured peak flight load "
+                    "and does not establish numerical divergence."
                 ),
                 "message_ja": (
-                    f"記録投封E�E機体加速度は推定機体で {pull:.1f} g に達する、E"
-                    "紁E6 g を趁E��るとピッチモードが発散し、機体�E投擲ではなぁE"
-                    "trim 外乱でnose-over するため、弾道�E投擲条件ではなぁE"
-                    "数値皁E�� trim 振動に支配されてしまぁE��E"
+                    f"選択した発射速度での静的トリム荷重推定は {pull:.1f} g です。"
+                    "これは実際の飛行中の最大荷重ではなく、数値発散の証拠でもありません。"
                 ),
             }
         )
@@ -2129,8 +2178,8 @@ def _limitations(
                 "message": (
                     "The airframe geometry and the release speed are "
                     "reconstructions: only the result, the venue, the date and "
-                    "the rules are published. Use the calibrated throw to "
-                    "compare like with like."
+                    "the rules are published. A historical calibration recipe "
+                    "does not validate the repaired flight model."
                 ),
                 "message_ja": (
                     "機体諸允E��投封E�E速�E推定値。�E開されてぁE��のは記録値・"
@@ -2138,6 +2187,12 @@ def _limitations(
                 ),
             }
         )
+    out.append({
+        "key": "performance_unvalidated",
+        "severity": "info",
+        "message": "Performance has not been validated against real flight measurements under the repaired model; calibration selects a recipe only.",
+        "message_ja": "修正後モデルの性能は実飛行測定と照合していません。校正フラグはレシピの選択のみを表します。",
+    })
     return out
 
 
@@ -2184,6 +2239,9 @@ def verification_report(
                 "name_ja": entry.name_ja,
                 "category": entry.category,
                 "skipped": False,
+                "flight_mode": simulated["flight_mode"],
+                "launch": simulated["launch"],
+                "performance_validated": False,
                 **simulated["comparison"],
                 "max_g_load": simulated["metrics"].get("max_g_load", 0.0),
                 "max_ld_ratio": simulated["metrics"].get("max_ld_ratio", 0.0),
@@ -2200,12 +2258,10 @@ def verification_report(
         "max_ratio": max(ratios) if ratios else 0.0,
         "duration_s": duration_s,
         "method": (
-            "Every row is flown with the *calibrated* throw, because the "
-            "documented record throws pull 9-12 g on the reconstructed "
-            "airframes and the solver's pitch mode diverges above about 6 g. "
-            "'ratio' is simulated / measured, so 1.0 is a perfect "
-            "reproduction; the distance record is reproduced closely and the "
-            "duration record is not, which is a model-fidelity limit and not a "
-            "dispute about the record."
+            "Rows use historical calibration recipes with legacy start-mode "
+            "selection; duration entries may begin at the apex and therefore "
+            "do not demonstrate a complete hand-launched flight. Each row "
+            "reports its actual start mode and launch. The ratio is simulated "
+            "metric / published metric, not evidence of validated performance."
         ),
     }
