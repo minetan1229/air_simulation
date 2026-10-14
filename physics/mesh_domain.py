@@ -1662,11 +1662,11 @@ def load_geometry(
 
     backend = "numpy"
     parsed_geometry: Optional[Tuple[np.ndarray, np.ndarray]] = None
-    if fmt in ("glb", "gltf"):
-        trimesh_result = _trimesh_load(data, filename if fmt == "glb" else f"{filename}.glb")
-        if trimesh_result is not None:
-            parsed_geometry = trimesh_result
-            backend = "trimesh"
+    target_filename = filename if ("." in filename) else f"{filename}.{fmt}"
+    trimesh_result = _trimesh_load(data, target_filename)
+    if trimesh_result is not None:
+        parsed_geometry = trimesh_result
+        backend = "trimesh"
 
     if parsed_geometry is None:
         if fmt == "obj":
