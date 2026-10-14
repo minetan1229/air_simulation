@@ -28,3 +28,6 @@ smoke_*.json
 htmlcov/
 .vscode/
 .idea/
+
+# Prevent accidental shadowing of standard modules
+antigravity.py

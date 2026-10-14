@@ -20,4 +20,5 @@ __all__ = [
     "optimizer_domain",
     "job_manager",
     "storage_domain",
+    "gravity_modifier",
 ]
