@@ -147,6 +147,17 @@ export class Viewport {
     this.tunnelParams = { speed: 12.0, alpha: 4.0, beta: 0.0, q: 0, cl: 0, cd: 0, cm: 0 };
     this.tunnelTime = 0;
 
+    // 100-plane swarm fleet GPU instancing and camera modes
+    this.fleetMesh = null;
+    this.fleetTrajectories = [];
+    this.fleetTime = 0;
+    this.fleetDuration = 0;
+    this.fleetLeadIndex = 0;
+    this.fleetPlaying = false;
+    this.cameraMode = "reset"; // "lead" | "swarm" | "fleet" | "reset"
+    this._swarmCenter = new THREE.Vector3(0, 1.8, 0);
+    this._leadPos = new THREE.Vector3(0, 1.8, 0);
+
     this.particles = new WindParticles(this.scene, this.renderer);
 
     this.gpuInfo = this._detectGpuRenderer();
@@ -1179,6 +1190,207 @@ export class Viewport {
     });
   }
 
+  /* ------------------------------------------------ 100-plane Swarm GPU Instancing */
+  setEnsembleFleet(trajectories) {
+    this.clearFleet();
+    if (!trajectories || !trajectories.length) return;
+
+    this.fleetTrajectories = trajectories;
+    const count = trajectories.length;
+
+    // Use current airframe geometry or synthesize fallback
+    const geo = (this.airframeMesh && this.airframeMesh.geometry)
+      ? this.airframeMesh.geometry.clone()
+      : buildAirframeGeometry({});
+
+    // Instanced material with custom paper roughness
+    const mat = createAirframeMaterial();
+    mat.vertexColors = false;
+    mat.roughness = 0.85;
+
+    this.fleetMesh = new THREE.InstancedMesh(geo, mat, count);
+    this.fleetMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+
+    let maxT = 0;
+    let maxDist = -1;
+    let leadIdx = 0;
+
+    const sorted = [...trajectories].sort((a, b) => (Number(b.landing_distance_m) || 0) - (Number(a.landing_distance_m) || 0));
+    const bestId = sorted.length ? sorted[0].id : null;
+    const worstId = sorted.length ? sorted[sorted.length - 1].id : null;
+
+    const dummy = new THREE.Object3D();
+    const color = new THREE.Color();
+
+    trajectories.forEach((tr, i) => {
+      const pts = tr.points || [];
+      const dist = Number(tr.landing_distance_m) || 0;
+      if (dist > maxDist) {
+        maxDist = dist;
+        leadIdx = i;
+      }
+      const tFlight = Number(tr.flight_time_s) || (pts.length * 0.02);
+      if (tFlight > maxT) maxT = tFlight;
+
+      // Color coding: 1st=Gold, 2nd=Silver, 3rd=Bronze, Worst=Red, Others=Pastel blue/green
+      if (tr.id === bestId) {
+        color.setHex(0xffb300); // 1st Gold (最高値)
+      } else if (tr.id === worstId) {
+        color.setHex(0xe53935); // Worst Red (最低値)
+      } else if (sorted[1] && tr.id === sorted[1].id) {
+        color.setHex(0xb0bec5); // 2nd Silver
+      } else if (sorted[2] && tr.id === sorted[2].id) {
+        color.setHex(0xcd7f32); // 3rd Bronze
+      } else {
+        const hue = 0.52 + ((i % 12) / 12) * 0.18;
+        color.setHSL(hue, 0.70, 0.60);
+      }
+      this.fleetMesh.setColorAt(i, color);
+
+      if (pts.length > 0) {
+        const p0 = pts[0];
+        dummy.position.set(Number(p0.x) || 0, Number(p0.z) || 1.8, Number(p0.y) || 0);
+        dummy.scale.setScalar(1.0);
+        dummy.updateMatrix();
+        this.fleetMesh.setMatrixAt(i, dummy.matrix);
+      }
+    });
+
+    if (this.fleetMesh.instanceColor) this.fleetMesh.instanceColor.needsUpdate = true;
+    this.fleetMesh.instanceMatrix.needsUpdate = true;
+
+    this.fleetDuration = Math.max(maxT, 1.0);
+    this.fleetLeadIndex = leadIdx;
+    this.fleetTime = 0;
+    this.fleetPlaying = true;
+
+    this.scene.add(this.fleetMesh);
+  }
+
+  clearFleet() {
+    if (this.fleetMesh) {
+      this.scene.remove(this.fleetMesh);
+      if (this.fleetMesh.geometry) this.fleetMesh.geometry.dispose();
+      if (this.fleetMesh.material) this.fleetMesh.material.dispose();
+      this.fleetMesh = null;
+    }
+    this.fleetTrajectories = [];
+    this.fleetPlaying = false;
+    this.fleetTime = 0;
+  }
+
+  _updateFleet(dt) {
+    if (!this.fleetMesh || !this.fleetTrajectories.length) return;
+    this.fleetTime += dt;
+    const t = this.fleetTime;
+    const count = this.fleetTrajectories.length;
+    const dummy = new THREE.Object3D();
+    const currentPos = new THREE.Vector3();
+    const dir = new THREE.Vector3();
+
+    const swarmSum = new THREE.Vector3();
+    let activeCount = 0;
+    let allLanded = true;
+
+    for (let i = 0; i < count; i += 1) {
+      const tr = this.fleetTrajectories[i];
+      const pts = tr.points;
+      if (!pts || !pts.length) continue;
+
+      const tFlight = Number(tr.flight_time_s) || (pts.length * 0.02);
+      const isLanded = t >= tFlight;
+      if (!isLanded) allLanded = false;
+
+      const ptIdxRaw = pts.length > 1 ? (Math.min(t / Math.max(tFlight, 0.001), 1.0) * (pts.length - 1)) : 0;
+      const idx0 = Math.floor(ptIdxRaw);
+      const idx1 = Math.min(idx0 + 1, pts.length - 1);
+      const frac = ptIdxRaw - idx0;
+
+      const p0 = pts[idx0];
+      const p1 = pts[idx1];
+
+      // Coordinate mapping: sim (x, y, z) -> three (x, z, y)
+      const x0 = Number(p0.x) || 0, y0 = Number(p0.z) || 0, z0 = Number(p0.y) || 0;
+      const x1 = Number(p1.x) || 0, y1 = Number(p1.z) || 0, z1 = Number(p1.y) || 0;
+
+      currentPos.set(
+        x0 + (x1 - x0) * frac,
+        Math.max(y0 + (y1 - y0) * frac, 0.015),
+        z0 + (z1 - z0) * frac
+      );
+
+      dummy.position.copy(currentPos);
+
+      if (!isLanded && (idx1 > idx0 || pts.length > 1)) {
+        dir.set(x1 - x0, y1 - y0, z1 - z0);
+        if (dir.lengthSq() > 1e-6) {
+          dir.normalize();
+          dummy.quaternion.setFromUnitVectors(new THREE.Vector3(1, 0, 0), dir);
+        }
+      } else {
+        dummy.quaternion.set(0, 0, 0, 1);
+      }
+
+      dummy.scale.setScalar(1.0);
+      dummy.updateMatrix();
+      this.fleetMesh.setMatrixAt(i, dummy.matrix);
+
+      if (!isLanded) {
+        swarmSum.add(currentPos);
+        activeCount += 1;
+      }
+
+      if (i === this.fleetLeadIndex) {
+        this._leadPos.copy(currentPos);
+      }
+    }
+
+    this.fleetMesh.instanceMatrix.needsUpdate = true;
+
+    if (activeCount > 0) {
+      this._swarmCenter.copy(swarmSum.multiplyScalar(1 / activeCount));
+    } else if (count > 0) {
+      this._swarmCenter.copy(this._leadPos);
+    }
+
+    if (allLanded && t > this.fleetDuration + 2.0) {
+      this.fleetPlaying = false;
+    }
+  }
+
+  setCameraMode(mode) {
+    this.cameraMode = mode || "reset";
+    if (this.cameraMode === "reset") {
+      this.resetCamera();
+    }
+  }
+
+  _updateCameraMode(dt) {
+    if (!this.controls || !this.camera) return;
+    const lerpFactor = Math.min(1.0, dt * 4.0);
+
+    if (this.cameraMode === "lead" && this._leadPos) {
+      // 1位機 (トップ機) を斜め後方・上方から追従
+      const target = this._leadPos;
+      this.controls.target.lerp(target, lerpFactor);
+      const camDesired = new THREE.Vector3(target.x - 2.8, target.y + 1.2, target.z + 1.4);
+      this.camera.position.lerp(camDesired, lerpFactor);
+    } else if (this.cameraMode === "swarm" && this._swarmCenter) {
+      // 飛行中の群れ重心 (Swarm Center of Mass) を自動追従
+      const target = this._swarmCenter;
+      this.controls.target.lerp(target, lerpFactor);
+      const camDesired = new THREE.Vector3(target.x - 6.5, target.y + 3.8, target.z + 5.5);
+      this.camera.position.lerp(camDesired, lerpFactor);
+    } else if (this.cameraMode === "fleet") {
+      // 100機全体を見渡す壮大なパノラマ俯瞰視点
+      const center = this._swarmCenter || new THREE.Vector3(12, 1, 0);
+      const target = new THREE.Vector3(center.x, 0.5, 0);
+      this.controls.target.lerp(target, lerpFactor);
+      const camDesired = new THREE.Vector3(center.x - 14.0, 11.0, 12.0);
+      this.camera.position.lerp(camDesired, lerpFactor);
+    }
+  }
+
   /* ------------------------------------------------ Video Recording */
   isRecording() {
     return Boolean(this._recorder && this._recorder.state === "recording");
@@ -1365,6 +1577,11 @@ export class Viewport {
       this._updateTunnelDynamics(dt);
     }
 
+    if (this.fleetMesh && this.fleetPlaying) {
+      this._updateFleet(dt);
+    }
+    this._updateCameraMode(dt);
+
     this.particles.update(dt, this.elapsed);
     this.controls.update();
     this.renderer.render(this.scene, this.camera);
@@ -1400,6 +1617,7 @@ export class Viewport {
   dispose() {
     this.running = false;
     this.stopRecording();
+    this.clearFleet();
     this.clearEnsembleTracks();
     cancelAnimationFrame(this.frameHandle);
     this._observer.disconnect();
