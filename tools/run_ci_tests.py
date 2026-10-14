@@ -1,6 +1,7 @@
 """CI test runner script: runs pytest, prints output, and reports summary."""
 
 import json
+import os
 import subprocess
 import sys
 import urllib.request
@@ -52,12 +53,39 @@ def main() -> int:
             for line in output_lines
             if any(k in line for k in ("FAILED ", "ERROR ", "failed in", "failures in"))
         ]
-        summary_text = "\n".join(failures[-15:]) if failures else "Pytest failed (see CI logs)"
+        summary_text = "\n".join(failures[-20:]) if failures else "Pytest failed (see CI logs)"
+
+        # Write to GitHub Step Summary if running in GitHub Actions
+        step_summary_path = os.environ.get("GITHUB_STEP_SUMMARY")
+        if step_summary_path:
+            try:
+                with open(step_summary_path, "a", encoding="utf-8") as f:
+                    f.write(f"## ❌ Pytest Failures (Exit code {ret})\n\n")
+                    f.write(f"```\n{summary_text}\n```\n\n")
+                    f.write("### Detailed Test Output (Last 150 lines)\n\n```\n")
+                    f.write("".join(output_lines[-150:]))
+                    f.write("\n```\n")
+            except Exception as exc:
+                print(f"Warning: could not write GITHUB_STEP_SUMMARY: {exc}", file=sys.stderr)
+
+        for line in failures:
+            escaped = line.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+            print(f"::error title=Pytest Failure::{escaped}", flush=True)
+
         msg = f"⚠️ **CI Test Failed (exit code {ret})**:\n```\n{summary_text[:1800]}\n```"
         notify_discord(msg)
     else:
         passed = [line.strip() for line in output_lines if "passed in" in line]
         summary_text = passed[-1] if passed else "All tests passed"
+
+        step_summary_path = os.environ.get("GITHUB_STEP_SUMMARY")
+        if step_summary_path:
+            try:
+                with open(step_summary_path, "a", encoding="utf-8") as f:
+                    f.write(f"## ✅ All Pytest Tests Passed\n\n`{summary_text}`\n")
+            except Exception as exc:
+                print(f"Warning: could not write GITHUB_STEP_SUMMARY: {exc}", file=sys.stderr)
+
         msg = f"✅ **CI All Tests Passed**: {summary_text}"
         notify_discord(msg)
 
