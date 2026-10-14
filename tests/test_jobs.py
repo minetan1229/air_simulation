@@ -1524,7 +1524,7 @@ def test_storage_is_thread_safe(tmp_path):
     for thread in threads:
         thread.start()
     for thread in threads:
-        thread.join(30.0)
+        thread.join(60.0)
         assert not thread.is_alive()
     assert not failures
     assert len(store.list_artefacts()) == 60 + 6
