@@ -312,6 +312,15 @@ class ConsoleApp {
       "hud-ld",
       "hud-cm",
       "hud-tunnel-status",
+      "hud-tunnel-aoa",
+      "hud-tunnel-speed",
+      "tunnel-slider-aoa",
+      "tunnel-slider-aoa-val",
+      "tunnel-slider-speed",
+      "tunnel-slider-speed-val",
+      "cam-mode-fleet",
+      "cam-mode-swarm",
+      "cam-mode-lead",
       "tunnel-hud",
       "tunnel-toggle",
       "tp-glide",
@@ -567,7 +576,27 @@ class ConsoleApp {
       });
     }
     const reset = document.getElementById("btn-view-reset");
-    if (reset) reset.addEventListener("click", () => this.viewport && this.viewport.resetCamera());
+    if (reset) reset.addEventListener("click", () => {
+      this._setCameraChipActive("btn-view-reset");
+      if (this.viewport) this.viewport.resetCamera();
+    });
+
+    const camModes = [
+      { id: "cam-mode-fleet", mode: "fleet" },
+      { id: "cam-mode-swarm", mode: "swarm" },
+      { id: "cam-mode-lead", mode: "lead" },
+    ];
+    for (const { id, mode } of camModes) {
+      const el = document.getElementById(id);
+      if (el) {
+        el.addEventListener("click", () => {
+          this._setCameraChipActive(id);
+          if (this.viewport) this.viewport.setCameraMode(mode);
+        });
+      }
+    }
+
+    this._initTunnelControls();
 
     const btnGpuEnsemble = document.getElementById("btn-gpu-ensemble");
     if (btnGpuEnsemble) {
@@ -655,10 +684,13 @@ class ConsoleApp {
           throw new Error("アンサンブルシミュレーションの結果が空です");
         }
 
-        // Render trajectories in Three.js viewport (default to top 1 to prevent freeze/browser crash)
+        // Render trajectories and 100-plane InstancedMesh in Three.js viewport
         if (this.viewport && res.sample_trajectories.length) {
           this.viewport.setEnsembleTracks(res.sample_trajectories);
           this.viewport.filterEnsembleTracks("top1");
+          this.viewport.setEnsembleFleet(res.sample_trajectories);
+          this.viewport.setCameraMode("lead");
+          this._setCameraChipActive("cam-mode-lead");
         }
 
         const backendStr = res.backend_display || res.backend || "cupy";
@@ -1659,6 +1691,66 @@ class ConsoleApp {
     return payload;
   }
 
+  _setCameraChipActive(activeId) {
+    const ids = ["cam-mode-fleet", "cam-mode-swarm", "cam-mode-lead", "btn-view-reset"];
+    ids.forEach((id) => {
+      const el = document.getElementById(id);
+      if (el) {
+        if (id === activeId) {
+          el.classList.add("active");
+          el.style.backgroundColor = "var(--accent)";
+          el.style.color = "#ffffff";
+        } else {
+          el.classList.remove("active");
+          el.style.backgroundColor = "";
+          el.style.color = "";
+        }
+      }
+    });
+  }
+
+  _initTunnelControls() {
+    const aoaSlider = this.dom["tunnel-slider-aoa"];
+    const speedSlider = this.dom["tunnel-slider-speed"];
+
+    if (aoaSlider) {
+      aoaSlider.addEventListener("input", (e) => {
+        const val = Number(e.target.value);
+        this.store.set("environment", "wind_tunnel_alpha_deg", val, "mode");
+        if (this.dom["tunnel-slider-aoa-val"]) this.dom["tunnel-slider-aoa-val"].textContent = `${val.toFixed(1)}°`;
+        if (this.dom["hud-tunnel-aoa"]) this.dom["hud-tunnel-aoa"].textContent = `${val.toFixed(1)}°`;
+        this._updateTunnelPose();
+        this._updateTrim();
+      });
+    }
+
+    if (speedSlider) {
+      speedSlider.addEventListener("input", (e) => {
+        const val = Number(e.target.value);
+        this.store.set("environment", "wind_tunnel_speed", val, "mode");
+        if (this.dom["tunnel-slider-speed-val"]) this.dom["tunnel-slider-speed-val"].textContent = `${val.toFixed(1)} m/s`;
+        if (this.dom["hud-tunnel-speed"]) this.dom["hud-tunnel-speed"].textContent = `${val.toFixed(1)} m/s`;
+        this._updateTunnelPose();
+        this._updateTrim();
+      });
+    }
+
+    const presetBtns = document.querySelectorAll(".tunnel-preset-btn");
+    presetBtns.forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const targetAoa = Number(btn.getAttribute("data-aoa"));
+        if (Number.isFinite(targetAoa)) {
+          if (aoaSlider) aoaSlider.value = targetAoa;
+          this.store.set("environment", "wind_tunnel_alpha_deg", targetAoa, "mode");
+          if (this.dom["tunnel-slider-aoa-val"]) this.dom["tunnel-slider-aoa-val"].textContent = `${targetAoa.toFixed(1)}°`;
+          if (this.dom["hud-tunnel-aoa"]) this.dom["hud-tunnel-aoa"].textContent = `${targetAoa.toFixed(1)}°`;
+          this._updateTunnelPose();
+          this._updateTrim();
+        }
+      });
+    });
+  }
+
   _updateTunnelPose() {
     if (!this.viewport || !this.tunnelMode) return;
     const env = this.store.data.environment || {};
@@ -1670,6 +1762,18 @@ class ConsoleApp {
     const cl = Number(aero.cl ?? 0.35);
     const cd = Number(aero.cd ?? 0.08);
     const cm = Number(aero.cm ?? 0.0);
+
+    // Sync HUD labels and slider positions
+    if (this.dom["hud-tunnel-aoa"]) this.dom["hud-tunnel-aoa"].textContent = `${alpha.toFixed(1)}°`;
+    if (this.dom["hud-tunnel-speed"]) this.dom["hud-tunnel-speed"].textContent = `${speed.toFixed(1)} m/s`;
+    if (this.dom["tunnel-slider-aoa-val"]) this.dom["tunnel-slider-aoa-val"].textContent = `${alpha.toFixed(1)}°`;
+    if (this.dom["tunnel-slider-speed-val"]) this.dom["tunnel-slider-speed-val"].textContent = `${speed.toFixed(1)} m/s`;
+    if (this.dom["tunnel-slider-aoa"] && Math.abs(Number(this.dom["tunnel-slider-aoa"].value) - alpha) > 0.01) {
+      this.dom["tunnel-slider-aoa"].value = alpha;
+    }
+    if (this.dom["tunnel-slider-speed"] && Math.abs(Number(this.dom["tunnel-slider-speed"].value) - speed) > 0.01) {
+      this.dom["tunnel-slider-speed"].value = speed;
+    }
 
     this.viewport.updateTunnelParams({
       speed,

@@ -239,14 +239,43 @@
         <div class="hud-row"><span class="hud-key">V∞</span><span class="hud-val num" id="hud-flow">—</span></div>
       </div>
 
-      <div class="vp-hud vp-hud-tr" id="tunnel-hud" hidden>
+      <div class="vp-hud vp-hud-tr" id="tunnel-hud" hidden style="min-width: 200px;">
         <div class="hud-title">風洞実験室 / WIND TUNNEL</div>
         <div class="hud-row"><span class="hud-key">動態</span><span class="hud-val" id="hud-tunnel-status" style="color:#1a73e8;font-weight:600;">リアルタイム空力応答</span></div>
         <div class="hud-row"><span class="hud-key">流線</span><span class="hud-val" style="color:#34a853;font-size:11px;">煙線レイク・翼干渉・翼端渦 ON</span></div>
+        <div class="hud-row"><span class="hud-key">迎角 α</span><span class="hud-val num" id="hud-tunnel-aoa" style="font-weight:700;color:#1a73e8;">4.0°</span></div>
+        <div class="hud-row"><span class="hud-key">風速 V</span><span class="hud-val num" id="hud-tunnel-speed" style="font-weight:700;">12.0 m/s</span></div>
         <div class="hud-row"><span class="hud-key">C_L</span><span class="hud-val num" id="hud-cl">—</span></div>
         <div class="hud-row"><span class="hud-key">C_D</span><span class="hud-val num" id="hud-cd">—</span></div>
         <div class="hud-row"><span class="hud-key">L/D</span><span class="hud-val num" id="hud-ld">—</span></div>
         <div class="hud-row"><span class="hud-key">C_m</span><span class="hud-val num" id="hud-cm">—</span></div>
+
+        <!-- インタラクティブ迎角・風速スライダー -->
+        <div style="margin-top:8px; border-top:1px solid rgba(0,0,0,0.08); padding-top:6px;">
+          <div style="display:flex; justify-content:space-between; align-items:center; font-size:10px; margin-bottom:2px;">
+            <span>迎角 (AoA) 調整</span>
+            <span id="tunnel-slider-aoa-val" class="num" style="font-weight:600; color:#1a73e8;">4.0°</span>
+          </div>
+          <input type="range" id="tunnel-slider-aoa" min="-15" max="30" step="0.5" value="4" style="width:100%; height:4px; cursor:pointer;" title="迎角をリアルタイム調整">
+        </div>
+
+        <div style="margin-top:6px;">
+          <div style="display:flex; justify-content:space-between; align-items:center; font-size:10px; margin-bottom:2px;">
+            <span>風洞風速</span>
+            <span id="tunnel-slider-speed-val" class="num" style="font-weight:600;">12.0 m/s</span>
+          </div>
+          <input type="range" id="tunnel-slider-speed" min="0" max="30" step="0.5" value="12" style="width:100%; height:4px; cursor:pointer;" title="風速をリアルタイム調整">
+        </div>
+
+        <!-- クイック迎角テストプリセット -->
+        <div style="display:flex; flex-wrap:wrap; gap:3px; margin-top:8px;">
+          <button type="button" class="btn btn-mini tunnel-preset-btn" data-aoa="0" style="padding:1px 4px; font-size:9.5px;">高速 0°</button>
+          <button type="button" class="btn btn-mini tunnel-preset-btn" data-aoa="4" style="padding:1px 4px; font-size:9.5px; border-color:#1a73e8; color:#1a73e8;">滑空 4°</button>
+          <button type="button" class="btn btn-mini tunnel-preset-btn" data-aoa="10" style="padding:1px 4px; font-size:9.5px;">高揚力 10°</button>
+          <button type="button" class="btn btn-mini tunnel-preset-btn" data-aoa="16" style="padding:1px 4px; font-size:9.5px; color:#ea4335;">臨界失速 16°</button>
+          <button type="button" class="btn btn-mini tunnel-preset-btn" data-aoa="24" style="padding:1px 4px; font-size:9.5px; color:#d93025;">深失速 24°</button>
+          <button type="button" class="btn btn-mini tunnel-preset-btn" data-aoa="-6" style="padding:1px 4px; font-size:9.5px;">逆迎角 -6°</button>
+        </div>
       </div>
 
       <div class="vp-hud vp-hud-bl">
