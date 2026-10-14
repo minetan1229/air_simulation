@@ -1294,6 +1294,8 @@ def investigate_run():
     JOB_MANAGER.start(job.job_id)
 
     def progress_cb(pct: int, total: int, msg: str) -> None:
+        if JOB_MANAGER.is_cancelled(job.job_id) or JOB_MANAGER.is_cancel_requested(job.job_id):
+            raise RuntimeError(f"Job {job.job_id} cancelled")
         try:
             JOB_MANAGER.update(job.job_id, pct, total_evaluations=total, message=msg)
         except KeyError:
@@ -1316,6 +1318,11 @@ def investigate_run():
                     RESULT_CACHE.pop(next(iter(RESULT_CACHE)))
             JOB_MANAGER.finish(job.job_id, message=f"Completed auto-investigation: {res.summary.get('primary_issue', 'OK')}")
         except Exception as exc:
+            try:
+                if JOB_MANAGER.is_cancelled(job.job_id):
+                    return
+            except KeyError:
+                return
             log.error("investigation job %s failed: %s\n%s", job.job_id, exc, traceback.format_exc())
             try:
                 JOB_MANAGER.fail(job.job_id, str(exc))
