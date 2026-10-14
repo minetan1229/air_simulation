@@ -207,7 +207,7 @@ def test_isa_isothermal_limit_matches_the_barometric_formula() -> None:
     assert pressure == pytest.approx(101325.0 * math.exp(-9.80665 * 1000.0 / (287.05 * 288.15)), rel=1e-12)
 
 
-def test_isa_density_is_pressure_over_r_times_t() -> None:
+def test_isa_density_is_pressure_over_r_times_t_discrete() -> None:
     for altitude in (0.0, 2500.0, 8000.0):
         t = isa_temperature(altitude)
         p = isa_pressure(altitude)

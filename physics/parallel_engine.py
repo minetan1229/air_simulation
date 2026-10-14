@@ -44,6 +44,7 @@ import os
 import pickle
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
+ProgressCallback = Callable[[int, int, Any], None]
 
 from .config_schema import (
     LAPSE_RATE_ISA,

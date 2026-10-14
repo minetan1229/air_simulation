@@ -13,10 +13,10 @@ jobs:
       - name: リポジトリのコードを取得
         uses: actions/checkout@v4
 
-      - name: Python 3.14 環境のセットアップ
+      - name: Python 3.11 環境のセットアップ
         uses: actions/setup-python@v5
         with:
-          python-version: '3.14'
+          python-version: '3.11'
           cache: 'pip'
 
       - name: 依存ライブラリと検証ツールのインストール
