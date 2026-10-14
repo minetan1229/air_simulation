@@ -96,15 +96,6 @@
         <button class="btn btn-mini" id="btn-config-reset" type="button" title="サーバの既定値に戻す">既定へ</button>
       </div>
       <div class="rail-body" id="rail-left-body">
-        <div class="rail-launch-hero">
-          <button class="btn btn-primary btn-launch-hero" id="btn-rail-launch" type="button" title="現在のパラメータで飛行軌跡を一括シミュレーション計算して再生します (Enter)">
-            <img src="https://api.iconify.design/material-symbols/rocket-launch.svg?color=%23ffffff" class="ui-icon" alt=""> 飛行シミュレーション発射
-          </button>
-          <button class="btn btn-gpu btn-launch-hero" id="btn-rail-gpu-ensemble" type="button" style="margin-top:6px;" title="NVIDIA RTX 4060 GPUで100機を同時に一括シミュレーション計算">
-            <img src="https://api.iconify.design/material-symbols/electric-bolt.svg?color=%23ffffff" class="ui-icon" alt=""> GPU 100機一括同時飛行
-          </button>
-        </div>
-
         <!-- ギネス世界記録・投擲モード -->
         <section class="group" data-group="records" open>
           <button class="group-head" type="button" aria-expanded="true">
@@ -231,9 +222,11 @@
         <button class="chip" id="tgl-grip" type="button" data-on="1" title="持ち手接触点 (M)">持ち手</button>
         <button class="chip" id="tgl-follow" type="button" data-on="1" title="機体追従 (C)">追従</button>
         <button class="chip" id="tgl-heat" type="button" data-on="1" title="応力ヒートマップ (H)">応力</button>
-        <button class="chip" id="btn-gpu-ensemble" type="button" title="GPU (CuPy) で100機を同時に一括並列シミュレーション"><img src="https://api.iconify.design/material-symbols/electric-bolt.svg?color=%23188038" class="ui-icon" alt=""> GPU 100機同時飛行</button>
-        <button class="chip chip-rec" id="btn-record-video" type="button" title="3Dシミュレーション動画を録画・保存 (WebM/MP4)"><img src="https://api.iconify.design/material-symbols/videocam.svg?color=%23d93025" class="ui-icon" alt=""> 録画</button>
-        <button class="chip" id="btn-view-reset" type="button" title="視点を初期化 (V)">視点</button>
+        <span class="toolbar-sep" aria-hidden="true"></span>
+        <button class="chip" id="cam-mode-fleet" type="button" title="100機全体を見渡す俯瞰カメラ">俯瞰</button>
+        <button class="chip" id="cam-mode-swarm" type="button" title="群れの重心を追尾するカメラ">群れ重心</button>
+        <button class="chip" id="cam-mode-lead" type="button" title="先頭トップ機を追尾するカメラ">トップ機</button>
+        <button class="chip" id="btn-view-reset" type="button" title="視点を初期化 (V)">リセット</button>
       </div>
 
       <div class="vp-hud vp-hud-tl">
@@ -241,6 +234,8 @@
         <div class="hud-row"><span class="hud-key">β</span><span class="hud-val num" id="hud-beta">—</span></div>
         <div class="hud-row"><span class="hud-key">V</span><span class="hud-val num" id="hud-speed">—</span></div>
         <div class="hud-row"><span class="hud-key">q</span><span class="hud-val num" id="hud-q">—</span></div>
+        <div class="hud-row"><span class="hud-key">L/D</span><span class="hud-val num" id="hud-ld-live" style="color:#1a73e8;font-weight:700;" title="瞬時揚抗比 (Lift-to-Drag Ratio)">—</span></div>
+        <div class="hud-row"><span class="hud-key">滑空比</span><span class="hud-val num" id="hud-glide-ratio" style="color:#188038;font-weight:700;" title="滑空比 (水平速度/沈下速度)">—</span></div>
         <div class="hud-row"><span class="hud-key">V∞</span><span class="hud-val num" id="hud-flow">—</span></div>
       </div>
 
@@ -272,91 +267,6 @@
         <strong>3D ビューを初期化できませんでした</strong>
         <p id="vp-notice-msg"></p>
         <p class="muted">設定・数値計算・最適化はそのまま利用できます。</p>
-      </div>
-
-      <!-- 🚀 直感型クイック投擲・3D操作バー (Floating Quick Launch Bar) -->
-      <div class="quick-launch-dock" id="quick-launch-dock">
-        <!-- メイン操作ボタン群 -->
-        <div class="quick-launch-actions">
-          <button class="btn-main-throw" id="quick-btn-throw" type="button" title="現在の設定で飛行機を投げる (Space / Enter)">
-            <svg class="ui-icon" viewBox="0 0 24 24" fill="currentColor"><path d="m13.13 22.19-1.63-3.83c1.57-.58 3.04-1.5 4.35-2.73l-2.72 6.56M5.64 12.5l-3.83-1.63 6.56-2.72c-1.23 1.31-2.15 2.78-2.73 4.35m8.58-8.58C12.9 5.24 11.23 7.31 9.77 9.77l4.46 4.46c2.46-1.46 4.53-3.13 5.85-4.45 1.54-1.54 2.42-3.15 2.58-4.24.03-.22-.05-.44-.22-.61-.17-.17-.39-.25-.61-.22-1.09.16-2.7 1.04-4.24 2.58M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2"/></svg>
-            <div class="throw-text-wrap">
-              <span class="throw-title">投げる</span>
-              <span class="throw-hint">ENTER</span>
-            </div>
-          </button>
-
-          <button class="btn-quick-play" id="quick-btn-play" type="button" title="飛行軌跡の再生 / 一時停止 (Space)">
-            <svg class="ui-icon" id="quick-play-icon" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
-            <div class="play-text-wrap">
-              <span class="play-title" id="quick-play-title">再生</span>
-              <span class="play-hint">SPACE</span>
-            </div>
-          </button>
-
-          <button class="btn-quick-reset" id="quick-btn-reset" type="button" title="最初の投擲位置に戻る (R)">
-            <svg class="ui-icon" viewBox="0 0 24 24" fill="currentColor"><path d="M12 5V1L7 6l5 5V7c3.31 0 6 2.69 6 6s-2.69 6-6 6-6-2.69-6-6H4c0 4.42 3.58 8 8 8s8-3.58 8-8-3.58-8-8-8z"/></svg>
-            <span class="quick-btn-label">最初へ</span>
-          </button>
-          
-          <button class="btn-ensemble-throw" id="quick-btn-ensemble" type="button" title="GPU並列計算で100機を同時に一斉投擲！最高記録を競います">
-            <svg class="ui-icon" viewBox="0 0 24 24" fill="#188038"><path d="M11 21h-1l1-7H7.5c-.88 0-.33-.75-.31-.78C8.48 10.94 10.42 7.54 13 3h1l-1 7h3.5c.49 0 .56.33.47.51l-.07.15L11 21z"/></svg>
-            <div class="ensemble-text-wrap">
-              <span class="ensemble-title">100機一斉</span>
-              <span class="ensemble-sub">GPU 100機</span>
-            </div>
-          </button>
-
-          <button class="btn-dock-toggle" id="quick-dock-toggle" type="button" title="投げ方・旋回バンク（初速・角度・左右傾き）のクイック調整を開閉">
-            <span id="quick-dock-toggle-icon"><img src="https://api.iconify.design/material-symbols/tune.svg?color=%235f6368" class="ui-icon" alt=""> 投げ方調整</span>
-          </button>
-        </div>
-
-        <!-- 投げ方クイック調整パネル (初速・角度・ロール傾き・左右曲がりの即座変更) -->
-        <div class="quick-tuning-panel" id="quick-tuning-panel" hidden>
-          <div class="tuning-col">
-            <div class="tuning-head">
-              <span class="tuning-label">初速 (スピード)</span>
-              <span class="tuning-val num" id="quick-val-speed">12.0 m/s</span>
-            </div>
-            <input type="range" class="tuning-slider" id="quick-slide-speed" min="3" max="30" step="0.5" value="12">
-            <div class="tuning-presets">
-              <button class="tuning-chip" type="button" data-type="speed" data-val="6">ふわっと (6m/s)</button>
-              <button class="tuning-chip active" type="button" data-type="speed" data-val="12">標準 (12m/s)</button>
-              <button class="tuning-chip" type="button" data-type="speed" data-val="18">強投 (18m/s)</button>
-              <button class="tuning-chip" type="button" data-type="speed" data-val="25">全力 (25m/s)</button>
-            </div>
-          </div>
-
-          <div class="tuning-col">
-            <div class="tuning-head">
-              <span class="tuning-label">投擲角度 (仰角)</span>
-              <span class="tuning-val num" id="quick-val-pitch">12.0°</span>
-            </div>
-            <input type="range" class="tuning-slider" id="quick-slide-pitch" min="-5" max="40" step="1" value="12">
-            <div class="tuning-presets">
-              <button class="tuning-chip" type="button" data-type="pitch" data-val="0">水平 (0°)</button>
-              <button class="tuning-chip active" type="button" data-type="pitch" data-val="12">浅め (12°)</button>
-              <button class="tuning-chip" type="button" data-type="pitch" data-val="20">上向き (20°)</button>
-              <button class="tuning-chip" type="button" data-type="pitch" data-val="30">高角 (30°)</button>
-            </div>
-          </div>
-
-          <div class="tuning-col">
-            <div class="tuning-head">
-              <span class="tuning-label">傾き (3Dバンク旋回)</span>
-              <span class="tuning-val num" id="quick-val-roll">0.0°</span>
-            </div>
-            <input type="range" class="tuning-slider" id="quick-slide-roll" min="-30" max="30" step="1" value="0">
-            <div class="tuning-presets">
-              <button class="tuning-chip" type="button" data-type="roll" data-val="-12">左旋回 (-12°)</button>
-              <button class="tuning-chip" type="button" data-type="roll" data-val="-5">左微傾 (-5°)</button>
-              <button class="tuning-chip active" type="button" data-type="roll" data-val="0">水平 (0°)</button>
-              <button class="tuning-chip" type="button" data-type="roll" data-val="5">右微傾 (+5°)</button>
-              <button class="tuning-chip" type="button" data-type="roll" data-val="12">右旋回 (+12°)</button>
-            </div>
-          </div>
-        </div>
       </div>
 
       <!-- 100機一括飛行・最高値/最下位/平均値 統計記録カード (100機シミュレーション記録HUD) -->
@@ -874,6 +784,7 @@
       <div class="tp-clock"><span class="num" id="tp-time">0.000</span><span class="muted">s</span></div>
       <div class="tp-stat"><span class="muted">滞空</span><span class="num" id="tp-flight">0.00</span><span class="muted">s</span></div>
       <div class="tp-stat"><span class="muted">距離</span><span class="num" id="tp-dist">0.00</span><span class="muted">m</span></div>
+      <div class="tp-stat"><span class="muted">滑空比</span><span class="num" id="tp-glide">—</span></div>
     </div>
   </footer>
 

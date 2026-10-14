@@ -1484,7 +1484,7 @@ def apply_record_preset():
     apply_aircraft_only = bool(payload.get("aircraft_only", False))
     # calibrated defaults to True for full presets, but False when isolating a throw technique
     calibrated = bool(payload.get("calibrated", not apply_throw_only))
-    flight_mode = payload.get("flight_mode")
+    flight_mode = payload.get("flight_mode") or "full_flight"
 
     with SESSION.lock:
         try:

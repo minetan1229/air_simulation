@@ -83,6 +83,7 @@ __all__ = [
     "drag_coefficient",
     "stall_blend_weight",
     "elevon_effects",
+    "trailing_edge_fold_effects",
     "elevon_authority",
     "trim_alpha_from_elevon",
     "elevon_for_trim",
@@ -532,6 +533,25 @@ def elevon_for_trim(cfg: AircraftConfig, alpha_deg: float) -> float:
         return 0.0
     required = -(_finite(cfg.cm0) + _finite(cfg.cm_alpha) * deg2rad(alpha_deg))
     return clamp(-required / gain, -ELEVON_MAX_DEG, ELEVON_MAX_DEG)
+
+
+def trailing_edge_fold_effects(cfg: AircraftConfig) -> Dict[str, float]:
+    """Aerodynamic increments from full-span trailing-edge fold angle.
+
+    A positive fold angle is trailing-edge-down (camber increase): adds lift (dcl > 0)
+    and introduces a nose-down moment (dcm < 0).
+    A negative fold angle is trailing-edge-up (reflex): reduces lift (dcl < 0)
+    and introduces a nose-up pitch trim moment (dcm > 0), essential for tailless paper gliders.
+    Also produces a profile drag increment dcd scaling with sin^2(fold).
+    """
+    fold_deg = _finite(getattr(cfg, "fold_trailing_deg", 0.0), 0.0)
+    if fold_deg == 0.0:
+        return {"dcl": 0.0, "dcm": 0.0, "dcd": 0.0}
+    rad = deg2rad(fold_deg)
+    dcl = 0.015 * fold_deg
+    dcm = -0.012 * fold_deg
+    dcd = 0.035 * (math.sin(rad) ** 2)
+    return {"dcl": dcl, "dcm": dcm, "dcd": dcd}
 
 
 # --------------------------------------------------------------------------

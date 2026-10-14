@@ -30,7 +30,7 @@ const FIELD_TABLE = {
   ],
   fold: [
     { key: "fold_leading_deg", label: "前縁折り角", unit: DEG, min: 0, max: 90, step: 0.5, digits: 1 },
-    { key: "fold_trailing_deg", label: "後縁折り角", unit: DEG, min: 0, max: 90, step: 0.5, digits: 1 },
+    { key: "fold_trailing_deg", label: "後縁折り角", unit: DEG, min: -45, max: 45, step: 0.5, digits: 1 },
     { key: "fold_tip_deg", label: "翼端折り角", unit: DEG, min: 0, max: 90, step: 0.5, digits: 1 },
     { key: "fold_center_deg", label: "中央折り角", unit: DEG, min: 0, max: 90, step: 0.5, digits: 1 },
     { key: "elevon_deg", label: "エレボン角 δe", unit: DEG, min: -20, max: 40, step: 0.25, digits: 2 },
@@ -181,16 +181,6 @@ export class ParameterPanels {
   }
 
   _buildThrowHead(container) {
-    const btnLaunch = make("button", {
-      class: "btn btn-primary btn-throw-launch",
-      type: "button",
-      html: `<img src="https://api.iconify.design/material-symbols/rocket-launch.svg?color=%23ffffff" class="ui-icon" alt=""> この機体・設定で投擲 (LAUNCH)`,
-      title: "現在の機体寸法・折り畳み・投げ方・風況で飛行シミュレーションを実行します (Enter)",
-    });
-    btnLaunch.addEventListener("click", () => {
-      if (this.onLaunch) this.onLaunch();
-    });
-
     const styles = (this.store.schema.launch && this.store.schema.launch.throw_styles) || [];
     const block = make("div", { class: "field" });
     const top = make("div", { class: "field-top" }, [
@@ -212,7 +202,6 @@ export class ParameterPanels {
     });
     block.append(top, select, note);
     container.insertBefore(block, container.firstChild);
-    container.insertBefore(btnLaunch, container.firstChild);
     this.throwStyleSelect = select;
     this.throwNote = note;
   }

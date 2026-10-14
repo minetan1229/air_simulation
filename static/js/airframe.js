@@ -593,31 +593,32 @@ export function createAirframeMaterial() {
     color: 0xffffff,
     vertexColors: true,
     side: THREE.DoubleSide,
-    flatShading: true,
-    roughness: 0.92, // Realistic matte paper diffuse
-    metalness: 0.0,
+    flatShading: false, // Smooth surface normals along wing panels
+    roughness: 0.82, // Tactile paper diffuse
+    metalness: 0.02,
     bumpMap: map,
-    bumpScale: 0.0006,
+    bumpScale: 0.0008,
   });
 }
 
 export function createCreaseMaterial() {
   return new THREE.LineBasicMaterial({
-    color: 0x475569, // Slate 600 - authentic origami crease shadow
+    color: 0x334155, // Slate 700 - sharp origami crease shadow
     transparent: true,
-    opacity: 0.72,
-    linewidth: 1.5,
+    opacity: 0.85,
+    linewidth: 2.0,
   });
 }
 
 export function createEdgeMaterial() {
   return new THREE.LineBasicMaterial({
-    color: 0x1e293b, // Slate 800 - crisp paper boundary edge
+    color: 0x0f172a, // Slate 900 - crisp paper boundary edge
     transparent: true,
-    opacity: 0.82,
-    linewidth: 1.8,
+    opacity: 0.90,
+    linewidth: 2.2,
   });
 }
+
 
 export function createPanelMaterial() {
   return new THREE.LineBasicMaterial({

@@ -305,6 +305,8 @@ class ConsoleApp {
       "hud-speed",
       "hud-q",
       "hud-flow",
+      "hud-ld-live",
+      "hud-glide-ratio",
       "hud-cl",
       "hud-cd",
       "hud-ld",
@@ -312,6 +314,7 @@ class ConsoleApp {
       "hud-tunnel-status",
       "tunnel-hud",
       "tunnel-toggle",
+      "tp-glide",
       "tp-launch",
       "tp-launch-label",
       "tp-play",
@@ -1879,6 +1882,23 @@ class ConsoleApp {
     this.dom["hud-speed"].textContent = `${fmt(frame.speed_mps, 2)} m/s`;
     this.dom["hud-q"].textContent = `${fmt(frame.dynamic_pressure_pa, 1)} Pa`;
 
+    // Live Aerodynamic L/D and Flight Glide Ratio
+    const ldLive = Number(frame.ld_ratio) || 0;
+    if (this.dom["hud-ld-live"]) this.dom["hud-ld-live"].textContent = `${fmt(ldLive, 2)}`;
+
+    const vel = frame.velocity_mps || [0, 0, 0];
+    const horizSpeed = Math.hypot(vel[0], vel[1]);
+    const sinkRate = Number(vel[2]) || 0; // canonical frame: +z is downwards
+    let glideRatio = 0;
+    if (sinkRate > 0.05) {
+      glideRatio = horizSpeed / sinkRate;
+    } else if (horizSpeed > 0.1 && Math.abs(sinkRate) <= 0.05) {
+      glideRatio = 99.9;
+    }
+    const grStr = glideRatio > 0 ? (glideRatio > 50 ? "水平" : fmt(glideRatio, 2)) : "—";
+    if (this.dom["hud-glide-ratio"]) this.dom["hud-glide-ratio"].textContent = grStr;
+    if (this.dom["tp-glide"]) this.dom["tp-glide"].textContent = grStr;
+
     const time = Number(frame.time_s) || 0;
     this.dom["tp-time"].textContent = fmt(time, 3);
     this.dom["top-clock"].innerHTML = `${fmt(time, 3)}<small>s</small>`;
@@ -1984,7 +2004,12 @@ class ConsoleApp {
       this.notify(`衝突終了 — 飛距離: ${dist.toFixed(2)}m · 飛行時間: ${time.toFixed(2)}s`, "warn");
     } else if (frame.landed || metrics.landed || metrics.status === "landed") {
       this._updatePill("着地", "flying");
-      this.notify(`着地完了 — 飛距離: ${dist.toFixed(2)}m · 滞空時間: ${time.toFixed(2)}s`, "ok");
+      const launchH = Number(this.store.data.launch?.launch_height_m) || 1.8;
+      const initialAlt = metrics.max_altitude_m || launchH;
+      const altDrop = Math.max(initialAlt - (Number(frame.altitude_m) || 0), 0.5);
+      const avgGR = dist / altDrop;
+      const grText = avgGR > 0 ? ` · 平均滑空比: ${avgGR.toFixed(2)}` : "";
+      this.notify(`着地完了 — 飛距離: ${dist.toFixed(2)}m · 滞空時間: ${time.toFixed(2)}s${grText}`, "ok");
     } else {
       this._updatePill("計算区間終了", "idle");
       this.notify(`計算時間 ${time.toFixed(2)}s に到達しました。着地は未確認です。`, "info");

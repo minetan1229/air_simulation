@@ -1090,7 +1090,7 @@ DESIGN_VARIABLE_CATALOGUE: Tuple[DesignVariable, ...] = (
     DesignVariable("aspect_ratio", 0.80, 4.00, 0.20, "shape", "Aspect ratio", "-"),
     DesignVariable("dihedral_deg", 0.0, 20.0, 2.5, "shape", "Dihedral", "deg"),
     DesignVariable("fold_leading_deg", 0.0, 90.0, 10.0, "fold", "Leading fold", "deg"),
-    DesignVariable("fold_trailing_deg", 0.0, 90.0, 10.0, "fold", "Trailing fold", "deg"),
+    DesignVariable("fold_trailing_deg", -45.0, 45.0, 5.0, "fold", "Trailing fold", "deg"),
     DesignVariable("fold_tip_deg", 0.0, 90.0, 10.0, "fold", "Tip fold", "deg"),
     DesignVariable("fold_center_deg", 0.0, 90.0, 10.0, "fold", "Centre fold", "deg"),
     DesignVariable("elevon_deg", 0.0, 35.0, 5.0, "fold", "Elevon angle", "deg"),

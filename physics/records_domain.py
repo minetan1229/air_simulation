@@ -626,11 +626,13 @@ class RecordPreset:
         if flight_mode == "apex_glide" and not self.has_apex_glide:
             raise ValueError("apex_glide is unavailable for this preset; use full_flight")
         requested_source = "calibration" if calibrated else "documented_throw"
-        if flight_mode is None:
-            recipe = self.calibration if calibrated and self.calibration else self.throw
-        elif flight_mode == "apex_glide":
-            recipe = self.calibration
+        if flight_mode == "apex_glide":
+            recipe = self.calibration if self.calibration is not None else self.throw
+        elif flight_mode == "full_flight":
+            recipe = self.throw
         elif calibrated and self.calibration is not None and not self.has_apex_glide:
+            recipe = self.calibration
+        elif calibrated and self.calibration is not None:
             recipe = self.calibration
         else:
             recipe = self.throw
