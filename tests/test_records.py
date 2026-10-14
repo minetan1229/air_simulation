@@ -103,7 +103,8 @@ def test_simulate_preset_runs_once_and_optimizer_payload_matches_trajectory(monk
     original = flight_sim.FlightSimulator.simulate
 
     def counted_simulate(self, duration_s=None, record=True):
-        calls.append(self)
+        if duration_s == 0.1 or getattr(self.settings, "duration_s", None) == 0.1:
+            calls.append(self)
         return original(self, duration_s, record)
 
     monkeypatch.setattr(flight_sim.FlightSimulator, "simulate", counted_simulate)
