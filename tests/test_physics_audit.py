@@ -181,8 +181,8 @@ def test_isa_column_matches_the_icao_table(altitude: float, temperature: float, 
     assert isa_pressure(altitude) == pytest.approx(pressure, rel=1e-4)
 
 
-@pytest.mark.parametrize("altitude, _, _", ICAO_TROPOSPHERE)
-def test_isa_density_is_pressure_over_r_times_t(altitude: float, _: float, __: float) -> None:
+@pytest.mark.parametrize("altitude, _temp, _press", ICAO_TROPOSPHERE)
+def test_isa_density_is_pressure_over_r_times_t(altitude: float, _temp: float, _press: float) -> None:
     t = isa_temperature(altitude)
     p = isa_pressure(altitude)
     assert isa_density(altitude) == pytest.approx(p / (287.05 * t), rel=1e-12)
