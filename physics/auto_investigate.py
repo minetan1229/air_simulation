@@ -274,25 +274,28 @@ def _simulate_trajectory(
     aircraft: AircraftConfig,
     environment: EnvironmentConfig,
     launch: LaunchConfig,
-    duration_s: float = 8.0,
-    dt_max: float = 0.02,
+    duration_s: float = 5.0,
+    dt_max: float = 0.05,
+    max_substeps: int = 8,
+    record: bool = True,
+    adaptive: bool = False,
 ) -> Tuple[Dict[str, Any], List[FlightLogSample]]:
     """Run full 6-DoF simulator and return summary and sample history."""
     settings = SimulationSettings(
         dt_max=dt_max,
-        dt_min=min(1.0e-5, dt_max),
-        max_substeps=64,
+        dt_min=min(1.0e-4, dt_max),
+        max_substeps=max_substeps,
         duration_s=duration_s,
-        record_interval_s=dt_max,
+        record_interval_s=max(dt_max, 0.05),
         time_scale=1.0,
-        adaptive=True,
+        adaptive=adaptive,
         collision_enabled=True,
         restitution=0.15,
-        ring_buffer_capacity=max(1024, int(duration_s / dt_max) + 64),
+        ring_buffer_capacity=max(256, int(duration_s / dt_max) + 16),
     )
     sim = FlightSimulator(aircraft, environment, launch, settings)
-    summary = sim.simulate(duration_s=duration_s, record=True)
-    samples = sim.history()
+    summary = sim.simulate(duration_s=duration_s, record=record)
+    samples = sim.history() if record else []
     return summary, samples
 
 
@@ -568,18 +571,33 @@ def run_sensitivity_scan(
             else:
                 setattr(mod_lau, var.name, val)
 
-            summary, samples = _simulate_trajectory(mod_air, environment, mod_lau, duration_s=6.0)
-            met = _compute_flight_metrics(
-                summary, samples, abs(float(mod_air.stall_alpha_deg))
+            summary, samples = _simulate_trajectory(
+                mod_air,
+                environment,
+                mod_lau,
+                duration_s=4.0,
+                dt_max=0.05,
+                max_substeps=12,
+                record=False,
             )
-            score = _get_target_metric(met, target_metric)
+            # Use distance and flight_time from summary directly
+            dist_val = float(summary.get("distance_m", 0.0))
+            time_val = float(summary.get("flight_time_s", 0.0))
+            if target_metric == "flight_time":
+                score = time_val
+            elif target_metric == "ld_ratio":
+                score = float(summary.get("max_ld_ratio", 0.0))
+            elif target_metric == "stability":
+                score = float(summary.get("stability", 0.0))
+            else:
+                score = dist_val
 
             curve_points.append(
                 {
                     "value": float(val),
                     "score": float(score),
-                    "distance_m": float(met["distance_m"]),
-                    "flight_time_s": float(met["flight_time_s"]),
+                    "distance_m": dist_val,
+                    "flight_time_s": time_val,
                 }
             )
 
@@ -686,11 +704,28 @@ def run_focused_tuning(
             else:
                 setattr(mod_lau, v.name, clipped)
 
-        summary, samples = _simulate_trajectory(mod_air, environment, mod_lau, duration_s=6.0)
-        met = _compute_flight_metrics(
-            summary, samples, abs(float(mod_air.stall_alpha_deg))
+        if eval_count > max_evaluations:
+            return -float(best_score)
+
+        summary, samples = _simulate_trajectory(
+            mod_air,
+            environment,
+            mod_lau,
+            duration_s=4.0,
+            dt_max=0.05,
+            max_substeps=12,
+            record=False,
         )
-        score = _get_target_metric(met, target_metric)
+        dist_val = float(summary.get("distance_m", 0.0))
+        time_val = float(summary.get("flight_time_s", 0.0))
+        if target_metric == "flight_time":
+            score = time_val
+        elif target_metric == "ld_ratio":
+            score = float(summary.get("max_ld_ratio", 0.0))
+        elif target_metric == "stability":
+            score = float(summary.get("stability", 0.0))
+        else:
+            score = dist_val
 
         if score > best_score:
             best_score = score
@@ -715,7 +750,7 @@ def run_focused_tuning(
             init_x,
             method="Nelder-Mead",
             bounds=bounds,
-            options={"maxiter": max_evaluations, "disp": False},
+            options={"maxiter": max_evaluations, "maxfev": max_evaluations, "disp": False},
         )
     except Exception:
         # Fallback to init if Nelder-Mead fails
@@ -935,6 +970,10 @@ def investigate_airplane(
     launch: Optional[LaunchConfig] = None,
     target_metric: str = "distance",
     progress_callback: Optional[Callable[[int, int, str], None]] = None,
+    sample_steps: int = 3,
+    max_tune_evaluations: int = 15,
+    skip_scan: bool = False,
+    skip_tuning: bool = False,
 ) -> InvestigationResult:
     """Run full automated investigation pipeline: Diagnosis -> Sensitivity -> Tuning -> Advice."""
     env = environment if environment is not None else EnvironmentConfig()
@@ -951,29 +990,49 @@ def investigate_airplane(
         progress_callback(10, 100, f"診断完了: {diagnosis.headline_ja}")
 
     # Step 2: Parametric Sensitivity Scan (1-D Sweeps)
-    def scan_cb(curr: int, tot: int, msg: str) -> None:
-        if progress_callback:
-            # Map 0..tot -> 10..60%
-            pct = 10 + int((curr / max(tot, 1)) * 50)
-            progress_callback(pct, 100, msg)
+    if skip_scan:
+        sensitivities = []
+    else:
+        def scan_cb(curr: int, tot: int, msg: str) -> None:
+            if progress_callback:
+                # Map 0..tot -> 10..60%
+                pct = 10 + int((curr / max(tot, 1)) * 50)
+                progress_callback(pct, 100, msg)
 
-    sensitivities = run_sensitivity_scan(
-        aircraft, env, lau, target_metric=target_metric, progress_callback=scan_cb
-    )
+        sensitivities = run_sensitivity_scan(
+            aircraft,
+            env,
+            lau,
+            target_metric=target_metric,
+            sample_steps=sample_steps,
+            progress_callback=scan_cb,
+        )
 
     # Step 3: Focused Multi-Variable Tuning
-    def tune_cb(curr: int, tot: int, msg: str) -> None:
-        if progress_callback:
-            # Map 0..tot -> 60..90%
-            pct = 60 + int((curr / max(tot, 1)) * 30)
-            progress_callback(pct, 100, msg)
+    if skip_tuning:
+        rec_air = copy.deepcopy(aircraft)
+        rec_lau = copy.deepcopy(lau)
+        rec_summary = base_summary
+        rec_samples = base_samples
+        rec_metrics = base_metrics
+    else:
+        def tune_cb(curr: int, tot: int, msg: str) -> None:
+            if progress_callback:
+                # Map 0..tot -> 60..90%
+                pct = 60 + int((curr / max(tot, 1)) * 30)
+                progress_callback(pct, 100, msg)
 
-    rec_air, rec_lau, rec_summary, rec_samples = run_focused_tuning(
-        aircraft, env, lau, target_metric=target_metric, max_evaluations=40, progress_callback=tune_cb
-    )
-    rec_metrics = _compute_flight_metrics(
-        rec_summary, rec_samples, abs(float(rec_air.stall_alpha_deg))
-    )
+        rec_air, rec_lau, rec_summary, rec_samples = run_focused_tuning(
+            aircraft,
+            env,
+            lau,
+            target_metric=target_metric,
+            max_evaluations=max_tune_evaluations,
+            progress_callback=tune_cb,
+        )
+        rec_metrics = _compute_flight_metrics(
+            rec_summary, rec_samples, abs(float(rec_air.stall_alpha_deg))
+        )
 
     # Step 4: Advice Generation
     advice_list = generate_advice(
