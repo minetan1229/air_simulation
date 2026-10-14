@@ -363,9 +363,9 @@ def _fold_efficiency(aircraft: AircraftConfig) -> Tuple[float, float]:
         + 0.0060 * max(float(aircraft.fold_leading_deg), 0.0)
         + 0.0040 * max(float(aircraft.fold_tip_deg), 0.0)
         + 0.0030 * max(float(aircraft.fold_center_deg), 0.0)
-        + 0.0015 * max(float(aircraft.fold_trailing_deg), 0.0)
+        + 0.0015 * abs(float(aircraft.fold_trailing_deg))
     )
-    blunt = 0.0045 * max(float(aircraft.fold_trailing_deg) - 15.0, 0.0)
+    blunt = 0.0045 * max(abs(float(aircraft.fold_trailing_deg)) - 15.0, 0.0)
     blunt += 0.0035 * max(float(aircraft.fold_tip_deg), 0.0)
     lift_factor = clamp(1.0 - blunt, 0.55, 1.15)
     return drag_factor, lift_factor

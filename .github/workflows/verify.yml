@@ -29,4 +29,16 @@ jobs:
         run: ruff check .
 
       - name: 自動テストの実行 (Pytest)
-        run: python -m pytest
+        run: |
+          set -o pipefail
+          python -m pytest -ra --tb=short 2>&1 | tee test_output.log
+
+      - name: テストサマリーの出力
+        if: always()
+        run: |
+          if [ -f test_output.log ]; then
+            echo "### Pytest Result Summary" >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+            grep -E "FAILED|ERROR|passed in|failed in|errors in" test_output.log | tail -n 50 >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+          fi

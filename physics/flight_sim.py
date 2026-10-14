@@ -1448,6 +1448,8 @@ def resolve_throw(
     inertia[0, 2] = inertia[2, 0] = derived.get("inertia_xz_kgm2", 0.0)
     inertia[1, 2] = inertia[2, 1] = derived.get("inertia_yz_kgm2", 0.0)
     torque_rate = np.linalg.solve(inertia, moment * duration * efficiency)
+    # Finger pinch guide effect: pinching the paper fuselage dampens excessive pitch-kick on release
+    torque_rate[1] *= 0.10
     rates = np.array(
         [
             clamp(
