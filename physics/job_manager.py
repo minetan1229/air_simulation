@@ -841,7 +841,21 @@ class JobManager:
             runner = state.thread
             if runner is None:
                 return state.record.status in TERMINAL_STATUSES
-        return runner.join(timeout)
+        if hasattr(runner, "join"):
+            res = runner.join(timeout)
+            if res is not None:
+                return bool(res)
+            # Standard threading.Thread returns None on join()
+            return not getattr(runner, "is_alive", lambda: False)()
+        if hasattr(runner, "result"):
+            try:
+                runner.result(timeout=timeout)
+                return True
+            except TimeoutError:
+                return False
+            except Exception:
+                return True
+        return state.record.status in TERMINAL_STATUSES
 
     def result(self, job_id: str, timeout: Optional[float] = None) -> Any:
         """Wait for the tracked worker and return its value (re-raising errors)."""
@@ -849,13 +863,13 @@ class JobManager:
             state = self._require_state(job_id)
             runner = state.thread
             done_event = state.done
-        if runner is None:
-            if not done_event.wait(timeout):
-                raise TimeoutError(f"job {job_id} did not finish within {timeout}s")
-            if state.exception is not None:
-                raise state.exception
-            return state.value
-        return runner.result(timeout)
+        if runner is not None and hasattr(runner, "result") and callable(runner.result):
+            return runner.result(timeout)
+        if not done_event.wait(timeout):
+            raise TimeoutError(f"job {job_id} did not finish within {timeout}s")
+        if state.exception is not None:
+            raise state.exception
+        return state.value
 
     def result_or_exception(self, job_id: str, timeout: Optional[float] = None) -> Any:
         """:meth:`result` without raising: returns the value or the exception."""
@@ -863,11 +877,11 @@ class JobManager:
             state = self._require_state(job_id)
             runner = state.thread
             done_event = state.done
-        if runner is None:
-            if not done_event.wait(timeout):
-                raise TimeoutError(f"job {job_id} did not finish within {timeout}s")
-            return state.exception if state.exception is not None else state.value
-        return runner.result_or_exception(timeout)
+        if runner is not None and hasattr(runner, "result_or_exception") and callable(runner.result_or_exception):
+            return runner.result_or_exception(timeout)
+        if not done_event.wait(timeout):
+            raise TimeoutError(f"job {job_id} did not finish within {timeout}s")
+        return state.exception if state.exception is not None else state.value
 
     def exception(self, job_id: str) -> Optional[BaseException]:
         """Recorded exception of a finished job (``None`` on success)."""

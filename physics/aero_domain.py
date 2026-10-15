@@ -996,8 +996,8 @@ def evaluate_aero(
     # Left and right wing lift partitioning based on total lift and roll moment
     # rolling_nm = (lift_left_n - lift_right_n) * (span / 4) approx, or partition from roll_coeff / cl_control
     d_lift = dynamic_pressure * area * cl_control
-    lift_left_n = max(0.0, 0.5 * lift_n + 0.5 * d_lift)
-    lift_right_n = max(0.0, 0.5 * lift_n - 0.5 * d_lift)
+    lift_left_n = 0.5 * lift_n + 0.5 * d_lift
+    lift_right_n = 0.5 * lift_n - 0.5 * d_lift
     drag_n = dynamic_pressure * area * cd
     side_n = dynamic_pressure * area * cy
 
