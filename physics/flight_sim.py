@@ -1997,14 +1997,15 @@ class FlightSimulator:
         aero_comp_gain = max(_finite(getattr(self.aircraft, "aeroelastic_compliance", 0.0)), 0.0)
         stiffness_val = max(_finite(self.aircraft.paper_stiffness, 0.35), 0.05)
         if aero_comp_gain > 0.0:
-            q_aeroelastic = 25.0 * stiffness_val / max(aero_comp_gain, 0.1)
+            q_aeroelastic = 160.0 * stiffness_val / max(aero_comp_gain, 0.1)
             pressure_ratio = safe_div(q_dyn, q_aeroelastic, 0.0)
-            morph_factor = 1.0 / (1.0 + (pressure_ratio ** 2.0))
+            morph_factor = 1.0 / (1.0 + (pressure_ratio ** 3.0))
             base_elevon = float(self.aircraft.elevon_deg)
             effective_elevon_deg = base_elevon * morph_factor
-            trailing_edge_bend_deg = effective_elevon_deg - base_elevon
             effective_cm0 = float(self.aircraft.cm0) * morph_factor
             effective_cL0 = float(self.aircraft.cL0) * morph_factor
+            compliance_deflection = 12.0 * aero_comp_gain * (pressure_ratio ** 1.5) / (1.0 + (pressure_ratio ** 1.5))
+            trailing_edge_bend_deg = compliance_deflection
         else:
             effective_elevon_deg = float(self.aircraft.elevon_deg)
             effective_cm0 = float(self.aircraft.cm0)

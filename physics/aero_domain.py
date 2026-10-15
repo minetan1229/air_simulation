@@ -947,9 +947,23 @@ def evaluate_aero(
         + _finite(cfg.cl_pitch_rate) * q_hat
         + _finite(cfg.cl_yaw_rate) * r_hat
     )
+    # Nonlinear pitching moment with post-stall saturation (Viterna / flat plate theory):
+    # Attached flow: Cm_alpha * alpha. Post-stall / high-alpha separation:
+    # Pitching moment saturates smoothly and approaches flat-plate cross-flow behavior ~ -sin(2*alpha),
+    # preventing non-physical massive torques (e.g. Cm < -1.0) during apex flow reversal (alpha > 90 deg).
+    stall_rad = deg2rad(effective_stall_alpha_deg(cfg))
+    alpha_rad = deg2rad(alpha)
+    if abs(alpha_rad) <= stall_rad:
+        cm_alpha_term = _finite(cfg.cm_alpha) * alpha_rad
+    else:
+        w_stall = stall_blend_weight(alpha, cfg)
+        linear_val = _finite(cfg.cm_alpha) * math.copysign(stall_rad, alpha_rad)
+        flat_plate_cm = 0.5 * _finite(cfg.cm_alpha) * math.sin(2.0 * alpha_rad) * stall_rad
+        cm_alpha_term = (1.0 - w_stall) * linear_val + w_stall * flat_plate_cm
+
     cm = (
         _finite(cfg.cm0)
-        + _finite(cfg.cm_alpha) * deg2rad(alpha)
+        + cm_alpha_term
         + _finite(cfg.cm_q) * q_hat
         + elevon["dcm"]
         + cm_roll
