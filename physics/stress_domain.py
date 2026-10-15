@@ -387,7 +387,7 @@ def aeroelastic_deformations(
     When ``cfg.aeroelastic_flex == 0.0`` and ``cfg.aeroelastic_twist == 0.0``,
     both deformations return 0.0 exactly.
     """
-    eff_stiff = effective_paper_stiffness(cfg)
+    eff_stiff = max(effective_paper_stiffness(cfg), 0.01)
     q = max(_finite_or(float(dynamic_pressure), 0.0), 0.0)
     load = max(_finite_or(float(nz), 0.0), 0.0)
 
@@ -415,8 +415,8 @@ def aeroelastic_deformations(
     # nz already carries dynamic pressure through L/W, so use force only once.
     norm_scale = 1.0e-10
     normal_force = max(cfg.mass_kg, 0.0) * 9.80665 * load
-    delta_dihedral = (normal_force * (span * 0.5) * flex_gain * norm_scale) / denom
-    washout_twist = (q * area * c_mac * twist_gain * norm_scale) / denom
+    delta_dihedral = clamp((normal_force * (span * 0.5) * flex_gain * norm_scale) / denom, -30.0, 30.0)
+    washout_twist = clamp((q * area * c_mac * twist_gain * norm_scale) / denom, -20.0, 20.0)
 
     return {
         "delta_dihedral_deg": float(delta_dihedral),

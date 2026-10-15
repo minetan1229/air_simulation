@@ -404,7 +404,13 @@ def system_gpu():
 def force_gpu_render():
     """Configure Windows DirectX UserGpuPreferences to force discrete high-performance GPU (RTX 4060)
     for browsers, and optionally launch or re-launch browser with high-performance flags.
+    Restricted to loopback address and explicit environment variable.
     """
+    if request.remote_addr not in ("127.0.0.1", "::1", "localhost"):
+        return _error("forbidden: endpoint restricted to local loopback", 403)
+    if not os.environ.get("PAPER_ALLOW_SYSTEM_CONFIG") and os.environ.get("ENV") == "production":
+        return _error("system configuration endpoint is disabled in production", 403)
+
     payload = request.get_json(silent=True) or {}
     action = payload.get("action", "configure")  # "configure" | "launch_chrome" | "launch_edge"
 
@@ -794,6 +800,8 @@ def simulation_launch():
         simulator = SESSION.simulator_instance()
         simulator.reset(launch=SESSION.launch)
         duration_s = as_float(payload.get("duration_s", 25.0), "duration_s")
+        if not (0.1 <= duration_s <= 120.0):
+            raise BadRequest("field 'duration_s' must lie within [0.1, 120.0]")
         aircraft = SESSION.aircraft
         environment = SESSION.environment
         launch = SESSION.launch
@@ -878,6 +886,8 @@ def simulation_batch():
     if len(cases) > 512:
         raise BadRequest("'cases' may contain at most 512 entries")
     normalised = []
+    total_steps = 0
+    MAX_BATCH_TOTAL_STEPS = 500_000
     for index, case in enumerate(cases):
         if not isinstance(case, dict):
             raise BadRequest(f"cases[{index}] must be a JSON object")
@@ -887,6 +897,9 @@ def simulation_batch():
         dt_max = as_float(case.get("dt_max", 0.02), f"cases[{index}].dt_max")
         if not (1.0e-4 <= dt_max <= 1.0):
             raise BadRequest(f"cases[{index}].dt_max must lie within [1e-4, 1.0]")
+        total_steps += int(duration_s / dt_max)
+        if total_steps > MAX_BATCH_TOTAL_STEPS:
+            raise BadRequest(f"batch total computation steps exceed limit of {MAX_BATCH_TOTAL_STEPS}")
         normalised.append(
             {
                 "aircraft": build(AircraftConfig, case.get("aircraft"), SESSION.aircraft).__dict__,
@@ -1164,6 +1177,8 @@ def _optimizer_config(payload: Dict[str, Any]) -> OptimizerConfig:
 
 @app.post("/api/v1/optimizer/run")
 def optimizer_run():
+    if JOB_MANAGER.active_count() >= 4:
+        raise BadRequest("server busy: maximum active jobs (4) reached, please wait or cancel running jobs")
     payload = body()
     cfg = _optimizer_config(payload)
 
@@ -1266,6 +1281,8 @@ def optimizer_result(job_id: str):
 # ---------------------------------------------------------------------------
 @app.post("/api/v1/investigate/run")
 def investigate_run():
+    if JOB_MANAGER.active_count() >= 4:
+        raise BadRequest("server busy: maximum active jobs (4) reached, please wait or cancel running jobs")
     payload = body()
     base_air = as_dict(SESSION.aircraft)
     base_air.update(payload.get("aircraft", {}) or {})

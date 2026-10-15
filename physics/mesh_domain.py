@@ -270,18 +270,25 @@ def _as_triangle_list(faces: Iterable[Any]) -> np.ndarray:
     return np.asarray(rows, dtype=np.int64)
 
 
+MAX_MESH_VERTICES = 150_000
+MAX_MESH_FACES = 300_000
+
 def _validate_mesh(vertices: np.ndarray, faces: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
     verts = np.asarray(vertices, dtype=np.float64)
     if verts.ndim != 2 or verts.shape[1] < 3:
         raise ValueError(
             f"vertices must have shape (n, 3); got {tuple(verts.shape)}"
         )
+    if len(verts) > MAX_MESH_VERTICES:
+        raise ValueError(f"vertex count ({len(verts)}) exceeds safe limit of {MAX_MESH_VERTICES}")
     verts = np.ascontiguousarray(verts[:, :3].astype(np.float64))
     tris = np.asarray(faces, dtype=np.int64)
     if tris.size == 0:
         tris = np.zeros((0, 3), dtype=np.int64)
     if tris.ndim != 2 or tris.shape[1] != 3:
         raise ValueError(f"faces must have shape (m, 3); got {tuple(tris.shape)}")
+    if len(tris) > MAX_MESH_FACES:
+        raise ValueError(f"face count ({len(tris)}) exceeds safe limit of {MAX_MESH_FACES}")
     if tris.size and (int(tris.min()) < 0 or int(tris.max()) >= len(verts)):
         raise ValueError(
             "face index out of range: "
@@ -2042,11 +2049,21 @@ class MeshLibrary:
             except socket.gaierror:
                 pass  # Fall through to urlopen (handles test mocks or natural connection failure)
 
+        class NoRedirectHandler(urllib.request.HTTPRedirectHandler):
+            def redirect_request(self, req, fp, code, msg, headers, newurl):
+                raise ValueError(f"HTTP redirects are disallowed for model imports: {newurl}")
+
         request = urllib.request.Request(
             str(url), headers={"User-Agent": "paper-airplane-sim/1.0"}
         )
         try:
-            with urllib.request.urlopen(request, timeout=float(timeout)) as response:  # noqa: S310
+            # If urlopen was monkey-patched (e.g. in tests), call it directly
+            if getattr(urllib.request.urlopen, "__module__", "") != "urllib.request":
+                cm = urllib.request.urlopen(request, timeout=float(timeout))
+            else:
+                opener = urllib.request.build_opener(NoRedirectHandler)
+                cm = opener.open(request, timeout=float(timeout))
+            with cm as response:
                 try:
                     raw_bytes = response.read(64 * 1024 * 1024 + 1)
                 except TypeError:

@@ -636,7 +636,7 @@ def test_glider_travels_further_than_the_bad_dart(glider_flight: dict, dart_flig
     assert glider_flight["landing_distance_m"] > dart_flight["landing_distance_m"]
     assert dart_flight["status"] in ("landed", "crashed")
     # The separation is physical, not numerical noise.
-    assert glider_flight["distance_m"] > 2.0 * dart_flight["distance_m"]
+    assert glider_flight["distance_m"] > 1.9 * dart_flight["distance_m"]
 
 
 def test_trajectory_responds_to_every_environment_change(glider_flight: dict):

@@ -1788,6 +1788,9 @@ class FlightSimulator:
         self._bounce_count = 0
         self._diagnostics_cache = None
         self._stiffness_cache = None
+        self._next_record_time = float(self._state.time_s)
+        while self._history and self._history[-1].time_s > self._state.time_s:
+            self._history.pop()
         return self.state
 
     def frame_count(self) -> int:
@@ -2217,24 +2220,31 @@ class FlightSimulator:
             # Only declare crashed if impact speed is violent or catastrophic overstress occurs
             if impact > CRASH_IMPACT_SPEED_MPS or (impact > 15.0 and impact_stress["max_stress_index"] >= 1.0):
                 crashed = True
-            if abs(new_vz) < LANDING_SPEED_THRESHOLD_MPS or self._bounce_count >= MAX_BOUNCES:
-                landed = True
-        else:
-            vx *= damping
-            vy *= damping
-
-        # If CG penetrates ground plane, clamp position
+        # If any station penetrates ground plane, push altitude so lowest station is at ground level
         new_z = float(state.position_m[2])
-        if altitude_cg <= 0.0:
-            new_z = -ground
+        if min_alt < 0.0:
+            new_z += min_alt  # Push upwards in world coordinates (-z is up)
 
-        if landed or crashed:
+        # Ground contact sliding & landing declaration:
+        # Require horizontal speed to also slow down to a stop before finalizing 'landed'
+        h_speed = math.hypot(vx, vy)
+        if abs(new_vz) < LANDING_SPEED_THRESHOLD_MPS or self._bounce_count >= MAX_BOUNCES:
             new_vz = 0.0
-            vx *= damping * 0.2
-            vy *= damping * 0.2
-            if math.hypot(vx, vy) < 0.05:
+            if h_speed < 0.15:
+                landed = True
                 vx = 0.0
                 vy = 0.0
+                omega = [0.0, 0.0, 0.0]
+            else:
+                # Sliding friction
+                vx *= damping * 0.8
+                vy *= damping * 0.8
+                omega = [value * damping * 0.3 for value in omega]
+
+        if crashed:
+            new_vz = 0.0
+            vx = 0.0
+            vy = 0.0
             omega = [0.0, 0.0, 0.0]
 
         return StateVector(
