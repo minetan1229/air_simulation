@@ -299,6 +299,23 @@ class ConsoleApp {
       "rec-style",
       "btn-apply-record",
       "btn-apply-throw-only",
+      "unified-aircraft-select",
+      "unified-mesh-file",
+      "btn-unified-mesh-import",
+      "unified-model-card",
+      "unified-model-badge",
+      "unified-model-metric",
+      "unified-model-title",
+      "unified-model-desc",
+      "f-hud-alt",
+      "f-hud-alt-peak",
+      "f-hud-spd",
+      "f-hud-spd-peak",
+      "f-hud-dist",
+      "f-hud-time",
+      "f-hud-glide",
+      "f-hud-aoa",
+      "f-hud-phase",
       "flow-backend",
       "flow-count",
       "hud-alpha",
@@ -598,6 +615,7 @@ class ConsoleApp {
     }
 
     this._initTunnelControls();
+    this._initUnifiedAircraftSelector();
 
     const btnGpuEnsemble = document.getElementById("btn-gpu-ensemble");
     if (btnGpuEnsemble) {
@@ -647,11 +665,11 @@ class ConsoleApp {
   }
 
   async _runGpuEnsemble(count = 100) {
+    if (this.tunnelMode) this.setTunnel(false);
     this.hideSimulationError();
     const tStart = performance.now();
     this.startEtaCountdown({
       clock: "GPU計算中...",
-      estimatedSec: 1.5,
       title: `GPU並列シミュレーション (${count}機同時計算) を実行中...`,
     });
 
@@ -1500,7 +1518,6 @@ class ConsoleApp {
 
   startEtaCountdown({
     clock = "計算中...",
-    estimatedSec = 1.5,
     title = "計算を実行中...",
   } = {}) {
     this.stopEtaCountdown();
@@ -1508,11 +1525,11 @@ class ConsoleApp {
     const update = () => {
       const elapsed = (performance.now() - t0) / 1000;
       let leftStr = "";
-      if (elapsed < estimatedSec) {
-        const remaining = Math.max(0.1, estimatedSec - elapsed);
-        leftStr = `残 約${remaining.toFixed(1)}秒`;
+      if (this._lastSimDuration && elapsed < this._lastSimDuration) {
+        const remaining = Math.max(0.1, this._lastSimDuration - elapsed);
+        leftStr = `残 約${remaining.toFixed(1)}s`;
       } else {
-        leftStr = `計算中 (${elapsed.toFixed(1)}s)`;
+        leftStr = `実行中 (${elapsed.toFixed(1)}s)`;
       }
       this.setGlobalEta({
         clock: clock,
@@ -1523,7 +1540,7 @@ class ConsoleApp {
       });
     };
     update();
-    this._etaTimer = setInterval(update, 100);
+    this._etaTimer = setInterval(update, 80);
   }
 
   stopEtaCountdown() {
@@ -1798,11 +1815,11 @@ class ConsoleApp {
   }
 
   async _launchFlight() {
+    if (this.tunnelMode) this.setTunnel(false);
     this.hideSimulationError();
     const tStart = performance.now();
     this.startEtaCountdown({
       clock: "6DoF計算中...",
-      estimatedSec: 1.5,
       title: "6DoF RK4 飛行シミュレーション軌跡を計算中...",
     });
 
@@ -1829,6 +1846,7 @@ class ConsoleApp {
         });
 
         const elapsedSec = ((performance.now() - tStart) / 1000).toFixed(2);
+        this._lastSimDuration = Number(elapsedSec);
         this.stopEtaCountdown();
         this.setGlobalEta({
           clock: `${elapsedSec}s`,
@@ -1874,6 +1892,7 @@ class ConsoleApp {
   }
 
   async _togglePlay() {
+    if (this.tunnelMode) this.setTunnel(false);
     await this._guard(async () => {
       if (this.flightDirty || !this.transport.history || !this.transport.history.length) {
         await this._launchFlight();
@@ -1891,6 +1910,7 @@ class ConsoleApp {
   }
 
   async _resetFlight(clearHistory = true) {
+    if (this.tunnelMode) this.setTunnel(false);
     this.hideSimulationError();
     this.setGlobalEta({ clock: "—", left: "待機中", active: false });
     if (this.viewport) {
@@ -2021,6 +2041,54 @@ class ConsoleApp {
     this.dom["top-range"].innerHTML = `${fmt(range, 2)}<small>m</small>`;
     this.dom["tp-dist"].textContent = fmt(range, 2);
 
+    // Rich Japanese Text Telemetry HUD with Current and Peak Values
+    const alt = Math.max(-position[2], 0);
+    const spd = Number(frame.speed_mps) || 0;
+    if (this._peakAlt === undefined || time <= 0.05) this._peakAlt = alt;
+    else this._peakAlt = Math.max(this._peakAlt, alt);
+
+    if (this._peakSpd === undefined || time <= 0.05) this._peakSpd = spd;
+    else this._peakSpd = Math.max(this._peakSpd, spd);
+
+    if (this.dom["f-hud-alt"]) this.dom["f-hud-alt"].textContent = fmt(alt, 2);
+    if (this.dom["f-hud-alt-peak"]) this.dom["f-hud-alt-peak"].textContent = fmt(this._peakAlt, 2);
+    if (this.dom["f-hud-spd"]) this.dom["f-hud-spd"].textContent = fmt(spd, 2);
+    if (this.dom["f-hud-spd-peak"]) this.dom["f-hud-spd-peak"].textContent = fmt(this._peakSpd, 2);
+    if (this.dom["f-hud-dist"]) this.dom["f-hud-dist"].textContent = fmt(range, 2);
+    if (this.dom["f-hud-time"]) this.dom["f-hud-time"].textContent = fmt(time, 2);
+    if (this.dom["f-hud-glide"]) this.dom["f-hud-glide"].textContent = grStr;
+    if (this.dom["f-hud-aoa"]) this.dom["f-hud-aoa"].textContent = `迎角: ${fmt(frame.alpha_deg, 1)}°`;
+
+    // Flight Phase Detection and Display
+    if (this.dom["f-hud-phase"]) {
+      let phaseLabel = "待機中";
+      let phaseBg = "#e8f0fe";
+      let phaseColor = "#1a73e8";
+
+      if (time > 0.05) {
+        if (alt <= 0.04 && time > 0.5) {
+          phaseLabel = "着地完了 (LANDED)";
+          phaseBg = "#ceead6";
+          phaseColor = "#137333";
+        } else if (sinkRate < -0.8) {
+          phaseLabel = "上昇中 (ASCENT)";
+          phaseBg = "#feefe3";
+          phaseColor = "#d93025";
+        } else if (Math.abs(sinkRate) <= 0.8 && spd < 4.5) {
+          phaseLabel = "頂点遷移 (APOGEE)";
+          phaseBg = "#fef7e0";
+          phaseColor = "#b06000";
+        } else if (sinkRate > 0) {
+          phaseLabel = "安定滑空 (GLIDE)";
+          phaseBg = "#e6f4ea";
+          phaseColor = "#137333";
+        }
+      }
+      this.dom["f-hud-phase"].textContent = phaseLabel;
+      this.dom["f-hud-phase"].style.background = phaseBg;
+      this.dom["f-hud-phase"].style.color = phaseColor;
+    }
+
     const frames = Number(frame.frames) || 0;
     const scrub = this.dom["tp-scrub"];
     const maxVal = Math.max(frames, 1);
@@ -2148,6 +2216,152 @@ class ConsoleApp {
 
     this._guard(async () => {
       await this._updateTrim();
+    });
+  }
+
+  /* ---------------------------------------------------- unified aircraft selector */
+
+  async _initUnifiedAircraftSelector() {
+    const sel = this.dom["unified-aircraft-select"];
+    if (!sel) return;
+
+    const optGuinness = document.getElementById("optgroup-guinness");
+    const optCustom = document.getElementById("optgroup-custom");
+    const btnImport = this.dom["btn-unified-mesh-import"];
+    const fileInput = this.dom["unified-mesh-file"];
+
+    // 1. 3Dモデルファイル読込ボタン連携
+    if (btnImport && fileInput) {
+      btnImport.addEventListener("click", () => fileInput.click());
+      fileInput.addEventListener("change", async () => {
+        if (fileInput.files && fileInput.files[0]) {
+          const file = fileInput.files[0];
+          this.notify(`3Dモデル ${file.name} を読み込み中...`, "info");
+          if (this.meshpanel) {
+            await this.meshpanel.importFile(file);
+            if (optCustom) {
+              optCustom.hidden = false;
+              const opt = document.createElement("option");
+              opt.value = `custom_${file.name}`;
+              opt.textContent = `3D: ${file.name}`;
+              optCustom.appendChild(opt);
+              sel.value = opt.value;
+              this._updateUnifiedAircraftCard({
+                badge: "3Dモデル",
+                metric: "カスタム",
+                title: file.name,
+                desc: "3Dモデルデータから物理量（翼面積、スパン、アスペクト比、重心）が自動抽出され適用されています。",
+              });
+            }
+          }
+        }
+      });
+    }
+
+    // 2. ギネス世界記録プリセットを読み込んでセレクトボックスに追加
+    try {
+      const data = await api.recordPresets();
+      const presets = data.presets || [];
+      this.recordPresetsMap = new Map();
+
+      if (optGuinness) {
+        optGuinness.innerHTML = "";
+        for (const p of presets) {
+          this.recordPresetsMap.set(p.key, p);
+          const opt = document.createElement("option");
+          opt.value = `record_${p.key}`;
+          const cat = p.category === "indoor_duration" ? "滞空" : "飛距離";
+          opt.textContent = `${p.name_ja || p.name} (${cat})`;
+          optGuinness.appendChild(opt);
+        }
+      }
+    } catch (err) {
+      console.warn("Failed to load guinness presets for unified selector:", err);
+    }
+
+    // 3. 機体選択イベント (投げ方は変更せず、機体形状・重量・トリムのみ適用)
+    sel.addEventListener("change", async () => {
+      const val = sel.value;
+      if (val.startsWith("record_")) {
+        const key = val.replace("record_", "");
+        const p = this.recordPresetsMap?.get(key);
+        if (p) {
+          await this._guard(async () => {
+            const res = await api.recordApply({ key, throw_only: false, calibrated: true, flight_mode: this.recordFlightMode || "full_flight" });
+            if (res.ok) {
+              this.store.adopt(res);
+              this.panels.sync();
+              this._syncGeometry();
+              await this.refreshAir();
+              await this.refreshPolar();
+              this._updateUnifiedAircraftCard({
+                badge: "世界記録機",
+                metric: p.achievement?.value_display || "世界記録",
+                title: p.name_ja || p.name,
+                desc: `${p.holder || ""} (${p.year || ""}) · ${p.description_ja || p.notes_ja || "世界記録の機体形状と剛性パラメータです。"}`,
+              });
+              this.notify(`機体モデルをロードしました: ${p.name_ja || p.name}`, "ok");
+            }
+          });
+        }
+      } else if (val === "preset_glider") {
+        this._applyStandardPreset({
+          name: "Paper Glider",
+          wingspan_m: 0.20,
+          wing_area_m2: 0.015,
+          mass_kg: 0.005,
+          paper_gsm: 100.0,
+          aspect_ratio: 2.67,
+          taper_ratio: 0.70,
+          dihedral_deg: 5.0,
+          elevon_deg: 2.0,
+        }, "標準機", "AR 2.67", "ペーパーグライダー", "高アスペクト比で安定した滑空性能を持つ標準モデルです。");
+      } else if (val === "preset_dart") {
+        this._applyStandardPreset({
+          name: "Dart High-Speed",
+          wingspan_m: 0.12,
+          wing_area_m2: 0.009,
+          mass_kg: 0.006,
+          paper_gsm: 120.0,
+          aspect_ratio: 1.60,
+          taper_ratio: 0.35,
+          dihedral_deg: 2.0,
+          elevon_deg: 1.0,
+        }, "高速ダーツ", "AR 1.60", "高速ダーツ機", "後退角が大きく空気抵抗を極限まで低減したスピード重視モデルです。");
+      } else if (val === "preset_wide") {
+        this._applyStandardPreset({
+          name: "Wide-Body Glider",
+          wingspan_m: 0.26,
+          wing_area_m2: 0.024,
+          mass_kg: 0.0045,
+          paper_gsm: 80.0,
+          aspect_ratio: 2.82,
+          taper_ratio: 0.85,
+          dihedral_deg: 6.5,
+          elevon_deg: 2.5,
+        }, "広翼型", "AR 2.82", "広翼型グライダー", "軽量・低翼面荷重で微風でも長時間滞空できるグライダーモデルです。");
+      }
+    });
+  }
+
+  _updateUnifiedAircraftCard({ badge, metric, title, desc }) {
+    if (this.dom["unified-model-badge"]) this.dom["unified-model-badge"].textContent = badge;
+    if (this.dom["unified-model-metric"]) this.dom["unified-model-metric"].textContent = metric;
+    if (this.dom["unified-model-title"]) this.dom["unified-model-title"].textContent = title;
+    if (this.dom["unified-model-desc"]) this.dom["unified-model-desc"].textContent = desc;
+  }
+
+  async _applyStandardPreset(params, badge, metric, title, desc) {
+    await this._guard(async () => {
+      for (const [k, v] of Object.entries(params)) {
+        this.store.set("aircraft", k, v, "preset");
+      }
+      this.panels.sync();
+      this._syncGeometry();
+      await this.refreshAir();
+      await this.refreshPolar();
+      this._updateUnifiedAircraftCard({ badge, metric, title, desc });
+      this.notify(`機体モデルを切り替えました: ${title}`, "ok");
     });
   }
 
@@ -2614,8 +2828,11 @@ class ConsoleApp {
 
   setTunnel(enabled) {
     this.tunnelMode = Boolean(enabled);
-    this.dom["tunnel-toggle"].checked = this.tunnelMode;
-    this.dom["tunnel-hud"].hidden = !this.tunnelMode;
+    if (this.dom["tunnel-toggle"]) this.dom["tunnel-toggle"].checked = this.tunnelMode;
+    if (this.dom["tunnel-hud"]) {
+      this.dom["tunnel-hud"].hidden = !this.tunnelMode;
+      this.dom["tunnel-hud"].style.display = this.tunnelMode ? "" : "none";
+    }
     this.transport.tunnelMode = this.tunnelMode;
     if (this.viewport) {
       const env = this.store.data.environment || {};
@@ -2629,6 +2846,7 @@ class ConsoleApp {
         this.viewport.setParticlesVisible(true);
         this._updateTunnelPose();
       } else {
+        this.viewport.setLaunchVectorVisible(true);
         this._placeAirframeAtLaunch();
       }
     }
@@ -2638,6 +2856,11 @@ class ConsoleApp {
       this._guard(async () => {
         await api.atmosphere(this.store.data.environment);
         await this._updateTrim();
+        await this.transport._pollWind();
+        await this.transport._pollStress();
+      });
+    } else {
+      this._guard(async () => {
         await this.transport._pollWind();
         await this.transport._pollStress();
       });

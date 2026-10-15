@@ -303,6 +303,11 @@ export class ParameterPanels {
     const raw = this._fromDisplay(spec, shown);
     const stored = spec.kind === "int" ? Math.round(raw) : raw;
     this.store.set(section, spec.key, stored, "ui");
+    if (section === "launch" && (spec.key === "launch_speed" || spec.key === "launch_angle_deg")) {
+      this.store.set("launch", "throw_speed_source", "direct", "ui");
+      this.store.set("launch", "throw_style", "direct", "ui");
+      if (this.throwStyleSelect) this.throwStyleSelect.value = "direct";
+    }
     value.textContent = spec.kind === "int" ? String(stored) : fmt(this._toDisplay(spec, stored), digits(spec));
     value.dataset.dirty = this._isDirty(section, spec.key, stored) ? "1" : "0";
     this.onChange(section, spec.key, stored);
