@@ -878,15 +878,14 @@ def gpu_ensemble_simulation(
     history_distances = []
     sample_count = max(1, min(int(max_sample_tracks), N))
     sample_indices = list(range(sample_count))
-    sample_tracks: List[List[Tuple[float, float, float]]] = [[] for _ in sample_indices]
+    sample_indices_xp = xp.asarray(sample_indices, dtype=xp.int32)
+    sample_tracks_snapshots = []
 
     # Pre-record t = 0
     history_times.append(0.0)
     history_altitudes.append(xp.maximum(-pos[:, 2], 0.0))
     history_distances.append(xp.sqrt(pos[:, 0] ** 2 + pos[:, 1] ** 2))
-    for k, idx in enumerate(sample_indices):
-        p_row = pos[idx]
-        sample_tracks[k].append((float(p_row[0]), float(p_row[1]), max(float(-p_row[2]), 0.0)))
+    sample_tracks_snapshots.append(pos[sample_indices_xp, :])
 
     # 6. Time integration loop
     t = 0.0
@@ -985,14 +984,10 @@ def gpu_ensemble_simulation(
 
         # History sampling
         if step % sample_stride == 0 or not xp.any(active) or step == max_steps:
-            history_times.append(round(float(t), 4))
+            history_times.append(round(step * dt, 4))
             history_altitudes.append(xp.maximum(-pos[:, 2], 0.0))
             history_distances.append(xp.sqrt(pos[:, 0] ** 2 + pos[:, 1] ** 2))
-            for k, idx in enumerate(sample_indices):
-                p_row = pos[idx]
-                sample_tracks[k].append(
-                    (round(float(p_row[0]), 3), round(float(p_row[1]), 3), round(max(float(-p_row[2]), 0.0), 3))
-                )
+            sample_tracks_snapshots.append(pos[sample_indices_xp, :])
 
         if not xp.any(active):
             break
@@ -1044,6 +1039,18 @@ def gpu_ensemble_simulation(
         dist_mean.append(round(float(np.mean(dists)), 3))
         dist_p10.append(round(float(np.percentile(dists, 10)), 3))
         dist_p90.append(round(float(np.percentile(dists, 90)), 3))
+
+    # Convert sample track snapshots to CPU
+    if backend == "cupy":
+        snapshots_np = [cp.asnumpy(snap) for snap in sample_tracks_snapshots]
+    else:
+        snapshots_np = [np.asarray(snap) for snap in sample_tracks_snapshots]
+
+    sample_tracks: List[List[Tuple[float, float, float]]] = [[] for _ in sample_indices]
+    for snap in snapshots_np:
+        for k in range(sample_count):
+            p = snap[k]
+            sample_tracks[k].append((round(float(p[0]), 3), round(float(p[1]), 3), round(max(float(-p[2]), 0.0), 3)))
 
     # Format sample trajectories with metrics and rank
     sample_trajectories = []

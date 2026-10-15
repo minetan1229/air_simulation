@@ -537,11 +537,13 @@ export class WindParticles {
 
   /* ------------------------------------------------------------ CPU path */
   _initCpu() {
+    // Dynamically cap particle count on CPU fallback to prevent freezing the UI thread
+    this.cpuCount = Math.min(this.count, 2048);
     const geometry = new THREE.BufferGeometry();
-    this.positions = new Float32Array(this.count * 3);
-    this.speeds = new Float32Array(this.count);
-    this.seedValues = new Float32Array(this.count);
-    for (let i = 0; i < this.count; i += 1) {
+    this.positions = new Float32Array(this.cpuCount * 3);
+    this.speeds = new Float32Array(this.cpuCount);
+    this.seedValues = new Float32Array(this.cpuCount);
+    for (let i = 0; i < this.cpuCount; i += 1) {
       this.positions[i * 3] = Math.random();
       this.positions[i * 3 + 1] = Math.random();
       this.positions[i * 3 + 2] = Math.random();
@@ -637,7 +639,8 @@ export class WindParticles {
       const positions = this.positions;
       const speeds = this.speeds;
       const out = this.sample;
-      for (let i = 0; i < this.count; i += 1) {
+      const nParticles = this.cpuCount || this.count;
+      for (let i = 0; i < nParticles; i += 1) {
         const wx = min.x + positions[i * 3] * sizeX;
         const wy = min.y + positions[i * 3 + 1] * sizeY;
         const wz = min.z + positions[i * 3 + 2] * sizeZ;
