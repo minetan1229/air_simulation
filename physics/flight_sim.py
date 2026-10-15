@@ -1964,18 +1964,25 @@ class FlightSimulator:
         effective_alpha_deg = alpha_deg - aero_twist_deg
         effective_dihedral_deg = float(self.aircraft.dihedral_deg) + aero_dihedral_deg
 
-        # Quasi-static trailing-edge bend: bounded pressure response, one
-        # effective fold shared by lift and pitch instead of independent cL0/cm0
-        # scaling. Positive fold is trailing-edge down and therefore nose down.
-        # Compliance is an empirical control-authority parameter, not measured
-        # material elasticity; this model does not describe flutter or hysteresis.
-        # The 8-degree travel ceiling is a conservative empirical control bound,
-        # not a measured material constant or a performance calibration.
+        # Passive Aeroelastic Morphing (AGENTS.md Section 2.1 & 8.2):
+        # High dynamic pressure during launch washes out trim elevator deflection to prevent
+        # pitching loops during vertical climb; at low dynamic pressure (apex / glide),
+        # paper elasticity restores trimmed elevon deflection smoothly without hard clamping.
         aero_comp_gain = max(_finite(getattr(self.aircraft, "aeroelastic_compliance", 0.0)), 0.0)
         stiffness_val = max(_finite(self.aircraft.paper_stiffness, 0.35), 0.05)
-        pressure_ratio = aero_comp_gain * q_dyn / (60.0 * stiffness_val)
-        trailing_edge_bend_deg = 8.0 * pressure_ratio / (1.0 + pressure_ratio)
-        aero_cfg = replace(self.aircraft, elevon_deg=clamp(float(self.aircraft.elevon_deg) + trailing_edge_bend_deg, -45.0, 45.0))
+        if aero_comp_gain > 0.0:
+            q_aeroelastic = 60.0 * stiffness_val / max(aero_comp_gain, 0.1)
+            pressure_ratio = safe_div(q_dyn, q_aeroelastic, 0.0)
+            morph_factor = 1.0 / (1.0 + (pressure_ratio ** 1.5))
+            downwash_deflection = 12.0 * (pressure_ratio ** 2) / (1.0 + (pressure_ratio ** 2))
+            base_elevon = float(self.aircraft.elevon_deg)
+            effective_elevon_deg = base_elevon * morph_factor + downwash_deflection
+            trailing_edge_bend_deg = effective_elevon_deg - base_elevon
+        else:
+            effective_elevon_deg = float(self.aircraft.elevon_deg)
+            trailing_edge_bend_deg = 0.0
+
+        aero_cfg = replace(self.aircraft, elevon_deg=clamp(effective_elevon_deg, -45.0, 45.0))
 
         result = aero_forces(
             aero_cfg,

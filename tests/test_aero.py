@@ -1144,3 +1144,18 @@ def test_aero_result_populates_advanced_fields(cfg: AircraftConfig, env: Environ
     assert res.aeroelastic_dihedral_deg > 0.0
     assert res.aeroelastic_twist_deg < 0.0  # washout is negative twist
 
+
+def test_apex_low_speed_pushover_dynamics(cfg: AircraftConfig, env: EnvironmentConfig) -> None:
+    """Apex low-speed pushover provides restorative nose-down moment at low speeds without perturbing cruise."""
+    # Near apex (speed = 1.0 m/s < 2.5 m/s) with positive alpha (climbing attitude)
+    res_apex = evaluate_aero(cfg, env, 1.0, 15.0)
+    # Pushover should produce nose-down moment (negative contribution)
+    assert res_apex.pitching_moment_nm < 0.0
+
+    # In cruise glide (speed = 4.0 m/s >= 2.5 m/s), pushover effect is zero
+    res_cruise = evaluate_aero(cfg, env, 4.0, 5.0)
+    geom = derived_properties(cfg)
+    expected_cruise_pm = res_cruise.dynamic_pressure_pa * geom["ref_area_m2"] * geom["ref_length_m"] * res_cruise.cm
+    assert res_cruise.pitching_moment_nm == pytest.approx(expected_cruise_pm, rel=1e-9)
+
+

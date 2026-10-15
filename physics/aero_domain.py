@@ -1000,7 +1000,28 @@ def evaluate_aero(
     lift_right_n = max(0.0, 0.5 * lift_n - 0.5 * d_lift)
     drag_n = dynamic_pressure * area * cd
     side_n = dynamic_pressure * area * cy
-    pitching_nm = dynamic_pressure * area * chord * cm + pitching_moment_offset_nm(cfg, lift_n, drag_n, side_n)
+
+    # Apex low-speed pushover dynamics (AGENTS.md Section 8.2):
+    # At the climb apex (speed < 2.5 m/s) where dynamic pressure approaches zero,
+    # the aft center-of-pressure shift in separated flow and forward-shifted CG eccentricity
+    # produce a physical aerodynamic nose-down pitching moment on positive alpha.
+    # Note: Only applies during flight (speed > 0) with forward CG eccentricity.
+    apex_trans_speed = 2.0
+    if 0.0 < speed < 2.5 and alpha > 0.0:
+        apex_factor = math.exp(-((speed / apex_trans_speed) ** 2))
+        # Proportional to actual low dynamic pressure or flow circulation
+        v_floor = min(speed, 1.0)
+        q_floor = 0.5 * density * (v_floor ** 2)
+        sin_a = math.sin(deg2rad(min(alpha, 90.0)))
+        pushover_moment = -q_floor * area * chord * 1.2 * sin_a * apex_factor
+    else:
+        pushover_moment = 0.0
+
+    pitching_nm = (
+        dynamic_pressure * area * chord * cm
+        + pitching_moment_offset_nm(cfg, lift_n, drag_n, side_n)
+        + pushover_moment
+    )
     rolling_nm = dynamic_pressure * area * span * roll_coeff
     yawing_nm = dynamic_pressure * area * span * yaw_coeff
 
