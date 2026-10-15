@@ -140,7 +140,7 @@ button, input, select, textarea {
   font-family: var(--mono);
   font-size: 8px;
   letter-spacing: 0.16em;
-  color: #6f757d;
+  color: #9aa0a6;
 }
 .readout-val {
   font-family: var(--mono);
@@ -837,7 +837,7 @@ input[type="range"]:focus-visible { outline: 2px solid var(--accent); outline-of
   margin-right: 2px;
   border-right: 1px solid #2c2f34;
 }
-.toprail .eta-key { color: #6f757d; font-family: var(--mono); font-size: 8.5px; letter-spacing: 0.16em; }
+.toprail .eta-key { color: #9aa0a6; font-family: var(--mono); font-size: 8.5px; letter-spacing: 0.16em; }
 .toprail .eta-val { color: #e9e7e2; font-size: 13px; font-family: var(--mono); font-weight: 600; }
 .toprail .eta-sub { color: #7f858d; font-size: 10px; font-family: var(--mono); }
 .header-eta[data-active="1"] { border-right-color: #1a73e8; }
@@ -1339,7 +1339,7 @@ input[type="range"]:focus-visible { outline: 2px solid var(--accent); outline-of
   color: #cfd2d6;
   flex: none;
 }
-.tp-frame .muted { color: #6f757d; }
+.tp-frame .muted { color: #9aa0a6; }
 
 .tp-meta { display: flex; align-items: center; gap: 14px; }
 .tp-clock {
@@ -1352,7 +1352,7 @@ input[type="range"]:focus-visible { outline: 2px solid var(--accent); outline-of
 }
 .tp-stat { display: flex; align-items: baseline; gap: 4px; }
 .tp-stat .num { font-size: 11.5px; color: #cfd2d6; }
-.transport .muted { color: #6f757d; }
+.transport .muted { color: #9aa0a6; }
 
 /* ------------------------------------------------------------------ */
 /* toasts + modal                                                      */

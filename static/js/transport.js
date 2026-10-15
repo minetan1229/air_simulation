@@ -39,6 +39,8 @@ export class Transport extends Emitter {
     this.lastWall = 0;
     this.windDomain = { min: [-3, -3, -0.6], max: [3, 3, 1.6] };
     this.busy = false;
+    this._stressInFlight = false;
+    this._windInFlight = false;
     this._tick = this._tick.bind(this);
     this._handle = 0;
   }
@@ -268,13 +270,19 @@ export class Transport extends Emitter {
     }
 
     if (this.playing || this.tunnelMode) {
-      if (now - this.lastStressAt > STRESS_INTERVAL_MS) {
+      if (now - this.lastStressAt > STRESS_INTERVAL_MS && !this._stressInFlight) {
         this.lastStressAt = now;
-        this._pollStress();
+        this._stressInFlight = true;
+        this._pollStress().finally(() => {
+          this._stressInFlight = false;
+        });
       }
-      if (now - this.lastWindAt > WIND_INTERVAL_MS) {
+      if (now - this.lastWindAt > WIND_INTERVAL_MS && !this._windInFlight) {
         this.lastWindAt = now;
-        this._pollWind();
+        this._windInFlight = true;
+        this._pollWind().finally(() => {
+          this._windInFlight = false;
+        });
       }
     }
 

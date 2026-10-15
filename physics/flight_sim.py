@@ -581,6 +581,7 @@ def _local_atmosphere(env: EnvironmentConfig, altitude_m: float, chord_m: float)
 _ATMOSPHERE_CACHE: "OrderedDict[tuple, Dict[str, float]]" = OrderedDict()
 _ATMOSPHERE_CACHE_LIMIT = 256
 _ATMOSPHERE_QUANTUM_M = 1.0e-3
+_ATMOSPHERE_LOCK = threading.Lock()
 
 
 def atmosphere_state(
@@ -616,15 +617,18 @@ def atmosphere_state(
         _finite(env.gravity),
         bool(env.compressibility_enabled),
     )
-    cached = _ATMOSPHERE_CACHE.get(key)
-    if cached is not None:
-        _ATMOSPHERE_CACHE.move_to_end(key)
-        return cached
+    with _ATMOSPHERE_LOCK:
+        cached = _ATMOSPHERE_CACHE.get(key)
+        if cached is not None:
+            _ATMOSPHERE_CACHE.move_to_end(key)
+            return cached
 
     result = _atmosphere_state_uncached(env, altitude, chord)
-    _ATMOSPHERE_CACHE[key] = result
-    if len(_ATMOSPHERE_CACHE) > _ATMOSPHERE_CACHE_LIMIT:
-        _ATMOSPHERE_CACHE.popitem(last=False)
+
+    with _ATMOSPHERE_LOCK:
+        _ATMOSPHERE_CACHE[key] = result
+        if len(_ATMOSPHERE_CACHE) > _ATMOSPHERE_CACHE_LIMIT:
+            _ATMOSPHERE_CACHE.popitem(last=False)
     return result
 
 
@@ -2226,8 +2230,11 @@ class FlightSimulator:
 
         if landed or crashed:
             new_vz = 0.0
-            vx *= 0.5
-            vy *= 0.5
+            vx *= damping * 0.2
+            vy *= damping * 0.2
+            if math.hypot(vx, vy) < 0.05:
+                vx = 0.0
+                vy = 0.0
             omega = [0.0, 0.0, 0.0]
 
         return StateVector(

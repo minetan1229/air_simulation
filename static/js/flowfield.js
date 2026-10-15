@@ -696,9 +696,21 @@ export class WindParticles {
     if (this.seedTexture) this.seedTexture.dispose();
     if (this.volumeTexture && this.volumeTexture !== this.blankVolume) this.volumeTexture.dispose();
     if (this.blankVolume) this.blankVolume.dispose();
+    if (this.simMaterial) this.simMaterial.dispose();
+    if (this.pointMaterial) this.pointMaterial.dispose();
+    if (this.cpuGeometry) this.cpuGeometry.dispose();
     if (this.points) {
-      this.points.geometry.dispose();
-      this.scene.remove(this.group);
+      if (this.points.geometry) this.points.geometry.dispose();
+      this.group.remove(this.points);
+    }
+    if (this.simScene) {
+      this.simScene.traverse((child) => {
+        if (child.geometry) child.geometry.dispose();
+        if (child.material) child.material.dispose();
+      });
+    }
+    if (this.group.parent) {
+      this.group.parent.remove(this.group);
     }
   }
 }
