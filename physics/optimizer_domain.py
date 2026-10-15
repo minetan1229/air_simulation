@@ -667,10 +667,10 @@ def crowding_distance(objectives: Sequence[str], value_matrix: Any, front: Seque
         order = np.argsort(block[:, column], kind="stable")
         values = block[order, column]
         spread = float(values[-1] - values[0])
+        if spread <= 1.0e-12:
+            continue
         distances[order[0]] = math.inf
         distances[order[-1]] = math.inf
-        if spread <= 0.0:
-            continue
         for position in range(1, len(members) - 1):
             member = int(order[position])
             if math.isinf(distances[member]):
@@ -1130,6 +1130,10 @@ def run_differential_evolution(
     if differential_evolution is None:
         return run_surrogate(cfg, progress_cb=progress_cb, cancel_cb=cancel_cb)
     dims = len(variables)
+    if dims == 0:
+        return run_surrogate(cfg, progress_cb=progress_cb, cancel_cb=cancel_cb)
+    if cap < dims * 2:
+        return run_surrogate(cfg, progress_cb=progress_cb, cancel_cb=cancel_cb)
     run = _Run("differential-evolution", cfg, variables, cap, progress_cb, cancel_cb)
 
     popsize = max(1, min(int(cfg.population_size), cap // max(1, dims)))

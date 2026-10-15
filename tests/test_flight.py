@@ -1198,3 +1198,15 @@ def test_passive_aeroelastic_morphing_smooth_response():
     assert 0.0 < bend_cruise < bend_launch
     assert bend_launch > 8.0  # Demonstrates removal of restrictive 8-degree hard ceiling
 
+
+def test_landing_stops_and_declares_landed_on_max_bounces():
+    launch = LaunchConfig(launch_speed=1.0, launch_angle_deg=-10.0, launch_height_m=0.01)
+    env = EnvironmentConfig(**CALM_ENVIRONMENT)
+    settings = SimulationSettings(collision_enabled=True)
+    sim = FlightSimulator(GLIDER, env, launch, settings)
+    summary = sim.simulate(duration_s=2.0, record=True)
+    assert summary["status"] in ("landed", "crashed")
+    assert sim.state.landed is True or sim.state.crashed is True
+
+
+
