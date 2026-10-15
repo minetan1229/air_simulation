@@ -22,9 +22,12 @@
    - 重いJS処理は Web Workers に委託し、メインUIスレッド（60FPS/120FPS）を阻害しない。
 6. **Google Minimalist UI/UX Standard (Google風UIデザイン)**
    - Google Clean / Material Design に完全準拠。白ベース（`#F8F9FA` / `#FFFFFF`）、角丸カード型浮遊パネル、Google Blue (`#1A73E8`) を基調としたデザイン。
-7. **完了報告**
-   - 作成が終了したら完了タイトル　終了時間　修正内容要約(100文字程度)を以下のwebhookに送信する。
-https://discord.com/api/webhooks/1559481959061782528/n8lndbZf9zWCjv9LRs9CPL_XcavqKWkvR1bD8C8ffIevAXymTS8f9NtJZGjdDU6OcVIE
+7. **作成、完了報告**
+   - 作成が開始、終了したら作成、完了タイトル　作成時間、終了時間　修正内容要約(100文字程度)を以下のwebhookに送信する。サブエージェントを起動する時も送信する。サブエージェントはサブエージェントとつける。
+   開始、サブエージェント、終了は見た目で分かるように開始は緑サブエージェントはオレンジ終了は青
+https://discord.com/api/webhooks/1560152284057567353/2udSqpx3P4ZVhrGi1JnyRbgAY-FyB6cySreOpSOxSi8U9KbTvTj4KtOm91oaMOQCQ8u_
+8. **最後に**
+   -ユニットテストで必ず検証するように
 
 
 ---
@@ -38,7 +41,10 @@ https://discord.com/api/webhooks/1559481959061782528/n8lndbZf9zWCjv9LRs9CPL_Xcav
   - **地面効果 (Ground Effect)**: 高度 $h$ と翼幅 $b$ による誘導抗力低減:
     $$C_{Di}(h) = C_{Di0} \cdot \left[ \frac{16(h/b)^2}{1 + 16(h/b)^2} \right]$$
   - **エレボン/トリム**: 後縁折り曲げ角 $\delta_{fold}$ によるトリム迎角およびピッチングモーメント調整。
-  - **用紙特性**: 坪量 ($g/m^2$) と剛性による動圧変化時の翼のしなり（二面角変化）。
+  - **用紙特性と受動的空力弾性モーフィング (Passive Aeroelastic Morphing)**:
+    坪量 ($g/m^2$) と剛性に基づく、動圧 $q$ 依存の非線形後縁トリム変形モデル。高動圧投擲域（$q \gg q_{ref}$）での頭上げループ抑制と、頂点・滑空域（$q \to 0$）でのトリム自動復元を両立する:
+    $$\delta_{eff}(q) = \delta_{trim} \cdot \left[ \frac{1}{1 + (q / q_{aeroelastic})^{n_{morph}}} \right]$$
+    （変形角を固定値でクランプせず、材料非線形性に基づく滑らかなシグモイド減衰として実装する）。
 - **風場・流体 (Fluid Dynamics)**:
   - 3D空間ベクトル場および Simplex/Perlin ノイズによる乱気流、熱上昇気流 (Thermal)。
 - **構造負荷・応力 (Structural Stress)**:
@@ -138,6 +144,8 @@ https://discord.com/api/webhooks/1559481959061782528/n8lndbZf9zWCjv9LRs9CPL_Xcav
 - **Drag Polar 出力**: $C_{D,\min}$ と $\alpha_{L/D,\max}$ を数値的に求めて API で公開。
 - 三角翼理論: $AR = b^2/S$、$c_{mac}$、$C_{L\alpha} = 2\pi AR/(2+\sqrt{AR^2(1+\lambda)+4AR/\pi})$。
 - Elevon 折り角 $\delta$ による $\Delta C_m$ / $\Delta C_L$ / $\Delta\alpha_{trim}$。
+- **極低速頂点遷移力学 (Apex Low-Speed Pushover Dynamics)**:
+  上昇端（$V < 2.0\,\text{m/s}$）における風圧中心 $x_{cp}$ の後退移動および質量中心偏心による自然な機首下げモーメントモデル。動圧消失時のモーメント特異点を防ぎ、重力と微小相対風による自然なプッシュオーバー（滑空姿勢への遷移）を再現する。
 - 揚力係数の数値積分で翼循環を検証する pytest を含める。
 
 ### 8.3 最適化エンジン (Optimizer Domain)
@@ -272,3 +280,4 @@ python smoke_test.py                     # API 導通 + 最適化ジョブ + ETA
 ```
 
 `pytest` では解析解が存在する領域（線形揚力、誘導抗力、ISA、Sutherland、面積・重心・慣性テンソル、翼循環）について相対誤差 1e-6〜1e-3 の検証を行い、検証できない箇所は「未検証」と明示する。
+加えて、ギネス滞空記録機ベンチマーク（初速 $26\,\text{m/s}$、投射角 $78^\circ$、初期高度 $1.8\,\text{m}$ からの急上昇・頂点プッシュオーバー・滑空遷移判定）を統合テストに含め、極端個体における非線形遷移の連続性と滞空性能を回帰検証する。

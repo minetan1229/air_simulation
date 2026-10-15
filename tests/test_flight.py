@@ -1174,3 +1174,27 @@ def test_flight_log_mode_and_version_survive_csv_round_trip():
     legacy = sample_from_row({"time_s": "0"})
     assert legacy.flight_mode == "legacy"
     assert legacy.physics_model_version == "unknown"
+
+
+def test_passive_aeroelastic_morphing_smooth_response():
+    """Verify passive aeroelastic morphing scales smoothly without hard clamping."""
+    aircraft = replace(GLIDER, aeroelastic_compliance=1.0, elevon_deg=2.0, paper_stiffness=0.35)
+    env = EnvironmentConfig(**CALM_ENVIRONMENT)
+    settings = SimulationSettings(collision_enabled=False)
+
+    # 1. Zero dynamic pressure -> zero bend, exact trim restored
+    sim_zero = FlightSimulator(aircraft, env, LaunchConfig(launch_speed=0.0, launch_height_m=10.0), settings)
+    assert sim_zero._diagnostics()["trailing_edge_bend_deg"] == 0.0
+
+    # 2. Moderate dynamic pressure (cruise glide, 4 m/s)
+    sim_cruise = FlightSimulator(aircraft, env, LaunchConfig(launch_speed=4.0, launch_height_m=10.0), settings)
+    bend_cruise = sim_cruise._diagnostics()["trailing_edge_bend_deg"]
+
+    # 3. High dynamic pressure (launch, 26 m/s)
+    sim_launch = FlightSimulator(aircraft, env, LaunchConfig(launch_speed=26.0, launch_angle_deg=78.0, launch_height_m=1.8), settings)
+    bend_launch = sim_launch._diagnostics()["trailing_edge_bend_deg"]
+
+    # Monotonic progression with dynamic pressure without abrupt saturation
+    assert 0.0 < bend_cruise < bend_launch
+    assert bend_launch > 8.0  # Demonstrates removal of restrictive 8-degree hard ceiling
+
