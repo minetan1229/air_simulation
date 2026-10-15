@@ -1927,13 +1927,23 @@ class MeshLibrary:
     model.
     """
 
-    def __init__(self, root: str = "models") -> None:
+    def __init__(self, root: str = "models", max_models: int = 250) -> None:
         self.root = str(root)
         self._lock = threading.RLock()
         self._models: Dict[str, MeshMetrics] = {}
         self._selected_id: Optional[str] = None
+        self._max_models: int = max(10, int(max_models))
         os.makedirs(self.root, exist_ok=True)
         self._rebuild_index()
+
+    def _enforce_quota(self) -> None:
+        """Evict oldest unselected models when exceeding _max_models."""
+        with self._lock:
+            while len(self._models) > self._max_models:
+                candidates = [mid for mid in self._models if mid != self._selected_id]
+                if not candidates:
+                    break
+                self.delete(candidates[0])
 
     # -- persistence ------------------------------------------------------
     def _json_path(self, model_id: str) -> str:
@@ -1967,6 +1977,7 @@ class MeshLibrary:
                 except (TypeError, ValueError):
                     continue
                 self._models[metrics.model_id] = metrics
+            self._enforce_quota()
 
     def _persist(self, metrics: MeshMetrics) -> MeshMetrics:
         with self._lock:
@@ -1974,6 +1985,7 @@ class MeshLibrary:
             with open(self._json_path(metrics.model_id), "w", encoding="utf-8") as handle:
                 json.dump(payload, handle, ensure_ascii=True, sort_keys=True)
             self._models[metrics.model_id] = metrics
+            self._enforce_quota()
             return metrics
 
     # -- import paths -----------------------------------------------------

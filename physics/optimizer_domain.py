@@ -36,7 +36,11 @@ import time
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
-from scipy.optimize import differential_evolution, minimize
+try:
+    from scipy.optimize import differential_evolution, minimize
+except ImportError:
+    differential_evolution = None
+    minimize = None
 
 from .config_schema import (
     OBJECTIVE_DIRECTIONS,
@@ -1076,6 +1080,8 @@ def run_nelder_mead(
     """Downhill simplex on the negated aggregate score with hard budget control."""
     variables, lows, highs = _prepare(cfg)
     cap = max(1, int(cfg.max_evaluations))
+    if minimize is None:
+        return run_surrogate(cfg, progress_cb=progress_cb, cancel_cb=cancel_cb)
     run = _Run("nelder-mead", cfg, variables, cap, progress_cb, cancel_cb)
     start = [clamp(value, low, high) for value, low, high in zip(config_to_vector(cfg, variables), lows, highs)]
     state = {"score": -math.inf, "seen": 0}
@@ -1121,6 +1127,8 @@ def run_differential_evolution(
     """Self-adaptive DE/rand/1/bin with deferred update and a strict budget."""
     variables, lows, highs = _prepare(cfg)
     cap = max(1, int(cfg.max_evaluations))
+    if differential_evolution is None:
+        return run_surrogate(cfg, progress_cb=progress_cb, cancel_cb=cancel_cb)
     dims = len(variables)
     run = _Run("differential-evolution", cfg, variables, cap, progress_cb, cancel_cb)
 

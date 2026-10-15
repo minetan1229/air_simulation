@@ -14,6 +14,11 @@ export class ConfigStore extends Emitter {
     this.meshModels = [];
   }
 
+  get aircraft() { return this.data.aircraft || {}; }
+  get environment() { return this.data.environment || {}; }
+  get launch() { return this.data.launch || {}; }
+  get simulation() { return this.data.simulation || {}; }
+
   /** Replace the local copy with a server snapshot (boot / import). */
   adopt(snapshot) {
     for (const section of SECTIONS) {
