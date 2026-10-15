@@ -15,6 +15,7 @@ import {
   $,
   clear,
   debounce,
+  escapeHtml,
   fmt,
   make,
   paintRamp,
@@ -2339,8 +2340,8 @@ class ConsoleApp {
     if (geomEl) geomEl.textContent = `翼幅 ${((geom.wingspan_m || air.wingspan_m || 0.32) * 100).toFixed(1)} cm / 翼面積 ${( (geom.wing_area_m2 || air.wing_area_m2 || 0.014) * 10000 ).toFixed(1)} cm²`;
     if (techEl) techEl.textContent = throwInfo.technique_ja || throwInfo.technique || "公認投擲フォーム";
     if (citEl) {
-      const cits = (p.citations || []).map(c => `・${c.title || c.citation || c.key || ""}`).join("<br>");
-      citEl.innerHTML = `<strong>【公認ルール・出処】</strong><br>${cits || "Guinness World Records 公認レギュレーション"}<br><span style="color:#1a73e8; margin-top:4px; display:inline-block;">${p.notes_ja || p.notes || ""}</span>`;
+      const cits = (p.citations || []).map(c => `・${escapeHtml(c.title || c.citation || c.key || "")}`).join("<br>");
+      citEl.innerHTML = `<strong>【公認ルール・出処】</strong><br>${cits || "Guinness World Records 公認レギュレーション"}<br><span style="color:#1a73e8; margin-top:4px; display:inline-block;">${escapeHtml(p.notes_ja || p.notes || "")}</span>`;
     }
   }
 
@@ -2410,7 +2411,7 @@ class ConsoleApp {
           item.style.background = lim.severity === "high" ? "#fce8e6" : "#f1f3f4";
           item.style.borderLeft = lim.severity === "high" ? "3px solid #d93025" : "3px solid #1a73e8";
           item.style.borderRadius = "2px";
-          item.innerHTML = `<strong>${lim.severity === "high" ? "【過大負荷】" : "【診断】"}</strong> ${lim.message_ja || lim.message}`;
+          item.innerHTML = `<strong>${lim.severity === "high" ? "【過大負荷】" : "【診断】"}</strong> ${escapeHtml(lim.message_ja || lim.message || "")}`;
           list.appendChild(item);
         }
       }

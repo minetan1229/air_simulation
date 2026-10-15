@@ -279,7 +279,12 @@ def angular_acceleration_body(
     m_vec = vec3(moment)
     angular_momentum = i_mat @ w_vec
     rhs = m_vec - np.cross(w_vec, angular_momentum)
-    return np.linalg.solve(i_mat, rhs)
+    try:
+        return np.linalg.solve(i_mat, rhs)
+    except np.linalg.LinAlgError:
+        sol, residuals, rank, s = np.linalg.lstsq(i_mat, rhs, rcond=1e-6)
+        return sol
+
 
 
 def inertia_tensor_box(mass: float, dx: float, dy: float, dz: float) -> np.ndarray:

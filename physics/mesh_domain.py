@@ -1495,7 +1495,10 @@ def panel_aerodynamics(
         area = max(float(areas[position]), 0.0)
 
         cos_local = -float(np.dot(normal, flow))
-        cos_local = float(np.clip(cos_local, -1.0, 1.0))
+        if math.isnan(cos_local) or not math.isfinite(cos_local):
+            cos_local = 0.0
+        else:
+            cos_local = float(np.clip(cos_local, -1.0, 1.0))
         local_rad = math.asin(cos_local)
         local_deg = math.degrees(local_rad)
 

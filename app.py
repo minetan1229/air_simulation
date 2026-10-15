@@ -169,7 +169,8 @@ def _handle_http_exception(exc: HTTPException):
 @app.errorhandler(Exception)
 def _handle_unexpected(exc: Exception):
     log.error("unhandled error on %s: %s\n%s", request.path, exc, traceback.format_exc())
-    return _error(f"internal server error: {exc}", 500)
+    return _error("an unexpected internal server error occurred", 500)
+
 
 
 # ---------------------------------------------------------------------------
@@ -1408,9 +1409,9 @@ def jobs_list():
 def jobs_join(job_id: str):
     timeout_raw = request.args.get("timeout")
     if timeout_raw is None or str(timeout_raw).strip() == "":
-        timeout = 30.0
+        timeout = 10.0
     else:
-        timeout = min(max(as_float(timeout_raw, "timeout"), 0.0), 300.0)
+        timeout = min(max(as_float(timeout_raw, "timeout"), 0.0), 30.0)
     try:
         finished = JOB_MANAGER.join(job_id, timeout)
     except KeyError as exc:
