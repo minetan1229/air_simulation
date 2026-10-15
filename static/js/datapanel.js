@@ -54,6 +54,12 @@ export class DataPanel {
     dom.exportRun.addEventListener("click", () => this.runExport());
     dom.bundleApply.addEventListener("click", () => this.applyBundle(dom.paste.value));
     dom.bundleDrop.addEventListener("click", () => this._openBundleFile());
+    dom.bundleDrop.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        this._openBundleFile();
+      }
+    });
     for (const type of ["dragenter", "dragover"]) {
       dom.bundleDrop.addEventListener(type, (event) => {
         event.preventDefault();

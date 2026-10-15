@@ -145,9 +145,9 @@ function makeWingSampler(cfg, side) {
     // Trailing edge fold (upward trim) and elevon / aileron on control band
     if (tc > 1 - ctrlRatio) {
       const k = smoothstep(0, 1, (tc - (1 - ctrlRatio)) / ctrlRatio);
-      // Upward fold/trim gives positive Y lift reflex
+      // teFold: upward fold/trim (+Y), elevonEffective: aerodynamic standard (+elevon = flap down = -Y)
       y += Math.sin(teFold) * chord * k * 0.4;
-      y += Math.sin(elevonEffective) * chord * k;
+      y -= Math.sin(elevonEffective) * chord * k;
     }
 
     return [x, y, z];
@@ -267,15 +267,16 @@ function makeUnderWingTuckSampler(cfg, side) {
   };
 }
 
-function pushSurface(target, sampler, spanSegments, chordSegments, flip = false, uvOffset = [0, 0]) {
+function pushSurface(target, sampler, spanSegments, chordSegments, flip = false, uvOffset = [0, 0], isLeftWing = false) {
   const base = target.positions.length / 3;
   for (let i = 0; i <= spanSegments; i += 1) {
     const s = i / spanSegments;
+    const uSpan = isLeftWing ? (1.0 - s) * 0.5 : 0.5 + s * 0.5;
     for (let j = 0; j <= chordSegments; j += 1) {
       const t = j / chordSegments;
       const p = sampler(s, t);
       target.positions.push(p[0], p[1], p[2]);
-      target.uvs.push(s * 0.5 + uvOffset[0], t);
+      target.uvs.push(uSpan, t);
     }
   }
   const row = chordSegments + 1;
@@ -296,24 +297,24 @@ export function buildAirframeGeometry(cfg) {
   const sink = { positions: [], uvs: [], indices: [] };
 
   // 1. Right & Left main wings (with seamless keel root fusion, dihedral, camber & elevons)
-  pushSurface(sink, makeWingSampler(cfg, 1), SPAN_SEGMENTS, CHORD_SEGMENTS, false, [0.5, 0]);
-  pushSurface(sink, makeWingSampler(cfg, -1), SPAN_SEGMENTS, CHORD_SEGMENTS, true, [0.0, 0]);
+  pushSurface(sink, makeWingSampler(cfg, 1), SPAN_SEGMENTS, CHORD_SEGMENTS, false, [0.5, 0], false);
+  pushSurface(sink, makeWingSampler(cfg, -1), SPAN_SEGMENTS, CHORD_SEGMENTS, true, [0.0, 0], true);
 
   // 2. 3D V-shaped Keel fuselage (Left & Right side walls with authentic paper spine thickness)
-  pushSurface(sink, makeRealisticKeelSampler(cfg, 1), 4, CHORD_SEGMENTS, false, [0.5, 0]);
-  pushSurface(sink, makeRealisticKeelSampler(cfg, -1), 4, CHORD_SEGMENTS, true, [0.0, 0]);
+  pushSurface(sink, makeRealisticKeelSampler(cfg, 1), 4, CHORD_SEGMENTS, false, [0.5, 0], false);
+  pushSurface(sink, makeRealisticKeelSampler(cfg, -1), 4, CHORD_SEGMENTS, true, [0.0, 0], true);
 
   // 3. Triangular nose lock ballast layers (Upper Left & Right, resting on main wing)
-  pushSurface(sink, makeNoseLockSampler(cfg, 1), 3, 4, false, [0.5, 0]);
-  pushSurface(sink, makeNoseLockSampler(cfg, -1), 3, 4, true, [0.0, 0]);
+  pushSurface(sink, makeNoseLockSampler(cfg, 1), 3, 4, false, [0.5, 0], false);
+  pushSurface(sink, makeNoseLockSampler(cfg, -1), 3, 4, true, [0.0, 0], true);
 
   // 4. Under-nose ballast fold layers
-  pushSurface(sink, makeUnderNoseBallastSampler(cfg, 1), 2, 3, false, [0.5, 0]);
-  pushSurface(sink, makeUnderNoseBallastSampler(cfg, -1), 2, 3, true, [0.0, 0]);
+  pushSurface(sink, makeUnderNoseBallastSampler(cfg, 1), 2, 3, false, [0.5, 0], false);
+  pushSurface(sink, makeUnderNoseBallastSampler(cfg, -1), 2, 3, true, [0.0, 0], true);
 
   // 5. Authentic under-wing structural tuck flaps (Left & Right)
-  pushSurface(sink, makeUnderWingTuckSampler(cfg, 1), 3, 4, true, [0.5, 0]);
-  pushSurface(sink, makeUnderWingTuckSampler(cfg, -1), 3, 4, false, [0.0, 0]);
+  pushSurface(sink, makeUnderWingTuckSampler(cfg, 1), 3, 4, true, [0.5, 0], false);
+  pushSurface(sink, makeUnderWingTuckSampler(cfg, -1), 3, 4, false, [0.0, 0], true);
 
   const geometry = new THREE.BufferGeometry();
   geometry.setAttribute("position", new THREE.Float32BufferAttribute(sink.positions, 3));

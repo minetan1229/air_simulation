@@ -125,9 +125,10 @@ vec3 computeAeroInterference(vec3 worldPos) {
       float circ = uTunnelCl * 0.25 * uTunnelSpeed * float(side); // Sign based on port/starboard
       float vTheta = circ * (rVortex / (rVortex * rVortex + 0.002)) * wakeDecay;
       
-      // Tangential velocity around vortex axis (along -X)
-      defl.y += -vTheta * (dVortex.y / (rVortex + 0.001));
-      defl.z +=  vTheta * (dVortex.x / (rVortex + 0.001));
+      // Tangential velocity around vortex axis (Biot-Savart Rankine vortex)
+      float rInv = 1.0 / (rVortex + 0.001);
+      defl.y +=  vTheta * (dVortex.y * rInv);
+      defl.z += -vTheta * (dVortex.x * rInv);
     }
   }
 

@@ -1303,7 +1303,8 @@ class ConsoleApp {
         return;
       }
       const tag = event.target && event.target.tagName;
-      if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || tag === "BUTTON") return;
+      if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
+      if (tag === "BUTTON" && (event.key === " " || event.key === "Enter")) return;
       if (event.ctrlKey || event.metaKey || event.altKey) return;
       const action = actions[event.key];
       if (!action) return;
@@ -2228,7 +2229,10 @@ class ConsoleApp {
       // Initialize dedicated Guinness Studio workbench pane
       await this._initGuinnessStudioPane(presets);
     } catch (err) {
-      console.warn("Failed to load record presets:", err);
+      console.error("Failed to load record presets:", err);
+      this.notify(`世界記録プリセットの読込に失敗しました: ${err.message}`, "error");
+      const sel = document.getElementById("record-preset-select");
+      if (sel) sel.innerHTML = '<option value="">プリセット読込エラー (再試行してください)</option>';
     }
   }
 

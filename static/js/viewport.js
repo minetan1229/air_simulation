@@ -276,7 +276,9 @@ export class Viewport {
     key.shadow.camera.top = 6;
     key.shadow.camera.bottom = -6;
     key.shadow.bias = -0.0005;
+    this.keyLight = key;
     this.scene.add(key);
+    this.scene.add(key.target);
     const fill = new THREE.DirectionalLight(0xdfe6f2, 0.45);
     fill.position.set(1.8, 0.9, -1.4);
     this.scene.add(fill);
@@ -386,14 +388,17 @@ export class Viewport {
     }
     if (this.edgeLines) {
       this.edgeLines.geometry.dispose();
+      if (this.edgeLines.material) this.edgeLines.material.dispose();
       this.airframeGroup.remove(this.edgeLines);
     }
     if (this.creaseLines) {
       this.creaseLines.geometry.dispose();
+      if (this.creaseLines.material) this.creaseLines.material.dispose();
       this.airframeGroup.remove(this.creaseLines);
     }
     if (this.panelLines) {
       this.panelLines.geometry.dispose();
+      if (this.panelLines.material) this.panelLines.material.dispose();
       this.airframeGroup.remove(this.panelLines);
     }
     this.airframeMesh = new THREE.Mesh(geometry, this.airframeMaterial);
@@ -1344,7 +1349,16 @@ export class Viewport {
         dir.set(x1 - x0, y1 - y0, z1 - z0);
         if (dir.lengthSq() > 1e-6) {
           dir.normalize();
-          dummy.quaternion.setFromUnitVectors(new THREE.Vector3(1, 0, 0), dir);
+          const m = new THREE.Matrix4();
+          const worldUp = new THREE.Vector3(0, 1, 0);
+          const side = new THREE.Vector3().crossVectors(dir, worldUp).normalize();
+          if (side.lengthSq() > 1e-4) {
+            const realUp = new THREE.Vector3().crossVectors(side, dir).normalize();
+            m.makeBasis(dir, realUp, side);
+            dummy.quaternion.setFromRotationMatrix(m);
+          } else {
+            dummy.quaternion.setFromUnitVectors(new THREE.Vector3(1, 0, 0), dir);
+          }
         }
       } else {
         dummy.quaternion.set(0, 0, 0, 1);
@@ -1602,6 +1616,13 @@ export class Viewport {
     this._updateCameraMode(dt);
 
     this.particles.update(dt, this.elapsed);
+    if (this.keyLight && this.airframeGroup) {
+      const px = this.airframeGroup.position.x;
+      const pz = this.airframeGroup.position.z;
+      this.keyLight.position.set(px - 2.0, 5.0, pz + 3.0);
+      this.keyLight.target.position.set(px, 0, pz);
+      this.keyLight.target.updateMatrixWorld();
+    }
     this.controls.update();
     this.renderer.render(this.scene, this.camera);
 

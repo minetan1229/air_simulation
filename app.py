@@ -1336,7 +1336,8 @@ def investigate_run():
             JOB_MANAGER.finish(job.job_id, message=f"Completed auto-investigation: {res.summary.get('primary_issue', 'OK')}")
         except Exception as exc:
             try:
-                if JOB_MANAGER.is_cancelled(job.job_id):
+                if JOB_MANAGER.is_cancelled(job.job_id) or JOB_MANAGER.is_cancel_requested(job.job_id):
+                    JOB_MANAGER.cancel(job.job_id)
                     return
             except KeyError:
                 return
@@ -1402,8 +1403,11 @@ def jobs_list():
 
 @app.post("/api/v1/jobs/join/<job_id>")
 def jobs_join(job_id: str):
-    timeout_raw = request.args.get("timeout", 30.0)
-    timeout = min(max(as_float(timeout_raw, "timeout"), 0.0), 300.0)
+    timeout_raw = request.args.get("timeout")
+    if timeout_raw is None or str(timeout_raw).strip() == "":
+        timeout = 30.0
+    else:
+        timeout = min(max(as_float(timeout_raw, "timeout"), 0.0), 300.0)
     try:
         finished = JOB_MANAGER.join(job_id, timeout)
     except KeyError as exc:

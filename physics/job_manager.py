@@ -419,6 +419,7 @@ class JobManager:
     def __init__(self) -> None:
         self._lock = threading.RLock()
         self._jobs: Dict[str, _JobState] = {}
+        self._max_retained_jobs: int = 256
 
     # -- internal helpers (call with the lock held) ------------------------
     def _state_for(self, job_id: str) -> Optional[_JobState]:
@@ -538,6 +539,14 @@ class JobManager:
                 model_id=str(model_id or ""),
                 result_path="",
             )
+            # Evict oldest terminal jobs if capacity exceeded
+            if len(self._jobs) >= self._max_retained_jobs:
+                terminal_ids = [
+                    jid for jid, st in self._jobs.items() if st.record.status in TERMINAL_STATUSES
+                ]
+                to_remove = max(0, len(terminal_ids) - self._max_retained_jobs // 2)
+                for old_id in terminal_ids[:to_remove]:
+                    self._jobs.pop(old_id, None)
             self._jobs[record.job_id] = _JobState(record=record)
             return _copy_record(record)
 

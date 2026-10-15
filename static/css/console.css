@@ -5,21 +5,21 @@
    ===================================================================== */
 
 :root {
-  --paper:      #f1efe9;
-  --surface:    #fbfaf7;
-  --surface-2:  #f6f4ee;
-  --ink:        #17181b;
-  --ink-2:      #464b52;
-  --muted:      #858a91;
-  --line:       #dedad1;
-  --line-2:     #c8c2b6;
+  --paper:      #f8f9fa;
+  --surface:    #ffffff;
+  --surface-2:  #f1f3f4;
+  --ink:        #202124;
+  --ink-2:      #5f6368;
+  --muted:      #80868b;
+  --line:       #dadce0;
+  --line-2:     #bdc1c6;
   --accent:     #1a73e8;
-  --accent-dk:  #0d4fa8;
-  --accent-bg:  #e8f0fd;
-  --ok:         #2f7d4f;
-  --warn:       #ad6a05;
-  --bad:        #bf3b2b;
-  --stage-bg:   #e7e4dc;
+  --accent-dk:  #1557b0;
+  --accent-bg:  #e8f0fe;
+  --ok:         #34a853;
+  --warn:       #fbbc04;
+  --bad:        #ea4335;
+  --stage-bg:   #e8eaed;
 
   --rail-l: 306px;
   --rail-r: 330px;
@@ -1364,7 +1364,7 @@ input[type="range"]:focus-visible { outline: 2px solid var(--accent); outline-of
   display: flex;
   flex-direction: column;
   gap: 4px;
-  z-index: 40;
+  z-index: 100;
   pointer-events: none;
 }
 .toast {
