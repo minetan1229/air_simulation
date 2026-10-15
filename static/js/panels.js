@@ -251,13 +251,18 @@ export class ParameterPanels {
     const [min, max] = this._bounds(spec);
     const step = spec.step || (max - min) / 100;
     const digits = spec.digits === undefined ? 2 : spec.digits;
+    const inputId = `param-${section}-${spec.key}`;
 
     const range = make("input", {
       type: "range",
+      id: inputId,
       min,
       max,
       step,
       class: "field-range",
+      "aria-label": `${spec.label}${spec.unit ? ` (${spec.unit})` : ""}`,
+      "aria-valuemin": String(min),
+      "aria-valuemax": String(max),
     });
     const number = make("input", {
       type: "number",
@@ -265,6 +270,7 @@ export class ParameterPanels {
       min,
       max,
       step,
+      "aria-label": `${spec.label} 数値入力`,
     });
     range.addEventListener("input", () => {
       const raw = Number(range.value);

@@ -244,13 +244,13 @@ def world_to_body(q: Sequence[float], v: Sequence[float]) -> np.ndarray:
 def quaternion_derivative(q: Sequence[float], omega_body: Sequence[float]) -> np.ndarray:
     """``q_dot = 0.5 * q (x) [0, omega_body]`` for body-frame angular rate."""
     w, x, y, z = quaternion_normalize(q)
-    p, r_roll, q_pitch = vec3(omega_body)
+    p, q_pitch, r_yaw = vec3(omega_body)
     return 0.5 * np.array(
         [
-            -(x * p + y * r_roll + z * q_pitch),
-            w * p + y * q_pitch - z * r_roll,
-            w * r_roll - x * q_pitch + z * p,
-            w * q_pitch + x * r_roll - y * p,
+            -(x * p + y * q_pitch + z * r_yaw),
+            w * p + y * r_yaw - z * q_pitch,
+            w * q_pitch - x * r_yaw + z * p,
+            w * r_yaw + x * q_pitch - y * p,
         ],
         dtype=np.float64,
     )

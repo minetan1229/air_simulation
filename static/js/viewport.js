@@ -122,6 +122,8 @@ export class Viewport {
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     this.renderer.setClearColor(0xe7e4dc, 1);
+    this.renderer.shadowMap.enabled = true;
+    this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 
     this.scene = new THREE.Scene();
     this.scene.fog = new THREE.Fog(0xe7e4dc, 5, 26);
@@ -263,7 +265,17 @@ export class Viewport {
     const hemi = new THREE.HemisphereLight(0xfdfbf6, 0xb9b3a6, 1.05);
     this.scene.add(hemi);
     const key = new THREE.DirectionalLight(0xfff6e8, 1.35);
-    key.position.set(-1.2, 2.4, 1.6);
+    key.position.set(-2.0, 5.0, 3.0);
+    key.castShadow = true;
+    key.shadow.mapSize.width = 2048;
+    key.shadow.mapSize.height = 2048;
+    key.shadow.camera.near = 0.1;
+    key.shadow.camera.far = 40;
+    key.shadow.camera.left = -6;
+    key.shadow.camera.right = 6;
+    key.shadow.camera.top = 6;
+    key.shadow.camera.bottom = -6;
+    key.shadow.bias = -0.0005;
     this.scene.add(key);
     const fill = new THREE.DirectionalLight(0xdfe6f2, 0.45);
     fill.position.set(1.8, 0.9, -1.4);
@@ -285,6 +297,7 @@ export class Viewport {
     const ground = new THREE.Mesh(new THREE.PlaneGeometry(400, 400), this.groundMaterial);
     ground.rotation.x = -Math.PI / 2;
     ground.renderOrder = -1;
+    ground.receiveShadow = true;
     this.scene.add(ground);
 
     const axes = new THREE.BufferGeometry();
@@ -384,6 +397,8 @@ export class Viewport {
       this.airframeGroup.remove(this.panelLines);
     }
     this.airframeMesh = new THREE.Mesh(geometry, this.airframeMaterial);
+    this.airframeMesh.castShadow = true;
+    this.airframeMesh.receiveShadow = true;
     this.airframeGroup.add(this.airframeMesh);
 
     const edges = new THREE.EdgesGeometry(geometry, 24);
@@ -966,6 +981,10 @@ export class Viewport {
 
   /* ------------------------------------------------ Ensemble Tracks (GPU 100 trajectories) */
   clearEnsembleTracks() {
+    if (this._staggerTimer) {
+      clearInterval(this._staggerTimer);
+      this._staggerTimer = null;
+    }
     if (this._ensembleGroup) {
       this.scene.remove(this._ensembleGroup);
       disposeTree(this._ensembleGroup);

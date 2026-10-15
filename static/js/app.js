@@ -1293,6 +1293,15 @@ class ConsoleApp {
       },
     };
     window.addEventListener("keydown", (event) => {
+      const helpOpen = this.dom["help"] && !this.dom["help"].hidden;
+      const gpuOpen = this.dom["gpu-modal"] && !this.dom["gpu-modal"].hidden;
+      if (helpOpen || gpuOpen) {
+        if (event.key === "Escape") {
+          if (helpOpen) this.dom["help"].hidden = true;
+          if (gpuOpen) this.dom["gpu-modal"].hidden = true;
+        }
+        return;
+      }
       const tag = event.target && event.target.tagName;
       if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || tag === "BUTTON") return;
       if (event.ctrlKey || event.metaKey || event.altKey) return;
@@ -2012,9 +2021,15 @@ class ConsoleApp {
 
     const frames = Number(frame.frames) || 0;
     const scrub = this.dom["tp-scrub"];
-    scrub.max = String(Math.max(frames, 1));
+    const maxVal = Math.max(frames, 1);
+    scrub.max = String(maxVal);
+    scrub.setAttribute("aria-valuemin", "0");
+    scrub.setAttribute("aria-valuemax", String(maxVal));
     if (document.activeElement !== scrub && this.transport.scrubIndex === null) {
-      scrub.value = String(Math.max(frames - 1, 0));
+      const curVal = Math.max(frames - 1, 0);
+      scrub.value = String(curVal);
+      scrub.setAttribute("aria-valuenow", String(curVal));
+      scrub.setAttribute("aria-valuetext", `${curVal} フレーム / ${fmt(time, 2)}秒`);
       paintRange(scrub);
     }
     this.dom["tp-frame"].textContent = String(this.transport.scrubIndex === null ? Math.max(frames - 1, 0) : this.transport.scrubIndex);

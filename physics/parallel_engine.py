@@ -969,8 +969,9 @@ def gpu_ensemble_simulation(
         # Ground intersection detection (ground is at z >= 0)
         just_landed = active & (new_pos[:, 2] >= 0.0)
         if xp.any(just_landed):
-            dz = xp.maximum(new_pos[:, 2] - pos[:, 2], 1e-6)
-            frac = xp.clip((-pos[:, 2]) / dz, 0.0, 1.0)
+            dz = new_pos[:, 2] - pos[:, 2]
+            safe_dz = xp.where(dz > 1e-6, dz, 1e-6)
+            frac = xp.clip((-pos[:, 2]) / safe_dz, 0.0, 1.0)
             t_impact = (t - dt) + frac * dt
             landing_time = xp.where(just_landed, t_impact, landing_time)
 
