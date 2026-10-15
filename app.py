@@ -172,6 +172,36 @@ def _handle_unexpected(exc: Exception):
     return _error("an unexpected internal server error occurred", 500)
 
 
+@app.after_request
+def _add_security_headers(response: Response) -> Response:
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "SAMEORIGIN"
+    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    response.headers["Content-Security-Policy"] = (
+        "default-src 'self'; "
+        "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; "
+        "style-src 'self' 'unsafe-inline'; "
+        "font-src 'self'; "
+        "img-src 'self' data: https://api.iconify.design; "
+        "connect-src 'self' ws: wss:;"
+    )
+    if "Access-Control-Allow-Origin" not in response.headers:
+        response.headers["Access-Control-Allow-Origin"] = "*"
+        response.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS, DELETE"
+        response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization"
+    return response
+
+
+@app.route("/", defaults={"path": ""}, methods=["OPTIONS"])
+@app.route("/<path:path>", methods=["OPTIONS"])
+def _handle_options(path: str = ""):
+    resp = Response(status=204)
+    resp.headers["Access-Control-Allow-Origin"] = "*"
+    resp.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS, DELETE"
+    resp.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization"
+    return resp
+
+
 
 # ---------------------------------------------------------------------------
 # Request helpers

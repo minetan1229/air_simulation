@@ -7,7 +7,7 @@
 <title>紙飛行機 風洞実験台 — Paper Airplane Wind-Tunnel Console</title>
 <link rel="stylesheet" href="static/css/console.css">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cpath fill='%231a73e8' d='M29 3 4.6 13.1a.6.6 0 0 0 .05 1.13l8.9 2.9 2.9 8.9a.6.6 0 0 0 1.12.05L29 3Z'/%3E%3C/svg%3E">
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js" integrity="sha384-9nhczxUqK87bcKHh20fSQcTGD4qq5GhayNYSYWqwBkINBhOfQLg/P5HG5lF1urn4" crossorigin="anonymous"></script>
 <script type="importmap">
 {
   "imports": {
@@ -96,64 +96,54 @@
         <button class="btn btn-mini" id="btn-config-reset" type="button" title="サーバの既定値に戻す">既定へ</button>
       </div>
       <div class="rail-body" id="rail-left-body">
-        <!-- ギネス世界記録・投擲モード -->
-        <section class="group" data-group="records" open>
+        <!-- 機体モデル統合選択 (標準・ギネス・3Dモデル) -->
+        <section class="group" data-group="model-select" open>
           <button class="group-head" type="button" aria-expanded="true">
-            <span class="group-name"><img src="https://api.iconify.design/material-symbols/trophy-outline.svg?color=%231a73e8" class="ui-icon" alt=""> ギネス世界記録・投擲</span><span class="group-en">GUINNESS & THROWS</span>
+            <span class="group-name"><svg class="ui-icon" viewBox="0 0 24 24" fill="currentColor"><path d="m13.13 22.19-1.63-3.83c1.57-.58 3.04-1.5 4.35-2.73l-2.72 6.56M5.64 12.5l-3.83-1.63 6.56-2.72c-1.23 1.31-2.15 2.78-2.73 4.35m8.58-8.58C12.9 5.24 11.23 7.31 9.77 9.77l4.46 4.46c2.46-1.46 4.53-3.13 5.85-4.45 1.54-1.54 2.42-3.15 2.58-4.24.03-.22-.05-.44-.22-.61-.17-.17-.39-.25-.61-.22-1.09.16-2.7 1.04-4.24 2.58M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2"/></svg> 機体モデル選択</span><span class="group-en">AIRFRAME MODEL</span>
             <span class="group-chev" aria-hidden="true"></span>
           </button>
-          <div class="group-body" data-host="records">
-            <div class="record-select-box">
-              <select id="record-preset-select" aria-label="世界記録モデル・投擲選択">
-                <option value="">-- 世界記録・投げ方を選択 --</option>
+          <div class="group-body" data-host="model-select">
+            <div class="unified-model-box">
+              <label for="unified-aircraft-select" style="font-size:11px; font-weight:600; color:var(--ink-2); margin-bottom:4px; display:block;">使用機体:</label>
+              <select id="unified-aircraft-select" aria-label="機体モデル選択" class="select" style="width:100%; font-weight:600;">
+                <optgroup label="標準プリセット機" id="optgroup-standard">
+                  <option value="preset_glider" selected>ペーパーグライダー (標準滑空機)</option>
+                  <option value="preset_dart">高速ダーツ機 (Dart High-Speed)</option>
+                  <option value="preset_wide">広翼型グライダー (Wide-Body Glider)</option>
+                </optgroup>
+                <optgroup label="ギネス世界記録モデル" id="optgroup-guinness">
+                  <!-- JSで動的生成 -->
+                </optgroup>
+                <optgroup label="カスタム3Dモデル" id="optgroup-custom" hidden>
+                  <!-- インポート時に追加 -->
+                </optgroup>
               </select>
             </div>
-            <div id="record-card" class="record-card" style="display:none;">
+
+            <!-- 3Dモデルファイルインポート（ドラッグ&ドロップ / 選択） -->
+            <div class="quick-mesh-import" style="margin-top:8px;">
+              <input type="file" id="unified-mesh-file" accept=".gltf,.glb,.obj,.stl" hidden>
+              <button type="button" class="btn btn-mini btn-outline" id="btn-unified-mesh-import" style="width:100%; justify-content:center; padding:5px 8px; gap:6px;">
+                <svg class="ui-icon" viewBox="0 0 24 24" fill="currentColor"><path d="M19.35 10.04C18.67 6.59 15.64 4 12 4 9.11 4 6.6 5.64 5.35 8.04 2.34 8.36 0 10.91 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96M14 13v4h-4v-4H7l5-5 5 5z"/></svg> 3Dモデル読込 (.glb / .obj / .stl)
+              </button>
+            </div>
+
+            <!-- 選択中機体サマリーカード -->
+            <div id="unified-model-card" class="record-card" style="margin-top:8px;">
               <div class="record-card-head">
-                <span class="record-badge" id="record-badge">記録</span>
-                <span class="record-val num" id="record-value">—</span>
+                <span class="record-badge" id="unified-model-badge">標準機</span>
+                <span class="record-val num" id="unified-model-metric">AR 2.67</span>
               </div>
-              <div class="record-title" id="record-name">—</div>
-              <div class="record-holder" id="record-holder">—</div>
-              
-              <div class="record-section-title">投擲モード選択 (SIMULATION MODE)</div>
-              <div class="record-mode-toggle" id="record-mode-toggle">
-                <button type="button" class="btn-mode active" id="btn-mode-calibrated" title="プリセットの手元高度・初速・投射角から、上昇と下降を連続計算します。到達高度と滞空時間は計算結果です。">
-                  <img src="https://api.iconify.design/material-symbols/rocket-launch.svg?color=%231a73e8" class="ui-icon" alt=""> フルフライト（手元投擲〜上昇〜滑空）
-                </button>
-                <button type="button" class="btn-mode" id="btn-mode-raw" title="保存された頂点開始条件から滑空を計算します。上昇時間は含みません。">
-                  <img src="https://api.iconify.design/material-symbols/flight.svg?color=%235f6368" class="ui-icon" alt=""> 頂点滑空のみ（最高到達点から開始）
-                </button>
-              </div>
+              <div class="record-title" id="unified-model-title">ペーパーグライダー</div>
+              <div class="record-notes" id="unified-model-desc" style="font-size:11px; color:var(--ink-2); line-height:1.4; margin-top:4px;">高アスペクト比で安定した滑空性能を持つ標準モデルです。</div>
+            </div>
 
-              <div class="record-section-title">投擲フォーム・投げ方 (THROW TECHNIQUE)</div>
-              <div class="record-technique" id="record-technique">—</div>
-              <div class="record-notes" id="record-notes">—</div>
-              
-              <div class="record-specs">
-                <div class="spec-item"><span class="spec-k">初速</span><span class="spec-v num" id="rec-speed">—</span></div>
-                <div class="spec-item"><span class="spec-k">仰角</span><span class="spec-v num" id="rec-angle">—</span></div>
-                <div class="spec-item"><span class="spec-k">高度</span><span class="spec-v num" id="rec-height">—</span></div>
-                <div class="spec-item"><span class="spec-k">スタイル</span><span class="spec-v num" id="rec-style">—</span></div>
-              </div>
-
-              <details class="record-help-details">
-                <summary><img src="https://api.iconify.design/material-symbols/lightbulb-outline.svg?color=%231a73e8" class="ui-icon" alt=""> 投擲モードの違いと空力弾性について</summary>
-                <div class="record-help-content">
-                  <p><strong>① フルフライト（手元投擲〜上昇〜滑空）:</strong> プリセットの手元高度・初速・投射角から上昇と下降を連続計算します。機体や投擲には再構成した条件を含みます。動圧による後縁変形を計算しますが、実機への校正と長時間滑空の目標達成は未検証です。</p>
-                  <p><strong>② 頂点滑空のみ（最高到達点から開始）:</strong> 上昇フェーズをスキップし、最高到達点（12〜17m）での定常滑空挙動を純粋に検証・観察したい場合のモードです。</p>
-                  <p class="help-rec"><strong>「フルフライト」</strong>は手元からの全軌道を確認するモードです。頂点からの滑空時間と、上昇を含む全飛行時間を区別して比較してください。</p>
-                </div>
-              </details>
-
-              <div class="record-actions">
-                <button type="button" class="btn-record-primary" id="btn-apply-record" title="通常セッションにロードして投げる">
-                  <img src="https://api.iconify.design/material-symbols/rocket-launch.svg?color=%23ffffff" class="ui-icon" alt=""> 通常セッションにロード
-                </button>
-                <button type="button" class="btn-record-secondary" id="btn-open-guinness-studio" style="border-color: #f9ab00; color: #b06000;" title="設定を汚染せず、ギネス公認数値のみで飛ばす独立検証スタジオを開く">
-                  <img src="https://api.iconify.design/material-symbols/trophy-outline.svg?color=%23f29900" class="ui-icon" alt=""> ギネス独立検証スタジオを開く
-                </button>
-              </div>
+            <!-- 互換性保持用非表示要素 (JS依存解決) -->
+            <select id="record-preset-select" style="display:none;"></select>
+            <div id="record-card" style="display:none;">
+              <span id="record-badge"></span><span id="record-value"></span><span id="record-name"></span>
+              <span id="record-holder"></span><span id="record-technique"></span><span id="record-notes"></span>
+              <span id="rec-speed"></span><span id="rec-angle"></span><span id="rec-height"></span><span id="rec-style"></span>
             </div>
           </div>
         </section>
@@ -177,10 +167,20 @@
 
         <section class="group" data-group="throw" open>
           <button class="group-head" type="button" aria-expanded="true">
-            <span class="group-name">投げ方</span><span class="group-en">THROW</span>
+            <span class="group-name">投擲・発射設定</span><span class="group-en">THROW & LAUNCH</span>
             <span class="group-chev" aria-hidden="true"></span>
           </button>
-          <div class="group-body" data-host="throw"></div>
+          <div class="group-body" data-host="throw">
+            <!-- 投擲モード（フルフライト / 頂点滑空） -->
+            <div class="throw-mode-box" style="margin-bottom:8px; display:flex; gap:6px;">
+              <button type="button" class="btn btn-mini active" id="btn-mode-calibrated" style="flex:1; font-size:10.5px; padding:4px 6px; justify-content:center;" title="手元からの全飛行（手元投擲〜上昇〜滑空〜着地）">
+                フルフライト
+              </button>
+              <button type="button" class="btn btn-mini" id="btn-mode-raw" style="flex:1; font-size:10.5px; padding:4px 6px; justify-content:center;" title="最高到達点（頂点）からの純粋滑空">
+                頂点滑空のみ
+              </button>
+            </div>
+          </div>
         </section>
 
         <section class="group" data-group="atmosphere">
