@@ -841,15 +841,18 @@ def gpu_ensemble_simulation(
     wz = xp.zeros(N, dtype=xp.float64)
     wind = xp.stack([wx, wy, wz], axis=1)
 
-    # 4. Aerodynamic constants
+    # 4. Aerodynamic constants and trim parameters
     mass = max(float(derived["mass_kg"]), 1e-4)
     area = max(float(derived["wing_area_m2"]), 1e-4)
     span = max(float(derived["wingspan_m"]), 1e-3)
     aspect_ratio = max(float(derived["aspect_ratio"]), 0.5)
+    chord = max(float(derived.get("mac_m", span / aspect_ratio)), 1e-3)
+    pitch_inertia = max(float(derived.get("pitch_inertia_kgm2", mass * (chord ** 2) / 12.0)), 1e-7)
     rho = float(isa_air_density(float(env_cfg.altitude_m)))
     gravity = abs(float(env_cfg.gravity))
 
-    cL0 = float(air_cfg.cL0)
+    elevon_deg = float(getattr(air_cfg, "elevon_deg", 2.0))
+    cL0_base = float(air_cfg.cL0) + 0.02 * elevon_deg
     cl_max = float(air_cfg.cl_max)
     cd0 = max(float(air_cfg.cd0), 0.015)
     oswald_e = clamp(float(air_cfg.oswald_e), 0.4, 0.95)
@@ -858,6 +861,18 @@ def gpu_ensemble_simulation(
     cl_alpha = float(air_cfg.cLalpha_per_rad)
     if cl_alpha <= 0.0:
         cl_alpha = (2.0 * math.pi * aspect_ratio) / (2.0 + math.sqrt(aspect_ratio**2 + 4.0))
+
+    cm0_base = float(air_cfg.cm0) - 0.03 * elevon_deg
+    cm_alpha = float(air_cfg.cm_alpha)
+    cm_q = float(air_cfg.cm_q)
+    alpha_trim_rad = -cm0_base / cm_alpha if abs(cm_alpha) > 1e-4 else math.radians(4.0)
+    alpha_trim_rad = clamp(alpha_trim_rad, -math.radians(8.0), math.radians(22.0))
+    stall_alpha_rad = math.radians(float(air_cfg.stall_alpha_deg))
+
+    # Aeroelastic compliance parameters
+    aero_comp_gain = max(float(getattr(air_cfg, "aeroelastic_compliance", 0.0)), 0.0)
+    stiffness_val = max(float(air_cfg.paper_stiffness), 0.05)
+    q_aeroelastic = 160.0 * stiffness_val / max(aero_comp_gain, 0.1) if aero_comp_gain > 0.0 else 5000.0
 
     # Control asymmetries
     aileron = float(getattr(air_cfg, "aileron_deg", 0.0))
@@ -884,8 +899,13 @@ def gpu_ensemble_simulation(
     active = xp.ones(N, dtype=bool)
     landing_time = xp.full(N, duration_s, dtype=xp.float64)
     landing_pos = xp.zeros((N, 3), dtype=xp.float64)
+
+    # 3D attitude tracking: pitch (theta), roll (phi), yaw (psi)
+    theta = xp.copy(pitch_rad)
     phi = xp.copy(roll_rad)
+    psi = xp.copy(yaw_rad)
     p_rate = xp.zeros(N, dtype=xp.float64)
+    q_rate = xp.zeros(N, dtype=xp.float64)
 
     history_times: List[float] = []
     history_altitudes = []
@@ -893,15 +913,17 @@ def gpu_ensemble_simulation(
     sample_count = max(1, min(int(max_sample_tracks), N))
     sample_indices = list(range(sample_count))
     sample_indices_xp = xp.asarray(sample_indices, dtype=xp.int32)
-    sample_tracks_snapshots = []
+    sample_pos_snapshots = []
+    sample_att_snapshots = []
 
     # Pre-record t = 0
     history_times.append(0.0)
     history_altitudes.append(xp.maximum(-pos[:, 2], 0.0))
     history_distances.append(xp.sqrt(pos[:, 0] ** 2 + pos[:, 1] ** 2))
-    sample_tracks_snapshots.append(pos[sample_indices_xp, :])
+    sample_pos_snapshots.append(pos[sample_indices_xp, :])
+    sample_att_snapshots.append(xp.stack([theta[sample_indices_xp], phi[sample_indices_xp], psi[sample_indices_xp]], axis=1))
 
-    # 6. Time integration loop
+    # 6. Time integration loop with advanced flight dynamics
     t = 0.0
     for step in range(1, max_steps + 1):
         t = step * dt
@@ -910,7 +932,17 @@ def gpu_ensemble_simulation(
         v_rel = vel - wind
         v_horiz = xp.sqrt(v_rel[:, 0] ** 2 + v_rel[:, 1] ** 2)
         speed = xp.sqrt(v_horiz ** 2 + v_rel[:, 2] ** 2)
-        speed_safe = xp.maximum(speed, 0.2)
+        speed_safe = xp.maximum(speed, 0.1)
+
+        # Dynamic pressure
+        q_dyn = 0.5 * rho * (speed_safe ** 2)
+
+        # Passive aeroelastic morphing factor
+        if aero_comp_gain > 0.0:
+            p_ratio = q_dyn / q_aeroelastic
+            morph_factor = 1.0 / (1.0 + (p_ratio ** 3.0))
+        else:
+            morph_factor = 1.0
 
         # Unit velocity vectors
         u_x = v_rel[:, 0] / speed_safe
@@ -919,19 +951,43 @@ def gpu_ensemble_simulation(
 
         # Flight path angle gamma (positive up, so -u_z)
         gamma = xp.arctan2(-u_z, xp.maximum(v_horiz, 1e-4))
+        track_yaw = xp.arctan2(u_y, u_x)
 
-        # Alpha relaxation towards trim
-        alpha_trim = 0.06  # ~3.5 deg trim AoA
-        decay = math.exp(-3.5 * min(t, 2.0))
-        alpha = xp.clip(alpha_trim + (pitch_rad - gamma) * decay, -0.25, 0.40)
+        # Angle of attack: difference between pitch attitude and flight path angle
+        alpha_geo = theta - gamma
 
-        # Aerodynamic coefficients
-        cl = xp.clip(cL0 + cl_alpha * alpha, -0.4, cl_max)
-        cd = cd0 + k_induced * (cl ** 2)
-        q = 0.5 * rho * (speed_safe ** 2)
+        # High dynamic pressure weathervaning & pitch dynamics
+        q_norm = chord / (2.0 * speed_safe)
+        # Static pitch moment: Cm_alpha * (alpha - alpha_trim*morph_factor) + Cm_q * q_rate
+        # Low-speed apex pushover: natural nose-down when speed drops below 2 m/s
+        pushover = xp.where(speed_safe < 2.0, -0.05 * (2.0 - speed_safe), 0.0)
+        pitch_torque_coeff = cm_alpha * (alpha_geo - alpha_trim_rad * morph_factor) + cm_q * q_rate * q_norm + pushover
+        pitch_accel = (q_dyn * area * chord * pitch_torque_coeff) / pitch_inertia
 
-        lift_mag = q * area * cl
-        drag_mag = q * area * cd
+        # Damped update of pitch rate and pitch angle
+        q_rate = xp.clip(q_rate + pitch_accel * dt, -20.0, 20.0)
+        theta = xp.clip(theta + q_rate * dt, -math.pi / 2.2, math.pi / 2.2)
+
+        # Effective AoA with pitch dynamics
+        alpha = xp.clip(theta - gamma, -0.35, 0.60)
+
+        # Stall modeling: linear up to stall_alpha_rad, smooth post-stall drop
+        is_stalled = xp.abs(alpha) > stall_alpha_rad
+        cl_linear = (cL0_base * morph_factor) + cl_alpha * alpha
+        # Viterna-like flat-plate cross flow post-stall
+        cl_post_stall = xp.sign(alpha) * (0.85 * xp.sin(2.0 * xp.abs(alpha)))
+        cl = xp.where(is_stalled, cl_post_stall, xp.clip(cl_linear, -0.6, cl_max))
+
+        # Ground effect induced drag reduction
+        alt_m = xp.maximum(-pos[:, 2], 0.02)
+        h_b = alt_m / span
+        ge_factor = (16.0 * (h_b ** 2)) / (1.0 + 16.0 * (h_b ** 2))
+        cd_induced = k_induced * (cl ** 2) * ge_factor
+        cd_stall_increment = xp.where(is_stalled, 0.35 * (1.0 - xp.cos(alpha)), 0.0)
+        cd = cd0 + cd_induced + cd_stall_increment
+
+        lift_mag = q_dyn * area * cl
+        drag_mag = q_dyn * area * cd
 
         # Drag vector opposes relative wind
         drag_x = -drag_mag * u_x
@@ -949,12 +1005,17 @@ def gpu_ensemble_simulation(
         s_y = u_x / h_safe
         s_z = xp.zeros(N, dtype=xp.float64)
 
-        # Update roll angle and rate
-        # Roll moment from asymmetry and damping
+        # Roll dynamics: torque from dihedral, roll damping and asymmetry
         roll_torque_coeff = cl_asym - roll_damping * (p_rate * span / (2.0 * speed_safe))
-        roll_accel = (q * area * span * roll_torque_coeff - 0.2 * dihedral_rad * phi) / max(mass * span * span * 0.1, 1e-6)
+        roll_accel = (q_dyn * area * span * roll_torque_coeff - 0.25 * dihedral_rad * phi) / max(mass * span * span * 0.1, 1e-6)
         p_rate = xp.clip(p_rate + roll_accel * dt, -15.0, 15.0)
         phi = xp.clip(phi + p_rate * dt, -math.pi / 2.5, math.pi / 2.5)
+
+        # Yaw weathervaning towards velocity heading
+        yaw_err = psi - track_yaw
+        # Wrap to [-pi, pi]
+        yaw_err = xp.arctan2(xp.sin(yaw_err), xp.cos(yaw_err))
+        psi = psi - 2.5 * yaw_err * dt
 
         cos_phi = xp.cos(phi)
         sin_phi = xp.sin(phi)
@@ -1001,7 +1062,8 @@ def gpu_ensemble_simulation(
             history_times.append(round(step * dt, 4))
             history_altitudes.append(xp.maximum(-pos[:, 2], 0.0))
             history_distances.append(xp.sqrt(pos[:, 0] ** 2 + pos[:, 1] ** 2))
-            sample_tracks_snapshots.append(pos[sample_indices_xp, :])
+            sample_pos_snapshots.append(pos[sample_indices_xp, :])
+            sample_att_snapshots.append(xp.stack([theta[sample_indices_xp], phi[sample_indices_xp], psi[sample_indices_xp]], axis=1))
 
         if not xp.any(active):
             break
@@ -1021,6 +1083,8 @@ def gpu_ensemble_simulation(
         roll_deg_np = cp.asnumpy(roll_deg)
         hist_alt_np = [cp.asnumpy(h) for h in history_altitudes]
         hist_dist_np = [cp.asnumpy(h) for h in history_distances]
+        snapshots_np = [cp.asnumpy(snap) for snap in sample_pos_snapshots]
+        attitudes_np = [cp.asnumpy(snap) for snap in sample_att_snapshots]
     else:
         landing_time_np = np.asarray(landing_time)
         landing_pos_np = np.asarray(landing_pos)
@@ -1029,6 +1093,8 @@ def gpu_ensemble_simulation(
         roll_deg_np = np.asarray(roll_deg)
         hist_alt_np = [np.asarray(h) for h in history_altitudes]
         hist_dist_np = [np.asarray(h) for h in history_distances]
+        snapshots_np = [np.asarray(snap) for snap in sample_pos_snapshots]
+        attitudes_np = [np.asarray(snap) for snap in sample_att_snapshots]
 
     landing_distances_np = np.sqrt(landing_pos_np[:, 0] ** 2 + landing_pos_np[:, 1] ** 2)
 
@@ -1054,27 +1120,30 @@ def gpu_ensemble_simulation(
         dist_p10.append(round(float(np.percentile(dists, 10)), 3))
         dist_p90.append(round(float(np.percentile(dists, 90)), 3))
 
-    # Convert sample track snapshots to CPU
-    if backend == "cupy":
-        snapshots_np = [cp.asnumpy(snap) for snap in sample_tracks_snapshots]
-    else:
-        snapshots_np = [np.asarray(snap) for snap in sample_tracks_snapshots]
-
-    sample_tracks: List[List[Tuple[float, float, float]]] = [[] for _ in sample_indices]
-    for snap in snapshots_np:
+    sample_tracks: List[List[Dict[str, float]]] = [[] for _ in sample_indices]
+    for s_i, snap in enumerate(snapshots_np):
+        att_snap = attitudes_np[s_i]
         for k in range(sample_count):
             p = snap[k]
-            sample_tracks[k].append((round(float(p[0]), 3), round(float(p[1]), 3), round(max(float(-p[2]), 0.0), 3)))
+            att = att_snap[k]
+            sample_tracks[k].append({
+                "x": round(float(p[0]), 3),
+                "y": round(float(p[1]), 3),
+                "z": round(max(float(-p[2]), 0.0), 3),
+                "pitch": round(float(math.degrees(att[0])), 2),
+                "roll": round(float(math.degrees(att[1])), 2),
+                "yaw": round(float(math.degrees(att[2])), 2),
+            })
 
     # Format sample trajectories with metrics and rank
     sample_trajectories = []
     for k, idx in enumerate(sample_indices):
         pts = sample_tracks[k]
-        peak_alt = max([float(p[2]) for p in pts], default=0.0)
+        peak_alt = max([float(p["z"]) for p in pts], default=0.0)
         sample_trajectories.append({
             "id": idx,
             "rank": 0,
-            "points": [{"x": pt[0], "y": pt[1], "z": pt[2]} for pt in pts],
+            "points": pts,
             "landing_distance_m": round(float(landing_distances_np[idx]), 3),
             "flight_time_s": round(float(landing_time_np[idx]), 3),
             "max_altitude_m": round(float(peak_alt), 3),

@@ -160,6 +160,17 @@ export class Viewport {
     this._swarmCenter = new THREE.Vector3(0, 1.8, 0);
     this._leadPos = new THREE.Vector3(0, 1.8, 0);
 
+    // Reusable temp objects for 100-plane fleet animation (Zero GC allocation)
+    this._fDummy = new THREE.Object3D();
+    this._fPos = new THREE.Vector3();
+    this._fDir = new THREE.Vector3();
+    this._fMatrix = new THREE.Matrix4();
+    this._fQuat = new THREE.Quaternion();
+    this._fEuler = new THREE.Euler(0, 0, 0, "ZYX");
+    this._fWorldUp = new THREE.Vector3(0, 1, 0);
+    this._fSide = new THREE.Vector3();
+    this._fRealUp = new THREE.Vector3();
+
     this.particles = new WindParticles(this.scene, this.renderer);
 
     this.gpuInfo = this._detectGpuRenderer();
@@ -671,7 +682,20 @@ export class Viewport {
     this.tunnelMode = Boolean(enabled);
     if (this.tunnelGroup) this.tunnelGroup.visible = this.tunnelMode;
     if (this.gripGroup) this.gripGroup.visible = !this.tunnelMode;
-    if (this.launchArrow && this.tunnelMode) this.launchArrow.visible = false;
+    if (this.launchArrow) this.launchArrow.visible = !this.tunnelMode;
+    if (!this.tunnelMode) {
+      if (this.particles) {
+        if (this.particles.simUniforms && this.particles.simUniforms.uTunnel) {
+          this.particles.simUniforms.uTunnel.value = 0;
+        }
+        if (this.particles.pointUniforms && this.particles.pointUniforms.uTunnel) {
+          this.particles.pointUniforms.uTunnel.value = 0;
+        }
+        if (this.particles.pointMaterial) {
+          this.particles.pointMaterial.opacity = 0.45;
+        }
+      }
+    }
     if (params) this.updateTunnelParams(params);
   }
 
@@ -1308,13 +1332,20 @@ export class Viewport {
     this.fleetTime += dt;
     const t = this.fleetTime;
     const count = this.fleetTrajectories.length;
-    const dummy = new THREE.Object3D();
-    const currentPos = new THREE.Vector3();
-    const dir = new THREE.Vector3();
+    const dummy = this._fDummy;
+    const currentPos = this._fPos;
+    const dir = this._fDir;
+    const m = this._fMatrix;
+    const worldUp = this._fWorldUp;
+    const side = this._fSide;
+    const realUp = this._fRealUp;
+    const euler = this._fEuler;
 
-    const swarmSum = new THREE.Vector3();
+    const swarmSum = this._swarmCenter;
+    swarmSum.set(0, 0, 0);
     let activeCount = 0;
     let allLanded = true;
+    const DEG = Math.PI / 180;
 
     for (let i = 0; i < count; i += 1) {
       const tr = this.fleetTrajectories[i];
@@ -1345,19 +1376,26 @@ export class Viewport {
 
       dummy.position.copy(currentPos);
 
-      if (!isLanded && (idx1 > idx0 || pts.length > 1)) {
-        dir.set(x1 - x0, y1 - y0, z1 - z0);
-        if (dir.lengthSq() > 1e-6) {
-          dir.normalize();
-          const m = new THREE.Matrix4();
-          const worldUp = new THREE.Vector3(0, 1, 0);
-          const side = new THREE.Vector3().crossVectors(dir, worldUp).normalize();
-          if (side.lengthSq() > 1e-4) {
-            const realUp = new THREE.Vector3().crossVectors(side, dir).normalize();
-            m.makeBasis(dir, realUp, side);
-            dummy.quaternion.setFromRotationMatrix(m);
-          } else {
-            dummy.quaternion.setFromUnitVectors(new THREE.Vector3(1, 0, 0), dir);
+      if (!isLanded) {
+        if (p0.pitch !== undefined && p1.pitch !== undefined) {
+          // Accurate multi-DoF orientation from simulation
+          const pitch = (Number(p0.pitch) + (Number(p1.pitch) - Number(p0.pitch)) * frac) * DEG;
+          const roll = (Number(p0.roll) + (Number(p1.roll) - Number(p0.roll)) * frac) * DEG;
+          const yaw = (Number(p0.yaw) + (Number(p1.yaw) - Number(p0.yaw)) * frac) * DEG;
+          euler.set(-pitch, -yaw, roll, "ZYX");
+          dummy.quaternion.setFromEuler(euler);
+        } else if (idx1 > idx0 || pts.length > 1) {
+          dir.set(x1 - x0, y1 - y0, z1 - z0);
+          if (dir.lengthSq() > 1e-6) {
+            dir.normalize();
+            side.crossVectors(dir, worldUp).normalize();
+            if (side.lengthSq() > 1e-4) {
+              realUp.crossVectors(side, dir).normalize();
+              m.makeBasis(dir, realUp, side);
+              dummy.quaternion.setFromRotationMatrix(m);
+            } else {
+              dummy.quaternion.setFromUnitVectors(new THREE.Vector3(1, 0, 0), dir);
+            }
           }
         }
       } else {

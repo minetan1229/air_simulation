@@ -229,14 +229,42 @@
         <button class="chip" id="btn-view-reset" type="button" title="視点を初期化 (V)">リセット</button>
       </div>
 
-      <div class="vp-hud vp-hud-tl">
-        <div class="hud-row"><span class="hud-key">α</span><span class="hud-val num" id="hud-alpha">—</span></div>
-        <div class="hud-row"><span class="hud-key">β</span><span class="hud-val num" id="hud-beta">—</span></div>
-        <div class="hud-row"><span class="hud-key">V</span><span class="hud-val num" id="hud-speed">—</span></div>
-        <div class="hud-row"><span class="hud-key">q</span><span class="hud-val num" id="hud-q">—</span></div>
-        <div class="hud-row"><span class="hud-key">L/D</span><span class="hud-val num" id="hud-ld-live" style="color:#1a73e8;font-weight:700;" title="瞬時揚抗比 (Lift-to-Drag Ratio)">—</span></div>
-        <div class="hud-row"><span class="hud-key">滑空比</span><span class="hud-val num" id="hud-glide-ratio" style="color:#188038;font-weight:700;" title="滑空比 (水平速度/沈下速度)">—</span></div>
-        <div class="hud-row"><span class="hud-key">V∞</span><span class="hud-val num" id="hud-flow">—</span></div>
+      <!-- リアルタイム・フライトテレメトリカード (日本語テキスト表示) -->
+      <div class="vp-hud vp-hud-tl flight-telemetry-hud" style="min-width: 220px; padding: 8px 10px; background: rgba(255,255,255,0.92); backdrop-filter: blur(8px); border: 1px solid var(--line); border-radius: 6px; box-shadow: 0 2px 8px rgba(0,0,0,0.06);">
+        <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid var(--line); padding-bottom:5px; margin-bottom:6px;">
+          <span style="font-weight:700; font-size:11px; color:var(--ink); letter-spacing:0.02em;">飛行ステータス</span>
+          <span class="hud-phase-pill" id="f-hud-phase" style="font-size:9.5px; padding:1px 6px; border-radius:10px; background:#e8f0fe; color:#1a73e8; font-weight:600;">待機中</span>
+        </div>
+
+        <div style="display:grid; grid-template-columns: 1fr 1fr; gap: 6px 12px; font-size:11px;">
+          <div>
+            <div style="color:var(--muted); font-size:9.5px;">高度</div>
+            <div style="font-weight:700; font-size:13px; color:var(--ink);"><span id="f-hud-alt" class="num">0.00</span> <small style="font-size:10px; font-weight:normal;">m</small></div>
+            <div style="font-size:9.5px; color:var(--accent); font-weight:500;">最高: <span id="f-hud-alt-peak" class="num">0.00</span> m</div>
+          </div>
+          <div>
+            <div style="color:var(--muted); font-size:9.5px;">速度</div>
+            <div style="font-weight:700; font-size:13px; color:var(--ink);"><span id="f-hud-spd" class="num">0.00</span> <small style="font-size:10px; font-weight:normal;">m/s</small></div>
+            <div style="font-size:9.5px; color:var(--accent); font-weight:500;">最高: <span id="f-hud-spd-peak" class="num">0.00</span> m/s</div>
+          </div>
+          <div>
+            <div style="color:var(--muted); font-size:9.5px;">水平距離</div>
+            <div style="font-weight:600; font-size:11.5px; color:var(--ink);"><span id="f-hud-dist" class="num">0.00</span> <small style="font-size:9.5px; font-weight:normal;">m</small></div>
+            <div style="font-size:9.5px; color:var(--ink-2);">時間: <span id="f-hud-time" class="num">0.00</span> s</div>
+          </div>
+          <div>
+            <div style="color:var(--muted); font-size:9.5px;">滑空比 / 迎角</div>
+            <div style="font-weight:600; font-size:11.5px; color:#188038;"><span id="f-hud-glide" class="num">—</span></div>
+            <div style="font-size:9.5px; color:var(--ink-2);">迎角: <span id="f-hud-aoa" class="num">0.0°</span></div>
+          </div>
+        </div>
+
+        <!-- 詳細力学データ (互換性用非表示コンテナ) -->
+        <div style="display:none;">
+          <span id="hud-alpha"></span><span id="hud-beta"></span><span id="hud-speed"></span>
+          <span id="hud-q"></span><span id="hud-ld-live"></span><span id="hud-glide-ratio"></span>
+          <span id="hud-flow"></span>
+        </div>
       </div>
 
       <div class="vp-hud vp-hud-tr" id="tunnel-hud" hidden style="min-width: 200px;">

@@ -2045,11 +2045,10 @@ class FlightSimulator:
             rho = max(air["density_kgm3"], 1.0e-6)
             m_add_z = (math.pi / 4.0) * rho * span * (self._chord ** 2)
             m_eff_z = self._mass + m_add_z
-            f_z_eff = self._mass / m_eff_z
             # Accelerations in body frame before world rotation:
             gravity_body = world_to_body(quaternion, gravity_world)
             a_body = (force_body / self._mass) + gravity_body
-            a_body[2] = (force_body[2] / m_eff_z) + gravity_body[2] * f_z_eff
+            a_body[2] = (force_body[2] / m_eff_z) + gravity_body[2]
             acceleration = body_to_world(quaternion, a_body)
         else:
             force_world = body_to_world(quaternion, force_body) + self._mass * gravity_world
