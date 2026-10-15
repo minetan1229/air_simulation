@@ -863,6 +863,7 @@ def test_numpy_backend_fallback(cfg,monkeypatch):
 
 
 def test_tapered_root_moment_matches_independent_load_quadrature(cfg):
+    pytest.importorskip("scipy")
     from scipy.integrate import quad
     for taper in (0.05, 0.4, 1.0):
         wing = replace(cfg, taper_ratio=taper)

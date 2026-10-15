@@ -1006,21 +1006,35 @@ def evaluate_aero(
     # the aft center-of-pressure shift in separated flow and forward-shifted CG eccentricity
     # produce a physical aerodynamic nose-down pitching moment on positive alpha.
     # Note: Only applies during flight (speed > 0) with forward CG eccentricity.
+    # Bounded and smoothly decayed as the aircraft reaches horizontal glide attitude (avoiding over-rotation into vertical dive).
     apex_trans_speed = 2.0
     if 0.0 < speed < 2.5 and alpha > 0.0:
         apex_factor = math.exp(-((speed / apex_trans_speed) ** 2))
-        # Proportional to actual low dynamic pressure or flow circulation
         v_floor = min(speed, 1.0)
         q_floor = 0.5 * density * (v_floor ** 2)
+        # Smooth transition gate: pushover acts when alpha is high (nose up relative to air)
+        # and tapers off as alpha approaches trim/glide regime (e.g. alpha <= 5 deg)
+        alpha_gate = math.tanh(max(alpha - 3.0, 0.0) / 10.0)
         sin_a = math.sin(deg2rad(min(alpha, 90.0)))
-        pushover_moment = -q_floor * area * chord * 1.2 * sin_a * apex_factor
+        pushover_moment = -q_floor * area * chord * 0.8 * sin_a * apex_factor * alpha_gate
     else:
         pushover_moment = 0.0
+
+    # Low-speed rotational apparent/viscous damping (Cross-flow resistance):
+    # In low airspeed regime where dynamic pressure q_dyn -> 0, classic q*c/(2V) vanishes.
+    # Fluid cross-flow drag on the rotating planform exerts physical angular damping:
+    # M_damp = -0.5 * rho * C_D_cross * (area * chord^2) * |q_rate| * q_rate - c_visc * q_rate
+    if 0.0 < speed < 2.5 and area > 1e-6 and chord > 1e-4:
+        q_rate_val = float(angular_rate[1]) if len(angular_rate) > 1 else 0.0
+        rot_damping = -0.5 * density * 1.2 * area * (chord ** 2) * abs(q_rate_val) * q_rate_val - 0.00015 * area * chord * density * q_rate_val
+    else:
+        rot_damping = 0.0
 
     pitching_nm = (
         dynamic_pressure * area * chord * cm
         + pitching_moment_offset_nm(cfg, lift_n, drag_n, side_n)
         + pushover_moment
+        + rot_damping
     )
     rolling_nm = dynamic_pressure * area * span * roll_coeff
     yawing_nm = dynamic_pressure * area * span * yaw_coeff

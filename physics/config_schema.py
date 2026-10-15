@@ -381,6 +381,21 @@ class AircraftConfig:
             added_mass_enabled=bool(self.added_mass_enabled),
             ground_pitch_coupling=clamp(self.ground_pitch_coupling, 0.0, 5.0),
             ground_cushion_lift=clamp(self.ground_cushion_lift, 0.0, 5.0),
+            cm0=clamp(self.cm0, -1.0, 1.0),
+            cm_alpha=clamp(self.cm_alpha, -10.0, 5.0),
+            cm_q=clamp(self.cm_q, -50.0, 5.0),
+            cy_beta=clamp(self.cy_beta, -5.0, 5.0),
+            cl_beta=clamp(self.cl_beta, -5.0, 5.0),
+            cn_beta=clamp(self.cn_beta, -5.0, 5.0),
+            cl_roll_rate=clamp(self.cl_roll_rate, -10.0, 0.0),
+            cm_roll_rate=clamp(self.cm_roll_rate, -5.0, 5.0),
+            cn_roll_rate=clamp(self.cn_roll_rate, -5.0, 5.0),
+            cl_pitch_rate=clamp(self.cl_pitch_rate, -5.0, 5.0),
+            cm_pitch_rate=clamp(self.cm_pitch_rate, -5.0, 5.0),
+            cn_pitch_rate=clamp(self.cn_pitch_rate, -5.0, 5.0),
+            cl_yaw_rate=clamp(self.cl_yaw_rate, -5.0, 5.0),
+            cm_yaw_rate=clamp(self.cm_yaw_rate, -5.0, 5.0),
+            cn_yaw_rate=clamp(self.cn_yaw_rate, -10.0, 0.0),
         )
 
 

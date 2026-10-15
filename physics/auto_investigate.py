@@ -742,9 +742,8 @@ def run_focused_tuning(
         return -float(score)
 
     # Quick Nelder-Mead with clipped parameters
-    from scipy.optimize import minimize
-
     try:
+        from scipy.optimize import minimize
         minimize(
             objective,
             init_x,
@@ -753,7 +752,7 @@ def run_focused_tuning(
             options={"maxiter": max_evaluations, "maxfev": max_evaluations, "disp": False},
         )
     except Exception:
-        # Fallback to init if Nelder-Mead fails
+        # Fallback to init if scipy not installed or Nelder-Mead fails
         pass
 
     # Build final recommended configs

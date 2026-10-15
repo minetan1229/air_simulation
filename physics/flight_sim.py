@@ -227,18 +227,42 @@ _CACHE_LOCK = threading.Lock()
 _MODULE_CACHE: Dict[str, Tuple[Any, float]] = {}
 _FUNC_CACHE: Dict[Tuple[int, Tuple[str, ...]], Any] = {}
 _PLAN_CACHE: Dict[int, Tuple[Any, Any]] = {}
-_MISSING_RETRY_S = 0.5
+try:
+    from . import aero_domain as _static_aero
+except Exception:
+    _static_aero = None
+
+try:
+    from . import atmosphere_domain as _static_atmo
+except Exception:
+    _static_atmo = None
+
+try:
+    from . import wind_domain as _static_wind
+except Exception:
+    _static_wind = None
+
+try:
+    from . import stress_domain as _static_stress
+except Exception:
+    _static_stress = None
 
 
 def _optional_module(name: str) -> Any:
     """Import ``physics.<name>`` lazily; return ``None`` when unavailable.
 
-    A missing module is retried at most once per :data:`_MISSING_RETRY_S` so a
-    sibling domain that lands while this process is alive is still picked up,
-    without paying an ``importlib`` syscall on the hot integration path.  A
-    failure is never fatal: the local NumPy implementations below are
-    structurally identical replacements.
+    Prefers statically imported sibling modules for zero-overhead type-safe
+    execution. A missing module is retried at most once per :data:`_MISSING_RETRY_S`.
     """
+    static_map = {
+        "aero_domain": _static_aero,
+        "atmosphere_domain": _static_atmo,
+        "wind_domain": _static_wind,
+        "stress_domain": _static_stress,
+    }
+    if name in static_map and static_map[name] is not None:
+        return static_map[name]
+
     now = time.monotonic()
     entry = _MODULE_CACHE.get(name)
     if entry is not None:
@@ -345,7 +369,9 @@ def _call_upstream(func: Any, values: Dict[str, Any]) -> Any:
             return None
     try:
         return func(**kwargs)
-    except Exception:
+    except Exception as exc:
+        import logging
+        logging.getLogger(__name__).debug("Upstream call %s failed: %s", getattr(func, "__name__", str(func)), exc)
         return None
 
 
@@ -1971,18 +1997,21 @@ class FlightSimulator:
         aero_comp_gain = max(_finite(getattr(self.aircraft, "aeroelastic_compliance", 0.0)), 0.0)
         stiffness_val = max(_finite(self.aircraft.paper_stiffness, 0.35), 0.05)
         if aero_comp_gain > 0.0:
-            q_aeroelastic = 60.0 * stiffness_val / max(aero_comp_gain, 0.1)
+            q_aeroelastic = 25.0 * stiffness_val / max(aero_comp_gain, 0.1)
             pressure_ratio = safe_div(q_dyn, q_aeroelastic, 0.0)
-            morph_factor = 1.0 / (1.0 + (pressure_ratio ** 1.5))
-            downwash_deflection = 12.0 * (pressure_ratio ** 2) / (1.0 + (pressure_ratio ** 2))
+            morph_factor = 1.0 / (1.0 + (pressure_ratio ** 2.0))
             base_elevon = float(self.aircraft.elevon_deg)
-            effective_elevon_deg = base_elevon * morph_factor + downwash_deflection
+            effective_elevon_deg = base_elevon * morph_factor
             trailing_edge_bend_deg = effective_elevon_deg - base_elevon
+            effective_cm0 = float(self.aircraft.cm0) * morph_factor
+            effective_cL0 = float(self.aircraft.cL0) * morph_factor
         else:
             effective_elevon_deg = float(self.aircraft.elevon_deg)
+            effective_cm0 = float(self.aircraft.cm0)
+            effective_cL0 = float(self.aircraft.cL0)
             trailing_edge_bend_deg = 0.0
 
-        aero_cfg = replace(self.aircraft, elevon_deg=clamp(effective_elevon_deg, -45.0, 45.0))
+        aero_cfg = replace(self.aircraft, cL0=effective_cL0, cm0=effective_cm0, elevon_deg=clamp(effective_elevon_deg, -45.0, 45.0))
 
         result = aero_forces(
             aero_cfg,

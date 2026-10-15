@@ -46,9 +46,9 @@ export class InvestigatorPanel {
 
     const targetMetric = this.dom.targetSelect ? this.dom.targetSelect.value : "distance";
     const payload = {
-      aircraft: this.store.aircraft,
-      environment: this.store.environment,
-      launch: this.store.launch,
+      aircraft: this.store.aircraft || (this.store.data && this.store.data.aircraft) || {},
+      environment: this.store.environment || (this.store.data && this.store.data.environment) || {},
+      launch: this.store.launch || (this.store.data && this.store.data.launch) || {},
       target_metric: targetMetric,
     };
 

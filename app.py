@@ -408,6 +408,9 @@ def force_gpu_render():
     """
     if request.remote_addr not in ("127.0.0.1", "::1", "localhost"):
         return _error("forbidden: endpoint restricted to local loopback", 403)
+    origin = request.headers.get("Origin") or request.headers.get("Referer")
+    if origin and not any(origin.startswith(h) for h in ("http://127.0.0.1:", "http://localhost:", "https://127.0.0.1:", "https://localhost:")):
+        return _error("forbidden: cross-origin request disallowed", 403)
     if not os.environ.get("PAPER_ALLOW_SYSTEM_CONFIG") and os.environ.get("ENV") == "production":
         return _error("system configuration endpoint is disabled in production", 403)
 
@@ -1165,8 +1168,8 @@ def _optimizer_config(payload: Dict[str, Any]) -> OptimizerConfig:
     except Exception as exc:
         raise BadRequest(f"invalid optimizer configuration: {exc}") from exc
 
-    if cfg.max_evaluations < 1 or cfg.max_evaluations > 200000:
-        raise BadRequest("'max_evaluations' must be within [1, 200000]")
+    if cfg.max_evaluations < 1 or cfg.max_evaluations > 5000:
+        raise BadRequest("'max_evaluations' must be within [1, 5000]")
     if cfg.design_variables:
         try:
             cfg.resolved_variables()
