@@ -2265,11 +2265,12 @@ class FlightSimulator:
             new_z += min_alt  # Push upwards in world coordinates (-z is up)
 
         # Ground contact sliding & landing declaration:
-        # Require horizontal speed to also slow down to a stop before finalizing 'landed'
+        # Require horizontal speed to also slow down to a stop before finalizing 'landed',
+        # or finalize landed immediately when max bounce limit is exhausted.
         h_speed = math.hypot(vx, vy)
         if abs(new_vz) < LANDING_SPEED_THRESHOLD_MPS or self._bounce_count >= MAX_BOUNCES:
             new_vz = 0.0
-            if h_speed < 0.15:
+            if h_speed < 0.15 or self._bounce_count >= MAX_BOUNCES:
                 landed = True
                 vx = 0.0
                 vy = 0.0

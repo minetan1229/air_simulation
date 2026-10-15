@@ -245,6 +245,20 @@ def test_crowding_distance_hand_checked() -> None:
     assert crowding_distance(objectives, KNOWN_ROWS, [0, 1]) == [math.inf, math.inf]
 
 
+def test_crowding_distance_identical_scores_no_bias() -> None:
+    objectives = ["max_distance"]
+    identical_rows = [
+        {"distance_m": 10.0},
+        {"distance_m": 10.0},
+        {"distance_m": 10.0},
+        {"distance_m": 10.0},
+    ]
+    distances = crowding_distance(objectives, identical_rows, [0, 1, 2, 3])
+    # When spread is 0, no individual should falsely receive inf
+    assert all(d == 0.0 for d in distances)
+
+
+
 # ==========================================================================
 # 4. Variation operators
 # ==========================================================================
@@ -709,4 +723,19 @@ def test_optimizer_result_preserves_mixed_physics_warning(monkeypatch):
     assert result["physics_verification_eligible"] is False
     assert any("direct comparison" in value for value in result["limitations"])
     assert result["best_physics"]["model"] == "translational_ensemble"
+
+
+def test_differential_evolution_small_budget_falls_back_to_surrogate():
+    from physics.optimizer_domain import run_differential_evolution
+    # 3 variables with max_evaluations=4 (< 3*2 = 6)
+    cfg = make_cfg(
+        "differential-evolution",
+        design_variables=["elevon_deg", "paper_gsm", "launch_angle_deg"],
+        objectives=["max_distance"],
+        max_evaluations=4,
+    )
+    result = run_differential_evolution(cfg)
+    assert result["algorithm"] == "surrogate"
+    assert result["evaluations"] <= 4
+
     assert all("physics" in row for row in result["pareto_front"])
