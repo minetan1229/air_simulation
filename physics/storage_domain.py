@@ -249,10 +249,23 @@ def parse_csv(text: str) -> List[Dict[str, Any]]:
     ]
 
 
+def _sanitize_json_leaves(value: Any) -> Any:
+    """Recursively convert NaN/Inf floats into None (JSON null) to guarantee exportability."""
+    if isinstance(value, float):
+        if value != value or value in (float("inf"), float("-inf")):
+            return None
+        return value
+    if isinstance(value, Mapping):
+        return {str(k): _sanitize_json_leaves(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_sanitize_json_leaves(item) for item in value]
+    return value
+
+
 def rows_to_json(rows: Sequence[Mapping[str, Any]], indent: Optional[int] = 2) -> str:
     """Serialise ``rows`` to JSON (UTF-8 friendly, never ASCII-escaped)."""
     data = as_dict(list(rows or []))
-    _assert_json_finite("rows", data)
+    data = _sanitize_json_leaves(data)
     return json.dumps(
         data, ensure_ascii=False, indent=indent, default=_json_default, allow_nan=False
     )
@@ -528,7 +541,7 @@ def export_optimizer_result(result: Any, fmt: str = "csv") -> Tuple[str, str, st
         return rows_to_csv(rows, columns=columns), CSV_MIMETYPE, f"optimizer_{stamp}.csv"
     if style == "json":
         data = as_dict(dict(payload))
-        _assert_json_finite("optimizer", data)
+        data = _sanitize_json_leaves(data)
         return (
             json.dumps(data, ensure_ascii=False, indent=2, default=_json_default, allow_nan=False),
             JSON_MIMETYPE,

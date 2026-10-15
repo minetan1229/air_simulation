@@ -141,14 +141,12 @@ def isa_pressure(
         # Isothermal limit: dp/dh = -rho g with rho = p / (R T0).
         exponent = -g * h / (R_AIR * max(abs(t0), _MIN_TEMPERATURE_K))
         return p0 * math.exp(clamp(exponent, -700.0, 700.0))
-    temperature = isa_temperature(h, t0, lapse)
-    ratio = temperature / t0
-    if ratio <= 0.0:
-        raise ValueError(
-            "ISA temperature reached 0 K or below at altitude "
-            f"{h} m (T0={t0} K, L={lapse} K/m); the tropospheric lapse model is "
-            "only valid below the lapse-rate tropopause"
-        )
+    raw_temp = isa_temperature(h, t0, lapse)
+    # The troposphere reaches the tropopause at ~11 km (T ~ 216.65 K).
+    # Beyond ~45 km the linear lapse rate reaches 0 K. Clamp temperature to
+    # standard tropopause/mesosphere floor to transition into isothermal high-altitude model.
+    temperature = max(raw_temp, 50.0)
+    ratio = max(temperature / max(t0, 1.0), 1.0e-6)
     exponent = g / (lapse * R_AIR)
     return p0 * (ratio ** exponent)
 

@@ -341,7 +341,12 @@ def wing_root_bending_moment(
     area = max(_finite_or(wing_area_m2, 0.0), 0.0)
     span = max(_finite_or(wingspan_m, 0.0), 0.0)
     nz = abs(_finite_or(load_factor, 0.0))
-    force = q * area * nz if cfg is None else max(cfg.mass_kg, 0.0) * max(gravity, 0.0) * nz
+    if cfg is None:
+        force = q * area * nz
+    elif gravity > 0.05:
+        force = max(cfg.mass_kg, 0.0) * gravity * nz
+    else:
+        force = q * area * nz
     taper = 1.0 if cfg is None else clamp(cfg.taper_ratio, 0.05, 1.0)
     return force * span * (1.0 + 2.0 * taper) / (12.0 * (1.0 + taper))
 

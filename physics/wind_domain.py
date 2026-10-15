@@ -880,6 +880,8 @@ def _parse_resolution(resolution: Any) -> Tuple[Tuple[int, int, int], Any]:
         )
     if min(values) < 1:
         raise ValueError(f"every resolution component must be >= 1, got {values}")
+    if values[0] * values[1] * values[2] > 262144:
+        raise ValueError(f"total grid points ({values[0] * values[1] * values[2]}) exceeds safety limit 262144")
     return (values[0], values[1], values[2]), values
 
 

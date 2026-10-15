@@ -1522,10 +1522,13 @@ def resolve_throw(
             rates = np.zeros(3, dtype=np.float64)
 
     height = abs(_finite(cfg.launch_height_m))
+    raw_pos = getattr(cfg, "launch_position_m", (0.0, 0.0, 0.0))
+    pos_x = _finite(raw_pos[0]) if len(raw_pos) > 0 else 0.0
+    pos_y = _finite(raw_pos[1]) if len(raw_pos) > 1 else 0.0
     position = np.array(
         [
-            _finite(cfg.launch_position_m[0]),
-            _finite(cfg.launch_position_m[1]),
+            pos_x,
+            pos_y,
             -height,
         ],
         dtype=np.float64,
@@ -1815,7 +1818,7 @@ class FlightSimulator:
         self._diagnostics_cache = None
         self._stiffness_cache = None
         self._next_record_time = float(self._state.time_s)
-        while self._history and self._history[-1].time_s > self._state.time_s:
+        while self._history and self._history[-1].time_s >= self._state.time_s - 1.0e-9:
             self._history.pop()
         return self.state
 
@@ -2339,7 +2342,11 @@ class FlightSimulator:
         interval = max(_finite(self.settings.record_interval_s, 1.0e-2), 1.0e-9)
         if float(self._state.time_s) + 1.0e-12 < self._next_record_time:
             return
-        self._history.append(self._make_sample())
+        sample = self._make_sample()
+        if self._history and abs(self._history[-1].time_s - sample.time_s) < 1.0e-9:
+            self._history[-1] = sample
+        else:
+            self._history.append(sample)
         self._next_record_time = float(self._state.time_s) + interval
 
     # -- diagnostics ------------------------------------------------------
@@ -2579,11 +2586,14 @@ class FlightSimulator:
         budget = max(1, int(self.settings.max_substeps) if substeps is None else int(substeps))
         travelled = 0.0
         used = 0
-        while travelled < total - 1.0e-12 and used < budget:
+        while travelled < total - 1.0e-9 and used < budget:
+            remaining = total - travelled
+            if remaining < 1.0e-9:
+                break
             y0 = _pack(self._state)
             time_s = float(self._state.time_s)
             core = self._compute_dynamics(y0, time_s)
-            h = min(self._timestep_from(core, y0, time_s), total - travelled)
+            h = min(self._timestep_from(core, y0, time_s), remaining)
             if not self._advance(h, y0, time_s, self._derivative(y0, time_s, core)):
                 break
             travelled += float(self._state.time_s) - time_s
