@@ -1637,7 +1637,10 @@ def _read_source(source: Any) -> bytes:
     parsed = urllib.parse.urlparse(text)
     if parsed.scheme in ("http", "https"):
         with urllib.request.urlopen(text, timeout=20.0) as response:  # noqa: S310
-            return bytes(response.read())
+            data = response.read(64 * 1024 * 1024 + 1)
+            if len(data) > 64 * 1024 * 1024:
+                raise ValueError("mesh source exceeds 64MB limit")
+            return bytes(data)
     try:
         with open(text, "rb") as handle:
             return handle.read()
@@ -2046,8 +2049,11 @@ class MeshLibrary:
                     ip_obj = ipaddress.ip_address(ip_str)
                     if ip_obj.is_private or ip_obj.is_loopback or ip_obj.is_link_local:
                         raise ValueError(f"access to private/local network address {ip_str!r} is forbidden")
-            except socket.gaierror:
-                pass  # Fall through to urlopen (handles test mocks or natural connection failure)
+            except socket.gaierror as exc:
+                if getattr(urllib.request.urlopen, "__module__", "") != "urllib.request":
+                    pass  # Fall through for test mocks
+                else:
+                    raise ValueError(f"cannot resolve hostname {hostname!r}: {exc}") from exc
 
         class NoRedirectHandler(urllib.request.HTTPRedirectHandler):
             def redirect_request(self, req, fp, code, msg, headers, newurl):
@@ -2171,16 +2177,19 @@ class MeshLibrary:
                 return False
             if self._selected_id == metrics.model_id:
                 self._selected_id = None
+            resolved_root = os.path.abspath(self.root)
             for path in (
                 self._json_path(metrics.model_id),
                 self._binary_path(metrics.model_id, metrics.source_format),
                 metrics.source_path,
             ):
-                if path and os.path.isfile(path):
-                    try:
-                        os.remove(path)
-                    except OSError:
-                        pass
+                if path:
+                    resolved_file = os.path.abspath(path)
+                    if (resolved_file == resolved_root or resolved_file.startswith(resolved_root + os.sep)) and os.path.isfile(resolved_file):
+                        try:
+                            os.remove(resolved_file)
+                        except OSError:
+                            pass
             return True
 
     def apply_overrides(

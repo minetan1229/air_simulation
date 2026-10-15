@@ -321,8 +321,10 @@ def _pool_worker(args: Tuple[Callable[[Any], Any], List[Any]]) -> List[Any]:
 # --------------------------------------------------------------------------
 # Atmosphere helper (surrogate only)
 # --------------------------------------------------------------------------
-def isa_air_density(environment: Optional[Dict[str, Any]] = None) -> float:
-    """Air density in kg/m^3 from an :class:`EnvironmentConfig` payload.
+def isa_air_density(
+    environment: Optional[Union[Dict[str, Any], float, int, EnvironmentConfig]] = None
+) -> float:
+    """Air density in kg/m^3 from an :class:`EnvironmentConfig` payload or altitude float.
 
     ISA temperature lapse ``T = T0 - L h`` with the hydrostatic
     ``p = p0 (T/T0)^(g/(L R))`` and ``rho = p / (R T)``, then the standard
@@ -330,9 +332,14 @@ def isa_air_density(environment: Optional[Dict[str, Any]] = None) -> float:
     ``rho *= 1 - 0.378 * RH``.  Always returns a strictly positive, finite
     value.
     """
-    env = EnvironmentConfig()
-    if environment:
+    if isinstance(environment, (int, float)):
+        env = EnvironmentConfig(altitude_m=float(environment))
+    elif isinstance(environment, EnvironmentConfig):
+        env = environment
+    elif isinstance(environment, dict):
         env = from_dict(EnvironmentConfig, environment)
+    else:
+        env = EnvironmentConfig()
     altitude = max(float(env.altitude_m), 0.0)
     gravity = max(float(env.gravity), 0.1)
     lapse = float(env.lapse_rate_K_per_m)
@@ -594,8 +601,15 @@ def evaluate_case(case: Dict[str, Any]) -> Dict[str, Any]:
                 "error": str(exc),
                 "distance_m": 0.0,
                 "flight_time_s": 0.0,
-                "max_stress_index": 1.0,
-                "max_stress_pa": 1.0e6,
+                "max_stress_index": 10.0,
+                "max_stress_pa": 1.0e9,
+                "max_ld_ratio": 0.0,
+                "stall_margin": -10.0,
+                "max_stall_margin": -10.0,
+                "launch_speed_mps": 100.0,
+                "min_launch_speed": 100.0,
+                "stability": -10.0,
+                "max_stability": -10.0,
                 "crashed": True,
                 "diverged": True,
                 "landed": False,

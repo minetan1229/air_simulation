@@ -151,7 +151,10 @@ def _encode_value(value: Any) -> str:
         return repr(value)
     if isinstance(value, (list, tuple, dict)):
         return json.dumps(as_dict(value), ensure_ascii=False, sort_keys=True)
-    return str(value)
+    text = str(value)
+    if text and text[0] in ("=", "+", "-", "@", "\t", "\r"):
+        return "'" + text
+    return text
 
 
 def _decode_value(text: str) -> Any:
@@ -164,6 +167,8 @@ def _decode_value(text: str) -> Any:
     to the dataclass types with ``from_dict(FlightLogSample, ...)`` instead of
     relying on this best-effort inference.
     """
+    if text.startswith("'") and len(text) > 1 and text[1] in ("=", "+", "-", "@", "\t", "\r"):
+        text = text[1:]
     if text == "true":
         return True
     if text == "false":
