@@ -1048,6 +1048,11 @@ export class Viewport {
     const sorted = [...trajectories].sort((a, b) => (Number(b.landing_distance_m) || 0) - (Number(a.landing_distance_m) || 0));
     const topIds = new Set(sorted.slice(0, 3).map((t) => t.id));
     const bestId = sorted.length ? sorted[0].id : null;
+    const totalCount = trajectories.length;
+    const worstId = sorted.length ? sorted[sorted.length - 1].id : null;
+
+    const midPositions = [];
+    const midMarkerPositions = [];
 
     trajectories.forEach((tr, idx) => {
       const pts = tr.points;
@@ -1057,13 +1062,30 @@ export class Viewport {
       const isRank1 = tr.id === bestId || rank === 1;
       const isRank2 = rank === 2;
       const isRank3 = rank === 3;
+      const isWorst = rank === totalCount || tr.id === worstId;
 
-      const totalCount = trajectories.length;
-      const isWorst = rank === totalCount || (sorted.length > 0 && tr.id === sorted[sorted.length - 1].id);
+      const isSpecial = isRank1 || isRank2 || isRank3 || isWorst;
 
+      if (!isSpecial) {
+        // Collect into merged LineSegments for high-performance batch rendering (1 draw call)
+        for (let i = 0; i < pts.length - 1; i++) {
+          const p1 = pts[i];
+          const p2 = pts[i + 1];
+          midPositions.push(
+            Number(p1.x) || 0, Number(p1.z) || 0, Number(p1.y) || 0,
+            Number(p2.x) || 0, Number(p2.z) || 0, Number(p2.y) || 0
+          );
+        }
+        const lastPt = pts[pts.length - 1];
+        if (lastPt) {
+          midMarkerPositions.push(Number(lastPt.x) || 0, 0.005, Number(lastPt.y) || 0);
+        }
+        return;
+      }
+
+      // Individual prominent lines for top 3 and worst planes
       const positions = [];
       pts.forEach((p) => {
-        // sim to three: x -> x, height -> y, lateral -> z
         positions.push(Number(p.x) || 0, Number(p.z) || 0, Number(p.y) || 0);
       });
 
@@ -1071,7 +1093,7 @@ export class Viewport {
       geom.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
 
       let col;
-      let opacity = 0.35;
+      let opacity = 0.85;
       let linewidth = 1;
 
       if (isRank1) {
@@ -1087,7 +1109,7 @@ export class Viewport {
         opacity = 0.85;
       } else if (isRank3) {
         col = new THREE.Color(0xcd7f32); // 3rd Bronze
-        opacity = 0.75;
+        opacity = 0.80;
       } else {
         col = palette[idx % palette.length];
       }
@@ -1103,7 +1125,7 @@ export class Viewport {
       line.userData = { trajectoryId: tr.id, rank: rank, isRank1: isRank1, isWorst: isWorst };
       group.add(line);
 
-      // Landing ground marker
+      // Prominent landing ground markers
       const lastPt = pts[pts.length - 1];
       if (lastPt) {
         const lx = Number(lastPt.x) || 0;
@@ -1157,7 +1179,7 @@ export class Viewport {
           const markerMat = new THREE.MeshBasicMaterial({
             color: col,
             transparent: true,
-            opacity: (isRank2 || isRank3) ? 0.85 : 0.55,
+            opacity: 0.85,
             side: THREE.DoubleSide,
           });
           const marker = new THREE.Mesh(markerGeom, markerMat);
@@ -1167,6 +1189,36 @@ export class Viewport {
         }
       }
     });
+
+    // Add merged LineSegments for the mid-tier trajectories (Draw call: 1)
+    if (midPositions.length > 0) {
+      const midGeom = new THREE.BufferGeometry();
+      midGeom.setAttribute("position", new THREE.Float32BufferAttribute(midPositions, 3));
+      const midMat = new THREE.LineBasicMaterial({
+        color: 0x4285f4,
+        transparent: true,
+        opacity: 0.35,
+      });
+      const midSegments = new THREE.LineSegments(midGeom, midMat);
+      midSegments.userData = { isMergedMid: true };
+      group.add(midSegments);
+    }
+
+    // Add merged points for mid-tier landing spots (Draw call: 1)
+    if (midMarkerPositions.length > 0) {
+      const markerGeom = new THREE.BufferGeometry();
+      markerGeom.setAttribute("position", new THREE.Float32BufferAttribute(midMarkerPositions, 3));
+      const markerMat = new THREE.PointsMaterial({
+        color: 0x1a73e8,
+        size: 5,
+        transparent: true,
+        opacity: 0.60,
+        sizeAttenuation: false,
+      });
+      const markerPoints = new THREE.Points(markerGeom, markerMat);
+      markerPoints.userData = { isMergedMid: true };
+      group.add(markerPoints);
+    }
 
     this.scene.add(group);
     this._ensembleGroup = group;
@@ -1200,8 +1252,12 @@ export class Viewport {
     if (mode === "stagger") {
       // Start with top 1, then reveal gradually in small batches
       this._ensembleGroup.children.forEach((child) => {
-        const rank = child.userData ? child.userData.rank : 999;
-        child.visible = rank === 1;
+        if (child.userData && child.userData.isMergedMid) {
+          child.visible = false;
+        } else {
+          const rank = child.userData ? child.userData.rank : 999;
+          child.visible = rank === 1;
+        }
       });
       let currentRevealRank = 1;
       const maxRank = this._ensembleTrajectories ? this._ensembleTrajectories.length : 100;
@@ -1213,9 +1269,13 @@ export class Viewport {
         }
         currentRevealRank += 3; // reveal 3 planes every 100ms
         this._ensembleGroup.children.forEach((child) => {
-          const rank = child.userData ? child.userData.rank : 999;
-          if (rank <= currentRevealRank) {
-            child.visible = true;
+          if (child.userData && child.userData.isMergedMid) {
+            child.visible = currentRevealRank >= maxRank;
+          } else {
+            const rank = child.userData ? child.userData.rank : 999;
+            if (rank <= currentRevealRank) {
+              child.visible = true;
+            }
           }
         });
         if (currentRevealRank >= maxRank) {
@@ -1227,13 +1287,17 @@ export class Viewport {
     }
 
     this._ensembleGroup.children.forEach((child) => {
-      const rank = child.userData ? child.userData.rank : 999;
-      if (mode === "top1") {
-        child.visible = rank === 1;
-      } else if (mode === "top3") {
-        child.visible = rank <= 3;
+      if (child.userData && child.userData.isMergedMid) {
+        child.visible = mode === "all";
       } else {
-        child.visible = true;
+        const rank = child.userData ? child.userData.rank : 999;
+        if (mode === "top1") {
+          child.visible = rank === 1;
+        } else if (mode === "top3") {
+          child.visible = rank <= 3;
+        } else {
+          child.visible = true;
+        }
       }
     });
   }

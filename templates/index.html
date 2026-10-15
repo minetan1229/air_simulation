@@ -441,6 +441,65 @@
           </table>
         </div>
       </div>
+
+      <!-- 飛行結果サマリーモーダル (着地 / 完了時ポップアップ) -->
+      <div class="flight-result-modal" id="flight-result-modal" hidden>
+        <div class="flight-result-card">
+          <div class="flight-result-head">
+            <div class="flight-result-title-group">
+              <span class="flight-result-icon"><svg class="ui-icon" viewBox="0 0 24 24" fill="currentColor" style="width:24px;height:24px;color:var(--accent);"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/></svg></span>
+              <div>
+                <div class="flight-result-title">飛行完了 / FLIGHT COMPLETED</div>
+                <div class="flight-result-sub" id="f-res-status-sub">滑空着地完了</div>
+              </div>
+            </div>
+            <button class="flight-result-close-btn" id="f-res-btn-close" type="button" title="閉じる">✕</button>
+          </div>
+
+          <div class="flight-result-grid">
+            <div class="flight-result-item highlight">
+              <div class="f-res-label">水平飛距離</div>
+              <div class="f-res-val"><span id="f-res-dist" class="num">0.00</span> <small>m</small></div>
+            </div>
+            <div class="flight-result-item highlight">
+              <div class="f-res-label">滞空時間</div>
+              <div class="f-res-val"><span id="f-res-time" class="num">0.00</span> <small>s</small></div>
+            </div>
+            <div class="flight-result-item">
+              <div class="f-res-label">最高高度</div>
+              <div class="f-res-val"><span id="f-res-alt-max" class="num">0.00</span> <small>m</small></div>
+            </div>
+            <div class="flight-result-item">
+              <div class="f-res-label">最高速度</div>
+              <div class="f-res-val"><span id="f-res-spd-max" class="num">0.00</span> <small>m/s</small></div>
+            </div>
+          </div>
+
+          <div class="flight-result-details">
+            <div class="f-res-detail-row">
+              <span class="f-res-detail-key">平均滑空比 (L/D)</span>
+              <span class="f-res-detail-val num" id="f-res-glide">—</span>
+            </div>
+            <div class="f-res-detail-row">
+              <span class="f-res-detail-key">最大Gフォース</span>
+              <span class="f-res-detail-val num" id="f-res-gload">—</span>
+            </div>
+            <div class="f-res-detail-row">
+              <span class="f-res-detail-key">最大翼面応力</span>
+              <span class="f-res-detail-val num" id="f-res-stress">—</span>
+            </div>
+          </div>
+
+          <div class="flight-result-actions">
+            <button type="button" class="btn btn-primary" id="f-res-btn-relaunch" style="flex:1; justify-content:center; gap:6px;">
+              <svg class="ui-icon" viewBox="0 0 24 24" fill="currentColor"><path d="M12 5V1L7 6l5 5V7c3.31 0 6 2.69 6 6s-2.69 6-6 6-6-2.69-6-6H4c0 4.42 3.58 8 8 8s8-3.58 8-8-3.58-8-8-8z"/></svg> もう一度飛ばす
+            </button>
+            <button type="button" class="btn btn-outline" id="f-res-btn-dismiss" style="padding:0 16px;">
+              閉じる
+            </button>
+          </div>
+        </div>
+      </div>
     </section>
 
     <!-- ---------- right rail : instrumentation ---------- -->

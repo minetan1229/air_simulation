@@ -316,6 +316,18 @@ class ConsoleApp {
       "f-hud-glide",
       "f-hud-aoa",
       "f-hud-phase",
+      "flight-result-modal",
+      "f-res-status-sub",
+      "f-res-dist",
+      "f-res-time",
+      "f-res-alt-max",
+      "f-res-spd-max",
+      "f-res-glide",
+      "f-res-gload",
+      "f-res-stress",
+      "f-res-btn-relaunch",
+      "f-res-btn-dismiss",
+      "f-res-btn-close",
       "flow-backend",
       "flow-count",
       "hud-alpha",
@@ -624,6 +636,20 @@ class ConsoleApp {
 
     if (this.dom["sim-error-close"]) {
       this.dom["sim-error-close"].addEventListener("click", () => this.hideSimulationError());
+    }
+
+    // Bind flight result modal buttons
+    if (this.dom["f-res-btn-relaunch"]) {
+      this.dom["f-res-btn-relaunch"].addEventListener("click", () => {
+        this.hideFlightResultModal();
+        this._launchFlight();
+      });
+    }
+    if (this.dom["f-res-btn-dismiss"]) {
+      this.dom["f-res-btn-dismiss"].addEventListener("click", () => this.hideFlightResultModal());
+    }
+    if (this.dom["f-res-btn-close"]) {
+      this.dom["f-res-btn-close"].addEventListener("click", () => this.hideFlightResultModal());
     }
 
     // Bind recording buttons
@@ -1817,6 +1843,7 @@ class ConsoleApp {
   async _launchFlight() {
     if (this.tunnelMode) this.setTunnel(false);
     this.hideSimulationError();
+    this.hideFlightResultModal();
     const tStart = performance.now();
     this.startEtaCountdown({
       clock: "6DoF計算中...",
@@ -1912,6 +1939,7 @@ class ConsoleApp {
   async _resetFlight(clearHistory = true) {
     if (this.tunnelMode) this.setTunnel(false);
     this.hideSimulationError();
+    this.hideFlightResultModal();
     this.setGlobalEta({ clock: "—", left: "待機中", active: false });
     if (this.viewport) {
       this.viewport.archiveTrack();
@@ -2217,6 +2245,46 @@ class ConsoleApp {
     this._guard(async () => {
       await this._updateTrim();
     });
+
+    this.showFlightResultModal(frame);
+  }
+
+  showFlightResultModal(frame) {
+    const modal = this.dom["flight-result-modal"];
+    if (!modal) return;
+
+    const position = frame.position_m || [frame.x_m || 0, frame.y_m || 0, frame.z_m || 0];
+    const dist = Math.hypot(position[0], position[1]);
+    const time = Number(frame.time_s) || 0;
+    const metrics = this.transport.metrics || {};
+
+    const launchH = Number(this.store.data.launch?.launch_height_m) || 1.8;
+    const peakAlt = this._peakAlt != null ? this._peakAlt : Math.max(metrics.max_altitude_m || launchH, -position[2]);
+    const peakSpd = this._peakSpd != null ? this._peakSpd : Math.max(Number(frame.speed_mps) || 0, Number(this.store.data.launch?.launch_speed) || 10);
+
+    const altDrop = Math.max(peakAlt - (Number(frame.altitude_m) || 0), 0.5);
+    const avgGR = dist / altDrop;
+
+    let statusText = "滑空着地完了";
+    if (frame.diverged || metrics.diverged) statusText = "数値計算発散";
+    else if (frame.crashed || metrics.crashed) statusText = "地表衝突・墜落";
+    else if (frame.stalled || metrics.stalled) statusText = "失速着地";
+
+    if (this.dom["f-res-status-sub"]) this.dom["f-res-status-sub"].textContent = statusText;
+    if (this.dom["f-res-dist"]) this.dom["f-res-dist"].textContent = fmt(dist, 2);
+    if (this.dom["f-res-time"]) this.dom["f-res-time"].textContent = fmt(time, 2);
+    if (this.dom["f-res-alt-max"]) this.dom["f-res-alt-max"].textContent = fmt(peakAlt, 2);
+    if (this.dom["f-res-spd-max"]) this.dom["f-res-spd-max"].textContent = fmt(peakSpd, 2);
+    if (this.dom["f-res-glide"]) this.dom["f-res-glide"].textContent = avgGR > 0 ? (avgGR > 50 ? "水平滑空" : fmt(avgGR, 2)) : "—";
+    if (this.dom["f-res-gload"]) this.dom["f-res-gload"].textContent = fmt(Number(frame.g_load) || 1.0, 2) + " G";
+    if (this.dom["f-res-stress"]) this.dom["f-res-stress"].textContent = fmt(Number(frame.max_stress_pa) || 0, 0) + " Pa";
+
+    modal.hidden = false;
+  }
+
+  hideFlightResultModal() {
+    const modal = this.dom["flight-result-modal"];
+    if (modal) modal.hidden = true;
   }
 
   /* ---------------------------------------------------- unified aircraft selector */
