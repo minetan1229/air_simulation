@@ -15,6 +15,6 @@ jobs:
       - name: リポジトリのコードを取得
         uses: actions/checkout@v4
       - name: 依存関係の変更を確認
-        uses: actions/dependency-review-action@v4
+        uses: actions/dependency-review-action@v5
         with:
           fail-on-severity: high
