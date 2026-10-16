@@ -71,10 +71,15 @@ export class Transport extends Emitter {
 
   /** Launch a new flight simulation: precomputes the entire trajectory. */
   async launch(customPayload = null) {
+    if (this.busy) {
+      console.warn("[Transport] Simulation launch already in flight; ignoring duplicate request.");
+      return null;
+    }
     this.playing = false;
     this.busy = true;
     this.generation += 1;
     const currentGen = this.generation;
+
 
     const payload = customPayload || {
       aircraft: this.store.data.aircraft,

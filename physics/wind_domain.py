@@ -803,11 +803,31 @@ def _velocity_device(points: np.ndarray, env: EnvironmentConfig, time_s: float, 
     if n == 0:
         return np.zeros((0, 3), dtype=np.float64)
 
-    # --- wind tunnel measurement mode (AGENTS.md 5) -----------------------
+    # --- wind tunnel measurement mode (REQ-07, AGENTS.md 5) -----------------------
     if bool(env.wind_tunnel_enabled):
+        speed = float(env.wind_tunnel_speed)
         stream = np.zeros((n, 3), dtype=np.float64)
-        stream[:, 0] = float(env.wind_tunnel_speed)
+        if getattr(env, "wind_tunnel_boundary_correction", False):
+            # When boundary correction is requested:
+            blockage_factor = 1.035
+            v_eff = speed * blockage_factor
+            stream[:, 0] = v_eff
+            if n > 0:
+                ti = 0.005
+                phase = time_s * 15.0
+                stream[:, 0] += v_eff * ti * np.sin(points[:, 1] * 20.0 + phase)
+                stream[:, 1] += v_eff * ti * np.cos(points[:, 0] * 20.0 + phase)
+                stream[:, 2] += v_eff * ti * np.sin(points[:, 2] * 20.0 + phase * 0.7)
+                r_wall = np.sqrt(points[:, 1]**2 + points[:, 2]**2)
+                tunnel_radius = 2.5
+                wall_damping = np.clip(1.0 - np.exp(-(np.maximum(tunnel_radius - r_wall, 0.0) / 0.15)), 0.0, 1.0)
+                stream[:, 0] *= wall_damping
+        else:
+            # Baseline test-contract: strict uniform stream
+            stream[:, 0] = speed
         return stream
+
+
 
     ground = float(env.ground_level_m)
     gust = gust_factor(env, time_s)
