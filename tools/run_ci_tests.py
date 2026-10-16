@@ -5,18 +5,25 @@ import os
 import subprocess
 import sys
 import urllib.request
+from pathlib import Path
 
-DISCORD_WEBHOOK = (
-    "https://discord.com/api/webhooks/1560152284057567353/"
-    "2udSqpx3P4ZVhrGi1JnyRbgAY-FyB6cySreOpSOxSi8U9KbTvTj4KtOm91oaMOQCQ8u_"
-)
+# Add project root to sys.path
+project_root = Path(__file__).resolve().parent.parent
+if str(project_root) not in sys.path:
+    sys.path.insert(0, str(project_root))
+
+from tools.notify_discord import get_webhook_url
 
 
 def notify_discord(content: str) -> None:
+    webhook_url = get_webhook_url()
+    if not webhook_url:
+        print("Notice: DISCORD_WEBHOOK_URL not configured. Discord notification skipped.", file=sys.stderr)
+        return
     try:
         payload = {"content": content}
         req = urllib.request.Request(
-            DISCORD_WEBHOOK,
+            webhook_url,
             data=json.dumps(payload).encode("utf-8"),
             headers={"Content-Type": "application/json", "User-Agent": "Mozilla/5.0"},
         )
