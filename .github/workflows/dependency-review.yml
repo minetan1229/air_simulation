@@ -1,0 +1,20 @@
+name: Dependency Review
+
+on:
+  pull_request:
+    branches: [ "master" ]
+
+permissions:
+  contents: read
+
+jobs:
+  dependency-review:
+    name: Review dependency changes
+    runs-on: ubuntu-latest
+    steps:
+      - name: リポジトリのコードを取得
+        uses: actions/checkout@v4
+      - name: 依存関係の変更を確認
+        uses: actions/dependency-review-action@v4
+        with:
+          fail-on-severity: high
