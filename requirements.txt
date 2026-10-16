@@ -7,7 +7,7 @@ scipy>=1.10
 pytest>=7.4
 
 # Optional mesh analysis backend (pure-NumPy fallback is always available)
-trimesh>=4.0 ; python_version >= "3.8"
+trimesh>=5.1.1 ; python_version >= "3.8"
 
 # Optional GPU backends for the wind field (NumPy fallback is always available)
 # cupy-cuda12x>=13.0
