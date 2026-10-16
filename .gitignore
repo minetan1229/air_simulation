@@ -31,5 +31,3 @@ htmlcov/
 
 # Prevent accidental shadowing of standard modules
 antigravity.py
-
-agents.md

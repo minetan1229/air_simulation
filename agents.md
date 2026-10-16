@@ -23,11 +23,19 @@
 6. **Google Minimalist UI/UX Standard (Google風UIデザイン)**
    - Google Clean / Material Design に完全準拠。白ベース（`#F8F9FA` / `#FFFFFF`）、角丸カード型浮遊パネル、Google Blue (`#1A73E8`) を基調としたデザイン。
 7. **作成、完了報告**
-   - 作成が開始、終了したら作成、完了タイトル　作成時間、終了時間　修正内容要約(100文字程度)を以下のwebhookに送信する。サブエージェントを起動する時も送信する。サブエージェントはサブエージェントとつける。
-   開始、サブエージェント、終了は見た目で分かるように開始は緑サブエージェントは開始も終了もオレンジ終了は青失敗は赤注意点は黄色ユーザーへの質問はぴんくで
-https://discord.com/api/webhooks/1560152284057567353/2udSqpx3P4ZVhrGi1JnyRbgAY-FyB6cySreOpSOxSi8U9KbTvTj4KtOm91oaMOQCQ8u_
+   - 作成が開始、終了したら作成、完了タイトル、作成時間、終了時間、修正内容要約(100文字程度)をDiscord Webhookに送信する。サブエージェントを起動する時も送信する（サブエージェントは「サブエージェント」とタイトルにつける）。
+   - **Webhook URLの管理**: Webhook URLは環境変数 `DISCORD_WEBHOOK_URL` または `.env` ファイルで設定し、リポジトリへの直書き・コミットを厳禁とする（`.env` は `.gitignore` 対象）。未設定時は送信をスキップして警告を出力する。
+     - テンプレート: `.env.example`
+     - 通知スクリプト: `python tools/notify_discord.py <start|subagent|end|fail|warning|question> <title> <summary> [extra_info]`
+   - **状態カラー規約**:
+     - 開始: 緑 (`#2ECC71` / `3066993`)
+     - サブエージェント: オレンジ (`#E67E22` / `15105570`)
+     - 終了: 青 (`#3498DB` / `3447003`)
+     - 失敗: 赤 (`#E74C3C` / `15158332`)
+     - 注意点: 黄色 (`#F1C40F` / `15844367`)
+     - ユーザーへの質問: ぴんく (`#E91E63` / `15277667`)
 8. **最後に**
-   -ユニットテストで必ず検証するように
+   - ユニットテストで必ず検証するように
 
 
 ---
