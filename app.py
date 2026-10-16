@@ -19,6 +19,7 @@ import os
 import struct
 import subprocess
 import threading
+import time
 import traceback
 from typing import Any, Callable, Dict, Optional, Tuple
 
@@ -39,6 +40,7 @@ from physics.config_schema import (
     AircraftConfig,
     EnvironmentConfig,
     as_dict,
+    clamp,
     from_dict,
     utc_now_iso,
 )
@@ -114,7 +116,7 @@ def _error(message: str, status: int = 400) -> Tuple[Response, int]:
 
 @app.errorhandler(BadRequest)
 def _handle_bad_request(exc: BadRequest):
-    return _error(exc, 400)
+    return _error(str(exc), 400)
 
 
 @app.errorhandler(NotFound)
@@ -124,7 +126,7 @@ def _handle_not_found(exc: NotFound):
 
 @app.errorhandler(ServiceUnavailable)
 def _handle_unavailable(exc: ServiceUnavailable):
-    return _error(exc, 503)
+    return _error(str(exc), 503)
 
 
 @app.errorhandler(404)
@@ -185,10 +187,18 @@ def _add_security_headers(response: Response) -> Response:
         "img-src 'self' data: https://api.iconify.design; "
         "connect-src 'self' ws: wss:;"
     )
+    origin = request.headers.get("Origin", "")
+    allowed = (
+        origin.startswith("http://127.0.0.1:")
+        or origin.startswith("http://localhost:")
+        or origin.startswith("https://127.0.0.1:")
+        or origin.startswith("https://localhost:")
+        or origin in ("http://127.0.0.1", "http://localhost")
+    )
     if "Access-Control-Allow-Origin" not in response.headers:
-        response.headers["Access-Control-Allow-Origin"] = "*"
+        response.headers["Access-Control-Allow-Origin"] = origin if allowed else "http://127.0.0.1:5000"
         response.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS, DELETE"
-        response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization"
+        response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization, X-Simulation-Session"
     return response
 
 
@@ -196,9 +206,17 @@ def _add_security_headers(response: Response) -> Response:
 @app.route("/<path:path>", methods=["OPTIONS"])
 def _handle_options(path: str = ""):
     resp = Response(status=204)
-    resp.headers["Access-Control-Allow-Origin"] = "*"
+    origin = request.headers.get("Origin", "")
+    allowed = (
+        origin.startswith("http://127.0.0.1:")
+        or origin.startswith("http://localhost:")
+        or origin.startswith("https://127.0.0.1:")
+        or origin.startswith("https://localhost:")
+        or origin in ("http://127.0.0.1", "http://localhost")
+    )
+    resp.headers["Access-Control-Allow-Origin"] = origin if allowed else "http://127.0.0.1:5000"
     resp.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS, DELETE"
-    resp.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization"
+    resp.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization, X-Simulation-Session"
     return resp
 
 
@@ -431,12 +449,17 @@ def system_gpu():
     return jsonify(parallel.get_gpu_info())
 
 
+_LAST_BROWSER_LAUNCH: float = 0.0
+_BROWSER_LAUNCH_LOCK = threading.Lock()
+
+
 @app.post("/api/v1/system/force-gpu-render")
 def force_gpu_render():
     """Configure Windows DirectX UserGpuPreferences to force discrete high-performance GPU (RTX 4060)
     for browsers, and optionally launch or re-launch browser with high-performance flags.
     Restricted to loopback address and explicit environment variable.
     """
+    global _LAST_BROWSER_LAUNCH
     if request.remote_addr not in ("127.0.0.1", "::1", "localhost"):
         return _error("forbidden: endpoint restricted to local loopback", 403)
     origin = request.headers.get("Origin") or request.headers.get("Referer")
@@ -476,6 +499,11 @@ def force_gpu_render():
 
     launched = False
     if action in ("launch_chrome", "launch_edge"):
+        with _BROWSER_LAUNCH_LOCK:
+            now = time.monotonic()
+            if (now - _LAST_BROWSER_LAUNCH) < 30.0:
+                return _error("rate limit: browser launch is limited to once every 30 seconds", 429)
+            _LAST_BROWSER_LAUNCH = now
         target_exe = (
             r"C:\Program Files\Google\Chrome\Application\chrome.exe"
             if action == "launch_chrome"
@@ -757,8 +785,8 @@ def simulation_step():
             raise BadRequest("'dt' must lie within [1e-5, 2e-1]")
     substeps = payload.get("substeps")
     substeps = None if substeps is None else as_int(substeps, "substeps")
-    if substeps is not None and not (1 <= substeps <= 4096):
-        raise BadRequest("'substeps' must lie within [1, 4096]")
+    if substeps is not None and not (1 <= substeps <= 256):
+        raise BadRequest("'substeps' must lie within [1, 256]")
 
     with SESSION.lock:
         if payload.get("aircraft"):
@@ -810,6 +838,9 @@ def simulation_reset():
     )
 
 
+SIMULATION_LAUNCH_SEMAPHORE = threading.BoundedSemaphore(value=4)
+
+
 @app.post("/api/v1/simulation/launch")
 def simulation_launch():
     """Execute a complete flight trajectory from release until landing.
@@ -817,74 +848,81 @@ def simulation_launch():
     Precomputes all samples so the frontend transport dock operates as a pure
     video-like player (scrub, rewind, play, pause) without ad-hoc background steps.
     """
-    payload = body()
-    with SESSION.lock:
-        if payload.get("aircraft"):
-            SESSION.set_aircraft(build(AircraftConfig, payload["aircraft"]))
-        if payload.get("environment"):
-            SESSION.set_environment(
-                merge_environment(payload["environment"], SESSION.environment)
-            )
-        if payload.get("launch"):
-            SESSION.set_launch(build(LaunchConfig, payload["launch"]))
-        if payload.get("simulation"):
-            SESSION.set_settings(build(SimulationSettings, payload["simulation"]))
+    acquired = SIMULATION_LAUNCH_SEMAPHORE.acquire(blocking=False)
+    if not acquired:
+        raise BadRequest("server busy: maximum concurrent simulations reached, please retry")
+    try:
+        payload = body()
+        with SESSION.lock:
+            if payload.get("aircraft"):
+                SESSION.set_aircraft(build(AircraftConfig, payload["aircraft"]))
+            if payload.get("environment"):
+                SESSION.set_environment(
+                    merge_environment(payload["environment"], SESSION.environment)
+                )
+            if payload.get("launch"):
+                SESSION.set_launch(build(LaunchConfig, payload["launch"]))
+            if payload.get("simulation"):
+                SESSION.set_settings(build(SimulationSettings, payload["simulation"]))
 
-        SESSION.simulator = None
-        simulator = SESSION.simulator_instance()
-        simulator.reset(launch=SESSION.launch)
-        duration_s = as_float(payload.get("duration_s", 25.0), "duration_s")
-        if not (0.1 <= duration_s <= 120.0):
-            raise BadRequest("field 'duration_s' must lie within [0.1, 120.0]")
-        aircraft = SESSION.aircraft
-        environment = SESSION.environment
-        launch = SESSION.launch
-        settings = SESSION.settings
+            simulator = SESSION.simulator_instance()
+            simulator.reset(launch=SESSION.launch)
+            duration_s = as_float(payload.get("duration_s", 25.0), "duration_s")
+            if not (0.1 <= duration_s <= 120.0):
+                raise BadRequest("field 'duration_s' must lie within [0.1, 120.0]")
+            aircraft = SESSION.aircraft
+            environment = SESSION.environment
+            launch = SESSION.launch
+            settings = SESSION.settings
 
-    # Keep the session available for configuration edits while integrating.
-    summary = simulator.simulate(duration_s=duration_s, record=True)
-    samples = [as_dict(s) for s in simulator.history()]
+        # Keep the session available for configuration edits while integrating.
+        summary = simulator.simulate(duration_s=duration_s, record=True)
+        with SESSION.lock:
+            SESSION.simulator = simulator
+        samples = [as_dict(s) for s in simulator.history()]
 
-    # GPU-accelerated ensemble Monte Carlo on RTX 4060
-    parallel = _domain("parallel_engine")
-    gpu_info = parallel.get_gpu_info()
-    sample_trajectories = []
-    ensemble_data = None
-    backend_name_str = summary.get("backend", "numpy")
-    device_name_str = None
+        # GPU-accelerated ensemble Monte Carlo on RTX 4060
+        parallel = _domain("parallel_engine")
+        gpu_info = parallel.get_gpu_info()
+        sample_trajectories = []
+        ensemble_data = None
+        backend_name_str = summary.get("backend", "numpy")
+        device_name_str = None
 
-    should_ensemble = bool(payload.get("include_ensemble") or payload.get("ensemble"))
-    if should_ensemble and gpu_info.get("available") and gpu_info.get("backend") == "cupy":
-        try:
-            ensemble_res = parallel.gpu_ensemble_simulation(
-                aircraft=aircraft,
-                environment=environment,
-                launch=launch,
-                settings=settings,
-                n_trajectories=128,
-                max_sample_tracks=64,
-            )
-            if ensemble_res and "sample_trajectories" in ensemble_res:
-                sample_trajectories = ensemble_res["sample_trajectories"]
-                ensemble_data = ensemble_res
-                backend_name_str = f"cupy ({gpu_info.get('device_name', 'RTX 4060')})"
-                device_name_str = gpu_info.get("device_name")
-        except Exception as exc:
-            log.warning("GPU ensemble simulation fallback: %s", exc)
+        should_ensemble = bool(payload.get("include_ensemble") or payload.get("ensemble"))
+        if should_ensemble and gpu_info.get("available") and gpu_info.get("backend") == "cupy":
+            try:
+                ensemble_res = parallel.gpu_ensemble_simulation(
+                    aircraft=aircraft,
+                    environment=environment,
+                    launch=launch,
+                    settings=settings,
+                    n_trajectories=128,
+                    max_sample_tracks=64,
+                )
+                if ensemble_res and "sample_trajectories" in ensemble_res:
+                    sample_trajectories = ensemble_res["sample_trajectories"]
+                    ensemble_data = ensemble_res
+                    backend_name_str = f"cupy ({gpu_info.get('device_name', 'RTX 4060')})"
+                    device_name_str = gpu_info.get("device_name")
+            except Exception as exc:
+                log.warning("GPU ensemble simulation fallback: %s", exc)
 
-    return jsonify(
-        {
-            "metrics": summary,
-            "samples": samples,
-            "sample_trajectories": sample_trajectories,
-            "ensemble": ensemble_data,
-            "total_frames": len(samples),
-            "backend": backend_name_str,
-            "device_name": device_name_str,
-            "gpu_available": bool(gpu_info.get("available")),
-            "timestamp": utc_now_iso(),
-        }
-    )
+        return jsonify(
+            {
+                "metrics": summary,
+                "samples": samples,
+                "sample_trajectories": sample_trajectories,
+                "ensemble": ensemble_data,
+                "total_frames": len(samples),
+                "backend": backend_name_str,
+                "device_name": device_name_str,
+                "gpu_available": bool(gpu_info.get("available")),
+                "timestamp": utc_now_iso(),
+            }
+        )
+    finally:
+        SIMULATION_LAUNCH_SEMAPHORE.release()
 
 
 @app.get("/api/v1/simulation/history")
@@ -1016,16 +1054,19 @@ def _mesh_import_inner():
         if uploaded is None or not uploaded.filename:
             raise BadRequest("multipart upload must contain a 'file' field")
         data = uploaded.read()
-        filename = secure_filename(uploaded.filename) or "model.glb"
+        filename = uploaded.filename
+        raw_gsm = as_float(request.form.get("paper_gsm", 100.0), "paper_gsm")
         metrics = mesh_domain.MESH_LIBRARY.import_model_bytes(
             data=data,
             filename=filename,
             scale_hint=request.form.get("scale_hint", "m"),
             cg_mode=request.form.get("cg_mode", "volume"),
-            paper_gsm=float(request.form.get("paper_gsm", 100.0)),
+            paper_gsm=clamp(raw_gsm, 10.0, 1000.0),
         )
     else:
         payload = body()
+        raw_gsm = as_float(payload.get("paper_gsm", 100.0), "paper_gsm")
+        paper_gsm = clamp(raw_gsm, 10.0, 1000.0)
         if "url" in payload and payload["url"]:
             url = str(payload["url"])
             if not url.lower().startswith(("http://", "https://")):
@@ -1034,7 +1075,7 @@ def _mesh_import_inner():
                 url=url,
                 scale_hint=str(payload.get("scale_hint", "m")),
                 cg_mode=str(payload.get("cg_mode", "volume")),
-                paper_gsm=float(payload.get("paper_gsm", 100.0)),
+                paper_gsm=paper_gsm,
                 overrides=payload.get("overrides"),
             )
         else:
@@ -1047,12 +1088,14 @@ def _mesh_import_inner():
                 raw = base64.b64decode(data, validate=True)
             except Exception as exc:
                 raise BadRequest(f"'data_base64' is not valid base64: {exc}") from exc
+            raw_fn = str(payload.get("filename", "model.glb"))
+            filename = secure_filename(raw_fn) or "model.glb"
             metrics = mesh_domain.MESH_LIBRARY.import_model_bytes(
                 data=raw,
-                filename=str(payload.get("filename", "model.glb")),
+                filename=filename,
                 scale_hint=str(payload.get("scale_hint", "m")),
                 cg_mode=str(payload.get("cg_mode", "volume")),
-                paper_gsm=float(payload.get("paper_gsm", 100.0)),
+                paper_gsm=paper_gsm,
                 overrides=payload.get("overrides"),
             )
     with SESSION.lock:

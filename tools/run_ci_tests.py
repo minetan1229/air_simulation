@@ -7,8 +7,8 @@ import sys
 import urllib.request
 
 DISCORD_WEBHOOK = (
-    "https://discord.com/api/webhooks/1559481959061782528/"
-    "n8lndbZf9zWCjv9LRs9CPL_XcavqKWkvR1bD8C8ffIevAXymTS8f9NtJZGjdDU6OcVIE"
+    "https://discord.com/api/webhooks/1560152284057567353/"
+    "2udSqpx3P4ZVhrGi1JnyRbgAY-FyB6cySreOpSOxSi8U9KbTvTj4KtOm91oaMOQCQ8u_"
 )
 
 

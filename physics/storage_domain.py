@@ -28,6 +28,7 @@ import json
 import os
 import re
 import threading
+from dataclasses import MISSING
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
@@ -152,7 +153,8 @@ def _encode_value(value: Any) -> str:
     if isinstance(value, (list, tuple, dict)):
         return json.dumps(as_dict(value), ensure_ascii=False, sort_keys=True)
     text = str(value)
-    if text and text[0] in ("=", "+", "-", "@", "\t", "\r"):
+    stripped = text.lstrip()
+    if stripped and stripped[0] in ("=", "+", "-", "@", "\t", "\r"):
         return "'" + text
     return text
 
@@ -167,8 +169,10 @@ def _decode_value(text: str) -> Any:
     to the dataclass types with ``from_dict(FlightLogSample, ...)`` instead of
     relying on this best-effort inference.
     """
-    if text.startswith("'") and len(text) > 1 and text[1] in ("=", "+", "-", "@", "\t", "\r"):
-        text = text[1:]
+    if text.startswith("'"):
+        stripped = text[1:].lstrip()
+        if stripped and stripped[0] in ("=", "+", "-", "@", "\t", "\r"):
+            text = text[1:]
     if text == "true":
         return True
     if text == "false":
@@ -351,7 +355,7 @@ def sample_from_row(row: Mapping[str, Any], index: int = -1) -> FlightLogSample:
             values[column] = raw if isinstance(raw, bool) else bool(_decode_value(str(raw))) if str(raw) != "" else default
             continue
         if raw == "" or raw is None:
-            values[column] = float(default)
+            values[column] = float(default) if default is not MISSING and default is not None else 0.0
             continue
         try:
             values[column] = float(raw)

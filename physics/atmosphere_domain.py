@@ -341,14 +341,9 @@ def evaluate_atmosphere(
         )
         source = "isa"
     else:
-        temperature = float(env.temperature_K)
-        pressure = float(env.pressure_Pa)
+        temperature = max(float(env.temperature_K), _MIN_TEMPERATURE_K)
+        pressure = max(float(env.pressure_Pa), 1.0)
         source = "local"
-
-    if temperature <= 0.0:
-        raise ValueError(
-            f"temperature must be positive, got {temperature} K at altitude {height} m"
-        )
 
     density = air_density(temperature, pressure, humidity)
     dynamic_viscosity = sutherland_viscosity(temperature)

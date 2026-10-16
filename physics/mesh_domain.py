@@ -184,8 +184,9 @@ def detect_format(filename: str, data: bytes) -> str:
     if blob[:1] == b"{":
         return "gltf"
 
+    sample_bytes = blob[:8192]
     try:
-        text = blob.decode("utf-8")
+        text = sample_bytes.decode("utf-8")
     except (UnicodeDecodeError, AttributeError):
         text = ""
     if text:
@@ -2043,6 +2044,8 @@ class MeshLibrary:
         parsed = urllib.parse.urlparse(str(url))
         if parsed.scheme not in ("http", "https"):
             raise ValueError(f"unsupported URL scheme {parsed.scheme!r} in {url!r}")
+        if parsed.port and parsed.port not in (80, 443):
+            raise ValueError(f"port {parsed.port} is not allowed; only standard HTTP/HTTPS ports (80, 443) are supported")
         hostname = parsed.hostname or ""
         if not hostname:
             raise ValueError(f"invalid host in URL {url!r}")

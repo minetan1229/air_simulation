@@ -846,6 +846,10 @@ export class Viewport {
   setPoseFromSample(sample) {
     if (!sample) return;
     const position = [sample.x_m, sample.y_m, sample.z_m];
+    if (sample.qw !== undefined && sample.qx !== undefined && sample.qy !== undefined && sample.qz !== undefined) {
+      this.setPose(position, [sample.qw, sample.qx, sample.qy, sample.qz]);
+      return;
+    }
     const DEG = Math.PI / 180;
     const euler = new THREE.Euler(
       (Number(sample.roll_deg) || 0) * DEG,

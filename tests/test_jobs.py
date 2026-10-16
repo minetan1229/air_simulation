@@ -984,7 +984,7 @@ def test_flight_log_rows_use_the_contract_header():
     samples = [FlightLogSample(time_s=0.01, x_m=1.0, stalled=True)]
     rows = flight_log_to_rows(samples)
     assert set(rows[0]) == set(FLIGHT_LOG_COLUMNS)
-    assert len(FLIGHT_LOG_COLUMNS) == 26
+    assert len(FLIGHT_LOG_COLUMNS) == 30
     text = rows_to_csv(rows)
     assert text.split("\r\n")[0].split(",") == list(FLIGHT_LOG_COLUMNS)
     assert parse_csv(text)[0]["stalled"] is True

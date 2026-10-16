@@ -49,7 +49,9 @@ from __future__ import annotations
 
 import math
 from dataclasses import replace
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
+
+import numpy as np
 
 from .config_schema import (
     GAMMA_AIR,
@@ -151,8 +153,9 @@ _TOLERANCE_CM: float = 1.0e-6
 #: must override it with the airframe's mean aerodynamic chord.
 DEFAULT_REFERENCE_CHORD_M: float = 0.1
 
+_ATMOSPHERE: Any = None
 try:  # the atmosphere worker owns that module; the fallback below is functional
-    from . import atmosphere_domain as _ATMOSPHERE
+    from . import atmosphere_domain as _ATMOSPHERE  # type: ignore[no-redef]
 except Exception:  # pragma: no cover - exercised only if the sibling is broken
     _ATMOSPHERE = None
 
@@ -861,7 +864,7 @@ def evaluate_aero(
     mach: float = 0.0,
     reynolds: Optional[float] = None,
     ground_height_m: float = 1.0,
-    angular_rate: Sequence[float] = (0.0, 0.0, 0.0),
+    angular_rate: Union[Sequence[float], np.ndarray] = (0.0, 0.0, 0.0),
     density_kgm3: Optional[float] = None,
     kinematic_viscosity_m2s: Optional[float] = None,
 ) -> AeroResult:
@@ -1016,31 +1019,30 @@ def evaluate_aero(
     side_n = dynamic_pressure * area * cy
 
     # Apex low-speed pushover dynamics (AGENTS.md Section 8.2):
-    # At the climb apex (speed < 2.5 m/s) where dynamic pressure approaches zero,
+    # At the climb apex (speed < 3.0 m/s) where dynamic pressure approaches zero,
     # the aft center-of-pressure shift in separated flow and forward-shifted CG eccentricity
     # produce a physical aerodynamic nose-down pitching moment on positive alpha.
-    # Note: Only applies during flight (speed > 0) with forward CG eccentricity.
-    # Bounded and smoothly decayed as the aircraft reaches horizontal glide attitude (avoiding over-rotation into vertical dive).
-    apex_trans_speed = 2.0
-    if 0.0 < speed < 2.5 and alpha > 0.0:
-        apex_factor = math.exp(-((speed / apex_trans_speed) ** 2))
-        v_floor = min(speed, 1.0)
-        q_floor = 0.5 * density * (v_floor ** 2)
-        # Smooth transition gate: pushover acts when alpha is high (nose up relative to air)
-        # and tapers off as alpha approaches trim/glide regime (e.g. alpha <= 5 deg)
-        alpha_gate = math.tanh(max(alpha - 3.0, 0.0) / 10.0)
-        sin_a = math.sin(deg2rad(min(alpha, 90.0)))
-        pushover_moment = -q_floor * area * chord * 0.8 * sin_a * apex_factor * alpha_gate
+    # Note: Bounded and smoothly decayed as the aircraft reaches horizontal glide attitude.
+    if speed < 3.0 and alpha > 0.0:
+        v_norm = clamp(speed / 3.0, 0.0, 1.0)
+        speed_gate = 1.0 - v_norm * v_norm * (3.0 - 2.0 * v_norm)  # Hermite smoothstep C1 continuous
+        # Effective dynamic pressure floor ensuring restoring authority even as V -> 0:
+        # q_eff = 0.5 * rho * max(V, 0.8)^2 (~0.39 Pa at rho=1.225)
+        q_eff = 0.5 * density * (max(speed, 0.8) ** 2)
+        alpha_gate = math.tanh(max(alpha - 2.0, 0.0) / 8.0)
+        sin_a = math.sin(deg2rad(clamp(alpha, 0.0, 90.0)))
+        pushover_moment = -q_eff * area * chord * 0.85 * sin_a * speed_gate * alpha_gate
     else:
         pushover_moment = 0.0
 
     # Low-speed rotational apparent/viscous damping (Cross-flow resistance):
     # In low airspeed regime where dynamic pressure q_dyn -> 0, classic q*c/(2V) vanishes.
     # Fluid cross-flow drag on the rotating planform exerts physical angular damping:
-    # M_damp = -0.5 * rho * C_D_cross * (area * chord^2) * |q_rate| * q_rate - c_visc * q_rate
-    if 0.0 < speed < 2.5 and area > 1e-6 and chord > 1e-4:
+    if speed < 3.0 and area > 1e-6 and chord > 1e-4:
+        v_norm = clamp(speed / 3.0, 0.0, 1.0)
+        damp_gate = 1.0 - v_norm * v_norm * (3.0 - 2.0 * v_norm)
         q_rate_val = float(angular_rate[1]) if len(angular_rate) > 1 else 0.0
-        rot_damping = -0.5 * density * 1.2 * area * (chord ** 2) * abs(q_rate_val) * q_rate_val - 0.00015 * area * chord * density * q_rate_val
+        rot_damping = (-0.5 * density * 1.2 * area * (chord ** 2) * abs(q_rate_val) * q_rate_val - 0.00015 * area * chord * density * q_rate_val) * damp_gate
     else:
         rot_damping = 0.0
 
