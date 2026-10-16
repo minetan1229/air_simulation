@@ -1137,11 +1137,13 @@ def run_differential_evolution(
     variables, lows, highs = _prepare(cfg)
     cap = max(1, int(cfg.max_evaluations))
     dims = len(variables)
-    if differential_evolution is None or dims == 0 or cap < dims * 2:
+    if differential_evolution is None:
         res = run_surrogate(cfg, progress_cb=progress_cb, cancel_cb=cancel_cb)
         res["algorithm"] = "differential-evolution"
         res["backend"] = f"{res.get('backend', 'serial')}:surrogate_fallback"
         return res
+    if dims == 0 or cap < dims * 2:
+        return run_surrogate(cfg, progress_cb=progress_cb, cancel_cb=cancel_cb)
     run = _Run("differential-evolution", cfg, variables, cap, progress_cb, cancel_cb)
 
     popsize = max(1, min(int(cfg.population_size), cap // max(1, dims)))
