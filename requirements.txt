@@ -1,13 +1,13 @@
 # Core runtime (required)
-Flask>=3.0,<4.0
+Flask>=3.1.3,<4.0
 numpy>=1.24
-scipy>=1.10
+scipy>=1.15.3
 
 # Test / verification
-pytest>=7.4
+pytest>=9.1.1
 
 # Optional mesh analysis backend (pure-NumPy fallback is always available)
-trimesh>=4.0 ; python_version >= "3.8"
+trimesh>=5.1.1 ; python_version >= "3.8"
 
 # Optional GPU backends for the wind field (NumPy fallback is always available)
 # cupy-cuda12x>=13.0
