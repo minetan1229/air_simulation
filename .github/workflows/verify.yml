@@ -12,7 +12,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: リポジトリのコードを取得
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Python 3.11 環境のセットアップ
         uses: actions/setup-python@v5
