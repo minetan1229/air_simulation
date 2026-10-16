@@ -1225,6 +1225,10 @@ class FlightLogSample:
     roll_deg: float = 0.0
     pitch_deg: float = 0.0
     yaw_deg: float = 0.0
+    qw: float = 1.0
+    qx: float = 0.0
+    qy: float = 0.0
+    qz: float = 0.0
     ld_ratio: float = 0.0
     g_load: float = 1.0
     max_stress_index: float = 0.0
@@ -1373,25 +1377,25 @@ ENVIRONMENT_SCHEMA: Dict[str, Any] = {
 #: hard-coding limits, which keeps the browser and the server in step when the
 #: contract changes.
 LAUNCH_RANGES: Dict[str, Tuple[float, float]] = {
-    "launch_speed": [0.0, 40.0],
-    "launch_angle_deg": [-45.0, 85.0],
-    "launch_roll_deg": [-90.0, 90.0],
-    "launch_yaw_deg": [-90.0, 90.0],
-    "launch_height_m": [0.0, 30.0],
-    "throw_force_n": [0.0, 1.2],
-    "throw_duration_s": [0.02, 0.6],
-    "throw_force_pitch_deg": [-60.0, 80.0],
-    "throw_force_yaw_deg": [-80.0, 80.0],
-    "throw_grip_x": [-0.5, 1.0],
-    "throw_grip_y": [-1.0, 1.0],
-    "throw_torque_efficiency": [0.0, 1.0],
-    "throw_runup_m": [0.0, 3.04],
-    "throw_wrist_spin_radps": [-40.0, 40.0],
-    "throw_pitch_rate_radps": [-8.0, 8.0],
-    "throw_yaw_rate_radps": [-12.0, 12.0],
-    "release_pitch_deg": [-45.0, 45.0],
-    "release_yaw_deg": [-45.0, 45.0],
-    "release_roll_deg": [-90.0, 90.0],
+    "launch_speed": (0.0, 40.0),
+    "launch_angle_deg": (-45.0, 85.0),
+    "launch_roll_deg": (-90.0, 90.0),
+    "launch_yaw_deg": (-90.0, 90.0),
+    "launch_height_m": (0.0, 30.0),
+    "throw_force_n": (0.0, 1.2),
+    "throw_duration_s": (0.02, 0.6),
+    "throw_force_pitch_deg": (-60.0, 80.0),
+    "throw_force_yaw_deg": (-80.0, 80.0),
+    "throw_grip_x": (-0.5, 1.0),
+    "throw_grip_y": (-1.0, 1.0),
+    "throw_torque_efficiency": (0.0, 1.0),
+    "throw_runup_m": (0.0, 3.04),
+    "throw_wrist_spin_radps": (-40.0, 40.0),
+    "throw_pitch_rate_radps": (-8.0, 8.0),
+    "throw_yaw_rate_radps": (-12.0, 12.0),
+    "release_pitch_deg": (-45.0, 45.0),
+    "release_yaw_deg": (-45.0, 45.0),
+    "release_roll_deg": (-90.0, 90.0),
 }
 
 LAUNCH_SCHEMA: Dict[str, Any] = {

@@ -13,14 +13,16 @@ Euler angles use the aviation ZYX (yaw, pitch, roll) sequence applied as
 from __future__ import annotations
 
 import math
-from typing import Sequence, Tuple
+from typing import Sequence, Tuple, Union
 
 import numpy as np
 
 from .config_schema import deg2rad, rad2deg
 
+ArrayLike = Union[Sequence[float], np.ndarray]
+
 __all__ = [
-    "vec3", "normalize", "cross", "dot", "skew", "outer",
+    "ArrayLike", "vec3", "normalize", "cross", "dot", "skew", "outer",
     "quaternion_multiply", "quaternion_conjugate", "quaternion_normalize",
     "quaternion_from_euler", "euler_from_quaternion", "quaternion_to_matrix",
     "matrix_to_quaternion", "body_to_world", "world_to_body",
@@ -34,7 +36,7 @@ __all__ = [
 _EPS = 1.0e-12
 
 
-def vec3(value: Sequence[float], default: Tuple[float, float, float] = (0.0, 0.0, 0.0)) -> np.ndarray:
+def vec3(value: ArrayLike, default: Tuple[float, float, float] = (0.0, 0.0, 0.0)) -> np.ndarray:
     """Coerce ``value`` into a fresh float64 3-vector."""
     arr = np.asarray(value, dtype=np.float64).reshape(-1)
     if arr.size == 0:
@@ -48,7 +50,7 @@ def vec3(value: Sequence[float], default: Tuple[float, float, float] = (0.0, 0.0
     return np.array(arr[:3], dtype=np.float64)
 
 
-def normalize(v: np.ndarray, fallback: Sequence[float] = (1.0, 0.0, 0.0)) -> np.ndarray:
+def normalize(v: ArrayLike, fallback: ArrayLike = (1.0, 0.0, 0.0)) -> np.ndarray:
     """Unit vector; falls back when the input is (near) zero length."""
     arr = np.asarray(v, dtype=np.float64)
     norm = float(np.linalg.norm(arr))
@@ -57,21 +59,21 @@ def normalize(v: np.ndarray, fallback: Sequence[float] = (1.0, 0.0, 0.0)) -> np.
     return arr / norm
 
 
-def cross(a: Sequence[float], b: Sequence[float]) -> np.ndarray:
+def cross(a: ArrayLike, b: ArrayLike) -> np.ndarray:
     return np.cross(vec3(a), vec3(b))
 
 
-def dot(a: Sequence[float], b: Sequence[float]) -> float:
+def dot(a: ArrayLike, b: ArrayLike) -> float:
     return float(np.dot(vec3(a), vec3(b)))
 
 
-def skew(v: Sequence[float]) -> np.ndarray:
+def skew(v: ArrayLike) -> np.ndarray:
     """Skew-symmetric matrix with ``skew(a) @ b == cross(a, b)``."""
     x, y, z = vec3(v)
     return np.array([[0.0, -z, y], [z, 0.0, -x], [-y, x, 0.0]], dtype=np.float64)
 
 
-def outer(a: Sequence[float], b: Sequence[float]) -> np.ndarray:
+def outer(a: ArrayLike, b: ArrayLike) -> np.ndarray:
     return np.outer(vec3(a), vec3(b))
 
 
@@ -84,7 +86,7 @@ def wrap_pi(angle: float) -> float:
 # --------------------------------------------------------------------------
 # Quaternion algebra (Hamilton, q = (w, x, y, z))
 # --------------------------------------------------------------------------
-def quaternion_multiply(a: Sequence[float], b: Sequence[float]) -> np.ndarray:
+def quaternion_multiply(a: ArrayLike, b: ArrayLike) -> np.ndarray:
     aw, ax, ay, az = vec4(a)
     bw, bx, by, bz = vec4(b)
     return np.array(
@@ -98,7 +100,7 @@ def quaternion_multiply(a: Sequence[float], b: Sequence[float]) -> np.ndarray:
     )
 
 
-def vec4(value: Sequence[float], default: Tuple[float, float, float, float] = (1.0, 0.0, 0.0, 0.0)) -> np.ndarray:
+def vec4(value: ArrayLike, default: Tuple[float, float, float, float] = (1.0, 0.0, 0.0, 0.0)) -> np.ndarray:
     arr = np.asarray(value, dtype=np.float64).reshape(-1)
     if arr.size == 0:
         return np.array(default, dtype=np.float64)
@@ -111,12 +113,12 @@ def vec4(value: Sequence[float], default: Tuple[float, float, float, float] = (1
     return np.array(arr[:4], dtype=np.float64)
 
 
-def quaternion_conjugate(q: Sequence[float]) -> np.ndarray:
+def quaternion_conjugate(q: ArrayLike) -> np.ndarray:
     w, x, y, z = vec4(q)
     return np.array([w, -x, -y, -z], dtype=np.float64)
 
 
-def quaternion_normalize(q: Sequence[float]) -> np.ndarray:
+def quaternion_normalize(q: ArrayLike) -> np.ndarray:
     arr = vec4(q)
     norm = float(np.linalg.norm(arr))
     if norm < _EPS or not math.isfinite(norm):
@@ -143,7 +145,7 @@ def quaternion_from_euler(roll_deg: float, pitch_deg: float, yaw_deg: float) -> 
     )
 
 
-def euler_zyx_from_quaternion(q: Sequence[float]) -> Tuple[float, float, float]:
+def euler_zyx_from_quaternion(q: ArrayLike) -> Tuple[float, float, float]:
     """Unit quaternion -> ZYX Euler angles in **degrees** (roll, pitch, yaw)."""
     w, x, y, z = quaternion_normalize(q)
     sin_pitch = 2.0 * (w * y - z * x)
@@ -164,7 +166,7 @@ def euler_zyx_from_quaternion(q: Sequence[float]) -> Tuple[float, float, float]:
     return (rad2deg(roll), rad2deg(pitch), rad2deg(yaw))
 
 
-def quaternion_to_matrix(q: Sequence[float]) -> np.ndarray:
+def quaternion_to_matrix(q: ArrayLike) -> np.ndarray:
     """Body->world direction cosine matrix of a (unit) quaternion."""
     w, x, y, z = quaternion_normalize(q)
     xx, yy, zz = x * x, y * y, z * z
@@ -228,20 +230,20 @@ quaternion_from_euler_zyx = quaternion_from_euler
 euler_from_quaternion = euler_zyx_from_quaternion
 
 
-def rotate_vector(q: Sequence[float], v: Sequence[float]) -> np.ndarray:
+def rotate_vector(q: ArrayLike, v: ArrayLike) -> np.ndarray:
     """Rotate a body-frame vector into the world frame."""
     return quaternion_to_matrix(q) @ vec3(v)
 
 
-def body_to_world(q: Sequence[float], v: Sequence[float]) -> np.ndarray:
+def body_to_world(q: ArrayLike, v: ArrayLike) -> np.ndarray:
     return quaternion_to_matrix(q) @ vec3(v)
 
 
-def world_to_body(q: Sequence[float], v: Sequence[float]) -> np.ndarray:
+def world_to_body(q: ArrayLike, v: ArrayLike) -> np.ndarray:
     return quaternion_to_matrix(q).T @ vec3(v)
 
 
-def quaternion_derivative(q: Sequence[float], omega_body: Sequence[float]) -> np.ndarray:
+def quaternion_derivative(q: ArrayLike, omega_body: ArrayLike) -> np.ndarray:
     """``q_dot = 0.5 * q (x) [0, omega_body]`` for body-frame angular rate."""
     w, x, y, z = quaternion_normalize(q)
     p, q_pitch, r_yaw = vec3(omega_body)
@@ -256,7 +258,7 @@ def quaternion_derivative(q: Sequence[float], omega_body: Sequence[float]) -> np
     )
 
 
-def quaternion_to_body_angular_rate(q: Sequence[float], q_dot: Sequence[float]) -> np.ndarray:
+def quaternion_to_body_angular_rate(q: ArrayLike, q_dot: ArrayLike) -> np.ndarray:
     """Inverse of :func:`quaternion_derivative` for unit quaternions."""
     w, x, y, z = quaternion_normalize(q)
     d = vec4(q_dot)
@@ -271,7 +273,7 @@ def quaternion_to_body_angular_rate(q: Sequence[float], q_dot: Sequence[float]) 
 
 
 def angular_acceleration_body(
-    inertia: np.ndarray, omega: Sequence[float], moment: Sequence[float]
+    inertia: np.ndarray, omega: ArrayLike, moment: ArrayLike
 ) -> np.ndarray:
     """Euler's equation ``I w' = M - w x (I w)`` in the body frame."""
     i_mat = np.asarray(inertia, dtype=np.float64).reshape(3, 3)
@@ -299,7 +301,7 @@ def inertia_tensor_box(mass: float, dx: float, dy: float, dz: float) -> np.ndarr
     )
 
 
-def wind_force_to_body(relative_velocity: Sequence[float], drag: float, side: float, lift: float) -> np.ndarray:
+def wind_force_to_body(relative_velocity: ArrayLike, drag: float, side: float, lift: float) -> np.ndarray:
     """Resolve wind-axis forces with actual flow, independently of wing twist.
 
     +z points down. The spanwise wind axis is orthogonal to the velocity
@@ -348,14 +350,14 @@ def principal_inertia_from_matrix(matrix: np.ndarray) -> Tuple[np.ndarray, np.nd
     return values[order], vectors[:, order]
 
 
-def angle_between_vectors(a: Sequence[float], b: Sequence[float]) -> float:
+def angle_between_vectors(a: ArrayLike, b: ArrayLike) -> float:
     """Signed-free angle between two vectors, in degrees."""
     ua = normalize(vec3(a))
     ub = normalize(vec3(b))
     return rad2deg(math.acos(float(np.clip(np.dot(ua, ub), -1.0, 1.0))))
 
 
-def quaternion_from_axis_angle(axis: Sequence[float], angle_deg: float) -> np.ndarray:
+def quaternion_from_axis_angle(axis: ArrayLike, angle_deg: float) -> np.ndarray:
     unit = normalize(vec3(axis))
     half = deg2rad(angle_deg) * 0.5
     s = math.sin(half)

@@ -43,7 +43,7 @@ import multiprocessing
 import os
 import pickle
 from concurrent.futures import ThreadPoolExecutor
-from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, Union, cast
 ProgressCallback = Callable[[int, int, Any], None]
 
 from .config_schema import (
@@ -1153,16 +1153,16 @@ def gpu_ensemble_simulation(
         })
 
     # Sort descending by distance to assign ranks
-    sorted_by_dist = sorted(sample_trajectories, key=lambda tr: tr["landing_distance_m"], reverse=True)
+    sorted_by_dist = sorted(sample_trajectories, key=lambda tr: cast(float, tr["landing_distance_m"]), reverse=True)
     for rank_idx, tr in enumerate(sorted_by_dist):
         tr["rank"] = rank_idx + 1
 
     best_distance_flight = sorted_by_dist[0] if sorted_by_dist else None
     worst_distance_flight = sorted_by_dist[-1] if sorted_by_dist else None
-    best_hangtime_flight = max(sample_trajectories, key=lambda tr: tr["flight_time_s"]) if sample_trajectories else None
-    worst_hangtime_flight = min(sample_trajectories, key=lambda tr: tr["flight_time_s"]) if sample_trajectories else None
-    best_altitude_flight = max(sample_trajectories, key=lambda tr: tr["max_altitude_m"]) if sample_trajectories else None
-    worst_altitude_flight = min(sample_trajectories, key=lambda tr: tr["max_altitude_m"]) if sample_trajectories else None
+    best_hangtime_flight = max(sample_trajectories, key=lambda tr: cast(float, tr["flight_time_s"])) if sample_trajectories else None
+    worst_hangtime_flight = min(sample_trajectories, key=lambda tr: cast(float, tr["flight_time_s"])) if sample_trajectories else None
+    best_altitude_flight = max(sample_trajectories, key=lambda tr: cast(float, tr["max_altitude_m"])) if sample_trajectories else None
+    worst_altitude_flight = min(sample_trajectories, key=lambda tr: cast(float, tr["max_altitude_m"])) if sample_trajectories else None
     leaderboard = [
         {
             "rank": tr["rank"],

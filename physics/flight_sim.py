@@ -225,6 +225,7 @@ _EPS = 1.0e-12
 # --------------------------------------------------------------------------
 _CACHE_LOCK = threading.Lock()
 _MODULE_CACHE: Dict[str, Tuple[Any, float]] = {}
+_MISSING_RETRY_S: float = 1.0
 _FUNC_CACHE: Dict[Tuple[int, Tuple[str, ...]], Any] = {}
 _PLAN_CACHE: Dict[int, Tuple[Any, Any]] = {}
 try:
@@ -1672,6 +1673,8 @@ class FlightSimulator:
         )
         self._launch: LaunchConfig = _config_from(LaunchConfig, launch)
         self._history: deque = deque(maxlen=max(1, int(self.settings.ring_buffer_capacity)))
+        self._lock = threading.RLock()
+        self._launch_sample: Optional[FlightLogSample] = None
         self._state: StateVector = initial_state(self._launch, self.environment, self.aircraft)
         self._diverged = False
         self._rolled_back = False
@@ -2287,11 +2290,23 @@ class FlightSimulator:
             vy = 0.0
             omega = [0.0, 0.0, 0.0]
 
+        # Ground attitude settling (align to ground plane: roll -> 0, pitch -> 0)
+        roll, pitch, yaw = euler_zyx_from_quaternion(state.quaternion)
+        if landed:
+            q_final = quaternion_from_euler(0.0, 0.0, yaw)
+            new_q = tuple(float(v) for v in q_final)
+        else:
+            settle_rate = 0.25
+            new_roll = roll * (1.0 - settle_rate)
+            new_pitch = pitch * (1.0 - settle_rate)
+            q_settled = quaternion_from_euler(new_roll, new_pitch, yaw)
+            new_q = tuple(float(v) for v in q_settled)
+
         return StateVector(
             time_s=state.time_s,
             position_m=(x, y, new_z),
             velocity_mps=(vx, vy, new_vz),
-            quaternion=state.quaternion,
+            quaternion=new_q,
             angular_velocity_radps=(omega[0], omega[1], omega[2]),
             acceleration_mps2=(0.0, 0.0, 0.0),
             angular_accel_radps2=(0.0, 0.0, 0.0),
@@ -2306,6 +2321,7 @@ class FlightSimulator:
         x, y, z = (float(value) for value in state.position_m)
         vx, vy, vz = (float(value) for value in state.velocity_mps)
         roll, pitch, yaw = euler_zyx_from_quaternion(state.quaternion)
+        qw, qx, qy, qz = (float(value) for value in state.quaternion)
         return FlightLogSample(
             time_s=_finite(state.time_s),
             x_m=x,
@@ -2321,6 +2337,10 @@ class FlightSimulator:
             roll_deg=roll,
             pitch_deg=pitch,
             yaw_deg=yaw,
+            qw=qw,
+            qx=qx,
+            qy=qy,
+            qz=qz,
             ld_ratio=diag["ld_ratio"],
             g_load=diag["g_load"],
             max_stress_index=diag["max_stress_index"],
@@ -2343,6 +2363,8 @@ class FlightSimulator:
         if float(self._state.time_s) + 1.0e-12 < self._next_record_time:
             return
         sample = self._make_sample()
+        if self._launch_sample is None:
+            self._launch_sample = sample
         if self._history and abs(self._history[-1].time_s - sample.time_s) < 1.0e-9:
             self._history[-1] = sample
         else:
@@ -2608,11 +2630,14 @@ class FlightSimulator:
     # -- history ----------------------------------------------------------
     def history(self) -> List[FlightLogSample]:
         """Recorded samples, **oldest first** (a copy of the ring buffer)."""
-        return list(self._history)
+        with self._lock:
+            return list(self._history)
 
     def metrics(self) -> Dict[str, Any]:
         """Summary statistics over the recorded history."""
-        samples = list(self._history)
+        with self._lock:
+            samples = list(self._history)
+            launch_sample = self._launch_sample
         diag = self._diagnostics()
         stall_alpha = abs(_finite(self.aircraft.stall_alpha_deg, 14.0))
         distance = 0.0
@@ -2647,8 +2672,9 @@ class FlightSimulator:
             stall_margin = min(stall_margin, margin) if saw_margin else margin
             saw_margin = True
         final = samples[-1] if samples else None
-        launch_x = float(samples[0].x_m) if samples else 0.0
-        launch_y = float(samples[0].y_m) if samples else 0.0
+        base_sample = launch_sample or (samples[0] if samples else None)
+        launch_x = float(base_sample.x_m) if base_sample else 0.0
+        launch_y = float(base_sample.y_m) if base_sample else 0.0
         final_x = float(final.x_m) if final else 0.0
         final_y = float(final.y_m) if final else 0.0
         return {

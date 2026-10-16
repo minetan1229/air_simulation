@@ -983,12 +983,17 @@ def latin_hypercube(size: int, lows: Sequence[float], highs: Sequence[float], rn
 # --------------------------------------------------------------------------
 def _grid_axes(variables: Sequence[DesignVariable]) -> List[List[float]]:
     axes: List[List[float]] = []
+    MAX_POINTS_PER_AXIS = 200
     for variable in variables:
         low = float(variable.low)
         high = float(variable.high)
         step = float(variable.step)
         if step > 0.0:
             count = int(math.floor((high - low) / step + 1.0e-9)) + 1
+            if count > MAX_POINTS_PER_AXIS:
+                # Clamp step so we don't blow up memory with tiny step sizes
+                step = (high - low) / (MAX_POINTS_PER_AXIS - 1)
+                count = MAX_POINTS_PER_AXIS
             values = [low + index * step for index in range(max(1, count))]
             if values[-1] < high - 1.0e-12:
                 values.append(high)
@@ -1043,6 +1048,7 @@ def run_grid_search(
     variables, _lows, _highs = _prepare(cfg)
     cap = max(1, int(cfg.max_evaluations))
     axes = _grid_axes(variables)
+    chosen: List[List[float]]
     if not axes:
         chosen = [[]]
         total = 1
@@ -1081,7 +1087,10 @@ def run_nelder_mead(
     variables, lows, highs = _prepare(cfg)
     cap = max(1, int(cfg.max_evaluations))
     if minimize is None:
-        return run_surrogate(cfg, progress_cb=progress_cb, cancel_cb=cancel_cb)
+        res = run_surrogate(cfg, progress_cb=progress_cb, cancel_cb=cancel_cb)
+        res["algorithm"] = "nelder-mead"
+        res["backend"] = f"{res.get('backend', 'serial')}:surrogate_fallback"
+        return res
     run = _Run("nelder-mead", cfg, variables, cap, progress_cb, cancel_cb)
     start = [clamp(value, low, high) for value, low, high in zip(config_to_vector(cfg, variables), lows, highs)]
     state = {"score": -math.inf, "seen": 0}
@@ -1127,13 +1136,12 @@ def run_differential_evolution(
     """Self-adaptive DE/rand/1/bin with deferred update and a strict budget."""
     variables, lows, highs = _prepare(cfg)
     cap = max(1, int(cfg.max_evaluations))
-    if differential_evolution is None:
-        return run_surrogate(cfg, progress_cb=progress_cb, cancel_cb=cancel_cb)
     dims = len(variables)
-    if dims == 0:
-        return run_surrogate(cfg, progress_cb=progress_cb, cancel_cb=cancel_cb)
-    if cap < dims * 2:
-        return run_surrogate(cfg, progress_cb=progress_cb, cancel_cb=cancel_cb)
+    if differential_evolution is None or dims == 0 or cap < dims * 2:
+        res = run_surrogate(cfg, progress_cb=progress_cb, cancel_cb=cancel_cb)
+        res["algorithm"] = "differential-evolution"
+        res["backend"] = f"{res.get('backend', 'serial')}:surrogate_fallback"
+        return res
     run = _Run("differential-evolution", cfg, variables, cap, progress_cb, cancel_cb)
 
     popsize = max(1, min(int(cfg.population_size), cap // max(1, dims)))

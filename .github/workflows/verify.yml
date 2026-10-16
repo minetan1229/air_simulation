@@ -8,6 +8,7 @@ on:
 
 jobs:
   verify:
+    name: Lint, Type Check & Test
     runs-on: ubuntu-latest
     steps:
       - name: リポジトリのコードを取得
@@ -22,11 +23,14 @@ jobs:
       - name: 依存ライブラリと検証ツールのインストール
         run: |
           python -m pip install --upgrade pip
-          pip install ruff pytest
+          pip install ruff mypy pytest
           if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
 
-      - name: 構文・フォーマット検証 (Ruff)
+      - name: 構文・スタイル検証 (Ruff)
         run: ruff check .
+
+      - name: 静的型検査 (Mypy)
+        run: mypy physics app.py
 
       - name: 自動テストの実行 (Pytest)
         run: python tools/run_ci_tests.py

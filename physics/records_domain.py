@@ -736,7 +736,7 @@ class RecordPreset:
         if self.calibration is not None:
             payload["calibration"] = self.calibration.as_payload()
             payload["calibration_note"] = self.calibration_note
-        if self.has_apex_glide:
+        if self.has_apex_glide and self.calibration is not None:
             payload["flight_modes"]["apex_glide"] = self.calibration.as_payload()
         if include_configs:
             payload["aircraft"] = as_dict(aircraft)
