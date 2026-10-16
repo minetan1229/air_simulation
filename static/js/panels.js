@@ -39,10 +39,12 @@ const FIELD_TABLE = {
   ],
   throw: [
     { key: "launch_speed", label: "発射初速", unit: "m/s", min: 2, max: 40, step: 0.1, digits: 1 },
-    { key: "launch_angle_deg", label: "発射角", unit: DEG, min: -30, max: 85, step: 0.5, digits: 1 },
+    { key: "launch_angle_deg", label: "発射角（軌道角）", unit: DEG, min: -30, max: 85, step: 0.5, digits: 1 },
+    { key: "release_pitch_deg", label: "迎え角 (AoA)", unit: DEG, min: -30, max: 45, step: 0.5, digits: 1 },
     { key: "launch_roll_deg", label: "ロール角", unit: DEG, min: -90, max: 90, step: 0.5, digits: 1 },
     { key: "launch_yaw_deg", label: "ヨー角", unit: DEG, min: -90, max: 90, step: 0.5, digits: 1 },
     { key: "launch_height_m", label: "放し高", unit: "m", min: 0, max: 6, step: 0.05, digits: 2 },
+
     { key: "throw_force_n", label: "手の力 F", unit: "N", min: 0, max: 1.2, step: 0.01, digits: 2 },
     { key: "throw_duration_s", label: "押し込み時間", unit: "s", min: 0.02, max: 0.6, step: 0.005, digits: 3 },
     { key: "throw_force_pitch_deg", label: "力の仰角", unit: DEG, min: -60, max: 80, step: 0.5, digits: 1 },

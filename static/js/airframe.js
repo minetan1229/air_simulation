@@ -16,8 +16,10 @@ const SPAN_SEGMENTS = 16;
 const CHORD_SEGMENTS = 12;
 
 /*/** Leading-edge sweep per shape family (0 = dart, 1 = glider/suzanne, 2 = wide-body/sky-king). */
-const SHAPE_SWEEP = [0.72, 0.44, 0.28];
+// Dart has extreme slender delta wing sweep (0.92 = ~75 deg sweep angle)
+const SHAPE_SWEEP = [0.92, 0.44, 0.28];
 const SHAPE_NAME = ["dart", "glider (suzanne)", "wide-body (sky king)"];
+
 
 function shapeIndex(flag) {
   const value = Number(flag);
@@ -163,11 +165,12 @@ function makeRealisticKeelSampler(cfg, side) {
   const sIdx = shapeIndex(cfg.shape_flag);
   const centreFold = Math.max(0, Number(cfg.fold_center_deg) || 0);
   
-  // Real origami keel height: Sky King & Suzanne have distinct deep grip keels
-  const baseDepthRatio = sIdx === 2 ? 0.26 : (sIdx === 1 ? 0.24 : 0.18);
+  // Real origami keel height: Dart has prominent deep structural spine keel
+  const baseDepthRatio = sIdx === 2 ? 0.26 : (sIdx === 1 ? 0.24 : 0.32);
   const height = geom.rootChord * (baseDepthRatio + 0.30 * Math.sin((centreFold * Math.PI) / 180));
   const leFold = ((Number(cfg.fold_leading_deg) || 0) * Math.PI) / 180;
-  const keelHalfWidth = Math.min(0.005, geom.span * 0.015);
+  const keelHalfWidth = Math.min(0.005, geom.span * (sIdx === 0 ? 0.008 : 0.015));
+
 
   return (s, t) => {
     const tc = Math.min(Math.max(t, 0), 1);

@@ -691,6 +691,13 @@ class ConsoleApp {
   }
 
   async _runGpuEnsemble(count = 100) {
+    if (this._launching || this.transport.busy) {
+      console.warn("[App] Ensemble/Launch already running; ignoring duplicate request.");
+      return;
+    }
+    this._launching = true;
+    this._setLaunchButtonsDisabled(true);
+
     if (this.tunnelMode) this.setTunnel(false);
     this.hideSimulationError();
     const tStart = performance.now();
@@ -702,6 +709,7 @@ class ConsoleApp {
     try {
       await this._guard(async () => {
         this.notify(`GPU一括並列シミュレーション (${count}機同時計算) を実行中...`, "info");
+
         const currentAircraft = this.store.data.aircraft || {};
         const currentEnv = this.store.data.environment || {};
         const currentLaunch = this.store.data.launch || {};
@@ -754,6 +762,8 @@ class ConsoleApp {
         this._updateFlightStatus("landed", `100機同時飛行完了 — 1位最高飛距離: ${maxDist.toFixed(2)}m (平均: ${meanDist.toFixed(2)}m)`);
       });
     } finally {
+      this._launching = false;
+      this._setLaunchButtonsDisabled(false);
       this.stopEtaCountdown();
       const widget = this.dom["eta-widget"];
       if (widget && widget.dataset.active === "1") {
@@ -765,6 +775,7 @@ class ConsoleApp {
         });
       }
     }
+
   }
 
   _showEnsembleChampionHud(res) {
@@ -1181,14 +1192,27 @@ class ConsoleApp {
     if (this.dom["btn-rail-launch"]) {
       this.dom["btn-rail-launch"].addEventListener("click", () => this._launchFlight());
     }
+    const btnSingleMode = document.getElementById("btn-mode-single");
     const btnTopGpu = document.getElementById("btn-top-gpu-ensemble");
+    if (btnSingleMode) {
+      btnSingleMode.addEventListener("click", () => {
+        btnSingleMode.classList.add("active");
+        if (btnTopGpu) btnTopGpu.classList.remove("active");
+        this.notify("単機飛行モードを選択しました。「発射」で単機の詳細シミュレーションを実行します。", "info");
+      });
+    }
     if (btnTopGpu) {
-      btnTopGpu.addEventListener("click", () => this._runGpuEnsemble(100));
+      btnTopGpu.addEventListener("click", () => {
+        if (btnSingleMode) btnSingleMode.classList.remove("active");
+        btnTopGpu.classList.add("active");
+        this._runGpuEnsemble(100);
+      });
     }
     const btnRailGpu = document.getElementById("btn-rail-gpu-ensemble");
     if (btnRailGpu) {
       btnRailGpu.addEventListener("click", () => this._runGpuEnsemble(100));
     }
+
     this.dom["btn-save"].addEventListener("click", () => this.dataPanel.exportConfigJson());
     this.dom["btn-load"].addEventListener("click", () => this.dom["config-file"].click());
     this.dom["config-file"].addEventListener("change", async (event) => {
@@ -1841,6 +1865,13 @@ class ConsoleApp {
   }
 
   async _launchFlight() {
+    if (this._launching || this.transport.busy) {
+      console.warn("[App] Launch already executing, ignoring duplicate trigger.");
+      return;
+    }
+    this._launching = true;
+    this._setLaunchButtonsDisabled(true);
+
     if (this.tunnelMode) this.setTunnel(false);
     this.hideSimulationError();
     this.hideFlightResultModal();
@@ -1862,6 +1893,7 @@ class ConsoleApp {
         }
         if (this.recorder) this.recorder.clear();
         if (this.gauges) this.gauges.resetPeaks();
+
 
         const result = await this.transport.launch({
           aircraft: this.store.data.aircraft,
@@ -1905,6 +1937,8 @@ class ConsoleApp {
         this._updateTransportUi(this.transport.state);
       });
     } finally {
+      this._launching = false;
+      this._setLaunchButtonsDisabled(false);
       this.stopEtaCountdown();
       const widget = this.dom["eta-widget"];
       if (widget && widget.dataset.active === "1") {
@@ -1917,6 +1951,18 @@ class ConsoleApp {
       }
     }
   }
+
+  _setLaunchButtonsDisabled(disabled) {
+    const ids = ["btn-top-launch", "btn-top-gpu-ensemble", "quick-btn-ensemble", "btn-gpu-ensemble"];
+    ids.forEach((id) => {
+      const el = document.getElementById(id);
+      if (el) {
+        el.disabled = disabled;
+        el.classList.toggle("btn--loading", disabled);
+      }
+    });
+  }
+
 
   async _togglePlay() {
     if (this.tunnelMode) this.setTunnel(false);
