@@ -1165,3 +1165,31 @@ def test_mesh_library_global_instance_is_usable():
     assert isinstance(MESH_LIBRARY, MeshLibrary)
     assert isinstance(MESH_LIBRARY.root, str)
     assert isinstance(MESH_LIBRARY.list_models(), list)
+
+
+def test_mesh_security_ssrf_and_path_traversal(tmp_path):
+    root = tmp_path / "models"
+    library = MeshLibrary(str(root))
+
+    # 1. SSRF: Private IP, loopback, and bad scheme rejections
+    with pytest.raises(ValueError, match="forbidden|unsupported|invalid"):
+        library.import_model_url("http://127.0.0.1/model.glb")
+    with pytest.raises(ValueError, match="forbidden|unsupported|invalid"):
+        library.import_model_url("http://10.0.0.1/model.glb")
+    with pytest.raises(ValueError, match="forbidden|unsupported|invalid"):
+        library.import_model_url("ftp://example.com/model.glb")
+    with pytest.raises(ValueError, match="port .* is not allowed"):
+        library.import_model_url("http://example.com:8080/model.glb")
+
+    # 2. Path Traversal: glTF external buffer escaping base_dir
+    from physics.mesh_domain import parse_gltf
+
+    evil_gltf = json.dumps({
+        "asset": {"version": "2.0"},
+        "buffers": [{"uri": "../../../etc/passwd", "byteLength": 10}],
+        "meshes": []
+    }).encode("utf-8")
+
+    with pytest.raises(ValueError, match="escapes base directory"):
+        parse_gltf(evil_gltf, base_dir=str(tmp_path / "subdir"))
+

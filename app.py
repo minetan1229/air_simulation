@@ -499,8 +499,9 @@ def force_gpu_render():
                 set_val(key, bp, 0, reg_sz, "GpuPreference=2;AutoHDREnable=0;")
                 registered.append(bp)
         close_key(key)
-    except Exception as ex:
-        error_msg = str(ex)
+    except Exception:
+        log.exception("force_gpu_render failed to configure DirectX UserGpuPreferences")
+        error_msg = "failed to configure GPU preferences"
 
     launched = False
     if action in ("launch_chrome", "launch_edge"):
@@ -526,8 +527,9 @@ def force_gpu_render():
             try:
                 subprocess.Popen(flags)
                 launched = True
-            except Exception as ex:
-                error_msg = str(ex)
+            except Exception:
+                log.exception("force_gpu_render failed to launch browser process")
+                error_msg = "failed to launch browser process"
 
     return jsonify({
         "status": "success" if not error_msg else "partial_error",

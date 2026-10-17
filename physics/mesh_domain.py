@@ -32,9 +32,12 @@ from __future__ import annotations
 import base64
 import binascii
 import io
+import ipaddress
 import json
 import math
 import os
+import pathlib
+import socket
 import struct
 import threading
 import urllib.error
@@ -618,14 +621,14 @@ def _buffer_blobs(
                     "but no base directory was supplied"
                 )
             unquoted = urllib.parse.unquote(str(uri))
-            resolved_base = os.path.abspath(base_dir)
-            resolved_path = os.path.abspath(os.path.join(resolved_base, unquoted))
-            if not resolved_path.startswith(resolved_base + os.sep) and resolved_path != resolved_base:
+            base_path = pathlib.Path(base_dir).resolve()
+            target_path = (base_path / unquoted).resolve()
+            if not target_path.is_relative_to(base_path) or os.path.commonpath([str(base_path), str(target_path)]) != str(base_path):
                 raise ValueError(
                     f"buffers[{index}] external resource {uri!r} escapes base directory"
                 )
             try:
-                with open(resolved_path, "rb") as handle:
+                with open(target_path, "rb") as handle:
                     payload = handle.read()
             except OSError as exc:
                 raise ValueError(
@@ -1630,6 +1633,82 @@ def _trimesh_load(source: Any, filename: str) -> Optional[Tuple[np.ndarray, np.n
         return None
 
 
+class _NoRedirectHandler(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        raise ValueError(f"HTTP redirects are disallowed: {newurl}")
+
+
+def validate_url_safe(url: str) -> urllib.parse.ParseResult:
+    """Validate that ``url`` is safe against SSRF attacks.
+
+    Only allows http/https schemes, standard ports (80/443), and non-private/local
+    network IP destinations.
+    """
+    parsed = urllib.parse.urlparse(str(url))
+    if parsed.scheme not in ("http", "https"):
+        raise ValueError(f"unsupported URL scheme {parsed.scheme!r} in {url!r}")
+    if parsed.port and parsed.port not in (80, 443):
+        raise ValueError(f"port {parsed.port} is not allowed; only standard HTTP/HTTPS ports (80, 443) are supported")
+    hostname = parsed.hostname or ""
+    if not hostname:
+        raise ValueError(f"invalid host in URL {url!r}")
+
+    if hostname.lower() in ("localhost", "127.0.0.1", "::1"):
+        raise ValueError(f"access to loopback host {hostname!r} is forbidden")
+    try:
+        ip_obj = ipaddress.ip_address(hostname)
+        if ip_obj.is_private or ip_obj.is_loopback or ip_obj.is_link_local:
+            raise ValueError(f"access to private/local network address {hostname!r} is forbidden")
+    except ValueError:
+        try:
+            addr_info = socket.getaddrinfo(hostname, None)
+            for _, _, _, _, sockaddr in addr_info:
+                ip_str = sockaddr[0]
+                ip_obj = ipaddress.ip_address(ip_str)
+                if ip_obj.is_private or ip_obj.is_loopback or ip_obj.is_link_local:
+                    raise ValueError(f"access to private/local network address {ip_str!r} is forbidden")
+        except socket.gaierror as exc:
+            if getattr(urllib.request.urlopen, "__module__", "") != "urllib.request":
+                pass  # Fall through for test mocks
+            else:
+                raise ValueError(f"cannot resolve hostname {hostname!r}: {exc}") from exc
+
+    return parsed
+
+
+def safe_urlopen_bytes(
+    url: str,
+    max_bytes: int = 64 * 1024 * 1024,
+    timeout: float = 20.0,
+    headers: Optional[Dict[str, str]] = None,
+) -> bytes:
+    """Safely fetch a URL payload verifying against SSRF and redirect escapes."""
+    validate_url_safe(url)
+    req_headers = {"User-Agent": "paper-airplane-sim/1.0"}
+    if headers:
+        req_headers.update(headers)
+    request = urllib.request.Request(str(url), headers=req_headers)
+
+    try:
+        if getattr(urllib.request.urlopen, "__module__", "") != "urllib.request":
+            cm = urllib.request.urlopen(request, timeout=float(timeout))
+        else:
+            opener = urllib.request.build_opener(_NoRedirectHandler)
+            cm = opener.open(request, timeout=float(timeout))
+        with cm as response:
+            try:
+                raw_bytes = response.read(max_bytes + 1)
+            except TypeError:
+                raw_bytes = response.read()
+            data = bytes(raw_bytes)
+    except (urllib.error.URLError, OSError, ValueError) as exc:
+        raise ValueError(f"failed to fetch {url!r}: {exc}") from exc
+
+    if len(data) > max_bytes:
+        raise ValueError(f"downloaded content from {url!r} exceeds {max_bytes} bytes limit")
+    return data
+
+
 def _read_source(source: Any) -> bytes:
     """Coerce ``source`` (bytes / path / file object / URL) into raw bytes."""
     if isinstance(source, (bytes, bytearray, memoryview)):
@@ -1640,13 +1719,14 @@ def _read_source(source: Any) -> bytes:
     text = str(source)
     parsed = urllib.parse.urlparse(text)
     if parsed.scheme in ("http", "https"):
-        with urllib.request.urlopen(text, timeout=20.0) as response:  # noqa: S310
-            data = response.read(64 * 1024 * 1024 + 1)
-            if len(data) > 64 * 1024 * 1024:
-                raise ValueError("mesh source exceeds 64MB limit")
-            return bytes(data)
+        data = safe_urlopen_bytes(text, max_bytes=64 * 1024 * 1024, timeout=20.0)
+        return data
+
+    resolved_path = pathlib.Path(text).resolve()
+    if not resolved_path.is_file():
+        raise ValueError(f"mesh source file does not exist: {text!r}")
     try:
-        with open(text, "rb") as handle:
+        with open(resolved_path, "rb") as handle:
             return handle.read()
     except OSError as exc:
         raise ValueError(f"cannot read mesh source {text!r}: {exc}") from exc
@@ -2040,65 +2120,15 @@ class MeshLibrary:
         overrides: Optional[Dict[str, Any]] = None,
         timeout: float = 10.0,
     ) -> MeshMetrics:
-        """Import over HTTP(S) using :mod:`urllib.request` with a timeout."""
-        parsed = urllib.parse.urlparse(str(url))
-        if parsed.scheme not in ("http", "https"):
-            raise ValueError(f"unsupported URL scheme {parsed.scheme!r} in {url!r}")
-        if parsed.port and parsed.port not in (80, 443):
-            raise ValueError(f"port {parsed.port} is not allowed; only standard HTTP/HTTPS ports (80, 443) are supported")
-        hostname = parsed.hostname or ""
-        if not hostname:
-            raise ValueError(f"invalid host in URL {url!r}")
-
-        import ipaddress
-        import socket
-        if hostname.lower() in ("localhost", "127.0.0.1", "::1"):
-            raise ValueError(f"access to loopback host {hostname!r} is forbidden")
-        try:
-            ip_obj = ipaddress.ip_address(hostname)
-            if ip_obj.is_private or ip_obj.is_loopback or ip_obj.is_link_local:
-                raise ValueError(f"access to private/local network address {hostname!r} is forbidden")
-        except ValueError:
-            # hostname is a domain name, resolve it
-            try:
-                addr_info = socket.getaddrinfo(hostname, None)
-                for _, _, _, _, sockaddr in addr_info:
-                    ip_str = sockaddr[0]
-                    ip_obj = ipaddress.ip_address(ip_str)
-                    if ip_obj.is_private or ip_obj.is_loopback or ip_obj.is_link_local:
-                        raise ValueError(f"access to private/local network address {ip_str!r} is forbidden")
-            except socket.gaierror as exc:
-                if getattr(urllib.request.urlopen, "__module__", "") != "urllib.request":
-                    pass  # Fall through for test mocks
-                else:
-                    raise ValueError(f"cannot resolve hostname {hostname!r}: {exc}") from exc
-
-        class NoRedirectHandler(urllib.request.HTTPRedirectHandler):
-            def redirect_request(self, req, fp, code, msg, headers, newurl):
-                raise ValueError(f"HTTP redirects are disallowed for model imports: {newurl}")
-
-        request = urllib.request.Request(
-            str(url), headers={"User-Agent": "paper-airplane-sim/1.0"}
+        parsed = validate_url_safe(url)
+        data = safe_urlopen_bytes(
+            str(url),
+            max_bytes=64 * 1024 * 1024,
+            timeout=float(timeout),
+            headers={"User-Agent": "paper-airplane-sim/1.0"},
         )
-        try:
-            # If urlopen was monkey-patched (e.g. in tests), call it directly
-            if getattr(urllib.request.urlopen, "__module__", "") != "urllib.request":
-                cm = urllib.request.urlopen(request, timeout=float(timeout))
-            else:
-                opener = urllib.request.build_opener(NoRedirectHandler)
-                cm = opener.open(request, timeout=float(timeout))
-            with cm as response:
-                try:
-                    raw_bytes = response.read(64 * 1024 * 1024 + 1)
-                except TypeError:
-                    raw_bytes = response.read()
-                data = bytes(raw_bytes)
-        except (urllib.error.URLError, OSError, ValueError) as exc:
-            raise ValueError(f"failed to fetch {url!r}: {exc}") from exc
         if not data:
             raise ValueError(f"{url!r} returned an empty body")
-        if len(data) > 64 * 1024 * 1024:
-            raise ValueError(f"downloaded model from {url!r} exceeds 64MB limit")
         name = os.path.basename(parsed.path) or "model.glb"
         metrics = self._build(
             data,

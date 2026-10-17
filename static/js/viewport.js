@@ -1025,10 +1025,11 @@ export class Viewport {
     }
   }
 
-  setEnsembleTracks(trajectories) {
+  setEnsembleTracks(trajectories, skipFirst = false) {
     this.clearEnsembleTracks();
     if (!trajectories || !trajectories.length) return;
 
+    this._skipFirstRank = Boolean(skipFirst);
     const group = new THREE.Group();
     group.name = "ensemble-trajectories";
     this._ensembleTrajectories = trajectories;
@@ -1050,10 +1051,14 @@ export class Viewport {
 
     // Sort to determine ranks if not pre-assigned
     const sorted = [...trajectories].sort((a, b) => (Number(b.landing_distance_m) || 0) - (Number(a.landing_distance_m) || 0));
-    const topIds = new Set(sorted.slice(0, 3).map((t) => t.id));
-    const bestId = sorted.length ? sorted[0].id : null;
-    const totalCount = trajectories.length;
-    const worstId = sorted.length ? sorted[sorted.length - 1].id : null;
+    const skippedId = (skipFirst && sorted.length > 1) ? sorted[0].id : null;
+    this._skippedTrajectoryId = skippedId;
+    const effectiveSorted = (skipFirst && sorted.length > 1) ? sorted.slice(1) : sorted;
+
+    const topIds = new Set(effectiveSorted.slice(0, 3).map((t) => t.id));
+    const bestId = effectiveSorted.length ? effectiveSorted[0].id : null;
+    const totalCount = effectiveSorted.length;
+    const worstId = effectiveSorted.length ? effectiveSorted[effectiveSorted.length - 1].id : null;
 
     const midPositions = [];
     const midMarkerPositions = [];
@@ -1062,7 +1067,30 @@ export class Viewport {
       const pts = tr.points;
       if (!pts || pts.length < 2) return;
 
-      const rank = tr.rank || (sorted.findIndex((s) => s.id === tr.id) + 1);
+      const isSkipped = tr.id === skippedId;
+      if (isSkipped) {
+        // Create invisible/muted placeholder for skipped trajectory
+        const positions = [];
+        pts.forEach((p) => {
+          positions.push(Number(p.x) || 0, Number(p.z) || 0, Number(p.y) || 0);
+        });
+        const geom = new THREE.BufferGeometry();
+        geom.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
+        const mat = new THREE.LineBasicMaterial({
+          color: 0x9aa0a6,
+          transparent: true,
+          opacity: 0.15,
+          linewidth: 1,
+        });
+        const line = new THREE.Line(geom, mat);
+        line.userData = { trajectoryId: tr.id, rank: 9999, isSkipped: true };
+        line.visible = false;
+        group.add(line);
+        return;
+      }
+
+      const effIndex = effectiveSorted.findIndex((s) => s.id === tr.id);
+      const rank = effIndex >= 0 ? (effIndex + 1) : 999;
       const isRank1 = tr.id === bestId || rank === 1;
       const isRank2 = rank === 2;
       const isRank3 = rank === 3;
@@ -1246,7 +1274,17 @@ export class Viewport {
     }
   }
 
+  setSkipFirstRank(skipFirst = false) {
+    this._skipFirstRank = Boolean(skipFirst);
+    if (this._ensembleTrajectories && this._ensembleTrajectories.length) {
+      this.setEnsembleTracks(this._ensembleTrajectories, this._skipFirstRank);
+      this.filterEnsembleTracks(this._ensembleMode || "top1");
+      this.setEnsembleFleet(this._ensembleTrajectories, this._skipFirstRank);
+    }
+  }
+
   filterEnsembleTracks(mode = "top1") {
+    this._ensembleMode = mode;
     if (!this._ensembleGroup) return;
     if (this._staggerTimer) {
       clearInterval(this._staggerTimer);
@@ -1257,6 +1295,8 @@ export class Viewport {
       // Start with top 1, then reveal gradually in small batches
       this._ensembleGroup.children.forEach((child) => {
         if (child.userData && child.userData.isMergedMid) {
+          child.visible = false;
+        } else if (child.userData && child.userData.isSkipped) {
           child.visible = false;
         } else {
           const rank = child.userData ? child.userData.rank : 999;
@@ -1273,7 +1313,9 @@ export class Viewport {
         }
         currentRevealRank += 3; // reveal 3 planes every 100ms
         this._ensembleGroup.children.forEach((child) => {
-          if (child.userData && child.userData.isMergedMid) {
+          if (child.userData && child.userData.isSkipped) {
+            child.visible = false;
+          } else if (child.userData && child.userData.isMergedMid) {
             child.visible = currentRevealRank >= maxRank;
           } else {
             const rank = child.userData ? child.userData.rank : 999;
@@ -1291,7 +1333,9 @@ export class Viewport {
     }
 
     this._ensembleGroup.children.forEach((child) => {
-      if (child.userData && child.userData.isMergedMid) {
+      if (child.userData && child.userData.isSkipped) {
+        child.visible = false;
+      } else if (child.userData && child.userData.isMergedMid) {
         child.visible = mode === "all";
       } else {
         const rank = child.userData ? child.userData.rank : 999;
@@ -1307,7 +1351,7 @@ export class Viewport {
   }
 
   /* ------------------------------------------------ 100-plane Swarm GPU Instancing */
-  setEnsembleFleet(trajectories) {
+  setEnsembleFleet(trajectories, skipFirst = false) {
     this.clearFleet();
     if (!trajectories || !trajectories.length) return;
 
@@ -1328,34 +1372,36 @@ export class Viewport {
     this.fleetMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
 
     let maxT = 0;
-    let maxDist = -1;
-    let leadIdx = 0;
 
     const sorted = [...trajectories].sort((a, b) => (Number(b.landing_distance_m) || 0) - (Number(a.landing_distance_m) || 0));
-    const bestId = sorted.length ? sorted[0].id : null;
-    const worstId = sorted.length ? sorted[sorted.length - 1].id : null;
+    const skippedId = (skipFirst && sorted.length > 1) ? sorted[0].id : null;
+    const effectiveSorted = (skipFirst && sorted.length > 1) ? sorted.slice(1) : sorted;
+
+    const bestId = effectiveSorted.length ? effectiveSorted[0].id : null;
+    const worstId = effectiveSorted.length ? effectiveSorted[effectiveSorted.length - 1].id : null;
+
+    let leadIdx = 0;
+    const foundLead = trajectories.findIndex((t) => t.id === bestId);
+    if (foundLead >= 0) leadIdx = foundLead;
 
     const dummy = new THREE.Object3D();
     const color = new THREE.Color();
 
     trajectories.forEach((tr, i) => {
       const pts = tr.points || [];
-      const dist = Number(tr.landing_distance_m) || 0;
-      if (dist > maxDist) {
-        maxDist = dist;
-        leadIdx = i;
-      }
       const tFlight = Number(tr.flight_time_s) || (pts.length * 0.02);
-      if (tFlight > maxT) maxT = tFlight;
+      if (tFlight > maxT && tr.id !== skippedId) maxT = tFlight;
 
       // Color coding: 1st=Gold, 2nd=Silver, 3rd=Bronze, Worst=Red, Others=Pastel blue/green
-      if (tr.id === bestId) {
+      if (tr.id === skippedId) {
+        color.setHex(0x5f6368); // Skipped muted gray
+      } else if (tr.id === bestId) {
         color.setHex(0xffb300); // 1st Gold (最高値)
       } else if (tr.id === worstId) {
         color.setHex(0xe53935); // Worst Red (最低値)
-      } else if (sorted[1] && tr.id === sorted[1].id) {
+      } else if (effectiveSorted[1] && tr.id === effectiveSorted[1].id) {
         color.setHex(0xb0bec5); // 2nd Silver
-      } else if (sorted[2] && tr.id === sorted[2].id) {
+      } else if (effectiveSorted[2] && tr.id === effectiveSorted[2].id) {
         color.setHex(0xcd7f32); // 3rd Bronze
       } else {
         const hue = 0.52 + ((i % 12) / 12) * 0.18;
@@ -1366,7 +1412,11 @@ export class Viewport {
       if (pts.length > 0) {
         const p0 = pts[0];
         dummy.position.set(Number(p0.x) || 0, Number(p0.z) || 1.8, Number(p0.y) || 0);
-        dummy.scale.setScalar(1.0);
+        if (tr.id === skippedId) {
+          dummy.scale.setScalar(0.000001);
+        } else {
+          dummy.scale.setScalar(1.0);
+        }
         dummy.updateMatrix();
         this.fleetMesh.setMatrixAt(i, dummy.matrix);
       }
@@ -1470,7 +1520,11 @@ export class Viewport {
         dummy.quaternion.set(0, 0, 0, 1);
       }
 
-      dummy.scale.setScalar(1.0);
+      if (tr.id === this._skippedTrajectoryId) {
+        dummy.scale.setScalar(0.000001);
+      } else {
+        dummy.scale.setScalar(1.0);
+      }
       dummy.updateMatrix();
       this.fleetMesh.setMatrixAt(i, dummy.matrix);
 

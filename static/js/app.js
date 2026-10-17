@@ -56,6 +56,8 @@ class ConsoleApp {
     this.geomSignature = "";
     this._pushDebounced = debounce(() => this._push(), 180);
     this._polarDebounced = debounce(() => this.refreshPolar(), 340);
+    this._skipFirstRank = false;
+    this._lastEnsembleResult = null;
   }
 
   /* ---------------------------------------------------------------- boot */
@@ -400,6 +402,11 @@ class ConsoleApp {
       "champ-worst-time-detail",
       "champ-btn-adopt",
       "champ-btn-focus",
+      "champ-btn-skip-top1",
+      "champ-label-skip-top1",
+      "champ-icon-skip-top1",
+      "champ-skip-status-badge",
+      "champ-promoted-tag",
       "champ-btn-focus-worst",
       "champ-btn-toggle-fleet",
       "champ-close-btn",

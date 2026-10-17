@@ -1096,7 +1096,19 @@ def gpu_ensemble_simulation(
         snapshots_np = [np.asarray(snap) for snap in sample_pos_snapshots]
         attitudes_np = [np.asarray(snap) for snap in sample_att_snapshots]
 
-    landing_distances_np = np.sqrt(landing_pos_np[:, 0] ** 2 + landing_pos_np[:, 1] ** 2)
+    # Sanitize NaN/Inf in case of numerical divergence
+    landing_time_np = np.nan_to_num(landing_time_np, nan=0.0, posinf=float(duration_s), neginf=0.0)
+    landing_pos_np = np.nan_to_num(landing_pos_np, nan=0.0, posinf=500.0, neginf=-500.0)
+    v0_np = np.nan_to_num(v0_np, nan=0.0, posinf=50.0, neginf=0.0)
+    pitch_deg_np = np.nan_to_num(pitch_deg_np, nan=0.0, posinf=90.0, neginf=-90.0)
+    roll_deg_np = np.nan_to_num(roll_deg_np, nan=0.0, posinf=180.0, neginf=-180.0)
+
+    landing_distances_np = np.nan_to_num(
+        np.sqrt(landing_pos_np[:, 0] ** 2 + landing_pos_np[:, 1] ** 2),
+        nan=0.0,
+        posinf=500.0,
+        neginf=0.0,
+    )
 
     # 8. Compute envelope percentiles across sampling points
     n_sample_points = len(history_times)
@@ -1105,8 +1117,8 @@ def gpu_ensemble_simulation(
     dist_mean, dist_p10, dist_p90 = [], [], []
 
     for s_idx in range(n_sample_points):
-        alts = hist_alt_np[s_idx]
-        dists = hist_dist_np[s_idx]
+        alts = np.nan_to_num(hist_alt_np[s_idx], nan=0.0)
+        dists = np.nan_to_num(hist_dist_np[s_idx], nan=0.0)
 
         alt_p10.append(round(float(np.percentile(alts, 10)), 3))
         alt_p25.append(round(float(np.percentile(alts, 25)), 3))
@@ -1126,13 +1138,19 @@ def gpu_ensemble_simulation(
         for k in range(sample_count):
             p = snap[k]
             att = att_snap[k]
+            px = float(p[0]) if math.isfinite(float(p[0])) else 0.0
+            py = float(p[1]) if math.isfinite(float(p[1])) else 0.0
+            pz = float(-p[2]) if math.isfinite(float(-p[2])) else 0.0
+            ptheta = math.degrees(float(att[0])) if math.isfinite(float(att[0])) else 0.0
+            pphi = math.degrees(float(att[1])) if math.isfinite(float(att[1])) else 0.0
+            ppsi = math.degrees(float(att[2])) if math.isfinite(float(att[2])) else 0.0
             sample_tracks[k].append({
-                "x": round(float(p[0]), 3),
-                "y": round(float(p[1]), 3),
-                "z": round(max(float(-p[2]), 0.0), 3),
-                "pitch": round(float(math.degrees(att[0])), 2),
-                "roll": round(float(math.degrees(att[1])), 2),
-                "yaw": round(float(math.degrees(att[2])), 2),
+                "x": round(px, 3),
+                "y": round(py, 3),
+                "z": round(max(pz, 0.0), 3),
+                "pitch": round(ptheta, 2),
+                "roll": round(pphi, 2),
+                "yaw": round(ppsi, 2),
             })
 
     # Format sample trajectories with metrics and rank
@@ -1140,16 +1158,21 @@ def gpu_ensemble_simulation(
     for k, idx in enumerate(sample_indices):
         pts = sample_tracks[k]
         peak_alt = max([float(p["z"]) for p in pts], default=0.0)
+        dist_val = float(landing_distances_np[idx])
+        time_val = float(landing_time_np[idx])
+        v0_val = float(v0_np[idx])
+        p_val = float(pitch_deg_np[idx])
+        r_val = float(roll_deg_np[idx])
         sample_trajectories.append({
             "id": idx,
             "rank": 0,
             "points": pts,
-            "landing_distance_m": round(float(landing_distances_np[idx]), 3),
-            "flight_time_s": round(float(landing_time_np[idx]), 3),
-            "max_altitude_m": round(float(peak_alt), 3),
-            "speed_mps": round(float(v0_np[idx]), 2),
-            "pitch_deg": round(float(pitch_deg_np[idx]), 2),
-            "roll_deg": round(float(roll_deg_np[idx]), 2),
+            "landing_distance_m": round(dist_val if math.isfinite(dist_val) else 0.0, 3),
+            "flight_time_s": round(time_val if math.isfinite(time_val) else 0.0, 3),
+            "max_altitude_m": round(peak_alt if math.isfinite(peak_alt) else 0.0, 3),
+            "speed_mps": round(v0_val if math.isfinite(v0_val) else 0.0, 2),
+            "pitch_deg": round(p_val if math.isfinite(p_val) else 0.0, 2),
+            "roll_deg": round(r_val if math.isfinite(r_val) else 0.0, 2),
         })
 
     # Sort descending by distance to assign ranks
@@ -1159,10 +1182,10 @@ def gpu_ensemble_simulation(
 
     best_distance_flight = sorted_by_dist[0] if sorted_by_dist else None
     worst_distance_flight = sorted_by_dist[-1] if sorted_by_dist else None
-    best_hangtime_flight = max(sample_trajectories, key=lambda tr: cast(float, tr["flight_time_s"])) if sample_trajectories else None
-    worst_hangtime_flight = min(sample_trajectories, key=lambda tr: cast(float, tr["flight_time_s"])) if sample_trajectories else None
-    best_altitude_flight = max(sample_trajectories, key=lambda tr: cast(float, tr["max_altitude_m"])) if sample_trajectories else None
-    worst_altitude_flight = min(sample_trajectories, key=lambda tr: cast(float, tr["max_altitude_m"])) if sample_trajectories else None
+    best_hangtime_flight = max(sorted_by_dist, key=lambda tr: cast(float, tr["flight_time_s"])) if sorted_by_dist else None
+    worst_hangtime_flight = min(sorted_by_dist, key=lambda tr: cast(float, tr["flight_time_s"])) if sorted_by_dist else None
+    best_altitude_flight = max(sorted_by_dist, key=lambda tr: cast(float, tr["max_altitude_m"])) if sorted_by_dist else None
+    worst_altitude_flight = min(sorted_by_dist, key=lambda tr: cast(float, tr["max_altitude_m"])) if sorted_by_dist else None
     leaderboard = [
         {
             "rank": tr["rank"],
@@ -1257,7 +1280,7 @@ def gpu_ensemble_simulation(
             "distance_p10": dist_p10,
             "distance_p90": dist_p90,
         },
-        "sample_trajectories": sample_trajectories,
+        "sample_trajectories": sorted_by_dist,
     }
 
 
