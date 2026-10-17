@@ -245,7 +245,18 @@
 ├── prompt.md                  # 実行プロンプト
 ├── requirements.txt
 ├── smoke_test.py              # 統合テスト（API 連鎖・最適化ジョブ・3D モデル）
-├── app.py                     # Flask 全 API
+├── app.py                     # Flask エントリーポイント & Blueprint ルーター
+├── api/                       # 分割された REST API パッケージ
+│   ├── __init__.py
+│   ├── core.py                # Session 状態・共通ヘルパー・エラー応答
+│   └── routes/                # 責務別 Blueprint ルーティング
+│       ├── __init__.py
+│       ├── meta.py            # メタデータ・スキーマ・GPU/環境診断
+│       ├── physics.py         # 空気力学・大気・風場・応力解析
+│       ├── simulation.py      # 6DoF 飛行積分・リセット・一括並列
+│       ├── mesh.py            # 3D メッシュ取込・選択・物理量解析
+│       ├── jobs.py            # 最適化 & 自動調査バックグラウンドジョブ
+│       └── records.py         # ギネス記録・プリセット・ログ出力・エラー履歴
 ├── physics/
 │   ├── __init__.py
 │   ├── config_schema.py       # 全 dataclass / JSON スキーマ（Manager: Phase 0）
@@ -259,7 +270,14 @@
 │   ├── parallel_engine.py
 │   ├── optimizer_domain.py
 │   ├── job_manager.py
-│   └── storage_domain.py
+│   ├── storage_domain.py
+│   ├── auto_investigate.py    # 自動調査・チューニング後方互換ファサード
+│   └── investigate/           # 分割された自動調査・診断・助言パッケージ
+│       ├── __init__.py
+│       ├── models.py          # 調査データモデル・手動変更可能パラメータ定義
+│       ├── diagnostics.py     # 飛行診断エンジン（失速・スパイラル判定）
+│       ├── advice.py          # 日本語折り方・投げ方改善アドバイス生成
+│       └── tuning.py          # 1D感度スイープ & 局所Nelder-Meadチューニング
 ├── tests/
 │   ├── test_aero.py
 │   ├── test_atmo_wind.py
@@ -267,7 +285,8 @@
 │   ├── test_mesh.py
 │   ├── test_flight.py
 │   ├── test_optimizer.py
-│   └── test_jobs.py
+│   ├── test_jobs.py
+│   └── test_investigate.py
 ├── templates/index.html
 ├── static/
 │   ├── css/console.css
