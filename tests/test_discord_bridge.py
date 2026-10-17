@@ -7,13 +7,21 @@ import os
 import unittest
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from tools.discord_bridge import (
-    AVAILABLE_MODELS,
-    DiscordBridgeClient,
-    ModelSelectView,
-)
+import pytest
+
+try:
+    import discord
+    from tools.discord_bridge import (
+        AVAILABLE_MODELS,
+        DiscordBridgeClient,
+        ModelSelectView,
+    )
+    HAS_DISCORD = True
+except ImportError:
+    HAS_DISCORD = False
 
 
+@unittest.skipUnless(HAS_DISCORD, "discord.py not installed")
 class TestDiscordBridge(unittest.TestCase):
     def setUp(self):
         self.client = DiscordBridgeClient()
