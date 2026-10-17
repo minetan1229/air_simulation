@@ -85,7 +85,7 @@ def detailed_phases(log, mode="full_flight", phugoid_window_s=2.5):
             
         qualifies = (apex_time is not None and row["time_s"] >= apex_time
                      and 1.5 <= row["speed_mps"] <= 8.0 and abs(row["alpha_deg"]) <= 10.0
-                     and abs(row["pitch_rate_radps"]) <= 0.5
+                     and abs(row["pitch_rate_radps"]) <= 0.7
                      and 0 <= effective_vz <= 2.0 and not row.get("stalled"))
         if qualifies:
             if start is None:

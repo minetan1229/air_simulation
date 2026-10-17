@@ -961,7 +961,14 @@ def evaluate_aero(
     else:
         w_stall = stall_blend_weight(alpha, cfg)
         linear_val = _finite(cfg.cm_alpha) * math.copysign(stall_rad, alpha_rad)
-        flat_plate_cm = 0.5 * _finite(cfg.cm_alpha) * math.sin(2.0 * alpha_rad) * stall_rad
+        # Flat-plate cross-flow restoring moment:
+        # Physically, normal flow resistance on the aft planform acts to restore
+        # the body into alignment with the relative wind. The restoring moment
+        # scales as sin(alpha) * |cos(alpha)|, ensuring correct sign preservation
+        # for both positive and negative angles of attack up to +/-180 degrees.
+        sin_a = math.sin(alpha_rad)
+        cos_a = math.cos(alpha_rad)
+        flat_plate_cm = _finite(cfg.cm_alpha) * sin_a * abs(cos_a) * stall_rad
         cm_alpha_term = (1.0 - w_stall) * linear_val + w_stall * flat_plate_cm
 
     cm = (
@@ -1021,16 +1028,16 @@ def evaluate_aero(
     # Apex low-speed pushover dynamics (AGENTS.md Section 8.2):
     # At the climb apex (speed < 3.0 m/s) where dynamic pressure approaches zero,
     # the aft center-of-pressure shift in separated flow and forward-shifted CG eccentricity
-    # produce a physical aerodynamic nose-down pitching moment on positive alpha.
+    # produce a physical aerodynamic restoring pitching moment to align the nose with flow.
     # Note: Bounded and smoothly decayed as the aircraft reaches horizontal glide attitude.
-    if speed < 3.0 and alpha > 0.0:
+    if speed < 3.0 and abs(alpha) > 0.1:
         v_norm = clamp(speed / 3.0, 0.0, 1.0)
         speed_gate = 1.0 - v_norm * v_norm * (3.0 - 2.0 * v_norm)  # Hermite smoothstep C1 continuous
         # Effective dynamic pressure floor ensuring restoring authority even as V -> 0:
         # q_eff = 0.5 * rho * max(V, 0.8)^2 (~0.39 Pa at rho=1.225)
         q_eff = 0.5 * density * (max(speed, 0.8) ** 2)
-        alpha_gate = math.tanh(max(alpha - 2.0, 0.0) / 8.0)
-        sin_a = math.sin(deg2rad(clamp(alpha, 0.0, 90.0)))
+        alpha_gate = math.tanh(abs(alpha) / 8.0)
+        sin_a = math.sin(deg2rad(clamp(alpha, -90.0, 90.0)))
         pushover_moment = -q_eff * area * chord * 0.85 * sin_a * speed_gate * alpha_gate
     else:
         pushover_moment = 0.0

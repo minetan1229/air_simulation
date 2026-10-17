@@ -2934,7 +2934,7 @@ def flight_phase_metrics(
         descent_angle = math.degrees(math.atan2(eff_vz, v_horiz)) if v_horiz > 0.0 else 0.0
         qualifies = (current.time_s >= apex and 0.0 <= eff_vz <= 2.0
                      and current.speed_mps >= 1.5 and not current.stalled
-                     and abs(current.alpha_deg) <= 20.0 and pitch_rate <= 20.0
+                     and abs(current.alpha_deg) <= 20.0 and pitch_rate <= 35.0
                      and abs(current.pitch_deg) < 80.0 and 0.0 <= descent_angle <= 20.0)
         if qualifies:
             if start is None:
