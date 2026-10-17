@@ -350,9 +350,16 @@ class ConsoleApp {
       "tunnel-slider-aoa-val",
       "tunnel-slider-speed",
       "tunnel-slider-speed-val",
-      "cam-mode-fleet",
-      "cam-mode-swarm",
+      "cam-mode-mean",
       "cam-mode-lead",
+      "cam-mode-fleet",
+      "cam-mode-fixed",
+      "cam-mode-swarm",
+      "tgl-ens-tracks",
+      "tgl-ens-mean-only",
+      "champ-btn-focus-mean",
+      "champ-btn-download-json",
+      "champ-btn-download-csv",
       "tunnel-hud",
       "tunnel-toggle",
       "tp-glide",
@@ -619,9 +626,11 @@ class ConsoleApp {
     });
 
     const camModes = [
-      { id: "cam-mode-fleet", mode: "fleet" },
-      { id: "cam-mode-swarm", mode: "swarm" },
+      { id: "cam-mode-mean", mode: "mean" },
       { id: "cam-mode-lead", mode: "lead" },
+      { id: "cam-mode-fleet", mode: "fleet" },
+      { id: "cam-mode-fixed", mode: "fixed" },
+      { id: "cam-mode-swarm", mode: "swarm" },
     ];
     for (const { id, mode } of camModes) {
       const el = document.getElementById(id);
@@ -631,6 +640,37 @@ class ConsoleApp {
           if (this.viewport) this.viewport.setCameraMode(mode);
         });
       }
+    }
+
+    // Toggle 100-plane ensemble tracks
+    const tglTracks = document.getElementById("tgl-ens-tracks");
+    if (tglTracks) {
+      tglTracks.addEventListener("click", () => {
+        const on = tglTracks.dataset.on !== "0";
+        const next = on ? "0" : "1";
+        tglTracks.dataset.on = next;
+        tglTracks.classList.toggle("active", next === "1");
+        if (this.viewport) this.viewport.setEnsembleTracksVisible(next === "1");
+      });
+    }
+
+    // Toggle Mean Only vs All Tracks
+    const tglMeanOnly = document.getElementById("tgl-ens-mean-only");
+    if (tglMeanOnly) {
+      tglMeanOnly.addEventListener("click", () => {
+        const current = tglMeanOnly.dataset.mode || "all";
+        if (current === "all") {
+          tglMeanOnly.dataset.mode = "mean_only";
+          tglMeanOnly.textContent = "平均機のみ";
+          tglMeanOnly.classList.add("active");
+          if (this.viewport) this.viewport.filterEnsembleTracks("mean_only");
+        } else {
+          tglMeanOnly.dataset.mode = "all";
+          tglMeanOnly.textContent = "全機表示";
+          tglMeanOnly.classList.remove("active");
+          if (this.viewport) this.viewport.filterEnsembleTracks("all");
+        }
+      });
     }
 
     this._initTunnelControls();
@@ -746,11 +786,11 @@ class ConsoleApp {
 
         // Render trajectories and 100-plane InstancedMesh in Three.js viewport
         if (this.viewport && res.sample_trajectories.length) {
-          this.viewport.setEnsembleTracks(res.sample_trajectories, this._skipFirstRank);
-          this.viewport.filterEnsembleTracks("top1");
-          this.viewport.setEnsembleFleet(res.sample_trajectories, this._skipFirstRank);
-          this.viewport.setCameraMode("lead");
-          this._setCameraChipActive("cam-mode-lead");
+          this.viewport.setEnsembleTracks(res.sample_trajectories, this._skipFirstRank, res.mean_trajectory);
+          this.viewport.filterEnsembleTracks("all");
+          this.viewport.setEnsembleFleet(res.sample_trajectories, this._skipFirstRank, res.mean_trajectory);
+          this.viewport.setCameraMode("mean");
+          this._setCameraChipActive("cam-mode-mean");
         }
 
         const backendStr = res.backend_display || res.backend || "cupy";
@@ -763,6 +803,9 @@ class ConsoleApp {
           `GPU 100機同時飛行完了 (${res.trajectories_count || count}機 · ${backendStr})\n最大飛距離: ${maxDist.toFixed(2)}m (平均: ${meanDist.toFixed(2)}m) · 最大滞空: ${maxTime.toFixed(2)}s (平均: ${meanTime.toFixed(2)}s)`,
           "ok"
         );
+
+        // Auto-save simulation data with date and timestamp
+        this._autoSaveEnsembleData(res, "json", false);
 
         // Show comprehensive champion metrics & leaderboard HUD
         this._showEnsembleChampionHud(res);
@@ -783,6 +826,83 @@ class ConsoleApp {
       }
     }
 
+  }
+
+  async _autoSaveEnsembleData(res, format = "json", isUserRequested = false) {
+    try {
+      const now = new Date();
+      const pad = (n) => String(n).padStart(2, "0");
+      const stamp = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}_${pad(now.getHours())}-${pad(now.getMinutes())}-${pad(now.getSeconds())}`;
+      const filename = `sim_data_${stamp}.${format}`;
+
+      const payload = {
+        executed_at: now.toISOString(),
+        timestamp_formatted: stamp,
+        parameters: {
+          aircraft: this.store.data.aircraft || {},
+          environment: this.store.data.environment || {},
+          launch: this.store.data.launch || {},
+          simulation: this.store.data.simulation || {},
+        },
+        mean_trajectory: res.mean_trajectory || null,
+        statistics: res.statistics || {},
+        trajectories_count: res.trajectories_count || 100,
+        mean_distance_m: res.mean_distance_m,
+        max_distance_m: res.max_distance_m,
+        mean_flight_time_s: res.mean_flight_time_s,
+        max_flight_time_s: res.max_flight_time_s,
+        sample_trajectories: res.sample_trajectories || [],
+        leaderboard: res.leaderboard || [],
+        bottomboard: res.bottomboard || [],
+      };
+
+      // Call server data export endpoint
+      const exportRes = await api.export({
+        kind: "ensemble",
+        format,
+        data: payload,
+      });
+
+      if (exportRes && exportRes.payload) {
+        const mime = format === "csv" ? "text/csv" : "application/json";
+        const fname = exportRes.filename || filename;
+        const blob = new Blob([exportRes.payload], { type: mime });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = fname;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        setTimeout(() => URL.revokeObjectURL(url), 2000);
+
+        const notifyMsg = isUserRequested
+          ? `シミュレーションデータを保存しました: ${fname}`
+          : `📁 100機シミュレーションデータを自動保存しました: ${fname}`;
+        this.notify(notifyMsg, "ok");
+      }
+    } catch (err) {
+      console.warn("[App] Auto-save ensemble data failed:", err);
+      // Fallback local client save if API fails
+      try {
+        const now = new Date();
+        const pad = (n) => String(n).padStart(2, "0");
+        const stamp = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}_${pad(now.getHours())}-${pad(now.getMinutes())}-${pad(now.getSeconds())}`;
+        const filename = `sim_data_${stamp}.json`;
+        const blob = new Blob([JSON.stringify(res, null, 2)], { type: "application/json" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        setTimeout(() => URL.revokeObjectURL(url), 2000);
+        this.notify(`📁 シミュレーションデータを自動保存しました: ${filename}`, "ok");
+      } catch (clientErr) {
+        console.error("[App] Fallback client save also failed:", clientErr);
+      }
+    }
   }
 
   _showEnsembleChampionHud(res) {
@@ -1106,6 +1226,28 @@ class ConsoleApp {
 
         const rankTag = this._skipFirstRank ? "繰り上げ1位" : "1位";
         this.notify(`${rankTag} (機体 #${f.id ?? "—"}) の投げ方を設定に反映しました！ (初速: ${speed}m/s, 仰角: ${pitch}°, ロール: ${roll}°)`, "ok");
+      });
+    }
+    if (this.dom["champ-btn-focus-mean"]) {
+      this.dom["champ-btn-focus-mean"].addEventListener("click", () => {
+        if (this.viewport) {
+          this.viewport.focusMeanTrajectory();
+          this.viewport.setCameraMode("mean");
+          this._setCameraChipActive("cam-mode-mean");
+          this.notify("代表平均機 (Mean Aircraft) にフォーカスしました", "info");
+        }
+      });
+    }
+    if (this.dom["champ-btn-download-json"]) {
+      this.dom["champ-btn-download-json"].addEventListener("click", () => {
+        if (!this._lastEnsembleResult) return;
+        this._autoSaveEnsembleData(this._lastEnsembleResult, "json", true);
+      });
+    }
+    if (this.dom["champ-btn-download-csv"]) {
+      this.dom["champ-btn-download-csv"].addEventListener("click", () => {
+        if (!this._lastEnsembleResult) return;
+        this._autoSaveEnsembleData(this._lastEnsembleResult, "csv", true);
       });
     }
     if (this.dom["champ-btn-focus"]) {
@@ -1857,7 +1999,14 @@ class ConsoleApp {
   }
 
   _setCameraChipActive(activeId) {
-    const ids = ["cam-mode-fleet", "cam-mode-swarm", "cam-mode-lead", "btn-view-reset"];
+    const ids = [
+      "cam-mode-mean",
+      "cam-mode-lead",
+      "cam-mode-fleet",
+      "cam-mode-fixed",
+      "cam-mode-swarm",
+      "btn-view-reset",
+    ];
     ids.forEach((id) => {
       const el = document.getElementById(id);
       if (el) {
@@ -2587,6 +2736,17 @@ class ConsoleApp {
 
   async _applyStandardPreset(params, badge, metric, title, desc) {
     await this._guard(async () => {
+      const inertiaKeys = [
+        "roll_inertia_kgm2",
+        "pitch_inertia_kgm2",
+        "yaw_inertia_kgm2",
+        "inertia_xy_kgm2",
+        "inertia_xz_kgm2",
+        "inertia_yz_kgm2",
+      ];
+      for (const k of inertiaKeys) {
+        this.store.set("aircraft", k, 0, "preset");
+      }
       for (const [k, v] of Object.entries(params)) {
         this.store.set("aircraft", k, v, "preset");
       }

@@ -1178,6 +1178,51 @@ def gpu_ensemble_simulation(
             "roll_deg": round(r_val if math.isfinite(r_val) else 0.0, 2),
         })
 
+    # Compute representative "Mean Aircraft" trajectory (average of all trajectories at each timestep)
+    mean_trajectory_points: List[Dict[str, float]] = []
+    for s_i in range(len(history_times)):
+        t_cur = history_times[s_i]
+        alts_cur = hist_alt_np[s_i]
+        dists_cur = hist_dist_np[s_i]
+        snap_cur = snapshots_np[s_i]
+        att_cur = attitudes_np[s_i]
+
+        mean_x = float(np.mean(snap_cur[:, 0])) if snap_cur.shape[0] > 0 else float(dist_mean[s_i])
+        mean_y = float(np.mean(snap_cur[:, 1])) if snap_cur.shape[0] > 0 else 0.0
+        mean_z = float(np.mean(alts_cur)) if len(alts_cur) > 0 else 0.0
+
+        mean_theta = math.degrees(float(np.mean(att_cur[:, 0]))) if att_cur.shape[0] > 0 else 0.0
+        mean_phi = math.degrees(float(np.mean(att_cur[:, 1]))) if att_cur.shape[0] > 0 else 0.0
+        mean_psi = math.degrees(float(np.mean(att_cur[:, 2]))) if att_cur.shape[0] > 0 else 0.0
+
+        mean_trajectory_points.append({
+            "t": round(float(t_cur), 4),
+            "x": round(float(mean_x) if math.isfinite(mean_x) else 0.0, 3),
+            "y": round(float(mean_y) if math.isfinite(mean_y) else 0.0, 3),
+            "z": round(max(float(mean_z) if math.isfinite(mean_z) else 0.0, 0.0), 3),
+            "pitch": round(float(mean_theta) if math.isfinite(mean_theta) else 0.0, 2),
+            "roll": round(float(mean_phi) if math.isfinite(mean_phi) else 0.0, 2),
+            "yaw": round(float(mean_psi) if math.isfinite(mean_psi) else 0.0, 2),
+        })
+
+    # Trim mean trajectory when it hits the ground
+    mean_flight_time_val = float(np.mean(landing_time_np))
+    mean_landing_dist_val = float(np.mean(landing_distances_np))
+    mean_peak_alt = max([float(p["z"]) for p in mean_trajectory_points], default=0.0)
+
+    mean_aircraft = {
+        "id": "mean",
+        "rank": 0,
+        "is_mean": True,
+        "points": mean_trajectory_points,
+        "landing_distance_m": round(mean_landing_dist_val if math.isfinite(mean_landing_dist_val) else 0.0, 3),
+        "flight_time_s": round(mean_flight_time_val if math.isfinite(mean_flight_time_val) else 0.0, 3),
+        "max_altitude_m": round(mean_peak_alt if math.isfinite(mean_peak_alt) else 0.0, 3),
+        "speed_mps": round(float(np.mean(v0_np)), 2),
+        "pitch_deg": round(float(np.mean(pitch_deg_np)), 2),
+        "roll_deg": round(float(np.mean(roll_deg_np)), 2),
+    }
+
     # Sort descending by distance to assign ranks
     sorted_by_dist = sorted(sample_trajectories, key=lambda tr: cast(float, tr["landing_distance_m"]), reverse=True)
     for rank_idx, tr in enumerate(sorted_by_dist):
@@ -1246,6 +1291,7 @@ def gpu_ensemble_simulation(
         "max_distance_m": round(max_d, 3),
         "min_flight_time_s": round(min_t, 3),
         "min_distance_m": round(min_d, 3),
+        "mean_trajectory": mean_aircraft,
         "best_flight": best_distance_flight,
         "worst_flight": worst_distance_flight,
         "best_hangtime": best_hangtime_flight,

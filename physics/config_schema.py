@@ -344,6 +344,32 @@ class AircraftConfig:
         """Return a copy with physical scalars forced into plausible bounds."""
         from dataclasses import replace as _replace
 
+        r = float(self.roll_inertia_kgm2)
+        p = float(self.pitch_inertia_kgm2)
+        y = float(self.yaw_inertia_kgm2)
+        ixy = float(self.inertia_xy_kgm2)
+        ixz = float(self.inertia_xz_kgm2)
+        iyz = float(self.inertia_yz_kgm2)
+
+        if r > 0.0 or p > 0.0 or y > 0.0:
+            r = max(r, 0.0)
+            p = max(p, 0.0)
+            y = max(y, 0.0)
+            if r > 0.0 and p > 0.0 and y > 0.0:
+                if r > p + y:
+                    r = p + y
+                elif p > r + y:
+                    p = r + y
+                elif y > r + p:
+                    y = r + p
+
+                max_xy = 0.95 * math.sqrt(r * p)
+                max_xz = 0.95 * math.sqrt(r * y)
+                max_yz = 0.95 * math.sqrt(p * y)
+                ixy = clamp(ixy, -max_xy, max_xy)
+                ixz = clamp(ixz, -max_xz, max_xz)
+                iyz = clamp(iyz, -max_yz, max_yz)
+
         return _replace(
             self,
             mass_kg=clamp(self.mass_kg, 1.0e-4, 1.0),
@@ -399,6 +425,12 @@ class AircraftConfig:
             cl_yaw_rate=clamp(self.cl_yaw_rate, -5.0, 5.0),
             cm_yaw_rate=clamp(self.cm_yaw_rate, -5.0, 5.0),
             cn_yaw_rate=clamp(self.cn_yaw_rate, -10.0, 0.0),
+            roll_inertia_kgm2=r,
+            pitch_inertia_kgm2=p,
+            yaw_inertia_kgm2=y,
+            inertia_xy_kgm2=ixy,
+            inertia_xz_kgm2=ixz,
+            inertia_yz_kgm2=iyz,
         )
 
 
@@ -1326,7 +1358,16 @@ def derived_properties(cfg: AircraftConfig) -> Dict[str, float]:
         else inertia_pitch,
         "yaw_inertia_kgm2": float(cfg.yaw_inertia_kgm2)
         if cfg.yaw_inertia_kgm2 > 0.0
-        else inertia_yaw,
+        else (
+            max(
+                inertia_yaw,
+                (float(cfg.roll_inertia_kgm2) if cfg.roll_inertia_kgm2 > 0.0 else inertia_roll)
+                + (float(cfg.pitch_inertia_kgm2) if cfg.pitch_inertia_kgm2 > 0.0 else inertia_pitch)
+                - 2.0 * mass * second_z,
+            )
+            if (cfg.roll_inertia_kgm2 > 0.0 or cfg.pitch_inertia_kgm2 > 0.0)
+            else inertia_yaw
+        ),
         "inertia_xy_kgm2": float(cfg.inertia_xy_kgm2),
         "inertia_xz_kgm2": float(cfg.inertia_xz_kgm2),
         "inertia_yz_kgm2": float(cfg.inertia_yz_kgm2),

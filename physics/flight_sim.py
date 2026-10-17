@@ -46,6 +46,7 @@ from __future__ import annotations
 
 import importlib
 import inspect
+import logging
 import math
 import threading
 import time
@@ -56,6 +57,8 @@ from dataclasses import dataclass, field, fields, is_dataclass, replace
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
+
+log = logging.getLogger(__name__)
 
 from .config_schema import (
     AeroResult,
@@ -1693,7 +1696,20 @@ class FlightSimulator:
         self._derived: Dict[str, float] = derived
         self._mass: float = max(derived["mass_kg"], 1.0e-9)
         self._chord: float = max(derived["mac_m"], 1.0e-4)
-        self._inertia: np.ndarray = body_inertia_tensor(derived)
+        try:
+            self._inertia: np.ndarray = body_inertia_tensor(derived)
+        except ValueError as err:
+            log.warning("FlightSimulator: invalid inertia tensor (%s); falling back to geometric tensor", err)
+            clean_cfg = replace(
+                self.aircraft,
+                roll_inertia_kgm2=0.0,
+                pitch_inertia_kgm2=0.0,
+                yaw_inertia_kgm2=0.0,
+                inertia_xy_kgm2=0.0,
+                inertia_xz_kgm2=0.0,
+                inertia_yz_kgm2=0.0,
+            )
+            self._inertia = body_inertia_tensor(derived_properties(clean_cfg))
         self._trim_pitch_deg = self._resolve_trim_pitch()
 
     def _resolve_trim_pitch(self) -> float:
