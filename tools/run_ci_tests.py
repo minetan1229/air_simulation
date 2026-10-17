@@ -81,6 +81,15 @@ def main() -> int:
 
         msg = f"⚠️ **CI Test Failed (exit code {ret})**:\n```\n{summary_text[:1800]}\n```"
         notify_discord(msg)
+
+        # Also write summary to file for automated issue creation step
+        try:
+            with open("pytest_failure_summary.txt", "w", encoding="utf-8") as f:
+                f.write(summary_text + "\n\n")
+                f.write("Last 60 lines of output:\n")
+                f.write("".join(output_lines[-60:]))
+        except Exception as exc:
+            print(f"Warning: could not write pytest_failure_summary.txt: {exc}", file=sys.stderr)
     else:
         passed = [line.strip() for line in output_lines if "passed in" in line]
         summary_text = passed[-1] if passed else "All tests passed"

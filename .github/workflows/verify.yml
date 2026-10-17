@@ -10,6 +10,9 @@ jobs:
   verify:
     name: Lint, Type Check & Test
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
     steps:
       - name: リポジトリのコードを取得
         uses: actions/checkout@v4
@@ -33,4 +36,12 @@ jobs:
         run: mypy --config-file mypy.ini physics app.py
 
       - name: 自動テストの実行 (Pytest)
+        id: pytest_step
         run: python tools/run_ci_tests.py
+
+      - name: テスト失敗時のIssue起票
+        if: failure() && steps.pytest_step.outcome == 'failure'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TEST_SUMMARY_FILE: pytest_failure_summary.txt
+        run: python tools/create_failure_issue.py
