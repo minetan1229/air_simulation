@@ -248,8 +248,10 @@ async def cmd_chat(interaction: discord.Interaction, prompt: str):
         await interaction.response.send_message("❌ Unauthorized: You do not have permission to run commands.", ephemeral=True)
         return
 
+    # Defer immediately to avoid Discord's 3-second interaction expiration
     await interaction.response.defer()
-    await execute_agy_prompt(interaction.channel, prompt, interaction.user)
+    # Pass interaction so execute_agy_prompt can resolve interaction followup
+    await execute_agy_prompt(interaction.channel, prompt, interaction.user, interaction=interaction)
 
 
 @client.tree.command(name="chats", description="List recent conversation sessions and resume them")
@@ -258,11 +260,15 @@ async def cmd_chats(interaction: discord.Interaction):
         await interaction.response.send_message("❌ Unauthorized.", ephemeral=True)
         return
 
-    sessions = get_recent_conversations(10)
+    # Defer immediately to prevent 404 Unknown interaction on disk scan
+    await interaction.response.defer()
+
+    # Offload disk search to thread to avoid blocking asyncio event loop
+    sessions = await asyncio.to_thread(get_recent_conversations, 10)
     current_conv = client.channel_conversations.get(interaction.channel_id)
 
     if not sessions:
-        await interaction.response.send_message("ℹ️ No previous conversation history found in workspace.", ephemeral=True)
+        await interaction.followup.send("ℹ️ No previous conversation history found in workspace.", ephemeral=True)
         return
 
     embed = discord.Embed(
@@ -279,7 +285,7 @@ async def cmd_chats(interaction: discord.Interaction):
         )
 
     view = ChatSelectView(sessions, current_conv, on_chat_selected)
-    await interaction.response.send_message(embed=embed, view=view)
+    await interaction.followup.send(embed=embed, view=view)
 
 
 async def on_chat_selected(interaction: discord.Interaction, selected_conv: str):
@@ -299,9 +305,11 @@ async def cmd_resume(interaction: discord.Interaction, conversation_id: str):
         await interaction.response.send_message("❌ Unauthorized.", ephemeral=True)
         return
 
+    await interaction.response.defer()
+
     cid = conversation_id.strip()
-    # Resolve short ID if given
-    sessions = get_recent_conversations(30)
+    # Resolve short ID if given asynchronously
+    sessions = await asyncio.to_thread(get_recent_conversations, 30)
     matched_full_id = cid
     for s in sessions:
         if s["id"].startswith(cid):
@@ -309,7 +317,7 @@ async def cmd_resume(interaction: discord.Interaction, conversation_id: str):
             break
 
     client.channel_conversations[interaction.channel_id] = matched_full_id
-    await interaction.response.send_message(
+    await interaction.followup.send(
         f"✅ Resumed conversation **`{matched_full_id[:8]}`** (`{matched_full_id}`)."
     )
 
@@ -417,6 +425,7 @@ async def execute_agy_prompt(
     prompt: str,
     user: discord.User,
     reply_to_msg: Optional[discord.Message] = None,
+    interaction: Optional[discord.Interaction] = None,
 ):
     """
     Runs agy CLI strictly in simulation/v3 workspace,
@@ -425,7 +434,11 @@ async def execute_agy_prompt(
     channel_id = channel.id
 
     if channel_id in client.active_processes and client.active_processes[channel_id].returncode is None:
-        await channel.send("⚠️ Another task is already running in this channel. Use `!abort` or `/abort` to cancel it first.")
+        msg = "⚠️ Another task is already running in this channel. Use `!abort` or `/abort` to cancel it first."
+        if interaction:
+            await interaction.followup.send(msg)
+        else:
+            await channel.send(msg)
         return
 
     model = client.get_model(channel_id)
@@ -452,7 +465,11 @@ async def execute_agy_prompt(
     status_embed.add_field(name="Current Status", value="🧠 Initializing & Reasoning...", inline=False)
     status_embed.set_footer(text="React with 🛑 or type !abort to cancel")
 
-    status_msg = await channel.send(embed=status_embed)
+    # If triggered by deferred slash command, send via followup so Discord's "thinking..." spinner clears!
+    if interaction:
+        status_msg = await interaction.followup.send(embed=status_embed, wait=True)
+    else:
+        status_msg = await channel.send(embed=status_embed)
     try:
         await status_msg.add_reaction("🛑")
     except Exception:
