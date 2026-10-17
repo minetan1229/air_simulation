@@ -4,10 +4,40 @@
 [![Flask](https://img.shields.io/badge/backend-Flask%20REST%20API-lightgrey.svg)](https://flask.palletsprojects.com/)
 [![Three.js](https://img.shields.io/badge/frontend-Three.js%20%2F%20WebGL-black.svg)](https://threejs.org/)
 [![Physics 6DoF](https://img.shields.io/badge/physics-6DoF%20RK4-brightgreen.svg)]()
-[![Tests](https://img.shields.io/badge/tests-672%20passed-success.svg)]()
+[![Tests](https://img.shields.io/badge/tests-691%20passed-success.svg)]()
 
 流体力学および航空工学理論に基づく、高精度・リアルタイムな**3D紙飛行機フライトシミュレーター**です。  
 Flask REST API による物理演算バックエンドと、Three.js による 3D 計器コンソール・気流可視化フロントエンドを統合しています。
+
+---
+
+## 📸 実際の起動画面・機能スクリーンショット
+
+### 1. メイン計器コンソール & 3D フライトシミュレーション
+Three.js による 3D 空間描画、リアルタイム風粒子（GPGPU）、動的ヒートマップ応力解析、飛行計器テレメトリを Google Clean スタイルで統合。
+
+![メインコンソール画面](./docs/images/01_main_console.png)
+
+### 2. 6DoF 飛行軌跡・頂点遷移ダイナミクス
+投擲から頂点滑空遷移（プッシュオーバー）、滑空、着地までの 6自由度 (6DoF) RK4 軌跡をリアルタイム描画。
+
+![6DoF飛行軌跡画面](./docs/images/02_flight_trajectory.png)
+
+### 3. 風洞実験モード (Wind Tunnel Mode)
+機体を仮想風洞内に固定し、煙線レイク・翼端渦などの流線粒子を可視化しながら、迎角ごとの空力係数 ($C_L, C_D, L/D, C_m$) を精密測定。
+
+![仮想風洞モード画面](./docs/images/03_wind_tunnel_mode.png)
+
+### 4. 統合作業台 (Auto調査 / 多目的最適化 / 3Dモデル解析)
+画面下部の作業台トグルから、感度解析・自動改善（Auto調査）、NSGA-II パレートフロント最適化、3D CADメッシュ（glTF/OBJ/STL）インポートを利用可能。
+
+| Auto調査モード (感度診断) | 多目的最適化エンジン (NSGA-II / ETA) |
+| :---: | :---: |
+| ![Auto調査モード](./docs/images/04_workbench_investigate.png) | ![多目的最適化エンジン](./docs/images/05_workbench_optimizer.png) |
+
+| 3Dメッシュインポート & パネル法 | GPU 100機同時アンサンブルシミュレーション |
+| :---: | :---: |
+| ![3Dモデル解析](./docs/images/06_workbench_3d_mesh.png) | ![100機同時飛行アンサンブル](./docs/images/07_ensemble_100_planes.png) |
 
 ---
 

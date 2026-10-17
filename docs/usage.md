@@ -14,6 +14,12 @@
 - **下部 タイムコントロール (Bottom Dock)**: 再生/一時停止、倍速切替、コマ送り、タイムラインシークバー
 - **右パネル (Right Telemetry & Analytics)**: 飛行計器ステータス（高度・速度・迎角・Gフォース等）、リアルタイムグラフ、最適化パネル、3Dモデル管理
 
+![UI画面構成](./images/01_main_console.png)
+
+| 仮想風洞実験 | 6DoF 飛行軌跡 |
+| :---: | :---: |
+| ![仮想風洞](./images/03_wind_tunnel_mode.png) | ![飛行軌跡](./images/02_flight_trajectory.png) |
+
 ---
 
 ## 2. フライトシミュレーションの実行

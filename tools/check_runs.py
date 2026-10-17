@@ -1,17 +1,45 @@
 import json
+import os
+import sys
 import urllib.request
 
-url = "https://api.github.com/repos/minetan1229/air_simulation/actions/runs?per_page=3"
-req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+if sys.stdout.encoding.lower() != 'utf-8':
+    try:
+        sys.stdout.reconfigure(encoding='utf-8')
+    except Exception:
+        pass
+
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from tools.notify_discord import load_env_file
+
+load_env_file()
+token = os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_TOKEN")
+
+headers = {"User-Agent": "Python-Workflow-Checker"}
+if token:
+    headers["Authorization"] = f"token {token}"
+
+url = "https://api.github.com/repos/minetan1229/air_simulation/actions/runs?per_page=6"
+req = urllib.request.Request(url, headers=headers)
 try:
-    with urllib.request.urlopen(req) as resp:
-        data = json.loads(resp.read().decode())
-        for r in data.get("workflow_runs", []):
-            num = r.get("run_number")
-            run_id = r.get("id")
+    with urllib.request.urlopen(req) as res:
+        data = json.loads(res.read().decode())
+        runs = data.get("workflow_runs", [])
+        print(f"Total workflow runs: {len(runs)}")
+        for r in runs:
+            r_num = r.get("run_number")
+            r_id = r.get("id")
+            name = r.get("name")
             status = r.get("status")
             conclusion = r.get("conclusion")
-            msg = (r.get("head_commit") or {}).get("message", "")
-            print(f"Run #{num}: id={run_id}, status={status}, conclusion={conclusion}, msg={msg}")
+            branch = r.get("head_branch")
+            commit = (r.get("head_sha") or "")[:7]
+            event = r.get("event")
+            print(f"Run #{r_num} [{name}] id={r_id} status={status} conclusion={conclusion} branch={branch} commit={commit} event={event}")
 except Exception as e:
-    print("Error:", e)
+    print("Error fetching runs:", e)
