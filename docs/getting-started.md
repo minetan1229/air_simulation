@@ -97,7 +97,7 @@ python app.py
 
 デフォルトではポート `5000` でリッスンします。起動後、ブラウザで以下のURLを開いてください：
 
-👉 **[http://localhost:5000](http://localhost:5000)**
+**URL:** [http://localhost:5000](http://localhost:5000)
 
 コンソール画面（Google Clean / Material スタイルのダッシュボード）が表示され、3Dビューアと各種計器パネルが操作可能になります。
 
@@ -112,4 +112,4 @@ python app.py
 
 ---
 
-[⬅ README に戻る](../README.md)
+[README に戻る](../README.md)

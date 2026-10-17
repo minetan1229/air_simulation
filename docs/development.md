@@ -86,4 +86,4 @@ python tools/notify_discord.py end "リファクタリング完了" "ドキュ�
 
 ---
 
-[⬅ README に戻る](../README.md)
+[README に戻る](../README.md)

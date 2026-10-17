@@ -107,4 +107,4 @@
 
 ---
 
-[⬅ README に戻る](../README.md)
+[README に戻る](../README.md)
