@@ -476,8 +476,13 @@ def force_gpu_render():
 
     try:
         import winreg
+        create_key = getattr(winreg, "CreateKey")
+        hkey_cu = getattr(winreg, "HKEY_CURRENT_USER")
+        set_val = getattr(winreg, "SetValueEx")
+        reg_sz = getattr(winreg, "REG_SZ")
+        close_key = getattr(winreg, "CloseKey")
         key_path = r"Software\Microsoft\DirectX\UserGpuPreferences"
-        key = winreg.CreateKey(winreg.HKEY_CURRENT_USER, key_path)
+        key = create_key(hkey_cu, key_path)
         browser_paths = [
             r"C:\Program Files\Google\Chrome\Application\chrome.exe",
             r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
@@ -491,9 +496,9 @@ def force_gpu_render():
 
         for bp in browser_paths:
             if os.path.exists(bp):
-                winreg.SetValueEx(key, bp, 0, winreg.REG_SZ, "GpuPreference=2;AutoHDREnable=0;")
+                set_val(key, bp, 0, reg_sz, "GpuPreference=2;AutoHDREnable=0;")
                 registered.append(bp)
-        winreg.CloseKey(key)
+        close_key(key)
     except Exception as ex:
         error_msg = str(ex)
 
