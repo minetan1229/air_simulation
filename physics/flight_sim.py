@@ -2912,7 +2912,7 @@ def flight_phase_metrics(
     vz_arr = [float(s.vz_mps) for s in samples]
     win = float(phugoid_window_s)
     half_w = 0.5 * win
-    
+
     start = None
     longest = 0.0
     entry = None
@@ -2922,14 +2922,14 @@ def flight_phase_metrics(
         dt = current.time_s - previous.time_s
         pitch_change = (current.pitch_deg - previous.pitch_deg + 180.0) % 360.0 - 180.0
         pitch_rate = abs(pitch_change / dt) if dt > 0 else float("inf")
-        
+
         t_curr = float(current.time_s)
         if win > 0.0 and len(t_arr) > 1:
             vals = [vz_arr[j] for j, tj in enumerate(t_arr) if abs(tj - t_curr) <= half_w]
             eff_vz = sum(vals) / max(len(vals), 1)
         else:
             eff_vz = current.vz_mps
-            
+
         v_horiz = math.hypot(current.vx_mps, current.vy_mps)
         descent_angle = math.degrees(math.atan2(eff_vz, v_horiz)) if v_horiz > 0.0 else 0.0
         qualifies = (current.time_s >= apex and 0.0 <= eff_vz <= 2.0
