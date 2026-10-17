@@ -124,13 +124,14 @@ class ErrorLoggerDomain:
 
             # Write to JSONL
             try:
-                line = json.dumps(record.to_dict(), ensure_ascii=False) + "\n"
                 stream = self._file_handler.stream
                 if stream is not None:
+                    line = json.dumps(record.to_dict(), ensure_ascii=False) + "\n"
                     stream.write(line)
                     stream.flush()
             except Exception:
                 pass
+
 
             # Write to plain text log
             try:
