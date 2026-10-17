@@ -182,7 +182,10 @@ def _coerce(value: Any, annotation: Any, name: str) -> Any:
         return value
 
     if annotation is float:
-        return float(value)
+        val = float(value)
+        if not math.isfinite(val):
+            raise ValueError(f"field '{name}' must be finite, got {value!r}")
+        return val
     if annotation is int:
         return int(value)
     if annotation is bool:

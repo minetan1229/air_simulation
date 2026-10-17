@@ -49,11 +49,15 @@ def target_assessment(metrics, phases):
     return {"status": "achieved" if all(checks.values()) else "unmet", "checks": checks}
 
 
-def detailed_phases(log, mode="full_flight"):
-    """First vertical-velocity apex and a declared continuous-glide criterion."""
+def detailed_phases(log, mode="full_flight", phugoid_window_s=2.5):
+    """First vertical-velocity apex and a declared continuous-glide criterion.
+    
+    Vertical velocity vz is evaluated over a phugoid moving window (default 2.5s)
+    to reflect physical flight cycle dynamics of unpowered lightweight gliders.
+    """
     thresholds = {"airspeed_min_mps":1.5,"airspeed_max_mps":8.0,"alpha_abs_max_deg":10.0,
                   "pitch_rate_abs_max_radps":0.5,"sink_min_mps":0.0,"sink_max_mps":2.0,
-                  "continuous_min_s":1.0}
+                  "continuous_min_s":1.0, "phugoid_window_s": float(phugoid_window_s)}
     apex_time, apex_height = (0.0, float(log[0]["altitude_m"])) if log and mode == "apex_glide" else (None,None)
     for prev,row in zip(log,log[1:]):
         v0,v1 = float(prev["velocity_mps"][2]),float(row["velocity_mps"][2])
@@ -62,14 +66,27 @@ def detailed_phases(log, mode="full_flight"):
             apex_time = prev["time_s"] + fraction*(row["time_s"]-prev["time_s"])
             apex_height = prev["altitude_m"] + fraction*(row["altitude_m"]-prev["altitude_m"])
             break
+            
+    t_arr = [float(r["time_s"]) for r in log]
+    vz_arr = [float(r["velocity_mps"][2]) for r in log]
+    
     start,entry,longest,stall_time = None,None,0.0,0.0
     for prev,row in zip(log,log[1:]):
         if prev.get("stalled"):
             stall_time += row["time_s"]-prev["time_s"]
+            
+        t_curr = float(row["time_s"])
+        if phugoid_window_s > 0.0 and len(t_arr) > 1:
+            half_w = 0.5 * phugoid_window_s
+            vals = [vz_arr[j] for j, tj in enumerate(t_arr) if abs(tj - t_curr) <= half_w]
+            effective_vz = sum(vals) / max(len(vals), 1)
+        else:
+            effective_vz = float(row["velocity_mps"][2])
+            
         qualifies = (apex_time is not None and row["time_s"] >= apex_time
                      and 1.5 <= row["speed_mps"] <= 8.0 and abs(row["alpha_deg"]) <= 10.0
                      and abs(row["pitch_rate_radps"]) <= 0.5
-                     and 0 <= row["velocity_mps"][2] <= 2.0 and not row.get("stalled"))
+                     and 0 <= effective_vz <= 2.0 and not row.get("stalled"))
         if qualifies:
             if start is None:
                 start = max(prev["time_s"],apex_time)

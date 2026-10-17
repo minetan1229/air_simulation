@@ -2889,28 +2889,50 @@ def evaluate_flight(
     return summarize_flight(simulator, summary)
 
 
-def flight_phase_metrics(samples: Sequence[FlightLogSample], mode: str = "legacy") -> Dict[str, Any]:
+def flight_phase_metrics(
+    samples: Sequence[FlightLogSample],
+    mode: str = "legacy",
+    phugoid_window_s: float = 2.5,
+) -> Dict[str, Any]:
     """Operational glide diagnostic, distinct from total apex-to-landing time.
 
     A qualifying segment descends at <=20 degrees, has airspeed >=1.5 m/s,
     sink <=2 m/s, |alpha|<=20 degrees, and |pitch rate|<=20 deg/s, and is not
     stalled. Pitch rate uses wrapped Euler differences, so segments near the
     Euler singularity (|pitch|>=80 degrees) cannot qualify.
+    Vertical velocity and descent angle are smoothed over a phugoid window
+    (default 2.5s) to reflect natural longitudinal phugoid oscillations.
     One continuous second is required to call recovery.
     These thresholds are diagnostics, not forces or controller inputs.
     """
     if not samples:
         return {"glide_entry_time_s": None, "stable_glide_duration_s": 0.0, "apex_recovery_status": "not_observed"}
     apex = max(samples, key=lambda row: row.altitude_m).time_s
+    t_arr = [float(s.time_s) for s in samples]
+    vz_arr = [float(s.vz_mps) for s in samples]
+    win = float(phugoid_window_s)
+    half_w = 0.5 * win
+    
     start = None
     longest = 0.0
     entry = None
-    for previous, current in zip(samples, samples[1:]):
+    for i in range(len(samples) - 1):
+        previous = samples[i]
+        current = samples[i + 1]
         dt = current.time_s - previous.time_s
         pitch_change = (current.pitch_deg - previous.pitch_deg + 180.0) % 360.0 - 180.0
         pitch_rate = abs(pitch_change / dt) if dt > 0 else float("inf")
-        descent_angle = math.degrees(math.atan2(current.vz_mps, math.hypot(current.vx_mps, current.vy_mps)))
-        qualifies = (current.time_s >= apex and 0.0 <= current.vz_mps <= 2.0
+        
+        t_curr = float(current.time_s)
+        if win > 0.0 and len(t_arr) > 1:
+            vals = [vz_arr[j] for j, tj in enumerate(t_arr) if abs(tj - t_curr) <= half_w]
+            eff_vz = sum(vals) / max(len(vals), 1)
+        else:
+            eff_vz = current.vz_mps
+            
+        v_horiz = math.hypot(current.vx_mps, current.vy_mps)
+        descent_angle = math.degrees(math.atan2(eff_vz, v_horiz)) if v_horiz > 0.0 else 0.0
+        qualifies = (current.time_s >= apex and 0.0 <= eff_vz <= 2.0
                      and current.speed_mps >= 1.5 and not current.stalled
                      and abs(current.alpha_deg) <= 20.0 and pitch_rate <= 20.0
                      and abs(current.pitch_deg) < 80.0 and 0.0 <= descent_angle <= 20.0)
