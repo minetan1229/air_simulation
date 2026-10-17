@@ -119,3 +119,65 @@ def test_ensemble_identifies_approximate_physics_even_on_gpu(force_cpu):
         assert result["backend"] == "numpy"
     elif get_gpu_info()["available"] and get_gpu_info()["backend"] == "cupy":
         assert result["backend"] == "cupy"
+
+
+def test_ensemble_sorting_and_sanitization():
+    """Verify that sample trajectories are properly sanitized against NaN/Inf and sorted."""
+    res = gpu_ensemble_simulation(
+        n_trajectories=32,
+        force_cpu=True,
+        random_seed=42,
+        max_sample_tracks=16,
+    )
+    trajs = res["sample_trajectories"]
+    assert len(trajs) == 16
+
+    # Verify descending sort order by landing_distance_m
+    for i in range(len(trajs) - 1):
+        assert trajs[i]["landing_distance_m"] >= trajs[i + 1]["landing_distance_m"]
+
+    # Verify rank assignments
+    assert trajs[0]["rank"] == 1
+    assert trajs[1]["rank"] == 2
+
+    # Verify metrics sanitization (finite values)
+    for t in trajs:
+        assert np.isfinite(t["landing_distance_m"])
+        assert np.isfinite(t["flight_time_s"])
+        assert np.isfinite(t["max_altitude_m"])
+        assert np.isfinite(t["speed_mps"])
+        assert np.isfinite(t["pitch_deg"])
+        assert np.isfinite(t["roll_deg"])
+        for p in t["points"]:
+            assert np.isfinite(p["x"]) and np.isfinite(p["y"]) and np.isfinite(p["z"])
+            assert np.isfinite(p["pitch"]) and np.isfinite(p["roll"]) and np.isfinite(p["yaw"])
+
+
+def test_ensemble_skip_first_promotion_logic():
+    """Verify that skipping rank 1 promotes rank 2 to effective champion."""
+    res = gpu_ensemble_simulation(
+        n_trajectories=32,
+        force_cpu=True,
+        random_seed=999,
+        max_sample_tracks=16,
+    )
+    trajs = res["sample_trajectories"]
+    assert len(trajs) >= 2
+
+    # Before skipping
+    original_top1 = trajs[0]
+    original_top2 = trajs[1]
+    assert original_top1["rank"] == 1
+    assert original_top2["rank"] == 2
+
+    # Simulating the UI skip-top-1 promotion logic:
+    # effective_list = trajs[1:]
+    effective_list = trajs[1:]
+    promoted_champion = effective_list[0]
+
+    # Promoted champion must be original top 2
+    assert promoted_champion["id"] == original_top2["id"]
+    assert promoted_champion["landing_distance_m"] == original_top2["landing_distance_m"]
+    # Skipped item is distinct
+    assert promoted_champion["id"] != original_top1["id"]
+

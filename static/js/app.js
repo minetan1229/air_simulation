@@ -746,9 +746,9 @@ class ConsoleApp {
 
         // Render trajectories and 100-plane InstancedMesh in Three.js viewport
         if (this.viewport && res.sample_trajectories.length) {
-          this.viewport.setEnsembleTracks(res.sample_trajectories);
+          this.viewport.setEnsembleTracks(res.sample_trajectories, this._skipFirstRank);
           this.viewport.filterEnsembleTracks("top1");
-          this.viewport.setEnsembleFleet(res.sample_trajectories);
+          this.viewport.setEnsembleFleet(res.sample_trajectories, this._skipFirstRank);
           this.viewport.setCameraMode("lead");
           this._setCameraChipActive("cam-mode-lead");
         }
@@ -787,17 +787,27 @@ class ConsoleApp {
 
   _showEnsembleChampionHud(res) {
     if (!res) return;
+    this._lastEnsembleResult = res;
     const card = this.dom["ensemble-champion-card"];
     if (!card) return;
 
-    const bestFlight = res.best_flight || (res.sample_trajectories && res.sample_trajectories[0]) || {};
+    // Full trajectories list sorted descending by distance
+    const fullList = (res.sample_trajectories && res.sample_trajectories.length)
+      ? [...res.sample_trajectories].sort((a, b) => (Number(b.landing_distance_m) || 0) - (Number(a.landing_distance_m) || 0))
+      : (res.leaderboard ? [...res.leaderboard] : []);
+
+    const isSkipping = Boolean(this._skipFirstRank && fullList.length > 1);
+    const skippedFlight = isSkipping ? fullList[0] : null;
+    const effectiveList = isSkipping ? fullList.slice(1) : fullList;
+
+    const bestFlight = effectiveList.length ? effectiveList[0] : (res.best_flight || {});
     const bestTimeFlight = res.best_hangtime || {};
     const bestAltFlight = res.best_altitude || {};
 
-    const worstFlight = res.worst_flight || (res.sample_trajectories && res.sample_trajectories[res.sample_trajectories.length - 1]) || {};
+    const worstFlight = res.worst_flight || (fullList.length ? fullList[fullList.length - 1] : {});
     const worstTimeFlight = res.worst_hangtime || {};
 
-    const maxDist = Number(res.max_distance_m || bestFlight.landing_distance_m || 0);
+    const maxDist = Number(bestFlight.landing_distance_m || res.max_distance_m || 0);
     const meanDist = Number(res.mean_distance_m || 0);
     const minDist = Number(res.min_distance_m || worstFlight.landing_distance_m || 0);
     const maxTime = Number(res.max_flight_time_s || bestTimeFlight.flight_time_s || 0);
@@ -818,8 +828,34 @@ class ConsoleApp {
     // 1. 最高値 (Max)
     if (this.dom["champ-best-dist"]) this.dom["champ-best-dist"].textContent = maxDist.toFixed(2);
     if (this.dom["champ-best-detail"]) {
-      this.dom["champ-best-detail"].textContent = `機体 #${bestId} · 初速: ${bestSpeed} m/s · 仰角: ${bestPitch}° · ロール: ${bestRoll}°`;
+      const extraLabel = isSkipping ? ` (※元1位 #${skippedFlight.id} 除外中)` : "";
+      this.dom["champ-best-detail"].textContent = `機体 #${bestId}${extraLabel} · 初速: ${bestSpeed} m/s · 仰角: ${bestPitch}° · ロール: ${bestRoll}°`;
     }
+    if (this.dom["champ-promoted-tag"]) {
+      this.dom["champ-promoted-tag"].style.display = isSkipping ? "inline-block" : "none";
+    }
+    if (this.dom["champ-skip-status-badge"]) {
+      this.dom["champ-skip-status-badge"].style.display = isSkipping ? "inline-block" : "none";
+      if (isSkipping && skippedFlight) {
+        this.dom["champ-skip-status-badge"].textContent = `⚠️ 元1位(#${skippedFlight.id} ${Number(skippedFlight.landing_distance_m || 0).toFixed(2)}m) スキップ中 · 2位(#${bestId})を最高記録に繰り上げ`;
+      }
+    }
+
+    // Update skip button UI state
+    const skipBtn = this.dom["champ-btn-skip-top1"];
+    const skipLbl = this.dom["champ-label-skip-top1"];
+    if (skipBtn) {
+      if (isSkipping) {
+        skipBtn.classList.add("active");
+        if (skipLbl) skipLbl.textContent = "↩️ 1位を含める (元に戻す)";
+        skipBtn.title = `現在、異常値の機体 #${skippedFlight.id} を除外して2位(機体 #${bestId})を繰り上げています。クリックで元に戻します。`;
+      } else {
+        skipBtn.classList.remove("active");
+        if (skipLbl) skipLbl.textContent = "1位をスキップ (2位繰上)";
+        skipBtn.title = "1位のデータに異常値がある場合に除外（スキップ）し、2位を繰り上げます";
+      }
+    }
+
     if (this.dom["champ-best-time"]) this.dom["champ-best-time"].textContent = maxTime.toFixed(2);
     if (this.dom["champ-best-time-detail"]) {
       this.dom["champ-best-time-detail"].textContent = `機体 #${bestTimeFlight.id ?? "—"} · 飛距離: ${Number(bestTimeFlight.landing_distance_m || 0).toFixed(2)}m`;
@@ -846,20 +882,47 @@ class ConsoleApp {
     }
 
     if (this.dom["champ-backend-sub"]) {
-      this.dom["champ-backend-sub"].textContent = `${res.backend_display || res.backend || "CuPy GPU"} · 計 ${res.trajectories_count || 100}機`;
+      const skipNote = isSkipping ? " [1位除外中]" : "";
+      this.dom["champ-backend-sub"].textContent = `${res.backend_display || res.backend || "CuPy GPU"} · 計 ${res.trajectories_count || 100}機${skipNote}`;
     }
 
-    // Leaderboard table body: Top 5 + Worst 1
+    // Leaderboard table body
     const tbody = this.dom["champ-leaderboard-body"];
     if (tbody) {
       tbody.innerHTML = "";
-      const topList = res.leaderboard ? res.leaderboard.slice(0, 5) : (res.sample_trajectories ? res.sample_trajectories.slice(0, 5) : []);
       const totalCount = res.trajectories_count || (res.sample_trajectories ? res.sample_trajectories.length : 100);
+
+      // スキップ中なら元の1位を除外行として明示表示
+      if (isSkipping && skippedFlight) {
+        const trSkip = document.createElement("tr");
+        trSkip.className = "clickable champ-rank-skipped";
+        trSkip.innerHTML = `
+          <td><strong>🚫 [除外] 元1位</strong></td>
+          <td>#${skippedFlight.id}</td>
+          <td><strong>${Number(skippedFlight.landing_distance_m || 0).toFixed(2)} m</strong></td>
+          <td>${Number(skippedFlight.flight_time_s || 0).toFixed(2)} s</td>
+          <td>${Number(skippedFlight.max_altitude_m || 0).toFixed(2)} m</td>
+          <td>${skippedFlight.speed_mps != null ? skippedFlight.speed_mps : "—"} m/s</td>
+          <td>${skippedFlight.pitch_deg != null ? skippedFlight.pitch_deg : "—"}°</td>
+        `;
+        trSkip.title = `除外中の元1位 機体 #${skippedFlight.id} (クリックでフォーカス)`;
+        trSkip.addEventListener("click", () => {
+          if (this.viewport && skippedFlight.id != null) {
+            this.viewport.focusTrajectory(skippedFlight.id);
+            this.notify(`除外中の元1位 機体 #${skippedFlight.id} (${Number(skippedFlight.landing_distance_m || 0).toFixed(2)}m) にカメラをフォーカスしました`, "info");
+          }
+        });
+        tbody.appendChild(trSkip);
+      }
+
+      const topList = effectiveList.slice(0, 5);
 
       topList.forEach((item, idx) => {
         const tr = document.createElement("tr");
         tr.className = `clickable ${idx === 0 ? "champ-rank-1" : ""}`;
-        const rankMedal = idx === 0 ? "🥇 1位 (最高)" : idx === 1 ? "🥈 2位" : idx === 2 ? "🥉 3位" : `${idx + 1}位`;
+        const rankMedal = idx === 0
+          ? (isSkipping ? "🥇 1位 (繰上最高)" : "🥇 1位 (最高)")
+          : idx === 1 ? "🥈 2位" : idx === 2 ? "🥉 3位" : `${idx + 1}位`;
         tr.innerHTML = `
           <td><strong>${rankMedal}</strong></td>
           <td>#${item.id}</td>
@@ -1041,7 +1104,8 @@ class ConsoleApp {
         if (slideRoll) slideRoll.value = roll;
         updateQuickLaunch();
 
-        this.notify(`1位の投げ方を設定に反映しました！ (初速: ${speed}m/s, 仰角: ${pitch}°, ロール: ${roll}°)`, "ok");
+        const rankTag = this._skipFirstRank ? "繰り上げ1位" : "1位";
+        this.notify(`${rankTag} (機体 #${f.id ?? "—"}) の投げ方を設定に反映しました！ (初速: ${speed}m/s, 仰角: ${pitch}°, ロール: ${roll}°)`, "ok");
       });
     }
     if (this.dom["champ-btn-focus"]) {
@@ -1049,8 +1113,24 @@ class ConsoleApp {
         if (!this._lastChampionFlight || this._lastChampionFlight.id == null) return;
         if (this.viewport) {
           this.viewport.focusTrajectory(this._lastChampionFlight.id);
-          this.notify(`1位 (機体 #${this._lastChampionFlight.id}) にフォーカスしました`, "info");
+          const rankTag = this._skipFirstRank ? "繰り上げ1位" : "1位";
+          this.notify(`${rankTag} (機体 #${this._lastChampionFlight.id}) にフォーカスしました`, "info");
         }
+      });
+    }
+    if (this.dom["champ-btn-skip-top1"]) {
+      this.dom["champ-btn-skip-top1"].addEventListener("click", () => {
+        this._skipFirstRank = !this._skipFirstRank;
+        if (this._lastEnsembleResult) {
+          this._showEnsembleChampionHud(this._lastEnsembleResult);
+        }
+        if (this.viewport) {
+          this.viewport.setSkipFirstRank(this._skipFirstRank);
+        }
+        const msg = this._skipFirstRank
+          ? "1位のデータを除外（スキップ）し、2位を最高記録に繰り上げました"
+          : "1位のデータ除外を解除し、元のランキングに戻しました";
+        this.notify(msg, "ok");
       });
     }
     if (this.dom["champ-btn-focus-worst"]) {
