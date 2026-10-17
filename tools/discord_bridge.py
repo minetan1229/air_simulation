@@ -6,6 +6,8 @@ Features:
 - Workspace strictly locked to simulation/v3 directory
 - Real-time live status updates (Thinking progress, Tool executions, Subagent spawns & completion)
 - Interactive multi-turn chat (DM or dedicated channel without repeated mentions)
+- Chat List & History inspection (!chats / /chats) with resumption (!resume / /resume)
+- Direct chat command (!chat <prompt> / /chat <prompt>)
 - Dynamic model selection via slash commands (/model) or prefix (!model, !m)
 - Process cancellation / abort (!abort, /abort, or 🛑 reaction)
 - User / Channel access control
@@ -16,11 +18,13 @@ import io
 import json
 import logging
 import os
+import re
 import shutil
 import sys
 import time
+from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Optional, Set
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 import discord
 from discord import app_commands
@@ -51,6 +55,10 @@ ALLOWED_CHANNEL_IDS: Set[int] = {
 # Strictly lock workspace to simulation/v3
 WORKSPACE_DIR = Path(__file__).resolve().parent.parent
 
+# Brain directories to discover conversation sessions
+CLI_BRAIN_DIR = Path(os.environ.get("USERPROFILE", "")) / ".gemini" / "antigravity-cli" / "brain"
+APP_BRAIN_DIR = Path(os.environ.get("USERPROFILE", "")) / ".gemini" / "antigravity" / "brain"
+
 # Available Models in AGY
 AVAILABLE_MODELS: Dict[str, str] = {
     "gemini-3.8-flash-low": "Gemini 3.8 Flash (Low - High Speed)",
@@ -60,6 +68,57 @@ AVAILABLE_MODELS: Dict[str, str] = {
     "claude-opus-4-6-thinking": "Claude Opus 4.6 (Thinking)",
     "gpt-oss-120b-medium": "GPT-OSS 120B (Medium)",
 }
+
+
+def get_recent_conversations(limit: int = 10) -> List[Dict[str, Any]]:
+    """Scan CLI and App brain folders to find past conversation sessions with their initial prompt and timestamp."""
+    sessions: List[Dict[str, Any]] = []
+    seen_ids: Set[str] = set()
+
+    for brain_root in (CLI_BRAIN_DIR, APP_BRAIN_DIR):
+        if not brain_root.exists():
+            continue
+        for item in brain_root.iterdir():
+            if not item.is_dir() or item.name in seen_ids or item.name.startswith("."):
+                continue
+
+            transcript_file = item / ".system_generated" / "logs" / "transcript.jsonl"
+            if not transcript_file.exists():
+                continue
+
+            seen_ids.add(item.name)
+            mtime = transcript_file.stat().st_mtime
+            first_prompt = "No prompt recorded"
+
+            try:
+                with open(transcript_file, "r", encoding="utf-8") as f:
+                    for line in f:
+                        line_str = line.strip()
+                        if not line_str:
+                            continue
+                        entry = json.loads(line_str)
+                        if entry.get("type") == "USER_INPUT":
+                            raw_content = entry.get("content", "")
+                            match = re.search(r"<USER_REQUEST>\s*(.*?)\s*</USER_REQUEST>", raw_content, re.DOTALL)
+                            if match:
+                                first_prompt = match.group(1).strip()
+                            else:
+                                first_prompt = raw_content[:120].strip()
+                            first_prompt = " ".join(first_prompt.split())
+                            break
+            except Exception:
+                pass
+
+            sessions.append({
+                "id": item.name,
+                "short_id": item.name[:8],
+                "mtime": mtime,
+                "date_str": datetime.fromtimestamp(mtime).strftime("%m/%d %H:%M"),
+                "prompt": first_prompt[:70] + ("..." if len(first_prompt) > 70 else ""),
+            })
+
+    sessions.sort(key=lambda s: s["mtime"], reverse=True)
+    return sessions[:limit]
 
 
 class ModelSelectView(discord.ui.View):
@@ -90,6 +149,39 @@ class ModelSelectView(discord.ui.View):
     async def select_callback(self, interaction: discord.Interaction):
         selected_model = interaction.data["values"][0]
         await self.on_select_callback(interaction, selected_model)
+
+
+class ChatSelectView(discord.ui.View):
+    """Dropdown View for resuming past conversations interactively."""
+    def __init__(self, sessions: List[Dict[str, Any]], current_conv: Optional[str], on_select_callback):
+        super().__init__(timeout=60)
+        self.on_select_callback = on_select_callback
+
+        options = []
+        for s in sessions[:15]:
+            is_active = (s["id"] == current_conv or s["short_id"] == current_conv)
+            label = f"{s['date_str']} - {s['prompt']}"[:95]
+            options.append(
+                discord.SelectOption(
+                    label=label,
+                    value=s["id"],
+                    description=f"Session ID: {s['short_id']}",
+                    default=is_active,
+                )
+            )
+
+        if options:
+            select = discord.ui.Select(
+                placeholder="Select a conversation to resume...",
+                options=options,
+                custom_id="chat_select",
+            )
+            select.callback = self.select_callback
+            self.add_item(select)
+
+    async def select_callback(self, interaction: discord.Interaction):
+        selected_conv = interaction.data["values"][0]
+        await self.on_select_callback(interaction, selected_conv)
 
 
 class DiscordBridgeClient(discord.Client):
@@ -143,6 +235,83 @@ async def on_ready():
         logger.info(f"Authorized User IDs: {ALLOWED_USER_IDS}")
     else:
         logger.warning("No ALLOWED_USER_IDS set. Anyone in invited channels can control Antigravity!")
+
+
+# ==========================================
+# Slash Commands
+# ==========================================
+
+@client.tree.command(name="chat", description="Send a prompt directly to Antigravity")
+@app_commands.describe(prompt="The instruction or question for Antigravity")
+async def cmd_chat(interaction: discord.Interaction, prompt: str):
+    if not check_auth(interaction):
+        await interaction.response.send_message("❌ Unauthorized: You do not have permission to run commands.", ephemeral=True)
+        return
+
+    await interaction.response.defer()
+    await execute_agy_prompt(interaction.channel, prompt, interaction.user)
+
+
+@client.tree.command(name="chats", description="List recent conversation sessions and resume them")
+async def cmd_chats(interaction: discord.Interaction):
+    if not check_auth(interaction):
+        await interaction.response.send_message("❌ Unauthorized.", ephemeral=True)
+        return
+
+    sessions = get_recent_conversations(10)
+    current_conv = client.channel_conversations.get(interaction.channel_id)
+
+    if not sessions:
+        await interaction.response.send_message("ℹ️ No previous conversation history found in workspace.", ephemeral=True)
+        return
+
+    embed = discord.Embed(
+        title="💬 Recent Conversations (Chat List)",
+        description=f"Current active session: **`{current_conv[:8] if current_conv else 'None (New)'}`**\nSelect from dropdown or use `/resume <id>` to switch.",
+        color=discord.Color.teal(),
+    )
+    for s in sessions:
+        prefix = "👉 **[ACTIVE]** " if (s["id"] == current_conv or s["short_id"] == current_conv) else "• "
+        embed.add_field(
+            name=f"{prefix}`{s['short_id']}` ({s['date_str']})",
+            value=s["prompt"] or "(No prompt)",
+            inline=False,
+        )
+
+    view = ChatSelectView(sessions, current_conv, on_chat_selected)
+    await interaction.response.send_message(embed=embed, view=view)
+
+
+async def on_chat_selected(interaction: discord.Interaction, selected_conv: str):
+    if not check_auth(interaction):
+        await interaction.response.send_message("❌ Unauthorized.", ephemeral=True)
+        return
+    client.channel_conversations[interaction.channel_id] = selected_conv
+    await interaction.response.send_message(
+        f"✅ Conversation resumed: **`{selected_conv[:8]}`** (`{selected_conv}`). Next messages will continue this context."
+    )
+
+
+@client.tree.command(name="resume", description="Resume a conversation by session ID")
+@app_commands.describe(conversation_id="Session ID or 8-character short ID")
+async def cmd_resume(interaction: discord.Interaction, conversation_id: str):
+    if not check_auth(interaction):
+        await interaction.response.send_message("❌ Unauthorized.", ephemeral=True)
+        return
+
+    cid = conversation_id.strip()
+    # Resolve short ID if given
+    sessions = get_recent_conversations(30)
+    matched_full_id = cid
+    for s in sessions:
+        if s["id"].startswith(cid):
+            matched_full_id = s["id"]
+            break
+
+    client.channel_conversations[interaction.channel_id] = matched_full_id
+    await interaction.response.send_message(
+        f"✅ Resumed conversation **`{matched_full_id[:8]}`** (`{matched_full_id}`)."
+    )
 
 
 @client.tree.command(name="models", description="List all available Antigravity models")
@@ -239,6 +408,10 @@ async def cmd_abort(interaction: discord.Interaction):
         await interaction.response.send_message("ℹ️ No active task is currently running in this channel.")
 
 
+# ==========================================
+# Execution Engine (Live Progress & Streaming)
+# ==========================================
+
 async def execute_agy_prompt(
     channel: discord.TextChannel | discord.DMChannel,
     prompt: str,
@@ -311,7 +484,6 @@ async def execute_agy_prompt(
                         inline=False,
                     )
                     if recent_activity_log:
-                        # Keep last 3 activity events
                         log_display = "\n".join(recent_activity_log[-3:])
                         if len(status_embed.fields) > 1:
                             status_embed.set_field_at(1, name="Recent Activity", value=log_display[:500], inline=False)
@@ -353,7 +525,7 @@ async def execute_agy_prompt(
                         if subagents:
                             sub_types = ", ".join(s.get("type_name", "subagent") for s in subagents)
                             current_status_line = f"👥 Subagent running: **{sub_types}**"
-                            recent_activity_log.append(f"👥 Subagent `{sub_types}` started")
+                            recent_activity_log.append(f"👥 Subagent `{sub_types}` active")
                         else:
                             current_status_line = "👥 Managing subagents..."
                         await update_live_embed()
@@ -440,6 +612,10 @@ async def execute_agy_prompt(
             await channel.send(content=preview, file=discord_file)
 
 
+# ==========================================
+# Text Message & Prefix Commands Handler
+# ==========================================
+
 @client.event
 async def on_message(message: discord.Message):
     # Ignore bot messages
@@ -448,18 +624,64 @@ async def on_message(message: discord.Message):
 
     content = message.content.strip()
 
-    # Prefix commands (!model, !models, !new, !abort, !help)
+    # Prefix commands (!chat, !chats, !resume, !model, !models, !new, !abort, !help)
     if content.startswith(("!", "/")):
         parts = content[1:].split(maxsplit=1)
         cmd_name = parts[0].lower() if parts else ""
         cmd_arg = parts[1].strip() if len(parts) > 1 else ""
 
-        if cmd_name in ("model", "m", "models", "new", "abort", "help"):
+        valid_cmds = ("chat", "chats", "history", "resume", "model", "m", "models", "new", "abort", "help")
+        if cmd_name in valid_cmds:
             if not client.is_authorized(message.author.id, message.channel.id):
                 await message.reply("❌ Unauthorized: You do not have permission to control Antigravity.")
                 return
 
-            if cmd_name in ("model", "m"):
+            if cmd_name == "chat":
+                if not cmd_arg:
+                    await message.reply("⚠️ Please provide a prompt. Usage: `!chat <prompt>`")
+                    return
+                async with message.channel.typing():
+                    await execute_agy_prompt(message.channel, cmd_arg, message.author, reply_to_msg=message)
+                return
+
+            elif cmd_name in ("chats", "history"):
+                sessions = get_recent_conversations(10)
+                current_conv = client.channel_conversations.get(message.channel.id)
+                if not sessions:
+                    await message.reply("ℹ️ No previous conversation history found in workspace.")
+                    return
+                embed = discord.Embed(
+                    title="💬 Recent Conversations (Chat List)",
+                    description=f"Current active session: **`{current_conv[:8] if current_conv else 'None (New)'}`**\nSelect below or type `!resume <id>` to switch.",
+                    color=discord.Color.teal(),
+                )
+                for s in sessions:
+                    prefix = "👉 **[ACTIVE]** " if (s["id"] == current_conv or s["short_id"] == current_conv) else "• "
+                    embed.add_field(
+                        name=f"{prefix}`{s['short_id']}` ({s['date_str']})",
+                        value=s["prompt"] or "(No prompt)",
+                        inline=False,
+                    )
+                view = ChatSelectView(sessions, current_conv, on_chat_selected)
+                await message.reply(embed=embed, view=view)
+                return
+
+            elif cmd_name == "resume":
+                if not cmd_arg:
+                    await message.reply("⚠️ Please specify a session ID. Example: `!resume 8678b84b`")
+                    return
+                cid = cmd_arg.strip()
+                sessions = get_recent_conversations(30)
+                matched_id = cid
+                for s in sessions:
+                    if s["id"].startswith(cid):
+                        matched_id = s["id"]
+                        break
+                client.channel_conversations[message.channel.id] = matched_id
+                await message.reply(f"✅ Resumed conversation **`{matched_id[:8]}`** (`{matched_id}`). Next messages will continue this session.")
+                return
+
+            elif cmd_name in ("model", "m"):
                 if not cmd_arg:
                     current = client.get_model(message.channel.id)
                     view = ModelSelectView(current, on_model_selected)
@@ -510,11 +732,14 @@ async def on_message(message: discord.Message):
             elif cmd_name == "help":
                 await message.reply(
                     "**Antigravity Remote Bridge Commands (`simulation/v3`):**\n"
+                    "• `!chat <prompt>`: Send prompt directly to agent\n"
+                    "• `!chats` (or `!history`): View recent conversation list & switch session\n"
+                    "• `!resume <id>`: Resume previous session by ID (e.g. `!resume 8678b84b`)\n"
                     "• `!model` or `!m [name]`: Change or view model\n"
                     "• `!models`: List all available models\n"
                     "• `!new`: Reset conversation context (start fresh)\n"
                     "• `!abort`: Terminate currently running task\n"
-                    "• `@Bot <prompt>` or DM or dedicated channel chat: Chat naturally with Antigravity"
+                    "• Natural Chat: DM or dedicated channel chat or `@Bot <prompt>`"
                 )
                 return
 
@@ -537,10 +762,12 @@ async def on_message(message: discord.Message):
     prompt = message.content.replace(f"<@{client.user.id}>", "").strip()
     if not prompt:
         current_model = client.get_model(message.channel.id)
+        current_conv = client.channel_conversations.get(message.channel.id)
+        conv_label = current_conv[:8] if current_conv else "New Session"
         await message.reply(
             f"👋 Antigravity Remote Bridge is ready in `simulation/v3`.\n"
-            f"Active Model: **`{current_model}`**\n"
-            f"Send me any task or instruction, or use `!model` to switch models."
+            f"Active Model: **`{current_model}`** | Session: **`{conv_label}`**\n"
+            f"Send me any task, or type `!help` / `!chats` to manage sessions."
         )
         return
 
