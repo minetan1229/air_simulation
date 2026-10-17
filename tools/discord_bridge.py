@@ -378,6 +378,79 @@ async def on_message(message: discord.Message):
     if message.author.bot:
         return
 
+    content = message.content.strip()
+
+    # Support prefix commands (!model, !models, !new, !abort)
+    if content.startswith(("!", "/")):
+        parts = content[1:].split(maxsplit=1)
+        cmd_name = parts[0].lower() if parts else ""
+        cmd_arg = parts[1].strip() if len(parts) > 1 else ""
+
+        if cmd_name in ("model", "m", "models", "new", "abort", "help"):
+            if not client.is_authorized(message.author.id, message.channel.id):
+                await message.reply("❌ Unauthorized: You do not have permission to control Antigravity.")
+                return
+
+            if cmd_name in ("model", "m"):
+                if not cmd_arg:
+                    current = client.get_model(message.channel.id)
+                    view = ModelSelectView(current, on_model_selected)
+                    await message.reply(f"Current active model: **`{current}`**\nSelect a new model below:", view=view)
+                    return
+                # Match partial or full model name
+                target_model = None
+                for mid in AVAILABLE_MODELS:
+                    if cmd_arg.lower() in mid.lower():
+                        target_model = mid
+                        break
+                if not target_model:
+                    await message.reply(f"❌ Unknown model: `{cmd_arg}`\nAvailable: {', '.join(f'`{m}`' for m in AVAILABLE_MODELS.keys())}")
+                    return
+                client.set_model(message.channel.id, target_model)
+                await message.reply(f"✅ Active model updated to: **{AVAILABLE_MODELS[target_model]}** (`{target_model}`)")
+                return
+
+            elif cmd_name == "models":
+                current = client.get_model(message.channel.id)
+                embed = discord.Embed(
+                    title="🤖 Available Antigravity Models",
+                    description=f"Current active model in this channel: **`{current}`**",
+                    color=discord.Color.blue(),
+                )
+                for mid, name in AVAILABLE_MODELS.items():
+                    prefix = "👉 " if mid == current else "• "
+                    embed.add_field(name=f"{prefix}{name}", value=f"`{mid}`", inline=False)
+                await message.reply(embed=embed)
+                return
+
+            elif cmd_name == "new":
+                client.channel_conversations[message.channel.id] = None
+                await message.reply("🔄 Conversation reset. Next message will start a new session.")
+                return
+
+            elif cmd_name == "abort":
+                proc = client.active_processes.get(message.channel.id)
+                if proc and proc.returncode is None:
+                    try:
+                        proc.kill()
+                        await message.reply("🛑 Active Antigravity task has been terminated.")
+                    except Exception as e:
+                        await message.reply(f"⚠️ Failed to terminate process: {e}")
+                else:
+                    await message.reply("ℹ️ No active task is currently running in this channel.")
+                return
+
+            elif cmd_name == "help":
+                await message.reply(
+                    "**Antigravity Remote Bridge Commands:**\n"
+                    "• `!model` or `!m [name]`: Change or view model\n"
+                    "• `!models`: List all models\n"
+                    "• `!new`: Reset conversation context\n"
+                    "• `!abort`: Terminate currently running task\n"
+                    "• `@Bot <prompt>`: Send instruction to Antigravity"
+                )
+                return
+
     # Check mention or DM
     is_mentioned = client.user in message.mentions
     is_dm = isinstance(message.channel, discord.DMChannel)
@@ -396,12 +469,13 @@ async def on_message(message: discord.Message):
         await message.reply(
             f"👋 Antigravity Remote Bridge is ready.\n"
             f"Active Model: **`{current_model}`**\n"
-            f"Send me any task or instruction, or use `/model` to change models."
+            f"Send me any task or instruction, or use `!model` to change models."
         )
         return
 
     async with message.channel.typing():
         await execute_agy_prompt(message.channel, prompt, message.author, reply_to_msg=message)
+
 
 
 @client.event
