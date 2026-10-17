@@ -52,3 +52,38 @@ def test_off_diagonal_body_inertia_retains_axis_information():
                          yaw_inertia_kgm2=4e-5, inertia_xy_kgm2=-1e-6)
     tensor = body_inertia_tensor(derived_properties(cfg))
     assert tensor[0, 1] == tensor[1, 0] == -1e-6
+
+
+def test_clamp_ranges_repairs_triangle_inequality():
+    cfg = AircraftConfig(roll_inertia_kgm2=3e-5, pitch_inertia_kgm2=1e-5, yaw_inertia_kgm2=1e-5)
+    clamped = cfg.clamp_ranges()
+    # Clamped config must be accepted by body_inertia_tensor
+    tensor = body_inertia_tensor(derived_properties(clamped))
+    principal = np.linalg.eigvalsh(tensor)
+    assert principal[-1] <= principal[0] + principal[1] + 1e-12 * principal[-1]
+
+
+def test_partial_inertia_override_preserves_triangle_inequality():
+    # Only pitch is overridden (e.g. from fuselage length)
+    cfg_pitch = AircraftConfig(pitch_inertia_kgm2=5e-5)
+    tensor_p = body_inertia_tensor(derived_properties(cfg_pitch))
+    principal_p = np.linalg.eigvalsh(tensor_p)
+    assert principal_p[-1] <= principal_p[0] + principal_p[1] + 1e-12 * principal_p[-1]
+
+    # Only roll is overridden (e.g. from span)
+    cfg_roll = AircraftConfig(roll_inertia_kgm2=5e-5)
+    tensor_r = body_inertia_tensor(derived_properties(cfg_roll))
+    principal_r = np.linalg.eigvalsh(tensor_r)
+    assert principal_r[-1] <= principal_r[0] + principal_r[1] + 1e-12 * principal_r[-1]
+
+
+def test_flight_simulator_gracefully_handles_invalid_inertia():
+    from physics.config_schema import EnvironmentConfig
+    from physics.flight_sim import FlightSimulator
+    # Even if an impossible inertia is passed directly into FlightSimulator, it safely recovers
+    bad_cfg = AircraftConfig(roll_inertia_kgm2=3e-5, pitch_inertia_kgm2=1e-5, yaw_inertia_kgm2=1e-5)
+    sim = FlightSimulator(aircraft=bad_cfg, environment=EnvironmentConfig())
+    assert sim._inertia is not None
+    principal = np.linalg.eigvalsh(sim._inertia)
+    assert principal[-1] <= principal[0] + principal[1] + 1e-12 * principal[-1]
+

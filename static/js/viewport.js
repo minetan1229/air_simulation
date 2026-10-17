@@ -156,9 +156,15 @@ export class Viewport {
     this.fleetDuration = 0;
     this.fleetLeadIndex = 0;
     this.fleetPlaying = false;
-    this.cameraMode = "reset"; // "lead" | "swarm" | "fleet" | "reset"
+    this.cameraMode = "mean"; // "mean" | "lead" | "fleet" | "fixed" | "reset"
     this._swarmCenter = new THREE.Vector3(0, 1.8, 0);
     this._leadPos = new THREE.Vector3(0, 1.8, 0);
+    this._meanPos = new THREE.Vector3(0, 1.8, 0);
+    this._camSmoothTarget = new THREE.Vector3(0, 1.8, 0);
+    this._camSmoothPos = new THREE.Vector3(0, 1.8, 0);
+    this._hasCamSmoothInit = false;
+    this.meanTrajectory = null;
+    this.meanMesh = null;
 
     // Reusable temp objects for 100-plane fleet animation (Zero GC allocation)
     this._fDummy = new THREE.Object3D();
@@ -1025,11 +1031,12 @@ export class Viewport {
     }
   }
 
-  setEnsembleTracks(trajectories, skipFirst = false) {
+  setEnsembleTracks(trajectories, skipFirst = false, meanTrajectory = null) {
     this.clearEnsembleTracks();
     if (!trajectories || !trajectories.length) return;
 
     this._skipFirstRank = Boolean(skipFirst);
+    this._meanTrajectoryData = meanTrajectory || this._meanTrajectoryData;
     const group = new THREE.Group();
     group.name = "ensemble-trajectories";
     this._ensembleTrajectories = trajectories;
@@ -1063,31 +1070,13 @@ export class Viewport {
     const midPositions = [];
     const midMarkerPositions = [];
 
+    // 1. Process 100 individual aircraft trajectories (subtle, translucent)
     trajectories.forEach((tr, idx) => {
       const pts = tr.points;
       if (!pts || pts.length < 2) return;
 
       const isSkipped = tr.id === skippedId;
-      if (isSkipped) {
-        // Create invisible/muted placeholder for skipped trajectory
-        const positions = [];
-        pts.forEach((p) => {
-          positions.push(Number(p.x) || 0, Number(p.z) || 0, Number(p.y) || 0);
-        });
-        const geom = new THREE.BufferGeometry();
-        geom.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
-        const mat = new THREE.LineBasicMaterial({
-          color: 0x9aa0a6,
-          transparent: true,
-          opacity: 0.15,
-          linewidth: 1,
-        });
-        const line = new THREE.Line(geom, mat);
-        line.userData = { trajectoryId: tr.id, rank: 9999, isSkipped: true };
-        line.visible = false;
-        group.add(line);
-        return;
-      }
+      if (isSkipped) return;
 
       const effIndex = effectiveSorted.findIndex((s) => s.id === tr.id);
       const rank = effIndex >= 0 ? (effIndex + 1) : 999;
@@ -1099,7 +1088,7 @@ export class Viewport {
       const isSpecial = isRank1 || isRank2 || isRank3 || isWorst;
 
       if (!isSpecial) {
-        // Collect into merged LineSegments for high-performance batch rendering (1 draw call)
+        // Collect into merged LineSegments with low opacity for clean swarm dispersion
         for (let i = 0; i < pts.length - 1; i++) {
           const p1 = pts[i];
           const p2 = pts[i + 1];
@@ -1115,7 +1104,7 @@ export class Viewport {
         return;
       }
 
-      // Individual prominent lines for top 3 and worst planes
+      // Individual lines for top 3 and worst
       const positions = [];
       pts.forEach((p) => {
         positions.push(Number(p.x) || 0, Number(p.z) || 0, Number(p.y) || 0);
@@ -1125,23 +1114,23 @@ export class Viewport {
       geom.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
 
       let col;
-      let opacity = 0.85;
+      let opacity = 0.65;
       let linewidth = 1;
 
       if (isRank1) {
         col = new THREE.Color(0xffb300); // 1st Gold (最高値)
-        opacity = 1.0;
-        linewidth = 3;
-      } else if (isWorst) {
-        col = new THREE.Color(0xe53935); // Worst Red (最低値)
         opacity = 0.95;
         linewidth = 2;
+      } else if (isWorst) {
+        col = new THREE.Color(0xe53935); // Worst Red (最低値)
+        opacity = 0.70;
+        linewidth = 1;
       } else if (isRank2) {
         col = new THREE.Color(0xb0bec5); // 2nd Silver
-        opacity = 0.85;
+        opacity = 0.70;
       } else if (isRank3) {
         col = new THREE.Color(0xcd7f32); // 3rd Bronze
-        opacity = 0.80;
+        opacity = 0.65;
       } else {
         col = palette[idx % palette.length];
       }
@@ -1154,102 +1143,126 @@ export class Viewport {
       });
 
       const line = new THREE.Line(geom, mat);
-      line.userData = { trajectoryId: tr.id, rank: rank, isRank1: isRank1, isWorst: isWorst };
+      line.userData = { trajectoryId: tr.id, rank: rank, isRank1: isRank1, isWorst: isWorst, isIndividual: true };
       group.add(line);
 
-      // Prominent landing ground markers
+      // Landing markers
       const lastPt = pts[pts.length - 1];
       if (lastPt) {
         const lx = Number(lastPt.x) || 0;
         const lz = Number(lastPt.y) || 0;
 
         if (isRank1) {
-          // 1st place gold landing circle and outer pulsating ring (最高値)
-          const innerGeom = new THREE.CircleGeometry(0.40, 24);
+          const innerGeom = new THREE.CircleGeometry(0.35, 24);
           innerGeom.rotateX(-Math.PI / 2);
           const innerMat = new THREE.MeshBasicMaterial({
             color: 0xffb300,
-            transparent: true,
-            opacity: 0.95,
-            side: THREE.DoubleSide,
-          });
-          const inner = new THREE.Mesh(innerGeom, innerMat);
-          inner.position.set(lx, 0.01, lz);
-          inner.userData = { trajectoryId: tr.id, rank: 1 };
-          group.add(inner);
-
-          const ringGeom = new THREE.RingGeometry(0.48, 0.65, 32);
-          ringGeom.rotateX(-Math.PI / 2);
-          const ringMat = new THREE.MeshBasicMaterial({
-            color: 0xffd54f,
-            transparent: true,
-            opacity: 0.75,
-            side: THREE.DoubleSide,
-          });
-          const ring = new THREE.Mesh(ringGeom, ringMat);
-          ring.position.set(lx, 0.012, lz);
-          ring.userData = { trajectoryId: tr.id, rank: 1 };
-          group.add(ring);
-        } else if (isWorst) {
-          // Worst place red landing circle (最低値)
-          const innerGeom = new THREE.CircleGeometry(0.30, 20);
-          innerGeom.rotateX(-Math.PI / 2);
-          const innerMat = new THREE.MeshBasicMaterial({
-            color: 0xd32f2f,
             transparent: true,
             opacity: 0.90,
             side: THREE.DoubleSide,
           });
           const inner = new THREE.Mesh(innerGeom, innerMat);
-          inner.position.set(lx, 0.008, lz);
-          inner.userData = { trajectoryId: tr.id, rank: rank, isWorst: true };
+          inner.position.set(lx, 0.01, lz);
+          inner.userData = { trajectoryId: tr.id, rank: 1, isIndividual: true };
           group.add(inner);
-        } else {
-          const radius = (isRank2 || isRank3) ? 0.22 : 0.10;
-          const markerGeom = new THREE.CircleGeometry(radius, 16);
-          markerGeom.rotateX(-Math.PI / 2);
-          const markerMat = new THREE.MeshBasicMaterial({
-            color: col,
+        } else if (isWorst) {
+          const innerGeom = new THREE.CircleGeometry(0.24, 16);
+          innerGeom.rotateX(-Math.PI / 2);
+          const innerMat = new THREE.MeshBasicMaterial({
+            color: 0xd32f2f,
             transparent: true,
-            opacity: 0.85,
+            opacity: 0.75,
             side: THREE.DoubleSide,
           });
-          const marker = new THREE.Mesh(markerGeom, markerMat);
-          marker.position.set(lx, 0.005, lz);
-          marker.userData = { trajectoryId: tr.id, rank: rank };
-          group.add(marker);
+          const inner = new THREE.Mesh(innerGeom, innerMat);
+          inner.position.set(lx, 0.008, lz);
+          inner.userData = { trajectoryId: tr.id, rank: rank, isWorst: true, isIndividual: true };
+          group.add(inner);
         }
       }
     });
 
-    // Add merged LineSegments for the mid-tier trajectories (Draw call: 1)
+    // Add merged LineSegments for mid-tier (low opacity, thin lines)
     if (midPositions.length > 0) {
       const midGeom = new THREE.BufferGeometry();
       midGeom.setAttribute("position", new THREE.Float32BufferAttribute(midPositions, 3));
       const midMat = new THREE.LineBasicMaterial({
-        color: 0x4285f4,
+        color: 0x5c9eff,
         transparent: true,
-        opacity: 0.35,
+        opacity: 0.22, // Translucent to prevent visual clutter
+        linewidth: 1,
       });
       const midSegments = new THREE.LineSegments(midGeom, midMat);
-      midSegments.userData = { isMergedMid: true };
+      midSegments.userData = { isMergedMid: true, isIndividual: true };
       group.add(midSegments);
     }
 
-    // Add merged points for mid-tier landing spots (Draw call: 1)
     if (midMarkerPositions.length > 0) {
       const markerGeom = new THREE.BufferGeometry();
       markerGeom.setAttribute("position", new THREE.Float32BufferAttribute(midMarkerPositions, 3));
       const markerMat = new THREE.PointsMaterial({
         color: 0x1a73e8,
-        size: 5,
+        size: 4,
         transparent: true,
-        opacity: 0.60,
+        opacity: 0.40,
         sizeAttenuation: false,
       });
       const markerPoints = new THREE.Points(markerGeom, markerMat);
-      markerPoints.userData = { isMergedMid: true };
+      markerPoints.userData = { isMergedMid: true, isIndividual: true };
       group.add(markerPoints);
+    }
+
+    // 2. Add Representative "Mean Aircraft" track (prominent, thick, high contrast)
+    const meanTr = this._meanTrajectoryData;
+    if (meanTr && meanTr.points && meanTr.points.length >= 2) {
+      const meanPositions = [];
+      meanTr.points.forEach((p) => {
+        meanPositions.push(Number(p.x) || 0, Number(p.z) || 0, Number(p.y) || 0);
+      });
+      const meanGeom = new THREE.BufferGeometry();
+      meanGeom.setAttribute("position", new THREE.Float32BufferAttribute(meanPositions, 3));
+      const meanMat = new THREE.LineBasicMaterial({
+        color: 0x00e5ff, // Vivid cyan for outstanding prominence
+        transparent: true,
+        opacity: 1.0,
+        linewidth: 4,
+      });
+      const meanLine = new THREE.Line(meanGeom, meanMat);
+      meanLine.renderOrder = 10; // Draw on top
+      meanLine.userData = { isMeanTrack: true };
+      group.add(meanLine);
+
+      // Mean landing target marker (Bullseye ring)
+      const lastMeanPt = meanTr.points[meanTr.points.length - 1];
+      if (lastMeanPt) {
+        const mx = Number(lastMeanPt.x) || 0;
+        const mz = Number(lastMeanPt.y) || 0;
+        const meanRingGeom = new THREE.RingGeometry(0.35, 0.55, 32);
+        meanRingGeom.rotateX(-Math.PI / 2);
+        const meanRingMat = new THREE.MeshBasicMaterial({
+          color: 0x00e5ff,
+          transparent: true,
+          opacity: 0.95,
+          side: THREE.DoubleSide,
+        });
+        const meanRing = new THREE.Mesh(meanRingGeom, meanRingMat);
+        meanRing.position.set(mx, 0.015, mz);
+        meanRing.userData = { isMeanTrack: true };
+        group.add(meanRing);
+
+        const centerDotGeom = new THREE.CircleGeometry(0.18, 20);
+        centerDotGeom.rotateX(-Math.PI / 2);
+        const centerDotMat = new THREE.MeshBasicMaterial({
+          color: 0x1a73e8,
+          transparent: true,
+          opacity: 0.95,
+          side: THREE.DoubleSide,
+        });
+        const centerDot = new THREE.Mesh(centerDotGeom, centerDotMat);
+        centerDot.position.set(mx, 0.016, mz);
+        centerDot.userData = { isMeanTrack: true };
+        group.add(centerDot);
+      }
     }
 
     this.scene.add(group);
@@ -1257,6 +1270,10 @@ export class Viewport {
   }
 
   focusTrajectory(trajectoryId) {
+    if (trajectoryId === "mean") {
+      this.focusMeanTrajectory();
+      return;
+    }
     if (!this._ensembleTrajectories) return;
     const target = this._ensembleTrajectories.find((t) => t.id === trajectoryId);
     if (!target || !target.points || !target.points.length) return;
@@ -1266,7 +1283,21 @@ export class Viewport {
     const targetY = Number(last.z) || 0;
     const targetZ = Number(last.y) || 0;
 
-    // Smoothly animate orbit controls target towards landing position
+    if (this.controls) {
+      this.controls.target.set(targetX, Math.max(targetY + 0.5, 0.5), targetZ);
+      this.camera.position.set(targetX - 5.0, Math.max(targetY + 3.0, 3.0), targetZ + 5.0);
+      this.controls.update();
+    }
+  }
+
+  focusMeanTrajectory() {
+    const meanTr = this._meanTrajectoryData;
+    if (!meanTr || !meanTr.points || !meanTr.points.length) return;
+    const last = meanTr.points[meanTr.points.length - 1];
+    const targetX = Number(last.x) || 0;
+    const targetY = Number(last.z) || 0;
+    const targetZ = Number(last.y) || 0;
+
     if (this.controls) {
       this.controls.target.set(targetX, Math.max(targetY + 0.5, 0.5), targetZ);
       this.camera.position.set(targetX - 5.0, Math.max(targetY + 3.0, 3.0), targetZ + 5.0);
@@ -1277,72 +1308,36 @@ export class Viewport {
   setSkipFirstRank(skipFirst = false) {
     this._skipFirstRank = Boolean(skipFirst);
     if (this._ensembleTrajectories && this._ensembleTrajectories.length) {
-      this.setEnsembleTracks(this._ensembleTrajectories, this._skipFirstRank);
-      this.filterEnsembleTracks(this._ensembleMode || "top1");
-      this.setEnsembleFleet(this._ensembleTrajectories, this._skipFirstRank);
+      this.setEnsembleTracks(this._ensembleTrajectories, this._skipFirstRank, this._meanTrajectoryData);
+      this.filterEnsembleTracks(this._ensembleMode || "all");
+      this.setEnsembleFleet(this._ensembleTrajectories, this._skipFirstRank, this._meanTrajectoryData);
     }
   }
 
-  filterEnsembleTracks(mode = "top1") {
+  setEnsembleTracksVisible(visible) {
+    if (this._ensembleGroup) {
+      this._ensembleGroup.visible = Boolean(visible);
+    }
+  }
+
+  filterEnsembleTracks(mode = "all") {
     this._ensembleMode = mode;
     if (!this._ensembleGroup) return;
-    if (this._staggerTimer) {
-      clearInterval(this._staggerTimer);
-      this._staggerTimer = null;
-    }
-
-    if (mode === "stagger") {
-      // Start with top 1, then reveal gradually in small batches
-      this._ensembleGroup.children.forEach((child) => {
-        if (child.userData && child.userData.isMergedMid) {
-          child.visible = false;
-        } else if (child.userData && child.userData.isSkipped) {
-          child.visible = false;
-        } else {
-          const rank = child.userData ? child.userData.rank : 999;
-          child.visible = rank === 1;
-        }
-      });
-      let currentRevealRank = 1;
-      const maxRank = this._ensembleTrajectories ? this._ensembleTrajectories.length : 100;
-      this._staggerTimer = setInterval(() => {
-        if (!this._ensembleGroup) {
-          clearInterval(this._staggerTimer);
-          this._staggerTimer = null;
-          return;
-        }
-        currentRevealRank += 3; // reveal 3 planes every 100ms
-        this._ensembleGroup.children.forEach((child) => {
-          if (child.userData && child.userData.isSkipped) {
-            child.visible = false;
-          } else if (child.userData && child.userData.isMergedMid) {
-            child.visible = currentRevealRank >= maxRank;
-          } else {
-            const rank = child.userData ? child.userData.rank : 999;
-            if (rank <= currentRevealRank) {
-              child.visible = true;
-            }
-          }
-        });
-        if (currentRevealRank >= maxRank) {
-          clearInterval(this._staggerTimer);
-          this._staggerTimer = null;
-        }
-      }, 100);
-      return;
-    }
 
     this._ensembleGroup.children.forEach((child) => {
-      if (child.userData && child.userData.isSkipped) {
+      const u = child.userData || {};
+      if (u.isMeanTrack) {
+        // Mean track is always visible unless entire group is hidden
+        child.visible = true;
+      } else if (mode === "mean_only") {
         child.visible = false;
-      } else if (child.userData && child.userData.isMergedMid) {
+      } else if (u.isMergedMid) {
         child.visible = mode === "all";
-      } else {
-        const rank = child.userData ? child.userData.rank : 999;
+      } else if (u.isIndividual) {
         if (mode === "top1") {
-          child.visible = rank === 1;
+          child.visible = u.rank === 1;
         } else if (mode === "top3") {
-          child.visible = rank <= 3;
+          child.visible = u.rank <= 3;
         } else {
           child.visible = true;
         }
@@ -1440,9 +1435,115 @@ export class Viewport {
       if (this.fleetMesh.material) this.fleetMesh.material.dispose();
       this.fleetMesh = null;
     }
+    if (this.meanMesh) {
+      this.scene.remove(this.meanMesh);
+      if (this.meanMesh.geometry) this.meanMesh.geometry.dispose();
+      if (this.meanMesh.material) this.meanMesh.material.dispose();
+      this.meanMesh = null;
+    }
     this.fleetTrajectories = [];
     this.fleetPlaying = false;
     this.fleetTime = 0;
+    this._hasCamSmoothInit = false;
+  }
+
+  setEnsembleFleet(trajectories, skipFirst = false, meanTrajectory = null) {
+    this.clearFleet();
+    if (!trajectories || !trajectories.length) return;
+
+    this.fleetTrajectories = trajectories;
+    this._meanTrajectoryData = meanTrajectory || this._meanTrajectoryData;
+    const count = trajectories.length;
+
+    // Use current airframe geometry or synthesize fallback
+    const geo = (this.airframeMesh && this.airframeMesh.geometry)
+      ? this.airframeMesh.geometry.clone()
+      : buildAirframeGeometry({});
+
+    // Instanced material with custom paper roughness
+    const mat = createAirframeMaterial();
+    mat.vertexColors = false;
+    mat.roughness = 0.85;
+
+    this.fleetMesh = new THREE.InstancedMesh(geo, mat, count);
+    this.fleetMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+
+    let maxT = 0;
+
+    const sorted = [...trajectories].sort((a, b) => (Number(b.landing_distance_m) || 0) - (Number(a.landing_distance_m) || 0));
+    const skippedId = (skipFirst && sorted.length > 1) ? sorted[0].id : null;
+    const effectiveSorted = (skipFirst && sorted.length > 1) ? sorted.slice(1) : sorted;
+
+    const bestId = effectiveSorted.length ? effectiveSorted[0].id : null;
+    const worstId = effectiveSorted.length ? effectiveSorted[effectiveSorted.length - 1].id : null;
+
+    let leadIdx = 0;
+    const foundLead = trajectories.findIndex((t) => t.id === bestId);
+    if (foundLead >= 0) leadIdx = foundLead;
+
+    const dummy = new THREE.Object3D();
+    const color = new THREE.Color();
+
+    trajectories.forEach((tr, i) => {
+      const pts = tr.points || [];
+      const tFlight = Number(tr.flight_time_s) || (pts.length * 0.02);
+      if (tFlight > maxT && tr.id !== skippedId) maxT = tFlight;
+
+      // Color coding: 1st=Gold, 2nd=Silver, 3rd=Bronze, Worst=Red, Others=Pastel blue/green
+      if (tr.id === skippedId) {
+        color.setHex(0x5f6368); // Skipped muted gray
+      } else if (tr.id === bestId) {
+        color.setHex(0xffb300); // 1st Gold (最高値)
+      } else if (tr.id === worstId) {
+        color.setHex(0xe53935); // Worst Red (最低値)
+      } else if (effectiveSorted[1] && tr.id === effectiveSorted[1].id) {
+        color.setHex(0xb0bec5); // 2nd Silver
+      } else if (effectiveSorted[2] && tr.id === effectiveSorted[2].id) {
+        color.setHex(0xcd7f32); // 3rd Bronze
+      } else {
+        const hue = 0.52 + ((i % 12) / 12) * 0.18;
+        color.setHSL(hue, 0.70, 0.60);
+      }
+      this.fleetMesh.setColorAt(i, color);
+
+      if (pts.length > 0) {
+        const p0 = pts[0];
+        dummy.position.set(Number(p0.x) || 0, Number(p0.z) || 1.8, Number(p0.y) || 0);
+        if (tr.id === skippedId) {
+          dummy.scale.setScalar(0.000001);
+        } else {
+          dummy.scale.setScalar(1.0);
+        }
+        dummy.updateMatrix();
+        this.fleetMesh.setMatrixAt(i, dummy.matrix);
+      }
+    });
+
+    if (this.fleetMesh.instanceColor) this.fleetMesh.instanceColor.needsUpdate = true;
+    this.fleetMesh.instanceMatrix.needsUpdate = true;
+
+    // Create prominent standalone "Mean Aircraft" mesh
+    if (this._meanTrajectoryData && this._meanTrajectoryData.points && this._meanTrajectoryData.points.length > 0) {
+      const meanGeo = geo.clone();
+      const meanMat = new THREE.MeshStandardMaterial({
+        color: 0x00e5ff, // Glowing cyan for representative plane
+        emissive: 0x004753,
+        roughness: 0.35,
+        metalness: 0.1,
+      });
+      this.meanMesh = new THREE.Mesh(meanGeo, meanMat);
+      const mp0 = this._meanTrajectoryData.points[0];
+      this.meanMesh.position.set(Number(mp0.x) || 0, Number(mp0.z) || 1.8, Number(mp0.y) || 0);
+      this.scene.add(this.meanMesh);
+    }
+
+    this.fleetDuration = Math.max(maxT, 1.0);
+    this.fleetLeadIndex = leadIdx;
+    this.fleetTime = 0;
+    this.fleetPlaying = true;
+    this._hasCamSmoothInit = false;
+
+    this.scene.add(this.fleetMesh);
   }
 
   _updateFleet(dt) {
@@ -1496,7 +1597,6 @@ export class Viewport {
 
       if (!isLanded) {
         if (p0.pitch !== undefined && p1.pitch !== undefined) {
-          // Accurate multi-DoF orientation from simulation
           const pitch = (Number(p0.pitch) + (Number(p1.pitch) - Number(p0.pitch)) * frac) * DEG;
           const roll = (Number(p0.roll) + (Number(p1.roll) - Number(p0.roll)) * frac) * DEG;
           const yaw = (Number(p0.yaw) + (Number(p1.yaw) - Number(p0.yaw)) * frac) * DEG;
@@ -1540,10 +1640,45 @@ export class Viewport {
 
     this.fleetMesh.instanceMatrix.needsUpdate = true;
 
+    // Update Mean Aircraft Mesh along its computed mean trajectory
+    const meanTr = this._meanTrajectoryData;
+    if (this.meanMesh && meanTr && meanTr.points && meanTr.points.length > 0) {
+      const mpts = meanTr.points;
+      const mtFlight = Number(meanTr.flight_time_s) || (mpts.length * 0.05);
+      const mIsLanded = t >= mtFlight;
+      const mptIdxRaw = mpts.length > 1 ? (Math.min(t / Math.max(mtFlight, 0.001), 1.0) * (mpts.length - 1)) : 0;
+      const midx0 = Math.floor(mptIdxRaw);
+      const midx1 = Math.min(midx0 + 1, mpts.length - 1);
+      const mfrac = mptIdxRaw - midx0;
+
+      const mp0 = mpts[midx0];
+      const mp1 = mpts[midx1];
+      const mx0 = Number(mp0.x) || 0, my0 = Number(mp0.z) || 0, mz0 = Number(mp0.y) || 0;
+      const mx1 = Number(mp1.x) || 0, my1 = Number(mp1.z) || 0, mz1 = Number(mp1.y) || 0;
+
+      this._meanPos.set(
+        mx0 + (mx1 - mx0) * mfrac,
+        Math.max(my0 + (my1 - my0) * mfrac, 0.02),
+        mz0 + (mz1 - mz0) * mfrac
+      );
+      this.meanMesh.position.copy(this._meanPos);
+
+      if (!mIsLanded) {
+        const mpitch = (Number(mp0.pitch || 0) + (Number(mp1.pitch || 0) - Number(mp0.pitch || 0)) * mfrac) * DEG;
+        const mroll = (Number(mp0.roll || 0) + (Number(mp1.roll || 0) - Number(mp0.roll || 0)) * mfrac) * DEG;
+        const myaw = (Number(mp0.yaw || 0) + (Number(mp1.yaw || 0) - Number(mp0.yaw || 0)) * mfrac) * DEG;
+        euler.set(-mpitch, -myaw, mroll, "ZYX");
+        this.meanMesh.quaternion.setFromEuler(euler);
+      }
+    } else {
+      // Fallback mean pos to lead pos
+      this._meanPos.copy(this._leadPos);
+    }
+
     if (activeCount > 0) {
       this._swarmCenter.copy(swarmSum.multiplyScalar(1 / activeCount));
     } else if (count > 0) {
-      this._swarmCenter.copy(this._leadPos);
+      this._swarmCenter.copy(this._meanPos);
     }
 
     if (allLanded && t > this.fleetDuration + 2.0) {
@@ -1552,36 +1687,59 @@ export class Viewport {
   }
 
   setCameraMode(mode) {
-    this.cameraMode = mode || "reset";
+    this.cameraMode = mode || "mean";
     if (this.cameraMode === "reset") {
       this.resetCamera();
     }
+    this._hasCamSmoothInit = false;
   }
 
   _updateCameraMode(dt) {
     if (!this.controls || !this.camera) return;
-    const lerpFactor = Math.min(1.0, dt * 4.0);
+    if (this.cameraMode === "fixed") return; // Manual orbit controls only
 
-    if (this.cameraMode === "lead" && this._leadPos) {
-      // 1位機 (トップ機) を斜め後方・上方から追従
-      const target = this._leadPos;
-      this.controls.target.lerp(target, lerpFactor);
-      const camDesired = new THREE.Vector3(target.x - 2.8, target.y + 1.2, target.z + 1.4);
-      this.camera.position.lerp(camDesired, lerpFactor);
-    } else if (this.cameraMode === "swarm" && this._swarmCenter) {
-      // 飛行中の群れ重心 (Swarm Center of Mass) を自動追従
-      const target = this._swarmCenter;
-      this.controls.target.lerp(target, lerpFactor);
-      const camDesired = new THREE.Vector3(target.x - 6.5, target.y + 3.8, target.z + 5.5);
-      this.camera.position.lerp(camDesired, lerpFactor);
+    // Critically damped interpolation factor (absorbs 30-120fps variance without overshoot)
+    const factor = 1.0 - Math.exp(-dt * 6.0);
+
+    let targetPos = null;
+    let camOffset = null;
+
+    if (this.cameraMode === "mean") {
+      // Representative Mean Aircraft follow: ultra-smooth chase camera
+      targetPos = this._meanPos;
+      camOffset = new THREE.Vector3(-3.2, 1.4, 1.8);
+    } else if (this.cameraMode === "lead" && this._leadPos) {
+      // 1st place lead aircraft follow
+      targetPos = this._leadPos;
+      camOffset = new THREE.Vector3(-2.8, 1.2, 1.4);
     } else if (this.cameraMode === "fleet") {
-      // 100機全体を見渡す壮大なパノラマ俯瞰視点
-      const center = this._swarmCenter || new THREE.Vector3(12, 1, 0);
-      const target = new THREE.Vector3(center.x, 0.5, 0);
-      this.controls.target.lerp(target, lerpFactor);
-      const camDesired = new THREE.Vector3(center.x - 14.0, 11.0, 12.0);
-      this.camera.position.lerp(camDesired, lerpFactor);
+      // 100-plane overview panorama
+      const center = this._meanPos || this._swarmCenter || new THREE.Vector3(12, 1, 0);
+      targetPos = new THREE.Vector3(center.x, 0.5, 0);
+      camOffset = new THREE.Vector3(-14.0, 11.0, 12.0);
+    } else if (this.cameraMode === "swarm") {
+      targetPos = this._meanPos || this._swarmCenter;
+      camOffset = new THREE.Vector3(-5.5, 3.2, 4.5);
     }
+
+    if (!targetPos) return;
+
+    if (!this._hasCamSmoothInit) {
+      this._camSmoothTarget.copy(targetPos);
+      this._camSmoothPos.copy(targetPos).add(camOffset);
+      this.controls.target.copy(this._camSmoothTarget);
+      this.camera.position.copy(this._camSmoothPos);
+      this._hasCamSmoothInit = true;
+      return;
+    }
+
+    // Smooth lerp to target
+    this._camSmoothTarget.lerp(targetPos, factor);
+    const desiredCamPos = this._camSmoothTarget.clone().add(camOffset);
+    this._camSmoothPos.lerp(desiredCamPos, factor);
+
+    this.controls.target.copy(this._camSmoothTarget);
+    this.camera.position.copy(this._camSmoothPos);
   }
 
   /* ------------------------------------------------ Video Recording */
@@ -1756,7 +1914,8 @@ export class Viewport {
     const dt = Math.min(this.clock.getDelta(), 0.1);
     this.elapsed += dt;
 
-    if (this.follow) {
+    const isFleetActive = Boolean(this.fleetMesh && this.fleetPlaying && this.cameraMode && this.cameraMode !== "reset" && this.cameraMode !== "fixed");
+    if (this.follow && !isFleetActive) {
       // Stiff enough that the airframe stays framed at 6 m/s, soft enough to
       // absorb the 30-60 Hz position updates without visible stair-stepping.
       this.followTarget.lerp(this.lastPose, Math.min(1, dt * 25));

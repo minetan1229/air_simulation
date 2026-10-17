@@ -1571,8 +1571,13 @@ def data_export():
     elif kind == "config":
         bundle = payload.get("bundle") or SESSION.current_snapshot()
         text, mimetype, filename = storage_domain.export_config(bundle, fmt)
+    elif kind == "ensemble":
+        ensemble_data = payload.get("data")
+        if ensemble_data is None:
+            raise BadRequest("ensemble 'data' payload is required for kind='ensemble'")
+        text, mimetype, filename = storage_domain.export_ensemble_data(ensemble_data, fmt)
     else:
-        raise BadRequest("'kind' must be one of flight, optimizer, config")
+        raise BadRequest("'kind' must be one of flight, optimizer, config, ensemble")
 
     if request.args.get("download") in ("1", "true", "yes"):
         return Response(

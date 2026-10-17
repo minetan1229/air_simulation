@@ -978,6 +978,7 @@ def _competition_airframe(**overrides: Any) -> Dict[str, Any]:
         # too small; the record airframes get the fuselage-length value.
         "pitch_inertia_kgm2": 0.0062 * 0.200 ** 2 / 12.0,
         "roll_inertia_kgm2": 0.0062 * 0.320 ** 2 / 12.0,
+        "yaw_inertia_kgm2": 0.0062 * (0.320 ** 2 + 0.200 ** 2) / 12.0,
         "cm0": 0.0040,
         "cm_alpha": -0.90,
         "cm_q": -12.0,
@@ -990,8 +991,11 @@ def _competition_airframe(**overrides: Any) -> Dict[str, Any]:
 #: through this helper rather than hard-coding a number per entry.
 def _finalise(payload: Dict[str, Any]) -> Dict[str, Any]:
     mass = float(payload.get("mass_kg", 0.0062))
-    payload["pitch_inertia_kgm2"] = mass * 0.200 ** 2 / 12.0
-    payload["roll_inertia_kgm2"] = mass * float(payload.get("wingspan_m", 0.32)) ** 2 / 12.0
+    pitch = mass * 0.200 ** 2 / 12.0
+    roll = mass * float(payload.get("wingspan_m", 0.32)) ** 2 / 12.0
+    payload["pitch_inertia_kgm2"] = pitch
+    payload["roll_inertia_kgm2"] = roll
+    payload["yaw_inertia_kgm2"] = roll + pitch
     return payload
 
 

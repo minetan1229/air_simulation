@@ -73,6 +73,8 @@ __all__ = [
     "config_bundle_to_rows",
     "sanitise_artefact_name",
     "utc_stamp",
+    "datetime_stamp",
+    "export_ensemble_data",
     "StorageManager",
     "STORAGE",
 ]
@@ -122,6 +124,12 @@ _WHITESPACE_PATTERN = re.compile(r"\s+")
 def utc_stamp() -> str:
     """Filename-safe UTC timestamp, e.g. ``20260901T094514Z``."""
     return datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+
+
+def datetime_stamp(dt: Optional[datetime] = None) -> str:
+    """Standard simulation timestamp format: YYYY-MM-DD_HH-mm-ss."""
+    now = dt or datetime.now()
+    return now.strftime("%Y-%m-%d_%H-%M-%S")
 
 
 def _json_default(value: Any) -> str:
@@ -380,6 +388,77 @@ def export_flight_log(samples: Any, fmt: str = "csv") -> Tuple[str, str, str]:
     if style == "json":
         return rows_to_json(rows), JSON_MIMETYPE, f"flight_log_{stamp}.json"
     raise ValueError(f"unsupported flight log format '{fmt}' (expected 'csv' or 'json')")
+
+
+def export_ensemble_data(data: Mapping[str, Any], fmt: str = "json") -> Tuple[str, str, str]:
+    """Return ``(payload, mimetype, filename)`` for ensemble simulation data.
+
+    Filename format follows AGENTS.md / user requirement:
+    ``sim_data_YYYY-MM-DD_HH-mm-ss.json`` or ``.csv``.
+    """
+    style = str(fmt or "json").strip().lower()
+    stamp = datetime_stamp()
+    filename_base = f"sim_data_{stamp}"
+
+    if style == "json":
+        payload_data = as_dict(dict(data))
+        payload_data = _sanitize_json_leaves(payload_data)
+        if "executed_at" not in payload_data:
+            payload_data["executed_at"] = datetime.now().isoformat()
+        text = json.dumps(payload_data, ensure_ascii=False, indent=2, default=_json_default, allow_nan=False)
+        return text, JSON_MIMETYPE, f"{filename_base}.json"
+
+    if style == "csv":
+        # Flatten sample trajectories and mean trajectory into CSV
+        rows: List[Dict[str, Any]] = []
+        mean_tr = data.get("mean_trajectory")
+        if mean_tr and isinstance(mean_tr, dict):
+            pts = mean_tr.get("points") or []
+            for p in pts:
+                rows.append({
+                    "plane_id": "mean",
+                    "is_mean": True,
+                    "t_s": p.get("t", 0.0),
+                    "x_m": p.get("x", 0.0),
+                    "y_m": p.get("y", 0.0),
+                    "z_m": p.get("z", 0.0),
+                    "pitch_deg": p.get("pitch", 0.0),
+                    "roll_deg": p.get("roll", 0.0),
+                    "yaw_deg": p.get("yaw", 0.0),
+                    "landing_distance_m": mean_tr.get("landing_distance_m", 0.0),
+                    "flight_time_s": mean_tr.get("flight_time_s", 0.0),
+                })
+        sample_trs = data.get("sample_trajectories") or []
+        for tr in sample_trs:
+            tr_id = tr.get("id", "")
+            rank = tr.get("rank", 0)
+            pts = tr.get("points") or []
+            dist = tr.get("landing_distance_m", 0.0)
+            ftime = tr.get("flight_time_s", 0.0)
+            for idx, p in enumerate(pts):
+                t_est = round(idx * 0.05, 4)
+                rows.append({
+                    "plane_id": tr_id,
+                    "rank": rank,
+                    "is_mean": False,
+                    "t_s": p.get("t", t_est),
+                    "x_m": p.get("x", 0.0),
+                    "y_m": p.get("y", 0.0),
+                    "z_m": p.get("z", 0.0),
+                    "pitch_deg": p.get("pitch", 0.0),
+                    "roll_deg": p.get("roll", 0.0),
+                    "yaw_deg": p.get("yaw", 0.0),
+                    "landing_distance_m": dist,
+                    "flight_time_s": ftime,
+                })
+        csv_cols = [
+            "plane_id", "rank", "is_mean", "t_s", "x_m", "y_m", "z_m",
+            "pitch_deg", "roll_deg", "yaw_deg", "landing_distance_m", "flight_time_s"
+        ]
+        text = rows_to_csv(rows, columns=csv_cols)
+        return text, CSV_MIMETYPE, f"{filename_base}.csv"
+
+    raise ValueError(f"unsupported ensemble export format '{fmt}' (expected 'csv' or 'json')")
 
 
 # --------------------------------------------------------------------------
