@@ -74,7 +74,7 @@ Flask REST APIによる物理演算バックエンドと、Three.jsによる3D�
 ## 🚀 クイックスタート
 
 ### 1. 必要要件
-- Python 3.8 以上 (Python 3.10 / 3.11 推奨)
+- Python 3.10 以上 (Python 3.10 / 3.11 推奨)
 - 仮想環境（venv / conda）
 
 ### 2. インストール

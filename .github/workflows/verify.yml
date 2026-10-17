@@ -30,8 +30,7 @@ jobs:
         run: ruff check .
 
       - name: 静的型検査 (Mypy)
-        run: mypy --config-file mypy.ini physics app.py || true
-        continue-on-error: true
+        run: mypy --config-file mypy.ini physics app.py
 
       - name: 自動テストの実行 (Pytest)
         run: python tools/run_ci_tests.py
