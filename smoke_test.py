@@ -741,6 +741,12 @@ def stage_data(r: Runner) -> None:
     r.post("/api/v1/data/export", {"kind": "flight", "format": "xml"}, expect=400)
     r.post("/api/v1/data/export", {"kind": "nope"}, expect=400)
 
+    # Error logging verification
+    errs = r.get("/api/v1/errors?limit=10")
+    r.check("errors" in errs and "statistics" in errs, "GET /api/v1/errors malformed response")
+    r.check(len(errs["errors"]) > 0, "No errors recorded in error logging buffer")
+    r.log(f"error logging: captured {len(errs['errors'])} errors, buffer stats={errs['statistics']['total_in_buffer']}")
+
 
 def stage_ui(r: Runner) -> None:
     import re

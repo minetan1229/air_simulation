@@ -45,6 +45,8 @@ from physics.config_schema import (
     utc_now_iso,
 )
 from physics import auto_investigate
+from physics import error_domain
+from physics.error_domain import ERROR_LOGGER
 from physics import job_manager as job_manager_module
 from physics import mesh_domain
 from physics import storage_domain
@@ -110,33 +112,63 @@ class NotFound(KeyError):
 # ---------------------------------------------------------------------------
 # Error handling
 # ---------------------------------------------------------------------------
-def _error(message: str, status: int = 400) -> Tuple[Response, int]:
-    return jsonify({"error": str(message), "status": status, "timestamp": utc_now_iso()}), status
+def _error(
+    message: str,
+    status: int = 400,
+    exc: Optional[BaseException] = None,
+    traceback_str: Optional[str] = None,
+    category: str = "api",
+    level: str = "WARNING",
+) -> Tuple[Response, int]:
+    try:
+        req_path = request.path if request else None
+        req_method = request.method if request else None
+        client_ip = request.remote_addr if request else None
+    except Exception:
+        req_path, req_method, client_ip = None, None, None
+
+    rec = ERROR_LOGGER.record_error(
+        message=message,
+        level=level,
+        category=category,
+        exc=exc,
+        traceback_str=traceback_str,
+        path=req_path,
+        method=req_method,
+        status_code=status,
+        client_ip=client_ip,
+    )
+    return jsonify({
+        "error": str(message),
+        "status": status,
+        "timestamp": rec.timestamp,
+        "error_id": rec.id,
+    }), status
 
 
 @app.errorhandler(BadRequest)
 def _handle_bad_request(exc: BadRequest):
-    return _error(str(exc), 400)
+    return _error(str(exc), 400, exc=exc, level="WARNING", category="client_input")
 
 
 @app.errorhandler(NotFound)
 def _handle_not_found(exc: NotFound):
-    return _error(str(exc), 404)
+    return _error(str(exc), 404, exc=exc, level="INFO", category="routing")
 
 
 @app.errorhandler(ServiceUnavailable)
 def _handle_unavailable(exc: ServiceUnavailable):
-    return _error(str(exc), 503)
+    return _error(str(exc), 503, exc=exc, level="ERROR", category="backend")
 
 
 @app.errorhandler(404)
 def _handle_404(_exc):
-    return _error("resource not found", 404)
+    return _error("resource not found", 404, level="INFO", category="routing")
 
 
 @app.errorhandler(405)
 def _handle_405(_exc):
-    return _error("method not allowed for this endpoint", 405)
+    return _error("method not allowed for this endpoint", 405, level="INFO", category="routing")
 
 
 @app.errorhandler(ValueError)
@@ -147,31 +179,33 @@ def _handle_value_error(exc: ValueError):
     to the client as 400 -- never as a 500.
     """
     log.warning("ValueError on %s: %s", request.path, exc)
-    return _error(f"invalid input: {exc}", 400)
+    return _error(f"invalid input: {exc}", 400, exc=exc, level="WARNING", category="validation")
 
 
 @app.errorhandler(OverflowError)
 def _handle_overflow(exc: OverflowError):
     log.warning("OverflowError on %s: %s", request.path, exc)
-    return _error(f"numeric overflow for the given input: {exc}", 400)
+    return _error(f"numeric overflow for the given input: {exc}", 400, exc=exc, level="WARNING", category="numeric")
 
 
 @app.errorhandler(ZeroDivisionError)
 def _handle_zero_division(exc: ZeroDivisionError):
     log.warning("ZeroDivisionError on %s: %s", request.path, exc)
-    return _error(f"degenerate input caused a division by zero: {exc}", 400)
+    return _error(f"degenerate input caused a division by zero: {exc}", 400, exc=exc, level="WARNING", category="numeric")
 
 
 @app.errorhandler(HTTPException)
 def _handle_http_exception(exc: HTTPException):
     code = exc.code or 500
-    return _error(exc.description or str(exc), code)
+    lvl = "ERROR" if code >= 500 else "WARNING"
+    return _error(exc.description or str(exc), code, exc=exc, level=lvl, category="http")
 
 
 @app.errorhandler(Exception)
 def _handle_unexpected(exc: Exception):
-    log.error("unhandled error on %s: %s\n%s", request.path, exc, traceback.format_exc())
-    return _error("an unexpected internal server error occurred", 500)
+    tb = traceback.format_exc()
+    log.error("unhandled error on %s: %s\n%s", request.path, exc, tb)
+    return _error("an unexpected internal server error occurred", 500, exc=exc, traceback_str=tb, level="CRITICAL", category="unhandled")
 
 
 @app.after_request
@@ -1685,6 +1719,67 @@ def guinness_verification():
     report = records_domain.verification_report(keys=keys)
     return jsonify(report)
 
+
+# ---------------------------------------------------------------------------
+# 8. Error Logging & Diagnostics Endpoints
+# ---------------------------------------------------------------------------
+@app.get("/api/v1/errors")
+def list_errors():
+    """Retrieve error history with optional level, category, and text filtering."""
+    limit = int(request.args.get("limit", 100))
+    limit = max(1, min(limit, 500))
+    level = request.args.get("level")
+    category = request.args.get("category")
+    search = request.args.get("search")
+    logs = ERROR_LOGGER.get_logs(limit=limit, level=level, category=category, search=search)
+    return jsonify({
+        "errors": logs,
+        "count": len(logs),
+        "statistics": ERROR_LOGGER.statistics(),
+    })
+
+
+@app.post("/api/v1/errors/report")
+def report_client_error():
+    """Receive client-side (frontend JavaScript/WebGL) errors and persist them."""
+    payload = body()
+    message = payload.get("message", "Frontend error")
+    level = payload.get("level", "ERROR")
+    category = payload.get("category", "frontend")
+    details = payload.get("details", {})
+    traceback_str = payload.get("stack") or payload.get("traceback")
+
+    try:
+        req_path = payload.get("url") or (request.path if request else None)
+        client_ip = request.remote_addr if request else None
+    except Exception:
+        req_path, client_ip = None, None
+
+    rec = ERROR_LOGGER.record_error(
+        message=message,
+        level=level,
+        category=category,
+        traceback_str=traceback_str,
+        details=details,
+        path=req_path,
+        method="CLIENT",
+        status_code=payload.get("status_code", 400),
+        client_ip=client_ip,
+    )
+    return jsonify({"ok": True, "error_id": rec.id})
+
+
+@app.get("/api/v1/errors/stats")
+def error_stats():
+    """Get error metrics and log file statuses."""
+    return jsonify(ERROR_LOGGER.statistics())
+
+
+@app.post("/api/v1/errors/clear")
+def clear_error_buffer():
+    """Clear the in-memory error ring buffer (retaining disk logs)."""
+    ERROR_LOGGER.clear()
+    return jsonify({"ok": True, "cleared": True})
 
 
 # ---------------------------------------------------------------------------

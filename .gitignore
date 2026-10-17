@@ -19,6 +19,8 @@ models/
 # Simulation artefacts
 runs/
 jobs/
+logs/
+*.log
 *.csv
 !tests/**/*.csv
 smoke_*.json
