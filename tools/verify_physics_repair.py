@@ -51,7 +51,7 @@ def target_assessment(metrics, phases):
 
 def detailed_phases(log, mode="full_flight", phugoid_window_s=2.5):
     """First vertical-velocity apex and a declared continuous-glide criterion.
-    
+
     Vertical velocity vz is evaluated over a phugoid moving window (default 2.5s)
     to reflect physical flight cycle dynamics of unpowered lightweight gliders.
     """
@@ -66,15 +66,15 @@ def detailed_phases(log, mode="full_flight", phugoid_window_s=2.5):
             apex_time = prev["time_s"] + fraction*(row["time_s"]-prev["time_s"])
             apex_height = prev["altitude_m"] + fraction*(row["altitude_m"]-prev["altitude_m"])
             break
-            
+
     t_arr = [float(r["time_s"]) for r in log]
     vz_arr = [float(r["velocity_mps"][2]) for r in log]
-    
+
     start,entry,longest,stall_time = None,None,0.0,0.0
     for prev,row in zip(log,log[1:]):
         if prev.get("stalled"):
             stall_time += row["time_s"]-prev["time_s"]
-            
+
         t_curr = float(row["time_s"])
         if phugoid_window_s > 0.0 and len(t_arr) > 1:
             half_w = 0.5 * phugoid_window_s
@@ -82,7 +82,7 @@ def detailed_phases(log, mode="full_flight", phugoid_window_s=2.5):
             effective_vz = sum(vals) / max(len(vals), 1)
         else:
             effective_vz = float(row["velocity_mps"][2])
-            
+
         qualifies = (apex_time is not None and row["time_s"] >= apex_time
                      and 1.5 <= row["speed_mps"] <= 8.0 and abs(row["alpha_deg"]) <= 10.0
                      and abs(row["pitch_rate_radps"]) <= 0.7
