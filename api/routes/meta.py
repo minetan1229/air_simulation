@@ -1,0 +1,173 @@
+"""Meta and system status routes."""
+
+from __future__ import annotations
+
+import logging
+import os
+import subprocess
+import threading
+import time
+from flask import Blueprint, jsonify, request
+
+from physics.config_schema import (
+    AIRCRAFT_SCHEMA,
+    ALGORITHM_NAMES,
+    DESIGN_VARIABLE_CATALOGUE,
+    ENVIRONMENT_SCHEMA,
+    LAUNCH_SCHEMA,
+    OBJECTIVE_DIRECTIONS,
+    as_dict,
+    utc_now_iso,
+)
+from ..core import ServiceUnavailable, api_error, domain
+
+log = logging.getLogger("paper_airplane")
+
+meta_bp = Blueprint("meta", __name__)
+
+
+@meta_bp.get("/api/v1/meta/schemas")
+def meta_schemas():
+    """Single source of truth for the UI sliders, objective list and ranges."""
+    return jsonify(
+        {
+            "aircraft": AIRCRAFT_SCHEMA,
+            "environment": ENVIRONMENT_SCHEMA,
+            "launch": LAUNCH_SCHEMA,
+            "objectives": [
+                {"name": name, "direction": direction}
+                for name, direction in OBJECTIVE_DIRECTIONS.items()
+            ],
+            "algorithms": list(ALGORITHM_NAMES),
+            "design_variables": [as_dict(v) for v in DESIGN_VARIABLE_CATALOGUE],
+            "design_variable_catalogue": [as_dict(v) for v in DESIGN_VARIABLE_CATALOGUE],
+            "backend": "numpy",
+        }
+    )
+
+
+@meta_bp.get("/api/v1/meta/health")
+def meta_health():
+    domains = {}
+    for name in (
+        "aero_domain",
+        "atmosphere_domain",
+        "wind_domain",
+        "stress_domain",
+        "mesh_domain",
+        "flight_sim",
+        "parallel_engine",
+        "optimizer_domain",
+        "job_manager",
+        "storage_domain",
+    ):
+        try:
+            domain(name)
+            domains[name] = "ok"
+        except ServiceUnavailable as exc:
+            domains[name] = str(exc)
+    gpu_info = domain("parallel_engine").get_gpu_info()
+    return jsonify({
+        "status": "ok",
+        "domains": domains,
+        "gpu": gpu_info,
+        "timestamp": utc_now_iso(),
+    })
+
+
+@meta_bp.get("/api/v1/system/gpu")
+def system_gpu():
+    parallel = domain("parallel_engine")
+    return jsonify(parallel.get_gpu_info())
+
+
+_LAST_BROWSER_LAUNCH: float = 0.0
+_BROWSER_LAUNCH_LOCK = threading.Lock()
+
+
+@meta_bp.post("/api/v1/system/force-gpu-render")
+def force_gpu_render():
+    """Configure Windows DirectX UserGpuPreferences to force discrete high-performance GPU (RTX 4060)
+    for browsers, and optionally launch or re-launch browser with high-performance flags.
+    Restricted to loopback address and explicit environment variable.
+    """
+    global _LAST_BROWSER_LAUNCH
+    if request.remote_addr not in ("127.0.0.1", "::1", "localhost"):
+        return api_error("forbidden: endpoint restricted to local loopback", 403)
+    origin = request.headers.get("Origin") or request.headers.get("Referer")
+    if origin and not any(origin.startswith(h) for h in ("http://127.0.0.1:", "http://localhost:", "https://127.0.0.1:", "https://localhost:")):
+        return api_error("forbidden: cross-origin request disallowed", 403)
+    if not os.environ.get("PAPER_ALLOW_SYSTEM_CONFIG") and os.environ.get("ENV") == "production":
+        return api_error("system configuration endpoint is disabled in production", 403)
+
+    payload = request.get_json(silent=True) or {}
+    action = payload.get("action", "configure")
+
+    registered = []
+    error_msg = None
+
+    try:
+        import winreg
+        create_key = getattr(winreg, "CreateKey")
+        hkey_cu = getattr(winreg, "HKEY_CURRENT_USER")
+        set_val = getattr(winreg, "SetValueEx")
+        reg_sz = getattr(winreg, "REG_SZ")
+        close_key = getattr(winreg, "CloseKey")
+        key_path = r"Software\Microsoft\DirectX\UserGpuPreferences"
+        key = create_key(hkey_cu, key_path)
+        browser_paths = [
+            r"C:\Program Files\Google\Chrome\Application\chrome.exe",
+            r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
+        ]
+        local_app = os.environ.get("LOCALAPPDATA", "")
+        if local_app:
+            browser_paths.extend([
+                os.path.join(local_app, r"Google\Chrome\Application\chrome.exe"),
+                os.path.join(local_app, r"Microsoft\Edge\Application\msedge.exe"),
+            ])
+
+        for bp in browser_paths:
+            if os.path.exists(bp):
+                set_val(key, bp, 0, reg_sz, "GpuPreference=2;AutoHDREnable=0;")
+                registered.append(bp)
+        close_key(key)
+    except Exception:
+        log.exception("force_gpu_render failed to configure DirectX UserGpuPreferences")
+        error_msg = "failed to configure GPU preferences"
+
+    launched = False
+    if action in ("launch_chrome", "launch_edge"):
+        with _BROWSER_LAUNCH_LOCK:
+            now = time.monotonic()
+            if (now - _LAST_BROWSER_LAUNCH) < 30.0:
+                return api_error("rate limit: browser launch is limited to once every 30 seconds", 429)
+            _LAST_BROWSER_LAUNCH = now
+        target_exe = (
+            r"C:\Program Files\Google\Chrome\Application\chrome.exe"
+            if action == "launch_chrome"
+            else r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe"
+        )
+        if os.path.exists(target_exe):
+            flags = [
+                target_exe,
+                "--force_high_performance_gpu",
+                "--gpu-preference=high-performance",
+                "--enable-gpu-rasterization",
+                "--ignore-gpu-blocklist",
+                "http://127.0.0.1:5000/",
+            ]
+            try:
+                subprocess.Popen(flags)
+                launched = True
+            except Exception:
+                log.exception("force_gpu_render failed to launch browser process")
+                error_msg = "failed to launch browser process"
+
+    return jsonify({
+        "status": "success" if not error_msg else "partial_error",
+        "registered_paths": registered,
+        "launched": launched,
+        "error": error_msg,
+        "gpu_preference": 2,
+        "preference_name": "High Performance (NVIDIA dGPU)",
+    })
