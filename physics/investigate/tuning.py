@@ -195,23 +195,23 @@ def run_focused_tuning(
     base_air = copy.deepcopy(aircraft)
     base_lau = copy.deepcopy(launch)
 
-    init_x = []
+    init_vals = []
     bounds = []
     for v in tuning_vars:
         val = getattr(
             base_air if v.target_object == "aircraft" else base_lau, v.name
         )
-        init_x.append(float(val))
+        init_vals.append(float(val))
         bounds.append((float(v.low), float(v.high)))
 
-    init_x = np.array(
-        [clamp(init_x[i], bounds[i][0], bounds[i][1]) for i in range(len(init_x))],
+    init_x: np.ndarray = np.array(
+        [clamp(init_vals[i], bounds[i][0], bounds[i][1]) for i in range(len(init_vals))],
         dtype=float,
     )
 
     eval_count = 0
     best_score = -1.0
-    best_x = init_x.copy()
+    best_x: np.ndarray = init_x.copy()
 
     def objective(x: np.ndarray) -> float:
         nonlocal eval_count, best_score, best_x
