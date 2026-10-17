@@ -125,8 +125,10 @@ class ErrorLoggerDomain:
             # Write to JSONL
             try:
                 line = json.dumps(record.to_dict(), ensure_ascii=False) + "\n"
-                self._file_handler.stream.write(line)
-                self._file_handler.stream.flush()
+                stream = self._file_handler.stream
+                if stream is not None:
+                    stream.write(line)
+                    stream.flush()
             except Exception:
                 pass
 
