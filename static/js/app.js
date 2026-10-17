@@ -1878,7 +1878,13 @@ class ConsoleApp {
     const aoaSlider = this.dom["tunnel-slider-aoa"];
     const speedSlider = this.dom["tunnel-slider-speed"];
 
+    const stopDrag = (e) => {
+      e.stopPropagation();
+    };
+
     if (aoaSlider) {
+      aoaSlider.addEventListener("pointerdown", stopDrag);
+      aoaSlider.addEventListener("mousedown", stopDrag);
       aoaSlider.addEventListener("input", (e) => {
         const val = Number(e.target.value);
         this.store.set("environment", "wind_tunnel_alpha_deg", val, "mode");
@@ -1890,6 +1896,8 @@ class ConsoleApp {
     }
 
     if (speedSlider) {
+      speedSlider.addEventListener("pointerdown", stopDrag);
+      speedSlider.addEventListener("mousedown", stopDrag);
       speedSlider.addEventListener("input", (e) => {
         const val = Number(e.target.value);
         this.store.set("environment", "wind_tunnel_speed", val, "mode");
@@ -1902,7 +1910,11 @@ class ConsoleApp {
 
     const presetBtns = document.querySelectorAll(".tunnel-preset-btn");
     presetBtns.forEach((btn) => {
-      btn.addEventListener("click", () => {
+      btn.addEventListener("pointerdown", stopDrag);
+      btn.addEventListener("mousedown", stopDrag);
+      btn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        e.preventDefault();
         const targetAoa = Number(btn.getAttribute("data-aoa"));
         if (Number.isFinite(targetAoa)) {
           if (aoaSlider) aoaSlider.value = targetAoa;
@@ -1914,6 +1926,12 @@ class ConsoleApp {
         }
       });
     });
+
+    const tunnelHud = this.dom["tunnel-hud"];
+    if (tunnelHud) {
+      tunnelHud.addEventListener("pointerdown", stopDrag);
+      tunnelHud.addEventListener("mousedown", stopDrag);
+    }
   }
 
   _updateTunnelPose() {
@@ -1939,6 +1957,21 @@ class ConsoleApp {
     if (this.dom["tunnel-slider-speed"] && Math.abs(Number(this.dom["tunnel-slider-speed"].value) - speed) > 0.01) {
       this.dom["tunnel-slider-speed"].value = speed;
     }
+
+    // Update active highlight on tunnel preset buttons
+    const presetBtns = document.querySelectorAll(".tunnel-preset-btn");
+    presetBtns.forEach((btn) => {
+      const bAoa = Number(btn.getAttribute("data-aoa"));
+      const isActive = Number.isFinite(bAoa) && Math.abs(bAoa - alpha) < 0.25;
+      btn.classList.toggle("active", isActive);
+      if (isActive) {
+        btn.style.borderColor = "#1a73e8";
+        btn.style.color = "#1a73e8";
+      } else {
+        btn.style.borderColor = "";
+        btn.style.color = "";
+      }
+    });
 
     this.viewport.updateTunnelParams({
       speed,

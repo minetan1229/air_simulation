@@ -720,16 +720,62 @@ input[type="range"]:focus-visible { outline: 2px solid var(--accent); outline-of
 }
 #view-canvas { display: block; width: 100%; height: 100%; }
 
-.vp-toolbar {
+/* Viewport HUD Stacks & Layering */
+.vp-overlay-stack {
   position: absolute;
+  pointer-events: none;
+  z-index: var(--z-hud);
+}
+
+.vp-overlay-tr {
   top: 10px;
   right: 12px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+  max-width: min(65%, 540px);
+}
+.vp-overlay-tr > * {
+  pointer-events: auto;
+}
+
+.vp-overlay-tl {
+  top: 10px;
+  left: 12px;
+  bottom: 12px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 8px;
+  max-width: 250px;
+  max-height: calc(100% - 24px);
+  overflow-y: auto;
+  scrollbar-width: none;
+}
+.vp-overlay-tl::-webkit-scrollbar {
+  display: none;
+}
+.vp-overlay-tl > * {
+  pointer-events: auto;
+  flex-shrink: 0;
+}
+
+.vp-toolbar {
+  position: relative;
   display: flex;
   gap: 4px;
   flex-wrap: wrap;
   justify-content: flex-end;
+  max-width: 100%;
+  z-index: var(--z-hud);
+}
+/* Standalone fallback if directly child of viewport */
+.viewport > .vp-toolbar {
+  position: absolute;
+  top: 10px;
+  right: 12px;
   max-width: min(55%, 520px);
-  z-index: 14;
 }
 .chip {
   appearance: none;
@@ -750,7 +796,7 @@ input[type="range"]:focus-visible { outline: 2px solid var(--accent); outline-of
 .chip:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 
 .vp-hud {
-  position: absolute;
+  position: relative;
   font-family: var(--mono);
   font-size: 10.5px;
   color: var(--ink-2);
@@ -758,14 +804,42 @@ input[type="range"]:focus-visible { outline: 2px solid var(--accent); outline-of
   backdrop-filter: blur(4px);
   border: 1px solid var(--line);
   padding: 6px 8px;
-  pointer-events: none;
+  pointer-events: auto !important;
   min-width: 132px;
-  z-index: 12;
+  z-index: 50;
   border-radius: 4px;
 }
-.vp-hud-tl { top: 10px; left: 12px; }
-.vp-hud-tr { top: 68px; right: 12px; min-width: 150px; }
-.vp-hud-bl { bottom: 12px; left: 12px; min-width: 190px; }
+/* Standalone fallback positioning when directly child of viewport */
+.viewport > .vp-hud-tl { position: absolute; top: 10px; left: 12px; }
+.viewport > .vp-hud-tr { position: absolute; top: 68px; right: 12px; }
+.viewport > .vp-hud-bl { position: absolute; bottom: 12px; left: 12px; }
+
+.vp-hud-tl { min-width: 220px; }
+.vp-hud-tr { min-width: 150px; max-height: calc(100vh - 160px); overflow-y: auto; pointer-events: auto !important; }
+.vp-hud-bl { min-width: 190px; }
+
+#tunnel-hud {
+  pointer-events: auto !important;
+  z-index: 50;
+}
+#tunnel-hud * {
+  pointer-events: auto !important;
+}
+.tunnel-preset-btn {
+  cursor: pointer !important;
+  user-select: none;
+  transition: all 0.15s ease;
+}
+.tunnel-preset-btn:hover {
+  background: #ffffff !important;
+  border-color: #1a73e8 !important;
+}
+.tunnel-preset-btn.active {
+  background: #e8f0fe !important;
+  border-color: #1a73e8 !important;
+  color: #1a73e8 !important;
+  font-weight: 700 !important;
+}
 
 .hud-row { display: flex; justify-content: space-between; gap: 12px; line-height: 1.6; }
 .hud-key { color: var(--muted); }
@@ -806,7 +880,7 @@ input[type="range"]:focus-visible { outline: 2px solid var(--accent); outline-of
   top: 14px;
   left: 50%;
   transform: translateX(-50%);
-  z-index: 50;
+  z-index: var(--z-banner);
   display: flex;
   align-items: flex-start;
   gap: 12px;
@@ -1489,7 +1563,7 @@ input[type="range"]:focus-visible { outline: 2px solid var(--accent); outline-of
   display: flex;
   flex-direction: column;
   gap: 4px;
-  z-index: 100;
+  z-index: var(--z-toast);
   pointer-events: none;
 }
 .toast {
@@ -1511,7 +1585,7 @@ input[type="range"]:focus-visible { outline: 2px solid var(--accent); outline-of
   background: rgba(23, 24, 27, 0.42);
   display: grid;
   place-items: center;
-  z-index: 60;
+  z-index: var(--z-modal);
 }
 .modal[hidden] { display: none; }
 .modal-card {
@@ -1615,7 +1689,7 @@ input[type="range"]:focus-visible { outline: 2px solid var(--accent); outline-of
     position: absolute;
     top: var(--top-h);
     bottom: var(--dock-h);
-    z-index: 20;
+    z-index: var(--z-drawer);
     width: 274px;
     box-shadow: 0 0 0 1px var(--line);
     transform: translateX(-102%);
@@ -2390,11 +2464,11 @@ input[type="range"]:focus-visible { outline: 2px solid var(--accent); outline-of
    100機一括飛行 記録・統計HUD (Google Clean Minimalist Modal/Card)
    ========================================================================== */
 .ensemble-champion-card {
-  position: absolute;
+  position: fixed;
   top: 50%;
   left: 50%;
   transform: translate(-50%, -50%);
-  z-index: 50;
+  z-index: var(--z-modal);
   width: 620px;
   max-width: 94vw;
   max-height: 85vh;
@@ -2665,7 +2739,7 @@ input[type="range"]:focus-visible { outline: 2px solid var(--accent); outline-of
   bottom: 14px;
   left: 50%;
   transform: translateX(-50%);
-  z-index: 15;
+  z-index: var(--z-hud);
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -2913,12 +2987,16 @@ input[type="range"]:focus-visible { outline: 2px solid var(--accent); outline-of
 
 /* ---------- Flight Result Summary Modal ---------- */
 .flight-result-modal {
-  position: absolute;
+  position: fixed;
   top: 50%;
   left: 50%;
   transform: translate(-50%, -50%);
-  z-index: 55;
+  z-index: var(--z-modal);
   pointer-events: auto;
+  max-height: 88vh;
+  overflow-y: auto;
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.22), 0 0 0 100vmax rgba(15, 23, 42, 0.35);
+  border-radius: 12px;
   animation: flightModalPop 0.22s cubic-bezier(0.16, 1, 0.3, 1);
 }
 .flight-result-modal[hidden] {
