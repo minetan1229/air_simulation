@@ -1530,3 +1530,51 @@ def test_storage_is_thread_safe(tmp_path):
     assert len(store.list_artefacts()) == 60 + 6
     assert len(store.list_configs()) == 6
     assert store.load_flight_log("flight-3-7")[0].time_s == pytest.approx(37.0)
+
+
+def test_export_ensemble_data_json_and_csv():
+    from physics.storage_domain import export_ensemble_data, datetime_stamp
+    data = {
+        "mean_trajectory": {
+            "id": "mean",
+            "is_mean": True,
+            "points": [
+                {"t": 0.0, "x": 0.0, "y": 0.0, "z": 1.8, "pitch": 12.0, "roll": 0.0, "yaw": 0.0},
+                {"t": 0.5, "x": 5.0, "y": 0.1, "z": 1.5, "pitch": 5.0, "roll": 0.2, "yaw": 0.1},
+            ],
+            "landing_distance_m": 18.5,
+            "flight_time_s": 3.8,
+        },
+        "sample_trajectories": [
+            {
+                "id": 1,
+                "rank": 1,
+                "points": [
+                    {"t": 0.0, "x": 0.0, "y": 0.0, "z": 1.8, "pitch": 12.0, "roll": 0.0, "yaw": 0.0},
+                    {"t": 0.5, "x": 5.2, "y": 0.2, "z": 1.6, "pitch": 6.0, "roll": 0.1, "yaw": 0.0},
+                ],
+                "landing_distance_m": 20.1,
+                "flight_time_s": 4.0,
+            }
+        ],
+        "statistics": {"mean_distance_m": 18.5},
+        "trajectories_count": 100,
+    }
+
+    text_json, mime_json, filename_json = export_ensemble_data(data, "json")
+    assert mime_json == "application/json"
+    assert filename_json.startswith("sim_data_")
+    assert filename_json.endswith(".json")
+    parsed = json.loads(text_json)
+    assert "mean_trajectory" in parsed
+    assert parsed["mean_trajectory"]["landing_distance_m"] == 18.5
+    assert len(parsed["sample_trajectories"]) == 1
+
+    text_csv, mime_csv, filename_csv = export_ensemble_data(data, "csv")
+    assert mime_csv == "text/csv"
+    assert filename_csv.startswith("sim_data_")
+    assert filename_csv.endswith(".csv")
+    assert "plane_id,rank,is_mean" in text_csv
+    assert "mean,,True" in text_csv or "mean,0,True" in text_csv or "mean" in text_csv
+    assert "20.1" in text_csv
+
