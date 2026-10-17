@@ -45,3 +45,9 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TEST_SUMMARY_FILE: pytest_failure_summary.txt
         run: python tools/create_failure_issue.py
+
+      - name: テスト成功時の解決済みIssue自動クローズ
+        if: success()
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: python tools/close_resolved_issue.py
