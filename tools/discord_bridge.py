@@ -3,10 +3,11 @@ Discord Remote Bridge for Antigravity (AGY)
 Allows full remote control of the local Antigravity agent from Discord.
 
 Features:
-- Streaming thought & tool execution status updates in Discord
-- Dynamic model selection via slash commands (/model) or select menus
-- Multi-turn conversation support (/new, /continue)
-- Process cancellation / abort (/abort or 🛑 reaction)
+- Workspace strictly locked to simulation/v3 directory
+- Real-time live status updates (Thinking progress, Tool executions, Subagent spawns & completion)
+- Interactive multi-turn chat (DM or dedicated channel without repeated mentions)
+- Dynamic model selection via slash commands (/model) or prefix (!model, !m)
+- Process cancellation / abort (!abort, /abort, or 🛑 reaction)
 - User / Channel access control
 """
 
@@ -17,6 +18,7 @@ import logging
 import os
 import shutil
 import sys
+import time
 from pathlib import Path
 from typing import Dict, List, Optional, Set
 
@@ -46,6 +48,7 @@ ALLOWED_CHANNEL_IDS: Set[int] = {
     int(c.strip()) for c in ALLOWED_CHANNELS_RAW.split(",") if c.strip().isdigit()
 }
 
+# Strictly lock workspace to simulation/v3
 WORKSPACE_DIR = Path(__file__).resolve().parent.parent
 
 # Available Models in AGY
@@ -98,7 +101,7 @@ class DiscordBridgeClient(discord.Client):
 
         # State tracking: channel_id -> current_model
         self.channel_models: Dict[int, str] = {}
-        # channel_id -> conversation_id
+        # channel_id -> conversation_id (for multi-turn memory)
         self.channel_conversations: Dict[int, Optional[str]] = {}
         # channel_id -> asyncio.subprocess.Process
         self.active_processes: Dict[int, asyncio.subprocess.Process] = {}
@@ -134,7 +137,7 @@ def check_auth(interaction: discord.Interaction) -> bool:
 @client.event
 async def on_ready():
     logger.info(f"Discord Bridge Bot logged in as {client.user} (ID: {client.user.id})")
-    logger.info(f"Working Directory: {WORKSPACE_DIR}")
+    logger.info(f"Strict Workspace Directory: {WORKSPACE_DIR}")
     logger.info(f"Default Model: {DEFAULT_MODEL}")
     if ALLOWED_USER_IDS:
         logger.info(f"Authorized User IDs: {ALLOWED_USER_IDS}")
@@ -189,17 +192,23 @@ async def cmd_model(interaction: discord.Interaction, model_id: Optional[str] = 
         )
         return
 
-    if model_id not in AVAILABLE_MODELS:
+    target_model = None
+    for mid in AVAILABLE_MODELS:
+        if model_id.lower() in mid.lower():
+            target_model = mid
+            break
+
+    if not target_model:
         await interaction.response.send_message(
             f"❌ Unknown model: `{model_id}`\nAvailable: {', '.join(f'`{m}`' for m in AVAILABLE_MODELS.keys())}",
             ephemeral=True,
         )
         return
 
-    client.set_model(interaction.channel_id, model_id)
-    display_name = AVAILABLE_MODELS.get(model_id, model_id)
+    client.set_model(interaction.channel_id, target_model)
+    display_name = AVAILABLE_MODELS.get(target_model, target_model)
     await interaction.response.send_message(
-        f"✅ Active model updated to: **{display_name}** (`{model_id}`)"
+        f"✅ Active model updated to: **{display_name}** (`{target_model}`)"
     )
 
 
@@ -210,7 +219,7 @@ async def cmd_new(interaction: discord.Interaction):
         return
 
     client.channel_conversations[interaction.channel_id] = None
-    await interaction.response.send_message("🔄 Conversation reset. Next message will start a new session.")
+    await interaction.response.send_message("🔄 Conversation reset. Next message will start a new session in `simulation/v3`.")
 
 
 @client.tree.command(name="abort", description="Abort currently running agent command")
@@ -231,36 +240,50 @@ async def cmd_abort(interaction: discord.Interaction):
 
 
 async def execute_agy_prompt(
-    channel: discord.TextChannel,
+    channel: discord.TextChannel | discord.DMChannel,
     prompt: str,
     user: discord.User,
     reply_to_msg: Optional[discord.Message] = None,
 ):
-    """Runs agy CLI in background, streams progress, and posts response."""
+    """
+    Runs agy CLI strictly in simulation/v3 workspace,
+    streams live progress (thinking, subagents, tools), and posts reply.
+    """
     channel_id = channel.id
 
     if channel_id in client.active_processes and client.active_processes[channel_id].returncode is None:
-        await channel.send("⚠️ Another task is already running in this channel. Use `/abort` to cancel it first.")
+        await channel.send("⚠️ Another task is already running in this channel. Use `!abort` or `/abort` to cancel it first.")
         return
 
     model = client.get_model(channel_id)
     conv_id = client.channel_conversations.get(channel_id)
 
-    # Build command line
-    cmd = ["agy", "-p", prompt, "--model", model, "--output-format", "stream-json", "--dangerously-skip-permissions"]
+    # Command construction: locked to WORKSPACE_DIR
+    cmd = [
+        "agy",
+        "-p", prompt,
+        "--model", model,
+        "--output-format", "stream-json",
+        "--dangerously-skip-permissions",
+    ]
     if conv_id:
         cmd.extend(["--conversation", conv_id])
 
-    logger.info(f"Running command: {' '.join(cmd[:6])}... [Model: {model}]")
+    logger.info(f"Running in {WORKSPACE_DIR} (Model: {model}, Conv: {conv_id}): {prompt[:60]}...")
 
     status_embed = discord.Embed(
-        title="🚀 Running Antigravity Agent",
-        description=f"**Model**: `{model}`\n**Prompt**: {prompt[:150]}{'...' if len(prompt) > 150 else ''}",
+        title="🚀 Antigravity Agent Running",
+        description=f"**Model**: `{model}`\n**Workspace**: `simulation/v3`\n**Prompt**: {prompt[:120]}{'...' if len(prompt) > 120 else ''}",
         color=discord.Color.gold(),
     )
-    status_embed.set_footer(text="React 🛑 to abort")
+    status_embed.add_field(name="Current Status", value="🧠 Initializing & Reasoning...", inline=False)
+    status_embed.set_footer(text="React with 🛑 or type !abort to cancel")
+
     status_msg = await channel.send(embed=status_embed)
-    await status_msg.add_reaction("🛑")
+    try:
+        await status_msg.add_reaction("🛑")
+    except Exception:
+        pass
 
     try:
         proc = await asyncio.create_subprocess_exec(
@@ -272,20 +295,29 @@ async def execute_agy_prompt(
         client.active_processes[channel_id] = proc
 
         accumulated_text = ""
-        current_step_info = "Initializing agent..."
-        new_conv_id = conv_id
-        last_edit_time = asyncio.get_event_loop().time()
+        current_status_line = "🧠 Thinking / Analyzing codebase..."
+        recent_activity_log: List[str] = []
+        last_edit_time = time.time()
 
-        async def update_status_embed(text: str):
+        async def update_live_embed(force: bool = False):
             nonlocal last_edit_time
-            now = asyncio.get_event_loop().time()
-            if now - last_edit_time > 1.5:  # Rate limit edits to prevent 429
+            now = time.time()
+            if force or (now - last_edit_time >= 1.5):
                 try:
-                    status_embed.description = (
-                        f"**Model**: `{model}`\n"
-                        f"**Status**: {text}\n"
-                        f"**Prompt**: {prompt[:100]}..."
+                    status_embed.set_field_at(
+                        0,
+                        name="Current Status",
+                        value=current_status_line[:250],
+                        inline=False,
                     )
+                    if recent_activity_log:
+                        # Keep last 3 activity events
+                        log_display = "\n".join(recent_activity_log[-3:])
+                        if len(status_embed.fields) > 1:
+                            status_embed.set_field_at(1, name="Recent Activity", value=log_display[:500], inline=False)
+                        else:
+                            status_embed.add_field(name="Recent Activity", value=log_display[:500], inline=False)
+
                     await status_msg.edit(embed=status_embed)
                     last_edit_time = now
                 except Exception:
@@ -311,13 +343,52 @@ async def execute_agy_prompt(
                 elif event == "step_update":
                     step = data.get("step_update", {})
                     step_type = step.get("step_type")
-                    if step_type == "tool_call":
-                        tool_name = step.get("tool_name", "tool")
-                        current_step_info = f"⚙️ Running tool: `{tool_name}`"
-                        await update_status_embed(current_step_info)
+                    state = step.get("state")
+                    tool_name = step.get("tool_name")
+
+                    # Subagent events
+                    if step_type == "subagent" or tool_name == "invoke_subagent":
+                        sub_info = step.get("subagent_info", {})
+                        subagents = sub_info.get("subagents", [])
+                        if subagents:
+                            sub_types = ", ".join(s.get("type_name", "subagent") for s in subagents)
+                            current_status_line = f"👥 Subagent running: **{sub_types}**"
+                            recent_activity_log.append(f"👥 Subagent `{sub_types}` started")
+                        else:
+                            current_status_line = "👥 Managing subagents..."
+                        await update_live_embed()
+
+                    # Tool execution events
+                    elif step_type == "tool":
+                        info = step.get("tool_info", {})
+                        params = info.get("parameters", {})
+                        if tool_name == "run_command":
+                            cmd_str = params.get("CommandLine", "")[:60]
+                            current_status_line = f"⚙️ Running command: `{cmd_str}`"
+                        elif tool_name in ("view_file", "replace_file_content", "write_to_file"):
+                            target_file = params.get("TargetFile") or params.get("AbsolutePath", "")
+                            base_name = Path(target_file).name if target_file else "file"
+                            current_status_line = f"📝 File op ({tool_name}): `{base_name}`"
+                        elif tool_name == "invoke_subagent":
+                            current_status_line = "👥 Spawning subagents..."
+                        else:
+                            current_status_line = f"⚙️ Tool: `{tool_name}`"
+
+                        if state == "DONE":
+                            recent_activity_log.append(f"✅ {current_status_line}")
+                        await update_live_embed()
+
+                    # Agent response streaming / thinking
                     elif step_type == "agent_response":
                         delta = step.get("text_delta", "")
                         accumulated_text += delta
+                        usage = step.get("usage", {})
+                        thinking_tokens = usage.get("thinking_tokens", 0)
+                        if thinking_tokens > 0:
+                            current_status_line = f"🧠 Thinking ({thinking_tokens} tokens reasoning)..."
+                        else:
+                            current_status_line = "✍️ Generating response..."
+                        await update_live_embed()
 
                 elif event == "result":
                     res = data.get("result", {})
@@ -326,13 +397,12 @@ async def execute_agy_prompt(
                         accumulated_text = resp_text
 
             except json.JSONDecodeError:
-                # Regular text output if not JSON
                 accumulated_text += line_str + "\n"
 
         stdout, stderr = await proc.communicate()
-        if proc.returncode != 0 and not accumulated_text:
+        if proc.returncode != 0 and not accumulated_text.strip():
             err_msg = stderr.decode("utf-8", errors="replace").strip()
-            accumulated_text = f"❌ Error (Exit Code {proc.returncode}):\n```\n{err_msg[:1800]}\n```"
+            accumulated_text = f"❌ Process exited with code {proc.returncode}:\n```\n{err_msg[:1800]}\n```"
 
     except asyncio.CancelledError:
         if proc and proc.returncode is None:
@@ -345,7 +415,7 @@ async def execute_agy_prompt(
     finally:
         client.active_processes.pop(channel_id, None)
 
-    # Delete or finalize status message
+    # Clean up status message
     try:
         await status_msg.delete()
     except Exception:
@@ -353,22 +423,20 @@ async def execute_agy_prompt(
 
     # Post final output
     if not accumulated_text.strip():
-        accumulated_text = "(Done. No output generated.)"
+        accumulated_text = "(Task completed. No text response was returned.)"
 
     # Discord 2000 character limit handling
     if len(accumulated_text) <= 1900:
         await channel.send(accumulated_text)
     else:
-        # Send chunks or file
         if len(accumulated_text) < 4000:
             chunks = [accumulated_text[i:i + 1900] for i in range(0, len(accumulated_text), 1900)]
             for chunk in chunks:
                 await channel.send(chunk)
         else:
-            # Send preview + full text file
             file_data = io.BytesIO(accumulated_text.encode("utf-8"))
             discord_file = discord.File(file_data, filename="response.md")
-            preview = accumulated_text[:1200] + "\n\n... (Full response attached as file)"
+            preview = accumulated_text[:1200] + "\n\n... (Full response attached below as response.md)"
             await channel.send(content=preview, file=discord_file)
 
 
@@ -380,7 +448,7 @@ async def on_message(message: discord.Message):
 
     content = message.content.strip()
 
-    # Support prefix commands (!model, !models, !new, !abort)
+    # Prefix commands (!model, !models, !new, !abort, !help)
     if content.startswith(("!", "/")):
         parts = content[1:].split(maxsplit=1)
         cmd_name = parts[0].lower() if parts else ""
@@ -397,7 +465,6 @@ async def on_message(message: discord.Message):
                     view = ModelSelectView(current, on_model_selected)
                     await message.reply(f"Current active model: **`{current}`**\nSelect a new model below:", view=view)
                     return
-                # Match partial or full model name
                 target_model = None
                 for mid in AVAILABLE_MODELS:
                     if cmd_arg.lower() in mid.lower():
@@ -414,7 +481,7 @@ async def on_message(message: discord.Message):
                 current = client.get_model(message.channel.id)
                 embed = discord.Embed(
                     title="🤖 Available Antigravity Models",
-                    description=f"Current active model in this channel: **`{current}`**",
+                    description=f"Current active model in this channel: **`{current}`**\nWorkspace: `simulation/v3`",
                     color=discord.Color.blue(),
                 )
                 for mid, name in AVAILABLE_MODELS.items():
@@ -425,7 +492,7 @@ async def on_message(message: discord.Message):
 
             elif cmd_name == "new":
                 client.channel_conversations[message.channel.id] = None
-                await message.reply("🔄 Conversation reset. Next message will start a new session.")
+                await message.reply("🔄 Conversation reset. Next message will start a fresh session in `simulation/v3`.")
                 return
 
             elif cmd_name == "abort":
@@ -442,40 +509,43 @@ async def on_message(message: discord.Message):
 
             elif cmd_name == "help":
                 await message.reply(
-                    "**Antigravity Remote Bridge Commands:**\n"
+                    "**Antigravity Remote Bridge Commands (`simulation/v3`):**\n"
                     "• `!model` or `!m [name]`: Change or view model\n"
-                    "• `!models`: List all models\n"
-                    "• `!new`: Reset conversation context\n"
+                    "• `!models`: List all available models\n"
+                    "• `!new`: Reset conversation context (start fresh)\n"
                     "• `!abort`: Terminate currently running task\n"
-                    "• `@Bot <prompt>`: Send instruction to Antigravity"
+                    "• `@Bot <prompt>` or DM or dedicated channel chat: Chat naturally with Antigravity"
                 )
                 return
 
-    # Check mention or DM
-    is_mentioned = client.user in message.mentions
+    # Natural conversation check:
+    # 1. Direct message (DM) -> Always conversational without mention
+    # 2. Dedicated channel configured in ALLOWED_CHANNEL_IDS -> Conversational without mention
+    # 3. Mentioned by user -> Conversational
     is_dm = isinstance(message.channel, discord.DMChannel)
+    is_dedicated_channel = (len(ALLOWED_CHANNEL_IDS) > 0 and message.channel.id in ALLOWED_CHANNEL_IDS)
+    is_mentioned = client.user in message.mentions
 
-    if not (is_mentioned or is_dm):
+    if not (is_dm or is_dedicated_channel or is_mentioned):
         return
 
     if not client.is_authorized(message.author.id, message.channel.id):
         await message.reply("❌ Unauthorized: You do not have permission to control Antigravity.")
         return
 
-    # Clean prompt (remove bot mention)
+    # Clean prompt
     prompt = message.content.replace(f"<@{client.user.id}>", "").strip()
     if not prompt:
         current_model = client.get_model(message.channel.id)
         await message.reply(
-            f"👋 Antigravity Remote Bridge is ready.\n"
+            f"👋 Antigravity Remote Bridge is ready in `simulation/v3`.\n"
             f"Active Model: **`{current_model}`**\n"
-            f"Send me any task or instruction, or use `!model` to change models."
+            f"Send me any task or instruction, or use `!model` to switch models."
         )
         return
 
     async with message.channel.typing():
         await execute_agy_prompt(message.channel, prompt, message.author, reply_to_msg=message)
-
 
 
 @client.event
@@ -499,7 +569,7 @@ def main():
         print("=" * 60 + "\n")
         sys.exit(1)
 
-    print("Starting Discord Remote Bridge for Antigravity...")
+    print("Starting Discord Remote Bridge for Antigravity (Workspace: simulation/v3)...")
     client.run(DISCORD_BOT_TOKEN)
 
 
