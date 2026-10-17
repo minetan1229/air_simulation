@@ -30,6 +30,15 @@
           "Hiragino Kaku Gothic ProN", "Yu Gothic UI", "Yu Gothic", Meiryo, sans-serif;
   --mono: ui-monospace, "Cascadia Mono", "Cascadia Code", Consolas,
           "SFMono-Regular", "Roboto Mono", monospace;
+
+  /* Layer Management Stack */
+  --z-canvas:   1;
+  --z-hud:      10;
+  --z-overlay:  20;
+  --z-drawer:   25;
+  --z-banner:   40;
+  --z-modal:    60;
+  --z-toast:    100;
 }
 
 * { box-sizing: border-box; }

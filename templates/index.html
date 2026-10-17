@@ -232,107 +232,117 @@
     <section class="viewport" aria-label="3D ビュー">
       <canvas id="view-canvas"></canvas>
 
-      <div class="vp-toolbar" role="toolbar" aria-label="表示設定">
-        <button class="chip" id="tgl-wind" type="button" data-on="1" title="風流粒子 (F)">風流</button>
-        <button class="chip" id="tgl-track" type="button" data-on="1" title="飛行軌跡 (T)">軌跡</button>
-        <button class="chip" id="tgl-ghost" type="button" data-on="1" title="前回の軌跡 (G)">ゴースト</button>
-        <button class="chip" id="tgl-panels" type="button" title="空力パネル格子 (P)">パネル</button>
-        <button class="chip" id="tgl-grip" type="button" data-on="1" title="持ち手接触点 (M)">持ち手</button>
-        <button class="chip" id="tgl-follow" type="button" data-on="1" title="機体追従 (C)">追従</button>
-        <button class="chip" id="tgl-heat" type="button" data-on="1" title="応力ヒートマップ (H)">応力</button>
-        <span class="toolbar-sep" aria-hidden="true"></span>
-        <button class="chip" id="cam-mode-fleet" type="button" title="100機全体を見渡す俯瞰カメラ">俯瞰</button>
-        <button class="chip" id="cam-mode-swarm" type="button" title="群れの重心を追尾するカメラ">群れ重心</button>
-        <button class="chip" id="cam-mode-lead" type="button" title="先頭トップ機を追尾するカメラ">トップ機</button>
-        <button class="chip" id="btn-view-reset" type="button" title="視点を初期化 (V)">リセット</button>
-      </div>
-
-      <!-- リアルタイム・フライトテレメトリカード (日本語テキスト表示) -->
-      <div class="vp-hud vp-hud-tl flight-telemetry-hud" style="min-width: 220px; padding: 8px 10px; background: rgba(255,255,255,0.92); backdrop-filter: blur(8px); border: 1px solid var(--line); border-radius: 6px; box-shadow: 0 2px 8px rgba(0,0,0,0.06);">
-        <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid var(--line); padding-bottom:5px; margin-bottom:6px;">
-          <span style="font-weight:700; font-size:11px; color:var(--ink); letter-spacing:0.02em;">飛行ステータス</span>
-          <span class="hud-phase-pill" id="f-hud-phase" style="font-size:9.5px; padding:1px 6px; border-radius:10px; background:#e8f0fe; color:#1a73e8; font-weight:600;">待機中</span>
+      <!-- Top-Right HUD Stack (表示切替ツールバー & 風洞HUDの自動縦フロー) -->
+      <div class="vp-overlay-stack vp-overlay-tr">
+        <div class="vp-toolbar" role="toolbar" aria-label="表示設定">
+          <button class="chip" id="tgl-wind" type="button" data-on="1" title="風流粒子 (F)">風流</button>
+          <button class="chip" id="tgl-track" type="button" data-on="1" title="飛行軌跡 (T)">軌跡</button>
+          <button class="chip" id="tgl-ghost" type="button" data-on="1" title="前回の軌跡 (G)">ゴースト</button>
+          <button class="chip" id="tgl-panels" type="button" title="空力パネル格子 (P)">パネル</button>
+          <button class="chip" id="tgl-grip" type="button" data-on="1" title="持ち手接触点 (M)">持ち手</button>
+          <button class="chip" id="tgl-follow" type="button" data-on="1" title="機体追従 (C)">追従</button>
+          <button class="chip" id="tgl-heat" type="button" data-on="1" title="応力ヒートマップ (H)">応力</button>
+          <span class="toolbar-sep" aria-hidden="true"></span>
+          <button class="chip active" id="cam-mode-mean" type="button" title="代表平均機を追従するカメラ (揺れなし)">平均機追従</button>
+          <button class="chip" id="cam-mode-lead" type="button" title="1位トップ機を追尾するカメラ">トップ機</button>
+          <button class="chip" id="cam-mode-fleet" type="button" title="100機全体を見渡す俯瞰カメラ">俯瞰</button>
+          <button class="chip" id="cam-mode-fixed" type="button" title="固定視点 (追従オフ)">固定カメラ</button>
+          <button class="chip" id="btn-view-reset" type="button" title="視点を初期化 (V)">リセット</button>
+          <span class="toolbar-sep" aria-hidden="true"></span>
+          <button class="chip" id="tgl-ens-tracks" type="button" data-on="1" title="100機の軌跡表示・非表示切替">100機軌道</button>
+          <button class="chip active" id="tgl-ens-mean-only" type="button" data-mode="all" title="全軌道表示 ⇄ 平均機のみ表示切替">全機表示</button>
         </div>
 
-        <div style="display:grid; grid-template-columns: 1fr 1fr; gap: 6px 12px; font-size:11px;">
-          <div>
-            <div style="color:var(--muted); font-size:9.5px;">高度</div>
-            <div style="font-weight:700; font-size:13px; color:var(--ink);"><span id="f-hud-alt" class="num">0.00</span> <small style="font-size:10px; font-weight:normal;">m</small></div>
-            <div style="font-size:9.5px; color:var(--accent); font-weight:500;">最高: <span id="f-hud-alt-peak" class="num">0.00</span> m</div>
-          </div>
-          <div>
-            <div style="color:var(--muted); font-size:9.5px;">速度</div>
-            <div style="font-weight:700; font-size:13px; color:var(--ink);"><span id="f-hud-spd" class="num">0.00</span> <small style="font-size:10px; font-weight:normal;">m/s</small></div>
-            <div style="font-size:9.5px; color:var(--accent); font-weight:500;">最高: <span id="f-hud-spd-peak" class="num">0.00</span> m/s</div>
-          </div>
-          <div>
-            <div style="color:var(--muted); font-size:9.5px;">水平距離</div>
-            <div style="font-weight:600; font-size:11.5px; color:var(--ink);"><span id="f-hud-dist" class="num">0.00</span> <small style="font-size:9.5px; font-weight:normal;">m</small></div>
-            <div style="font-size:9.5px; color:var(--ink-2);">時間: <span id="f-hud-time" class="num">0.00</span> s</div>
-          </div>
-          <div>
-            <div style="color:var(--muted); font-size:9.5px;">滑空比 / 迎角</div>
-            <div style="font-weight:600; font-size:11.5px; color:#188038;"><span id="f-hud-glide" class="num">—</span></div>
-            <div style="font-size:9.5px; color:var(--ink-2);">迎角: <span id="f-hud-aoa" class="num">0.0°</span></div>
-          </div>
-        </div>
+        <div class="vp-hud vp-hud-tr" id="tunnel-hud" hidden style="min-width: 200px;">
+          <div class="hud-title">風洞実験室 / WIND TUNNEL</div>
+          <div class="hud-row"><span class="hud-key">動態</span><span class="hud-val" id="hud-tunnel-status" style="color:#1a73e8;font-weight:600;">リアルタイム空力応答</span></div>
+          <div class="hud-row"><span class="hud-key">流線</span><span class="hud-val" style="color:#34a853;font-size:11px;">煙線レイク・翼干渉・翼端渦 ON</span></div>
+          <div class="hud-row"><span class="hud-key">迎角 α</span><span class="hud-val num" id="hud-tunnel-aoa" style="font-weight:700;color:#1a73e8;">4.0°</span></div>
+          <div class="hud-row"><span class="hud-key">風速 V</span><span class="hud-val num" id="hud-tunnel-speed" style="font-weight:700;">12.0 m/s</span></div>
+          <div class="hud-row"><span class="hud-key">C_L</span><span class="hud-val num" id="hud-cl">—</span></div>
+          <div class="hud-row"><span class="hud-key">C_D</span><span class="hud-val num" id="hud-cd">—</span></div>
+          <div class="hud-row"><span class="hud-key">L/D</span><span class="hud-val num" id="hud-ld">—</span></div>
+          <div class="hud-row"><span class="hud-key">C_m</span><span class="hud-val num" id="hud-cm">—</span></div>
 
-        <!-- 詳細力学データ (互換性用非表示コンテナ) -->
-        <div style="display:none;">
-          <span id="hud-alpha"></span><span id="hud-beta"></span><span id="hud-speed"></span>
-          <span id="hud-q"></span><span id="hud-ld-live"></span><span id="hud-glide-ratio"></span>
-          <span id="hud-flow"></span>
-        </div>
-      </div>
-
-      <div class="vp-hud vp-hud-tr" id="tunnel-hud" hidden style="min-width: 200px;">
-        <div class="hud-title">風洞実験室 / WIND TUNNEL</div>
-        <div class="hud-row"><span class="hud-key">動態</span><span class="hud-val" id="hud-tunnel-status" style="color:#1a73e8;font-weight:600;">リアルタイム空力応答</span></div>
-        <div class="hud-row"><span class="hud-key">流線</span><span class="hud-val" style="color:#34a853;font-size:11px;">煙線レイク・翼干渉・翼端渦 ON</span></div>
-        <div class="hud-row"><span class="hud-key">迎角 α</span><span class="hud-val num" id="hud-tunnel-aoa" style="font-weight:700;color:#1a73e8;">4.0°</span></div>
-        <div class="hud-row"><span class="hud-key">風速 V</span><span class="hud-val num" id="hud-tunnel-speed" style="font-weight:700;">12.0 m/s</span></div>
-        <div class="hud-row"><span class="hud-key">C_L</span><span class="hud-val num" id="hud-cl">—</span></div>
-        <div class="hud-row"><span class="hud-key">C_D</span><span class="hud-val num" id="hud-cd">—</span></div>
-        <div class="hud-row"><span class="hud-key">L/D</span><span class="hud-val num" id="hud-ld">—</span></div>
-        <div class="hud-row"><span class="hud-key">C_m</span><span class="hud-val num" id="hud-cm">—</span></div>
-
-        <!-- インタラクティブ迎角・風速スライダー -->
-        <div style="margin-top:8px; border-top:1px solid rgba(0,0,0,0.08); padding-top:6px;">
-          <div style="display:flex; justify-content:space-between; align-items:center; font-size:10px; margin-bottom:2px;">
-            <span>迎角 (AoA) 調整</span>
-            <span id="tunnel-slider-aoa-val" class="num" style="font-weight:600; color:#1a73e8;">4.0°</span>
+          <!-- インタラクティブ迎角・風速スライダー -->
+          <div style="margin-top:8px; border-top:1px solid rgba(0,0,0,0.08); padding-top:6px;">
+            <div style="display:flex; justify-content:space-between; align-items:center; font-size:10px; margin-bottom:2px;">
+              <span>迎角 (AoA) 調整</span>
+              <span id="tunnel-slider-aoa-val" class="num" style="font-weight:600; color:#1a73e8;">4.0°</span>
+            </div>
+            <input type="range" id="tunnel-slider-aoa" min="-15" max="30" step="0.5" value="4" style="width:100%; height:4px; cursor:pointer;" title="迎角をリアルタイム調整">
           </div>
-          <input type="range" id="tunnel-slider-aoa" min="-15" max="30" step="0.5" value="4" style="width:100%; height:4px; cursor:pointer;" title="迎角をリアルタイム調整">
-        </div>
 
-        <div style="margin-top:6px;">
-          <div style="display:flex; justify-content:space-between; align-items:center; font-size:10px; margin-bottom:2px;">
-            <span>風洞風速</span>
-            <span id="tunnel-slider-speed-val" class="num" style="font-weight:600;">12.0 m/s</span>
+          <div style="margin-top:6px;">
+            <div style="display:flex; justify-content:space-between; align-items:center; font-size:10px; margin-bottom:2px;">
+              <span>風洞風速</span>
+              <span id="tunnel-slider-speed-val" class="num" style="font-weight:600;">12.0 m/s</span>
+            </div>
+            <input type="range" id="tunnel-slider-speed" min="0" max="30" step="0.5" value="12" style="width:100%; height:4px; cursor:pointer;" title="風速をリアルタイム調整">
           </div>
-          <input type="range" id="tunnel-slider-speed" min="0" max="30" step="0.5" value="12" style="width:100%; height:4px; cursor:pointer;" title="風速をリアルタイム調整">
-        </div>
 
-        <!-- クイック迎角テストプリセット -->
-        <div style="display:flex; flex-wrap:wrap; gap:3px; margin-top:8px;">
-          <button type="button" class="btn btn-mini tunnel-preset-btn" data-aoa="0" style="padding:1px 4px; font-size:9.5px;">高速 0°</button>
-          <button type="button" class="btn btn-mini tunnel-preset-btn" data-aoa="4" style="padding:1px 4px; font-size:9.5px; border-color:#1a73e8; color:#1a73e8;">滑空 4°</button>
-          <button type="button" class="btn btn-mini tunnel-preset-btn" data-aoa="10" style="padding:1px 4px; font-size:9.5px;">高揚力 10°</button>
-          <button type="button" class="btn btn-mini tunnel-preset-btn" data-aoa="16" style="padding:1px 4px; font-size:9.5px; color:#ea4335;">臨界失速 16°</button>
-          <button type="button" class="btn btn-mini tunnel-preset-btn" data-aoa="24" style="padding:1px 4px; font-size:9.5px; color:#d93025;">深失速 24°</button>
-          <button type="button" class="btn btn-mini tunnel-preset-btn" data-aoa="-6" style="padding:1px 4px; font-size:9.5px;">逆迎角 -6°</button>
+          <!-- クイック迎角テストプリセット -->
+          <div style="display:flex; flex-wrap:wrap; gap:3px; margin-top:8px;">
+            <button type="button" class="btn btn-mini tunnel-preset-btn" data-aoa="0" style="padding:1px 4px; font-size:9.5px;">高速 0°</button>
+            <button type="button" class="btn btn-mini tunnel-preset-btn" data-aoa="4" style="padding:1px 4px; font-size:9.5px; border-color:#1a73e8; color:#1a73e8;">滑空 4°</button>
+            <button type="button" class="btn btn-mini tunnel-preset-btn" data-aoa="10" style="padding:1px 4px; font-size:9.5px;">高揚力 10°</button>
+            <button type="button" class="btn btn-mini tunnel-preset-btn" data-aoa="16" style="padding:1px 4px; font-size:9.5px; color:#ea4335;">臨界失速 16°</button>
+            <button type="button" class="btn btn-mini tunnel-preset-btn" data-aoa="24" style="padding:1px 4px; font-size:9.5px; color:#d93025;">深失速 24°</button>
+            <button type="button" class="btn btn-mini tunnel-preset-btn" data-aoa="-6" style="padding:1px 4px; font-size:9.5px;">逆迎角 -6°</button>
+          </div>
         </div>
       </div>
 
-      <div class="vp-hud vp-hud-bl">
-        <div class="heat-legend">
-          <span class="heat-title">翼面応力インデックス STRESS</span>
-          <div class="heat-bar"><canvas id="heat-ramp" width="180" height="10"></canvas></div>
-          <div class="heat-scale"><span>0.0</span><span>0.5</span><span>1.0</span></div>
+      <!-- Left HUD Stack (テレメトリ & 翼面応力凡例の縦衝突防止スタック) -->
+      <div class="vp-overlay-stack vp-overlay-tl">
+        <!-- リアルタイム・フライトテレメトリカード (日本語テキスト表示) -->
+        <div class="vp-hud vp-hud-tl flight-telemetry-hud" style="min-width: 220px; padding: 8px 10px; background: rgba(255,255,255,0.92); backdrop-filter: blur(8px); border: 1px solid var(--line); border-radius: 6px; box-shadow: 0 2px 8px rgba(0,0,0,0.06);">
+          <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid var(--line); padding-bottom:5px; margin-bottom:6px;">
+            <span style="font-weight:700; font-size:11px; color:var(--ink); letter-spacing:0.02em;">飛行ステータス</span>
+            <span class="hud-phase-pill" id="f-hud-phase" style="font-size:9.5px; padding:1px 6px; border-radius:10px; background:#e8f0fe; color:#1a73e8; font-weight:600;">待機中</span>
+          </div>
+
+          <div style="display:grid; grid-template-columns: 1fr 1fr; gap: 6px 12px; font-size:11px;">
+            <div>
+              <div style="color:var(--muted); font-size:9.5px;">高度</div>
+              <div style="font-weight:700; font-size:13px; color:var(--ink);"><span id="f-hud-alt" class="num">0.00</span> <small style="font-size:10px; font-weight:normal;">m</small></div>
+              <div style="font-size:9.5px; color:var(--accent); font-weight:500;">最高: <span id="f-hud-alt-peak" class="num">0.00</span> m</div>
+            </div>
+            <div>
+              <div style="color:var(--muted); font-size:9.5px;">速度</div>
+              <div style="font-weight:700; font-size:13px; color:var(--ink);"><span id="f-hud-spd" class="num">0.00</span> <small style="font-size:10px; font-weight:normal;">m/s</small></div>
+              <div style="font-size:9.5px; color:var(--accent); font-weight:500;">最高: <span id="f-hud-spd-peak" class="num">0.00</span> m/s</div>
+            </div>
+            <div>
+              <div style="color:var(--muted); font-size:9.5px;">水平距離</div>
+              <div style="font-weight:600; font-size:11.5px; color:var(--ink);"><span id="f-hud-dist" class="num">0.00</span> <small style="font-size:9.5px; font-weight:normal;">m</small></div>
+              <div style="font-size:9.5px; color:var(--ink-2);">時間: <span id="f-hud-time" class="num">0.00</span> s</div>
+            </div>
+            <div>
+              <div style="color:var(--muted); font-size:9.5px;">滑空比 / 迎角</div>
+              <div style="font-weight:600; font-size:11.5px; color:#188038;"><span id="f-hud-glide" class="num">—</span></div>
+              <div style="font-size:9.5px; color:var(--ink-2);">迎角: <span id="f-hud-aoa" class="num">0.0°</span></div>
+            </div>
+          </div>
+
+          <!-- 詳細力学データ (互換性用非表示コンテナ) -->
+          <div style="display:none;">
+            <span id="hud-alpha"></span><span id="hud-beta"></span><span id="hud-speed"></span>
+            <span id="hud-q"></span><span id="hud-ld-live"></span><span id="hud-glide-ratio"></span>
+            <span id="hud-flow"></span>
+          </div>
         </div>
-        <div class="flow-legend">
-          <span class="flow-backend" id="flow-backend">flow: —</span>
-          <span class="flow-count num" id="flow-count">—</span>
+
+        <div class="vp-hud vp-hud-bl">
+          <div class="heat-legend">
+            <span class="heat-title">翼面応力インデックス STRESS</span>
+            <div class="heat-bar"><canvas id="heat-ramp" width="180" height="10"></canvas></div>
+            <div class="heat-scale"><span>0.0</span><span>0.5</span><span>1.0</span></div>
+          </div>
+          <div class="flow-legend">
+            <span class="flow-backend" id="flow-backend">flow: —</span>
+            <span class="flow-count num" id="flow-count">—</span>
+          </div>
         </div>
       </div>
 
@@ -344,187 +354,6 @@
         <p class="muted">設定・数値計算・最適化はそのまま利用できます。</p>
       </div>
 
-      <!-- 100機一括飛行・最高値/最下位/平均値 統計記録カード (100機シミュレーション記録HUD) -->
-      <div class="ensemble-champion-card" id="ensemble-champion-card" hidden>
-        <div class="champ-head">
-          <div class="champ-title-group">
-            <span class="champ-trophy"><img src="https://api.iconify.design/material-symbols/social-leaderboard-outline.svg?color=%23f9ab00" class="ui-icon" style="width:28px;height:28px;" alt=""></span>
-            <div>
-              <div class="champ-title">100機一斉飛行 記録・統計分析</div>
-              <div class="champ-sub" id="champ-backend-sub">GPU 並列演算 · 計 100機</div>
-            </div>
-          </div>
-          <button class="champ-close-btn" id="champ-close-btn" type="button" title="閉じる">✕</button>
-        </div>
-
-        <!-- 最高値・最下位・平均値の記録グリッド -->
-        <div class="champ-grid">
-          <!-- 🥇 最高値 (1位 最長飛距離) -->
-          <div class="champ-stat-card champ-gold">
-            <div class="champ-stat-label">
-              <img src="https://api.iconify.design/material-symbols/trophy.svg?color=%23b06000" class="ui-icon" alt="">
-              最高飛距離 (1位チャンピオン)
-              <span class="champ-promoted-tag" id="champ-promoted-tag" style="display:none;">2位繰り上げ</span>
-            </div>
-            <div class="champ-stat-value"><span class="num" id="champ-best-dist">—</span><span class="unit"> m</span></div>
-            <div class="champ-stat-extra" id="champ-best-detail">機体 #— · 初速: — · 角度: —</div>
-          </div>
-
-          <!-- 🥈 最長滞空時間 (最高値) -->
-          <div class="champ-stat-card">
-            <div class="champ-stat-label">
-              <img src="https://api.iconify.design/material-symbols/timer-outline.svg?color=%231a73e8" class="ui-icon" alt="">
-              最長滞空時間 (最高値)
-            </div>
-            <div class="champ-stat-value"><span class="num" id="champ-best-time">—</span><span class="unit"> s</span></div>
-            <div class="champ-stat-extra" id="champ-best-time-detail">機体 #— · 飛距離: —m</div>
-          </div>
-
-          <!-- ⛰️ 最高到達高度 (最高値) -->
-          <div class="champ-stat-card">
-            <div class="champ-stat-label">
-              <img src="https://api.iconify.design/material-symbols/height.svg?color=%23188038" class="ui-icon" alt="">
-              最高到達高度 (最高値)
-            </div>
-            <div class="champ-stat-value"><span class="num" id="champ-best-alt">—</span><span class="unit"> m</span></div>
-            <div class="champ-stat-extra" id="champ-best-alt-detail">機体 #—</div>
-          </div>
-
-          <!-- 📊 100機 平均飛距離 & 滞空平均 -->
-          <div class="champ-stat-card champ-avg">
-            <div class="champ-stat-label">
-              <img src="https://api.iconify.design/material-symbols/bar-chart.svg?color=%231a73e8" class="ui-icon" alt="">
-              100機 平均値の記録
-            </div>
-            <div class="champ-stat-value"><span class="num" id="champ-avg-dist">—</span><span class="unit"> m</span></div>
-            <div class="champ-stat-extra" id="champ-avg-range">平均滞空: —s (最小 —m 〜 最大 —m)</div>
-          </div>
-
-          <!-- 🔻 最低飛距離 (最下位 100位) -->
-          <div class="champ-stat-card champ-min">
-            <div class="champ-stat-label">
-              <img src="https://api.iconify.design/material-symbols/south.svg?color=%23d93025" class="ui-icon" alt="">
-              最低飛距離 (最下位 100位)
-            </div>
-            <div class="champ-stat-value"><span class="num" id="champ-worst-dist">—</span><span class="unit"> m</span></div>
-            <div class="champ-stat-extra" id="champ-worst-detail">機体 #— · 初速: — · 角度: —</div>
-          </div>
-
-          <!-- ⏱️ 最低滞空時間 (最短滞空) -->
-          <div class="champ-stat-card champ-min">
-            <div class="champ-stat-label">
-              <img src="https://api.iconify.design/material-symbols/arrow-downward.svg?color=%23d93025" class="ui-icon" alt="">
-              最短滞空時間 (最低値)
-            </div>
-            <div class="champ-stat-value"><span class="num" id="champ-worst-time">—</span><span class="unit"> s</span></div>
-            <div class="champ-stat-extra" id="champ-worst-time-detail">機体 #— · 飛距離: —m</div>
-          </div>
-        </div>
-
-        <!-- チャンピオン機 & 表示切り替えアクション -->
-        <div class="champ-actions">
-          <button class="btn btn-primary btn-sm champ-btn" id="champ-btn-adopt" type="button" title="最も飛んだ機体の初速・仰角を現在の機体設定にコピーして再現">
-            <img src="https://api.iconify.design/material-symbols/check-circle-outline.svg?color=%23ffffff" class="ui-icon" alt=""> 1位の投げ方を設定に反映
-          </button>
-          <button class="btn btn-sm champ-btn" id="champ-btn-focus" type="button" title="1位の機体の着地点・軌跡にカメラをズーム">
-            <img src="https://api.iconify.design/material-symbols/center-focus-strong.svg?color=%231a73e8" class="ui-icon" alt=""> 1位にフォーカス
-          </button>
-          <button class="btn btn-sm champ-btn champ-btn-warn" id="champ-btn-skip-top1" type="button" title="1位のデータに異常値がある場合に除外（スキップ）し、2位を繰り上げます">
-            <img src="https://api.iconify.design/material-symbols/skip-next.svg?color=%23c5221f" class="ui-icon" alt="" id="champ-icon-skip-top1"> <span id="champ-label-skip-top1">1位をスキップ (2位繰上)</span>
-          </button>
-          <button class="btn btn-sm champ-btn" id="champ-btn-focus-worst" type="button" title="最下位の機体にカメラをズームして課題を検証">
-            <img src="https://api.iconify.design/material-symbols/visibility.svg?color=%23d93025" class="ui-icon" alt=""> 最下位にフォーカス
-          </button>
-          <button class="btn btn-sm champ-btn" id="champ-btn-toggle-fleet" type="button" title="全100機表示と上位トップ3表示を切り替え">
-            <img src="https://api.iconify.design/material-symbols/layers.svg?color=%235f6368" class="ui-icon" alt=""> 表示: 全100機 ⇄ 上位3機
-          </button>
-        </div>
-
-        <!-- ランキング・記録テーブル (TOP & WORST) -->
-        <div class="champ-table-wrap">
-          <div class="champ-table-header-row">
-            <div class="champ-table-title">
-              <img src="https://api.iconify.design/material-symbols/trophy.svg?color=%23f9ab00" class="ui-icon" alt=""> 飛距離ランキング TOP 5 &amp; 最下位 (行クリックでその機体をフォーカス)
-              <span id="champ-skip-status-badge" class="champ-skip-badge" style="display:none;">⚠️ 元1位スキップ中 (2位を最高記録に繰り上げ)</span>
-            </div>
-          </div>
-          <table class="champ-table">
-            <thead>
-              <tr>
-                <th>順位</th>
-                <th>機体ID</th>
-                <th>飛距離</th>
-                <th>滞空時間</th>
-                <th>最高高度</th>
-                <th>初速</th>
-                <th>仰角</th>
-              </tr>
-            </thead>
-            <tbody id="champ-leaderboard-body">
-              <!-- 動的生成 -->
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      <!-- 飛行結果サマリーモーダル (着地 / 完了時ポップアップ) -->
-      <div class="flight-result-modal" id="flight-result-modal" hidden>
-        <div class="flight-result-card">
-          <div class="flight-result-head">
-            <div class="flight-result-title-group">
-              <span class="flight-result-icon"><svg class="ui-icon" viewBox="0 0 24 24" fill="currentColor" style="width:24px;height:24px;color:var(--accent);"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/></svg></span>
-              <div>
-                <div class="flight-result-title">飛行完了 / FLIGHT COMPLETED</div>
-                <div class="flight-result-sub" id="f-res-status-sub">滑空着地完了</div>
-              </div>
-            </div>
-            <button class="flight-result-close-btn" id="f-res-btn-close" type="button" title="閉じる">✕</button>
-          </div>
-
-          <div class="flight-result-grid">
-            <div class="flight-result-item highlight">
-              <div class="f-res-label">水平飛距離</div>
-              <div class="f-res-val"><span id="f-res-dist" class="num">0.00</span> <small>m</small></div>
-            </div>
-            <div class="flight-result-item highlight">
-              <div class="f-res-label">滞空時間</div>
-              <div class="f-res-val"><span id="f-res-time" class="num">0.00</span> <small>s</small></div>
-            </div>
-            <div class="flight-result-item">
-              <div class="f-res-label">最高高度</div>
-              <div class="f-res-val"><span id="f-res-alt-max" class="num">0.00</span> <small>m</small></div>
-            </div>
-            <div class="flight-result-item">
-              <div class="f-res-label">最高速度</div>
-              <div class="f-res-val"><span id="f-res-spd-max" class="num">0.00</span> <small>m/s</small></div>
-            </div>
-          </div>
-
-          <div class="flight-result-details">
-            <div class="f-res-detail-row">
-              <span class="f-res-detail-key">平均滑空比 (L/D)</span>
-              <span class="f-res-detail-val num" id="f-res-glide">—</span>
-            </div>
-            <div class="f-res-detail-row">
-              <span class="f-res-detail-key">最大Gフォース</span>
-              <span class="f-res-detail-val num" id="f-res-gload">—</span>
-            </div>
-            <div class="f-res-detail-row">
-              <span class="f-res-detail-key">最大翼面応力</span>
-              <span class="f-res-detail-val num" id="f-res-stress">—</span>
-            </div>
-          </div>
-
-          <div class="flight-result-actions">
-            <button type="button" class="btn btn-primary" id="f-res-btn-relaunch" style="flex:1; justify-content:center; gap:6px;">
-              <svg class="ui-icon" viewBox="0 0 24 24" fill="currentColor"><path d="M12 5V1L7 6l5 5V7c3.31 0 6 2.69 6 6s-2.69 6-6 6-6-2.69-6-6H4c0 4.42 3.58 8 8 8s8-3.58 8-8-3.58-8-8-8z"/></svg> もう一度飛ばす
-            </button>
-            <button type="button" class="btn btn-outline" id="f-res-btn-dismiss" style="padding:0 16px;">
-              閉じる
-            </button>
-          </div>
-        </div>
-      </div>
     </section>
 
     <!-- ---------- right rail : instrumentation ---------- -->
@@ -928,6 +757,189 @@
       <div class="tp-stat"><span class="muted">滑空比</span><span class="num" id="tp-glide">—</span></div>
     </div>
   </footer>
+
+  <!-- ==================== Modals and Floating Overlays ==================== -->
+  <!-- 100機一括飛行・最高値/最下位/平均値 統計記録カード (100機シミュレーション記録HUD) -->
+  <div class="ensemble-champion-card" id="ensemble-champion-card" hidden>
+    <div class="champ-head">
+      <div class="champ-title-group">
+        <span class="champ-trophy"><img src="https://api.iconify.design/material-symbols/social-leaderboard-outline.svg?color=%23f9ab00" class="ui-icon" style="width:28px;height:28px;" alt=""></span>
+        <div>
+          <div class="champ-title">100機一斉飛行 記録・統計分析</div>
+          <div class="champ-sub" id="champ-backend-sub">GPU 並列演算 · 計 100機</div>
+        </div>
+      </div>
+      <button class="champ-close-btn" id="champ-close-btn" type="button" title="閉じる">✕</button>
+    </div>
+
+    <!-- 最高値・最下位・平均値の記録グリッド -->
+    <div class="champ-grid">
+      <!-- 🥇 最高値 (1位 最長飛距離) -->
+      <div class="champ-stat-card champ-gold">
+        <div class="champ-stat-label">
+          <img src="https://api.iconify.design/material-symbols/trophy.svg?color=%23b06000" class="ui-icon" alt="">
+          最高飛距離 (1位チャンピオン)
+          <span class="champ-promoted-tag" id="champ-promoted-tag" style="display:none;">2位繰り上げ</span>
+        </div>
+        <div class="champ-stat-value"><span class="num" id="champ-best-dist">—</span><span class="unit"> m</span></div>
+        <div class="champ-stat-extra" id="champ-best-detail">機体 #— · 初速: — · 角度: —</div>
+      </div>
+
+      <!-- 🥈 最長滞空時間 (最高値) -->
+      <div class="champ-stat-card">
+        <div class="champ-stat-label">
+          <img src="https://api.iconify.design/material-symbols/timer-outline.svg?color=%231a73e8" class="ui-icon" alt="">
+          最長滞空時間 (最高値)
+        </div>
+        <div class="champ-stat-value"><span class="num" id="champ-best-time">—</span><span class="unit"> s</span></div>
+        <div class="champ-stat-extra" id="champ-best-time-detail">機体 #— · 飛距離: —m</div>
+      </div>
+
+      <!-- ⛰️ 最高到達高度 (最高値) -->
+      <div class="champ-stat-card">
+        <div class="champ-stat-label">
+          <img src="https://api.iconify.design/material-symbols/height.svg?color=%23188038" class="ui-icon" alt="">
+          最高到達高度 (最高値)
+        </div>
+        <div class="champ-stat-value"><span class="num" id="champ-best-alt">—</span><span class="unit"> m</span></div>
+        <div class="champ-stat-extra" id="champ-best-alt-detail">機体 #—</div>
+      </div>
+
+      <!-- 📊 100機 平均飛距離 & 滞空平均 -->
+      <div class="champ-stat-card champ-avg">
+        <div class="champ-stat-label">
+          <img src="https://api.iconify.design/material-symbols/bar-chart.svg?color=%231a73e8" class="ui-icon" alt="">
+          100機 平均値の記録
+        </div>
+        <div class="champ-stat-value"><span class="num" id="champ-avg-dist">—</span><span class="unit"> m</span></div>
+        <div class="champ-stat-extra" id="champ-avg-range">平均滞空: —s (最小 —m 〜 最大 —m)</div>
+      </div>
+
+      <!-- 🔻 最低飛距離 (最下位 100位) -->
+      <div class="champ-stat-card champ-min">
+        <div class="champ-stat-label">
+          <img src="https://api.iconify.design/material-symbols/south.svg?color=%23d93025" class="ui-icon" alt="">
+          最低飛距離 (最下位 100位)
+        </div>
+        <div class="champ-stat-value"><span class="num" id="champ-worst-dist">—</span><span class="unit"> m</span></div>
+        <div class="champ-stat-extra" id="champ-worst-detail">機体 #— · 初速: — · 角度: —</div>
+      </div>
+
+      <!-- ⏱️ 最低滞空時間 (最短滞空) -->
+      <div class="champ-stat-card champ-min">
+        <div class="champ-stat-label">
+          <img src="https://api.iconify.design/material-symbols/arrow-downward.svg?color=%23d93025" class="ui-icon" alt="">
+          最短滞空時間 (最低値)
+        </div>
+        <div class="champ-stat-value"><span class="num" id="champ-worst-time">—</span><span class="unit"> s</span></div>
+        <div class="champ-stat-extra" id="champ-worst-time-detail">機体 #— · 飛距離: —m</div>
+      </div>
+    </div>
+
+    <!-- チャンピオン機 & 表示切り替えアクション -->
+    <div class="champ-actions">
+      <button class="btn btn-primary btn-sm champ-btn" id="champ-btn-adopt" type="button" title="最も飛んだ機体の初速・仰角を現在の機体設定にコピーして再現">
+        <img src="https://api.iconify.design/material-symbols/check-circle-outline.svg?color=%23ffffff" class="ui-icon" alt=""> 1位の投げ方を設定に反映
+      </button>
+      <button class="btn btn-sm champ-btn" id="champ-btn-focus" type="button" title="1位の機体の着地点・軌跡にカメラをズーム">
+        <img src="https://api.iconify.design/material-symbols/center-focus-strong.svg?color=%231a73e8" class="ui-icon" alt=""> 1位にフォーカス
+      </button>
+      <button class="btn btn-sm champ-btn champ-btn-warn" id="champ-btn-skip-top1" type="button" title="1位のデータに異常値がある場合に除外（スキップ）し、2位を繰り上げます">
+        <img src="https://api.iconify.design/material-symbols/skip-next.svg?color=%23c5221f" class="ui-icon" alt="" id="champ-icon-skip-top1"> <span id="champ-label-skip-top1">1位をスキップ (2位繰上)</span>
+      </button>
+      <button class="btn btn-sm champ-btn" id="champ-btn-focus-worst" type="button" title="最下位の機体にカメラをズームして課題を検証">
+        <img src="https://api.iconify.design/material-symbols/visibility.svg?color=%23d93025" class="ui-icon" alt=""> 最下位にフォーカス
+      </button>
+      <button class="btn btn-sm champ-btn" id="champ-btn-toggle-fleet" type="button" title="全100機表示と上位トップ3表示を切り替え">
+        <img src="https://api.iconify.design/material-symbols/layers.svg?color=%235f6368" class="ui-icon" alt=""> 表示: 全100機 ⇄ 上位3機
+      </button>
+    </div>
+
+    <!-- ランキング・記録テーブル (TOP & WORST) -->
+    <div class="champ-table-wrap">
+      <div class="champ-table-header-row">
+        <div class="champ-table-title">
+          <img src="https://api.iconify.design/material-symbols/trophy.svg?color=%23f9ab00" class="ui-icon" alt=""> 飛距離ランキング TOP 5 &amp; 最下位 (行クリックでその機体をフォーカス)
+          <span id="champ-skip-status-badge" class="champ-skip-badge" style="display:none;">⚠️ 元1位スキップ中 (2位を最高記録に繰り上げ)</span>
+        </div>
+      </div>
+      <table class="champ-table">
+        <thead>
+          <tr>
+            <th>順位</th>
+            <th>機体ID</th>
+            <th>飛距離</th>
+            <th>滞空時間</th>
+            <th>最高高度</th>
+            <th>初速</th>
+            <th>仰角</th>
+          </tr>
+        </thead>
+        <tbody id="champ-leaderboard-body">
+          <!-- 動的生成 -->
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- 飛行結果サマリーモーダル (着地 / 完了時ポップアップ) -->
+  <div class="flight-result-modal" id="flight-result-modal" hidden>
+    <div class="flight-result-card">
+      <div class="flight-result-head">
+        <div class="flight-result-title-group">
+          <span class="flight-result-icon"><svg class="ui-icon" viewBox="0 0 24 24" fill="currentColor" style="width:24px;height:24px;color:var(--accent);"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/></svg></span>
+          <div>
+            <div class="flight-result-title">飛行完了 / FLIGHT COMPLETED</div>
+            <div class="flight-result-sub" id="f-res-status-sub">滑空着地完了</div>
+          </div>
+        </div>
+        <button class="flight-result-close-btn" id="f-res-btn-close" type="button" title="閉じる">✕</button>
+      </div>
+
+      <div class="flight-result-grid">
+        <div class="flight-result-item highlight">
+          <div class="f-res-label">水平飛距離</div>
+          <div class="f-res-val"><span id="f-res-dist" class="num">0.00</span> <small>m</small></div>
+        </div>
+        <div class="flight-result-item highlight">
+          <div class="f-res-label">滞空時間</div>
+          <div class="f-res-val"><span id="f-res-time" class="num">0.00</span> <small>s</small></div>
+        </div>
+        <div class="flight-result-item">
+          <div class="f-res-label">最高高度</div>
+          <div class="f-res-val"><span id="f-res-alt-max" class="num">0.00</span> <small>m</small></div>
+        </div>
+        <div class="flight-result-item">
+          <div class="f-res-label">最高速度</div>
+          <div class="f-res-val"><span id="f-res-spd-max" class="num">0.00</span> <small>m/s</small></div>
+        </div>
+      </div>
+
+      <div class="flight-result-details">
+        <div class="f-res-detail-row">
+          <span class="f-res-detail-key">平均滑空比 (L/D)</span>
+          <span class="f-res-detail-val num" id="f-res-glide">—</span>
+        </div>
+        <div class="f-res-detail-row">
+          <span class="f-res-detail-key">最大Gフォース</span>
+          <span class="f-res-detail-val num" id="f-res-gload">—</span>
+        </div>
+        <div class="f-res-detail-row">
+          <span class="f-res-detail-key">最大翼面応力</span>
+          <span class="f-res-detail-val num" id="f-res-stress">—</span>
+        </div>
+      </div>
+
+      <div class="flight-result-actions">
+        <button type="button" class="btn btn-primary" id="f-res-btn-relaunch" style="flex:1; justify-content:center; gap:6px;">
+          <svg class="ui-icon" viewBox="0 0 24 24" fill="currentColor"><path d="M12 5V1L7 6l5 5V7c3.31 0 6 2.69 6 6s-2.69 6-6 6-6-2.69-6-6H4c0 4.42 3.58 8 8 8s8-3.58 8-8-3.58-8-8-8z"/></svg> もう一度飛ばす
+        </button>
+        <button type="button" class="btn btn-outline" id="f-res-btn-dismiss" style="padding:0 16px;">
+          閉じる
+        </button>
+      </div>
+    </div>
+  </div>
 
   <div class="toasts" id="toasts" aria-live="polite"></div>
 
