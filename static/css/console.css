@@ -83,23 +83,28 @@ button, input, select, textarea {
 .toprail {
   display: flex;
   align-items: stretch;
+  justify-content: space-between;
   gap: 0;
   background: var(--ink);
   color: #e9e7e2;
-  border-bottom: 1px solid #000;
+  border-bottom: 1px solid #141518;
+  height: var(--top-h);
+  min-height: var(--top-h);
+  user-select: none;
 }
 
 .brand {
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 0 16px;
+  padding: 0 14px;
   border-right: 1px solid #2c2f34;
+  flex: 0 0 auto;
 }
 
 .brand-mark {
-  width: 26px;
-  height: 26px;
+  width: 24px;
+  height: 24px;
   color: var(--accent);
   flex: none;
 }
@@ -112,12 +117,13 @@ button, input, select, textarea {
 }
 
 .brand-text { display: flex; flex-direction: column; line-height: 1.15; }
-.brand-title { font-size: 13px; font-weight: 600; letter-spacing: 0.02em; }
+.brand-title { font-size: 12.5px; font-weight: 600; letter-spacing: 0.02em; white-space: nowrap; }
 .brand-sub {
   font-family: var(--mono);
-  font-size: 8.5px;
-  letter-spacing: 0.16em;
+  font-size: 8px;
+  letter-spacing: 0.14em;
   color: #7f858d;
+  white-space: nowrap;
 }
 
 .toprail-readouts {
@@ -133,44 +139,108 @@ button, input, select, textarea {
   flex-direction: column;
   justify-content: center;
   gap: 1px;
-  padding: 0 9px;
+  padding: 0 8px;
   border-right: 1px solid #2c2f34;
   min-width: 0;
 }
 .readout-key {
   font-family: var(--mono);
-  font-size: 8px;
-  letter-spacing: 0.16em;
+  font-size: 7.5px;
+  letter-spacing: 0.14em;
   color: #9aa0a6;
 }
 .readout-val {
   font-family: var(--mono);
-  font-size: 12px;
+  font-size: 11.5px;
   color: #e9e7e2;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.readout-val small { font-size: 9px; color: #7f858d; margin-left: 1px; }
-.readout-run .readout-val { color: var(--muted); }
+.readout-val small { font-size: 8.5px; color: #7f858d; margin-left: 1px; }
+.readout-run .readout-val { color: var(--muted); font-weight: 600; }
 .readout-run[data-run="running"] .readout-val { color: #6ee7a8; }
 .readout-run[data-run="paused"] .readout-val { color: #f5c56b; }
 .readout-run[data-run="done"] .readout-val { color: #7fb2ff; }
+
+.readout-clickable {
+  cursor: pointer;
+  transition: background 120ms ease;
+}
+.readout-clickable:hover {
+  background: rgba(255, 255, 255, 0.06);
+}
 
 .toprail-actions {
   display: flex;
   align-items: center;
   justify-content: flex-end;
-  gap: 5px;
-  padding: 0 10px;
+  gap: 8px;
+  padding: 0 12px 0 8px;
   border-left: 1px solid #2c2f34;
-  flex: 1 0 auto;
+  flex: 1 1 auto;
   min-width: 0;
   overflow-x: auto;
   scrollbar-width: none;
 }
 .toprail-actions::-webkit-scrollbar {
   display: none;
+}
+
+/* toprail group partitions */
+.toprail-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex: 0 0 auto;
+}
+
+.toprail-flight-group {
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 6px;
+  padding: 3px 6px;
+  gap: 6px;
+}
+
+.toprail-tools-group {
+  padding: 0 6px;
+  border-left: 1px solid #2c2f34;
+  border-right: 1px solid #2c2f34;
+  gap: 6px;
+}
+
+.toprail-util-group {
+  gap: 4px;
+}
+
+/* fleet-mode selector (single vs ensemble) */
+.fleet-mode-selector {
+  display: inline-flex;
+  border: 1px solid #3c4043;
+  border-radius: 4px;
+  overflow: hidden;
+  background: #1a1d21;
+}
+.fleet-mode-selector .btn {
+  border: none;
+  border-radius: 0;
+  padding: 0 7px;
+  height: 24px;
+  font-size: 11px;
+  font-weight: 500;
+  background: transparent;
+  color: #9aa0a6;
+  transition: background 90ms linear, color 90ms linear;
+}
+.fleet-mode-selector .btn:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.08);
+  color: #e8eaed;
+}
+.fleet-mode-selector .btn.active {
+  background: var(--accent);
+  color: #ffffff;
+  font-weight: 600;
 }
 
 .btn {
@@ -225,9 +295,63 @@ button, input, select, textarea {
   background: #23262b;
   border-color: #383c43;
   color: #d7d5d0;
+  height: 28px;
+  padding: 0 8px;
+  font-size: 11.5px;
+  font-weight: 500;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  border-radius: 4px;
+  white-space: nowrap;
 }
-.toprail .btn:hover:not(:disabled) { background: #2c3037; border-color: #4a4f57; }
+.toprail .btn:hover:not(:disabled) {
+  background: #2e3239;
+  border-color: #4f545e;
+  color: #ffffff;
+}
 .toprail .btn:disabled { opacity: 0.4; }
+
+.toprail .btn-icon {
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  flex: 0 0 28px;
+}
+
+.toprail .ui-icon {
+  width: 14px;
+  height: 14px;
+  flex: none;
+}
+
+.toprail .btn-launch-top {
+  background: var(--accent);
+  border-color: var(--accent-dk);
+  color: #ffffff;
+  font-weight: 600;
+  padding: 0 10px;
+}
+.toprail .btn-launch-top:hover:not(:disabled) {
+  background: #2b80ef;
+  border-color: var(--accent-dk);
+}
+
+.toprail-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+}
+.toprail-switch .switch-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11.5px;
+  font-weight: 500;
+  color: #d7d5d0;
+}
 
 /* switch ------------------------------------------------------------ */
 .switch {
@@ -1409,6 +1533,71 @@ input[type="range"]:focus-visible { outline: 2px solid var(--accent); outline-of
 .modal-card .btn-row { justify-content: flex-end; }
 
 /* ------------------------------------------------------------------ */
+/* toprail responsive collapses                                        */
+/* ------------------------------------------------------------------ */
+@media (max-width: 1560px) {
+  .toprail-util-group .btn .btn-text {
+    display: none;
+  }
+  .toprail-util-group .btn {
+    padding: 0 7px;
+    width: 28px;
+    height: 28px;
+    justify-content: center;
+  }
+}
+
+@media (max-width: 1380px) {
+  .brand-sub {
+    display: none;
+  }
+  .readout-ghost {
+    display: none;
+  }
+  .header-eta {
+    padding-right: 8px;
+    margin-right: 0;
+  }
+}
+
+@media (max-width: 1220px) {
+  .toprail-tools-group .btn-text,
+  .toprail-tools-group .switch-label .btn-text {
+    display: none;
+  }
+  .toprail-tools-group .btn {
+    padding: 0 7px;
+    width: 28px;
+    height: 28px;
+  }
+  .readout-solver, .readout-render {
+    display: none;
+  }
+}
+
+@media (max-width: 1060px) {
+  .header-eta {
+    display: none;
+  }
+  .brand-title {
+    font-size: 11.5px;
+  }
+  .toprail-flight-group {
+    padding: 2px 4px;
+    gap: 4px;
+  }
+  #top-play-label {
+    display: none;
+  }
+  .btn-launch-top .btn-text {
+    display: none;
+  }
+  .btn-launch-top {
+    padding: 0 8px;
+  }
+}
+
+/* ------------------------------------------------------------------ */
 /* narrow viewports                                                    */
 /* ------------------------------------------------------------------ */
 @media (max-width: 1180px) {
@@ -2420,6 +2609,54 @@ input[type="range"]:focus-visible { outline: 2px solid var(--accent); outline-of
 }
 .champ-table tr.champ-rank-worst td {
   color: #c5221f;
+}
+.champ-table tr.champ-rank-skipped {
+  opacity: 0.50;
+  text-decoration: line-through;
+  background: #f8f9fa !important;
+}
+.champ-table tr.champ-rank-skipped td {
+  color: var(--muted) !important;
+}
+
+.champ-btn-warn {
+  border: 1px solid #f28b82 !important;
+  color: #c5221f !important;
+  background: #fce8e6 !important;
+}
+.champ-btn-warn:hover {
+  background: #fad2cf !important;
+}
+.champ-btn-warn.active {
+  background: #d93025 !important;
+  color: #ffffff !important;
+  border-color: #d93025 !important;
+}
+.champ-btn-warn.active img {
+  filter: brightness(0) invert(1);
+}
+
+.champ-skip-badge {
+  display: inline-block;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 9.5px;
+  font-weight: 600;
+  background: #fce8e6;
+  color: #c5221f;
+  margin-left: 8px;
+  vertical-align: middle;
+}
+.champ-promoted-tag {
+  display: inline-block;
+  padding: 1px 5px;
+  border-radius: 4px;
+  font-size: 9px;
+  font-weight: 700;
+  background: #e8f0fe;
+  color: #1a73e8;
+  margin-left: 6px;
+  vertical-align: middle;
 }
 
 /* 🚀 Quick Launch Dock & 3D Tuning Panel */

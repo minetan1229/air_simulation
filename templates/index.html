@@ -47,15 +47,15 @@
         <span class="readout-key">RNG</span>
         <span class="readout-val num" id="top-range">0.00<small>m</small></span>
       </div>
-      <div class="readout">
+      <div class="readout readout-ghost">
         <span class="readout-key">GHOST</span>
         <span class="readout-val num" id="top-ghost" title="前回の到達飛距離・滞空時間">—</span>
       </div>
-      <div class="readout readout-clickable" id="readout-solver" title="物理演算GPU情報 (クリックで診断表示)">
+      <div class="readout readout-clickable readout-solver" id="readout-solver" title="物理演算GPU情報 (クリックで診断表示)">
         <span class="readout-key">SOLVER</span>
         <span class="readout-val num" id="top-backend">—</span>
       </div>
-      <div class="readout readout-clickable" id="readout-render" title="3D描画GPU情報 (クリックで診断表示)">
+      <div class="readout readout-clickable readout-render" id="readout-render" title="3D描画GPU情報 (クリックで診断表示)">
         <span class="readout-key">RENDER</span>
         <span class="readout-val num" id="top-fps">—</span>
       </div>
@@ -67,31 +67,35 @@
         <span class="eta-val num" id="eta-clock">—</span>
         <span class="eta-sub num" id="eta-left">待機中</span>
       </div>
-      <div class="toprail-group" style="display:flex; align-items:center; gap:6px; background:rgba(0,0,0,0.03); padding:3px 6px; border-radius:6px;">
-        <button class="btn btn-primary btn-launch-top" id="btn-top-launch" type="button" title="現在の設定で飛行軌跡を一括シミュレーション計算して再生します (Enter)"><svg class="ui-icon" viewBox="0 0 24 24" fill="currentColor"><path d="m13.13 22.19-1.63-3.83c1.57-.58 3.04-1.5 4.35-2.73l-2.72 6.56M5.64 12.5l-3.83-1.63 6.56-2.72c-1.23 1.31-2.15 2.78-2.73 4.35m8.58-8.58C12.9 5.24 11.23 7.31 9.77 9.77l4.46 4.46c2.46-1.46 4.53-3.13 5.85-4.45 1.54-1.54 2.42-3.15 2.58-4.24.03-.22-.05-.44-.22-.61-.17-.17-.39-.25-.61-.22-1.09.16-2.7 1.04-4.24 2.58M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2"/></svg> 発射</button>
-        <button class="btn btn-top-play" id="btn-top-play" type="button" title="飛行の再生 / 一時停止 (Space)"><svg class="ui-icon" id="top-play-icon" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg> <span id="top-play-label">再生</span></button>
+
+      <!-- フライト制御グループ (発射 / 再生 / モード選択) -->
+      <div class="toprail-group toprail-flight-group">
+        <button class="btn btn-primary btn-launch-top" id="btn-top-launch" type="button" title="現在の設定で飛行軌跡を一括シミュレーション計算して再生します (Enter)"><svg class="ui-icon" viewBox="0 0 24 24" fill="currentColor"><path d="m13.13 22.19-1.63-3.83c1.57-.58 3.04-1.5 4.35-2.73l-2.72 6.56M5.64 12.5l-3.83-1.63 6.56-2.72c-1.23 1.31-2.15 2.78-2.73 4.35m8.58-8.58C12.9 5.24 11.23 7.31 9.77 9.77l4.46 4.46c2.46-1.46 4.53-3.13 5.85-4.45 1.54-1.54 2.42-3.15 2.58-4.24.03-.22-.05-.44-.22-.61-.17-.17-.39-.25-.61-.22-1.09.16-2.7 1.04-4.24 2.58M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2"/></svg> <span class="btn-text">発射</span></button>
+        <button class="btn btn-top-play" id="btn-top-play" type="button" title="飛行の再生 / 一時停止 (Space)"><svg class="ui-icon" id="top-play-icon" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg> <span id="top-play-label" class="btn-text">再生</span></button>
         
-        <!-- REQ-10: 100機同時飛行 / 単機飛行モード切替ボタングループ -->
-        <div class="fleet-mode-selector" style="display:inline-flex; border:1px solid var(--line); border-radius:4px; overflow:hidden;">
-          <button class="btn btn-mini active" id="btn-mode-single" type="button" title="単機（1機）で飛行シミュレーションを実行" style="border-radius:0; padding:4px 8px; font-weight:600;">単機</button>
-          <button class="btn btn-mini" id="btn-top-gpu-ensemble" type="button" title="GPUで100機を同時に一括シミュレーション計算して全軌跡を描画" style="border-radius:0; padding:4px 8px; font-weight:600;">100機一括</button>
+        <!-- 単機 / 100機一括 モードセレクター -->
+        <div class="fleet-mode-selector">
+          <button class="btn btn-mini active" id="btn-mode-single" type="button" title="単機（1機）で飛行シミュレーションを実行">単機</button>
+          <button class="btn btn-mini" id="btn-top-gpu-ensemble" type="button" title="GPUで100機を同時に一括シミュレーション計算して全軌跡を描画">100機一括</button>
         </div>
       </div>
 
-      <div class="toprail-group" style="display:flex; align-items:center; gap:6px;">
-        <label class="switch" title="風洞モード: 機体を固定して空力係数のみ測定 (U)">
+      <!-- ツールグループ (風洞 / 調査) -->
+      <div class="toprail-group toprail-tools-group">
+        <label class="switch toprail-switch" title="風洞モード: 機体を固定して空力係数のみ測定 (U)">
           <input type="checkbox" id="tunnel-toggle">
           <span class="switch-box"></span>
-          <span class="switch-label"><svg class="ui-icon" viewBox="0 0 24 24" fill="currentColor"><path d="M14.5 17c0 1.65-1.35 3-3 3s-3-1.35-3-3h2c0 .55.45 1 1 1s1-.45 1-1-.45-1-1-1H2v-2h9.5c1.65 0 3 1.35 3 3m3.5-6c0 1.65-1.35 3-3 3H2v-2h13c.55 0 1-.45 1-1s-.45-1-1-1-1 .45-1 1h-2c0-1.65 1.35-3 3-3s3 1.35 3 3m1.5-6C19.5 3.35 18.15 2 16.5 2s-3 1.35-3 3h2c0-.55.45-1 1-1s1 .45 1 1-.45 1-1 1H2v2h14.5c1.65 0 3-1.35 3-3"/></svg> 風洞</span>
+          <span class="switch-label"><svg class="ui-icon" viewBox="0 0 24 24" fill="currentColor"><path d="M14.5 17c0 1.65-1.35 3-3 3s-3-1.35-3-3h2c0 .55.45 1 1 1s1-.45 1-1-.45-1-1-1H2v-2h9.5c1.65 0 3 1.35 3 3m3.5-6c0 1.65-1.35 3-3 3H2v-2h13c.55 0 1-.45 1-1s-.45-1-1-1-1 .45-1 1h-2c0-1.65 1.35-3 3-3s3 1.35 3 3m1.5-6C19.5 3.35 18.15 2 16.5 2s-3 1.35-3 3h2c0-.55.45-1 1-1s1 .45 1 1-.45 1-1 1H2v2h14.5c1.65 0 3-1.35 3-3"/></svg> <span class="btn-text">風洞</span></span>
         </label>
-        <button class="btn btn-outline" id="btn-top-investigate" type="button" title="指定した機体をベースに手で変えられる項目を自動分析・改善"><svg class="ui-icon" viewBox="0 0 24 24" fill="currentColor"><path d="M15.5 14h-.79l-.28-.27A6.471 6.471 0 0 0 16 9.5 6.5 6.5 0 1 0 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14"/></svg> 調査</button>
+        <button class="btn btn-outline" id="btn-top-investigate" type="button" title="指定した機体をベースに手で変えられる項目を自動分析・改善"><svg class="ui-icon" viewBox="0 0 24 24" fill="currentColor"><path d="M15.5 14h-.79l-.28-.27A6.471 6.471 0 0 0 16 9.5 6.5 6.5 0 1 0 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14"/></svg> <span class="btn-text">調査</span></button>
       </div>
 
-      <div class="toprail-group" style="display:flex; align-items:center; gap:4px;">
-        <button class="btn btn-subtle" id="btn-save" type="button" title="設定を JSON で保存 (Ctrl+S)"><svg class="ui-icon" viewBox="0 0 24 24" fill="currentColor"><path d="M17 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V7zm2 16H5V5h11.17L19 7.83zm-7-7c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3M6 6h9v4H6z"/></svg> 保存</button>
-        <button class="btn btn-subtle" id="btn-load" type="button" title="設定 JSON の読込"><svg class="ui-icon" viewBox="0 0 24 24" fill="currentColor"><path d="M20 6h-8l-2-2H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2m0 12H4V8h16z"/></svg> 読込</button>
-        <button class="btn btn-subtle" id="btn-csv" type="button" title="飛行ログを CSV で出力 (E)"><svg class="ui-icon" viewBox="0 0 24 24" fill="currentColor"><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2m0 16H5V5h14zM7 10h2v7H7zm4-3h2v10h-2zm4 6h2v4h-2z"/></svg> CSV</button>
-        <button class="btn btn-rec" id="btn-top-record" type="button" title="3D飛行動画を録画して保存 (WebM/MP4)"><svg class="ui-icon" viewBox="0 0 24 24" fill="#d93025"><path d="M17 10.5V7a1 1 0 0 0-1-1H4a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-3.5l4 4v-11z"/></svg> 録画</button>
+      <!-- ユーティリティグループ (保存 / 読込 / CSV / 録画 / ヘルプ) -->
+      <div class="toprail-group toprail-util-group">
+        <button class="btn btn-subtle" id="btn-save" type="button" title="設定を JSON で保存 (Ctrl+S)"><svg class="ui-icon" viewBox="0 0 24 24" fill="currentColor"><path d="M17 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V7zm2 16H5V5h11.17L19 7.83zm-7-7c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3M6 6h9v4H6z"/></svg> <span class="btn-text">保存</span></button>
+        <button class="btn btn-subtle" id="btn-load" type="button" title="設定 JSON の読込"><svg class="ui-icon" viewBox="0 0 24 24" fill="currentColor"><path d="M20 6h-8l-2-2H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2m0 12H4V8h16z"/></svg> <span class="btn-text">読込</span></button>
+        <button class="btn btn-subtle" id="btn-csv" type="button" title="飛行ログを CSV で出力 (E)"><svg class="ui-icon" viewBox="0 0 24 24" fill="currentColor"><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2m0 16H5V5h14zM7 10h2v7H7zm4-3h2v10h-2zm4 6h2v4h-2z"/></svg> <span class="btn-text">CSV</span></button>
+        <button class="btn btn-rec" id="btn-top-record" type="button" title="3D飛行動画を録画して保存 (WebM/MP4)"><svg class="ui-icon" viewBox="0 0 24 24" fill="#d93025"><path d="M17 10.5V7a1 1 0 0 0-1-1H4a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-3.5l4 4v-11z"/></svg> <span class="btn-text">録画</span></button>
         <button class="btn btn-icon" id="btn-help" type="button" title="ショートカット (?)" aria-label="ショートカット"><svg class="ui-icon" viewBox="0 0 24 24" fill="currentColor"><path d="M11 18h2v-2h-2zm1-16C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2m0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8m0-14c-2.21 0-4 1.79-4 4h2c0-1.1.9-2 2-2s2 .9 2 2c0 2-3 1.75-3 5h2c0-2.25 3-2.5 3-5 0-2.21-1.79-4-4-4"/></svg></button>
         <input type="file" id="config-file" accept="application/json,.json" hidden>
       </div>
@@ -360,6 +364,7 @@
             <div class="champ-stat-label">
               <img src="https://api.iconify.design/material-symbols/trophy.svg?color=%23b06000" class="ui-icon" alt="">
               最高飛距離 (1位チャンピオン)
+              <span class="champ-promoted-tag" id="champ-promoted-tag" style="display:none;">2位繰り上げ</span>
             </div>
             <div class="champ-stat-value"><span class="num" id="champ-best-dist">—</span><span class="unit"> m</span></div>
             <div class="champ-stat-extra" id="champ-best-detail">機体 #— · 初速: — · 角度: —</div>
@@ -424,6 +429,9 @@
           <button class="btn btn-sm champ-btn" id="champ-btn-focus" type="button" title="1位の機体の着地点・軌跡にカメラをズーム">
             <img src="https://api.iconify.design/material-symbols/center-focus-strong.svg?color=%231a73e8" class="ui-icon" alt=""> 1位にフォーカス
           </button>
+          <button class="btn btn-sm champ-btn champ-btn-warn" id="champ-btn-skip-top1" type="button" title="1位のデータに異常値がある場合に除外（スキップ）し、2位を繰り上げます">
+            <img src="https://api.iconify.design/material-symbols/skip-next.svg?color=%23c5221f" class="ui-icon" alt="" id="champ-icon-skip-top1"> <span id="champ-label-skip-top1">1位をスキップ (2位繰上)</span>
+          </button>
           <button class="btn btn-sm champ-btn" id="champ-btn-focus-worst" type="button" title="最下位の機体にカメラをズームして課題を検証">
             <img src="https://api.iconify.design/material-symbols/visibility.svg?color=%23d93025" class="ui-icon" alt=""> 最下位にフォーカス
           </button>
@@ -435,7 +443,10 @@
         <!-- ランキング・記録テーブル (TOP & WORST) -->
         <div class="champ-table-wrap">
           <div class="champ-table-header-row">
-            <div class="champ-table-title"><img src="https://api.iconify.design/material-symbols/trophy.svg?color=%23f9ab00" class="ui-icon" alt=""> 飛距離ランキング TOP 5 &amp; 最下位 (行クリックでその機体をフォーカス)</div>
+            <div class="champ-table-title">
+              <img src="https://api.iconify.design/material-symbols/trophy.svg?color=%23f9ab00" class="ui-icon" alt=""> 飛距離ランキング TOP 5 &amp; 最下位 (行クリックでその機体をフォーカス)
+              <span id="champ-skip-status-badge" class="champ-skip-badge" style="display:none;">⚠️ 元1位スキップ中 (2位を最高記録に繰り上げ)</span>
+            </div>
           </div>
           <table class="champ-table">
             <thead>
