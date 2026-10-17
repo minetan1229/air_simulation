@@ -601,6 +601,8 @@ def evaluate_case(case: Dict[str, Any]) -> Dict[str, Any]:
                 "error": str(exc),
                 "distance_m": 0.0,
                 "flight_time_s": 0.0,
+                "max_altitude_m": 0.0,
+                "landing_distance_m": 0.0,
                 "max_stress_index": 10.0,
                 "max_stress_pa": 1.0e9,
                 "max_ld_ratio": 0.0,
@@ -836,8 +838,9 @@ def gpu_ensemble_simulation(
     w_dir_base = float(env_cfg.wind_direction_deg)
     w_speed = xp.maximum(w_speed_base + xp.random.normal(0.0, wind_spd_std, size=N), 0.0)
     w_dir_rad = xp.deg2rad(w_dir_base + xp.random.normal(0.0, wind_dir_std, size=N))
-    wx = w_speed * xp.cos(w_dir_rad)
-    wy = w_speed * xp.sin(w_dir_rad)
+    # Wind vector blowing towards (WMO FROM convention: wx = -speed*cos(dir), wy = -speed*sin(dir))
+    wx = -w_speed * xp.cos(w_dir_rad)
+    wy = -w_speed * xp.sin(w_dir_rad)
     wz = xp.zeros(N, dtype=xp.float64)
     wind = xp.stack([wx, wy, wz], axis=1)
 

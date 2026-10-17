@@ -885,7 +885,12 @@ def simulation_launch():
         # Keep the session available for configuration edits while integrating.
         summary = simulator.simulate(duration_s=duration_s, record=True)
         with SESSION.lock:
-            SESSION.simulator = simulator
+            # Only update SESSION.simulator if the session configuration was not modified during simulate
+            if (SESSION.aircraft is aircraft and
+                SESSION.environment is environment and
+                SESSION.launch is launch and
+                SESSION.settings is settings):
+                SESSION.simulator = simulator
         samples = [as_dict(s) for s in simulator.history()]
 
         # GPU-accelerated ensemble Monte Carlo on RTX 4060
