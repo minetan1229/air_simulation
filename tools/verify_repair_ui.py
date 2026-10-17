@@ -6,6 +6,8 @@ checks modes, rendering and playback, not full-flight aerodynamic performance.
 from __future__ import annotations
 
 import json
+import os
+import shutil
 import sys
 import threading
 from pathlib import Path
@@ -16,6 +18,26 @@ sys.path.insert(0, str(ROOT))
 from app import app
 from playwright.sync_api import sync_playwright
 from werkzeug.serving import make_server
+
+
+def _find_chrome_executable() -> str | None:
+    env_chrome = os.environ.get("CHROME_PATH")
+    if env_chrome and Path(env_chrome).is_file():
+        return env_chrome
+    which_chrome = shutil.which("chrome") or shutil.which("google-chrome") or shutil.which("msedge")
+    if which_chrome:
+        return which_chrome
+    candidates = [
+        Path(os.environ.get("PROGRAMFILES", r"C:\Program Files")) / "Google" / "Chrome" / "Application" / "chrome.exe",
+        Path(os.environ.get("PROGRAMFILES(X86)", r"C:\Program Files (x86)")) / "Google" / "Chrome" / "Application" / "chrome.exe",
+        Path(os.environ.get("LOCALAPPDATA", "")) / "Google" / "Chrome" / "Application" / "chrome.exe",
+        Path(os.environ.get("PROGRAMFILES(X86)", r"C:\Program Files (x86)")) / "Microsoft" / "Edge" / "Application" / "msedge.exe",
+        Path(os.environ.get("PROGRAMFILES", r"C:\Program Files")) / "Microsoft" / "Edge" / "Application" / "msedge.exe",
+    ]
+    for candidate in candidates:
+        if candidate.is_file():
+            return str(candidate)
+    return None
 
 
 def main() -> int:
@@ -34,9 +56,11 @@ def main() -> int:
 
     try:
         with sync_playwright() as playwright:
-            browser = playwright.chromium.launch(
-                executable_path="C:/Program Files/Google/Chrome/Application/chrome.exe",
-                headless=True, args=["--enable-unsafe-swiftshader"])
+            chrome_path = _find_chrome_executable()
+            launch_args = {"headless": True, "args": ["--enable-unsafe-swiftshader"]}
+            if chrome_path:
+                launch_args["executable_path"] = chrome_path
+            browser = playwright.chromium.launch(**launch_args)
             page = browser.new_page(viewport={"width": 1600, "height": 1050}, device_scale_factor=1)
             page.on("console", lambda message: report["console_errors"].append(message.text) if message.type == "error" else None)
             page.on("pageerror", lambda error: report["page_errors"].append(str(error)))
@@ -148,9 +172,10 @@ def main() -> int:
                   and disabled["normalMode"] == disabled["studioMode"] == "full_flight", disabled)
             page.screenshot(path=str(output / "ui_distance_mode.png"), full_page=True)
             browser.close()
-            software_browser = playwright.chromium.launch(
-                executable_path="C:/Program Files/Google/Chrome/Application/chrome.exe",
-                headless=True, args=["--use-angle=swiftshader", "--enable-unsafe-swiftshader"])
+            sw_args = {"headless": True, "args": ["--use-angle=swiftshader", "--enable-unsafe-swiftshader"]}
+            if chrome_path:
+                sw_args["executable_path"] = chrome_path
+            software_browser = playwright.chromium.launch(**sw_args)
             fallback_page = software_browser.new_page(viewport={"width": 1400, "height": 900})
             fallback_page.goto(base, wait_until="domcontentloaded", timeout=60000)
             fallback_page.wait_for_function("window.consoleApp?.viewport?.renderer?.info.render.calls > 0", timeout=60000)
