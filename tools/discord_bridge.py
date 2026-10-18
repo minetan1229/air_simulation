@@ -110,6 +110,8 @@ def get_system_metrics() -> Dict[str, Any]:
                 [smi, "--query-gpu=name,utilization.gpu,memory.used,memory.total", "--format=csv,noheader,nounits"],
                 capture_output=True,
                 text=True,
+                encoding="utf-8",
+                errors="replace",
                 timeout=3,
             )
             if res.returncode == 0 and res.stdout.strip():
@@ -121,9 +123,9 @@ def get_system_metrics() -> Dict[str, Any]:
                         try:
                             m_used_f = float(m_used) / 1024.0
                             m_tot_f = float(m_tot) / 1024.0
-                            gpus.append(f"{name} | 使用率: {util}% | VRAM: {m_used_f:.1f}GB / {m_tot_f:.1f}GB")
+                            gpus.append(f"{name} | 負荷: {util}% | VRAM: {m_used_f:.1f}GB / {m_tot_f:.1f}GB")
                         except ValueError:
-                            gpus.append(f"{name} | 使用率: {util}% | VRAM: {m_used}MB / {m_tot}MB")
+                            gpus.append(f"{name} | 負荷: {util}% | VRAM: {m_used}MB / {m_tot}MB")
                 if gpus:
                     metrics["gpu"] = "\n".join(gpus)
         except Exception as e:
@@ -700,11 +702,14 @@ async def execute_agy_prompt(
 
     proc = None
     try:
+        env = os.environ.copy()
+        env["PYTHONIOENCODING"] = "utf-8"
         proc = await asyncio.create_subprocess_exec(
             *cmd,
             cwd=str(WORKSPACE_DIR),
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
+            env=env,
         )
         client.register_task(channel_id, task_id, proc)
 
