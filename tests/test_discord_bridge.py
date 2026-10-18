@@ -75,6 +75,52 @@ class TestDiscordBridge(unittest.TestCase):
         self.assertEqual(len(default_opts), 1)
         self.assertEqual(default_opts[0].value, "gemini-3.8-flash-low")
 
+    def test_parallel_task_registration_and_abort(self):
+        channel_id = 999
+        mock_proc1 = MagicMock()
+        mock_proc1.returncode = None
+        mock_proc2 = MagicMock()
+        mock_proc2.returncode = None
+
+        self.client.register_task(channel_id, "task_1", mock_proc1)
+        self.client.register_task(channel_id, "task_2", mock_proc2)
+
+        self.assertEqual(len(self.client.active_processes), 2)
+        self.assertEqual(len(self.client.channel_tasks[channel_id]), 2)
+
+        # Abort one task
+        aborted = self.client.abort_tasks(task_id="task_1")
+        self.assertEqual(aborted, 1)
+        mock_proc1.kill.assert_called_once()
+
+        # Abort channel tasks
+        aborted_ch = self.client.abort_tasks(channel_id=channel_id)
+        self.assertEqual(aborted_ch, 2)
+        mock_proc2.kill.assert_called_once()
+
+        # Unregister task
+        self.client.unregister_task(channel_id, "task_1")
+        self.client.unregister_task(channel_id, "task_2")
+        self.assertEqual(len(self.client.active_processes), 0)
+        self.assertNotIn(channel_id, self.client.channel_tasks)
+
+    def test_get_system_metrics(self):
+        from tools.discord_bridge import get_system_metrics
+        metrics = get_system_metrics()
+        self.assertIn("cpu", metrics)
+        self.assertIn("memory", metrics)
+        self.assertIn("gpu", metrics)
+        self.assertIsInstance(metrics["cpu"], str)
+        self.assertIsInstance(metrics["memory"], str)
+
+    def test_launch_chrome_browser_not_found(self):
+        from tools.discord_bridge import launch_chrome_browser
+        with patch("os.path.exists", return_value=False), \
+             patch("shutil.which", return_value=None):
+            success, msg = launch_chrome_browser("http://localhost:5000")
+            self.assertFalse(success)
+            self.assertIn("見つかりませんでした", msg)
+
 
 if __name__ == "__main__":
     unittest.main()

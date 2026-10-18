@@ -20,6 +20,7 @@ import logging
 import os
 import re
 import shutil
+import subprocess
 import sys
 import time
 from datetime import datetime
@@ -29,6 +30,13 @@ from typing import Any, Dict, List, Optional, Set, Tuple
 import discord
 from discord import app_commands
 from dotenv import load_dotenv
+
+try:
+    import psutil
+    HAS_PSUTIL = True
+except ImportError:
+    HAS_PSUTIL = False
+    psutil = None
 
 # Setup logging
 logging.basicConfig(
@@ -68,6 +76,94 @@ AVAILABLE_MODELS: Dict[str, str] = {
     "claude-opus-4-6-thinking": "Claude Opus 4.6 (Thinking)",
     "gpt-oss-120b-medium": "GPT-OSS 120B (Medium)",
 }
+
+
+def get_system_metrics() -> Dict[str, Any]:
+    """Gather CPU, RAM, and GPU status."""
+    metrics = {
+        "cpu": "N/A",
+        "cpu_percent": 0.0,
+        "memory": "N/A",
+        "memory_percent": 0.0,
+        "gpu": "GPU: 未検出 / 利用不可",
+    }
+    if HAS_PSUTIL and psutil:
+        try:
+            cpu_pct = psutil.cpu_percent(interval=0.1)
+            cpu_count = psutil.cpu_count(logical=True)
+            metrics["cpu_percent"] = cpu_pct
+            metrics["cpu"] = f"{cpu_pct:.1f}% ({cpu_count} Threads)"
+
+            mem = psutil.virtual_memory()
+            mem_used_gb = mem.used / (1024 ** 3)
+            mem_tot_gb = mem.total / (1024 ** 3)
+            metrics["memory_percent"] = mem.percent
+            metrics["memory"] = f"{mem_used_gb:.1f}GB / {mem_tot_gb:.1f}GB ({mem.percent}%)"
+        except Exception as e:
+            logger.warning(f"Failed to gather psutil metrics: {e}")
+
+    # Query GPU via nvidia-smi if available
+    smi = shutil.which("nvidia-smi")
+    if smi:
+        try:
+            res = subprocess.run(
+                [smi, "--query-gpu=name,utilization.gpu,memory.used,memory.total", "--format=csv,noheader,nounits"],
+                capture_output=True,
+                text=True,
+                timeout=3,
+            )
+            if res.returncode == 0 and res.stdout.strip():
+                gpus = []
+                for line in res.stdout.strip().splitlines():
+                    parts = [p.strip() for p in line.split(",")]
+                    if len(parts) >= 4:
+                        name, util, m_used, m_tot = parts[0], parts[1], parts[2], parts[3]
+                        try:
+                            m_used_f = float(m_used) / 1024.0
+                            m_tot_f = float(m_tot) / 1024.0
+                            gpus.append(f"{name} | 使用率: {util}% | VRAM: {m_used_f:.1f}GB / {m_tot_f:.1f}GB")
+                        except ValueError:
+                            gpus.append(f"{name} | 使用率: {util}% | VRAM: {m_used}MB / {m_tot}MB")
+                if gpus:
+                    metrics["gpu"] = "\n".join(gpus)
+        except Exception as e:
+            logger.warning(f"nvidia-smi execution error: {e}")
+            metrics["gpu"] = f"GPU取得エラー: {e}"
+
+    return metrics
+
+
+def launch_chrome_browser(url: str = "http://localhost:5000") -> Tuple[bool, str]:
+    """Launch Google Chrome on the host environment."""
+    chrome_paths = [
+        r"C:\Program Files\Google\Chrome\Application\chrome.exe",
+        r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
+        os.path.expandvars(r"%LOCALAPPDATA%\Google\Chrome\Application\chrome.exe"),
+        shutil.which("chrome"),
+        shutil.which("google-chrome"),
+    ]
+    target_exe = None
+    for p in chrome_paths:
+        if p and os.path.exists(p):
+            target_exe = p
+            break
+
+    if not target_exe:
+        return False, "Google Chrome の実行ファイルが見つかりませんでした。"
+
+    try:
+        creation_flags = 0
+        if sys.platform == "win32":
+            creation_flags = getattr(subprocess, "DETACHED_PROCESS", 0x00000008)
+        proc = subprocess.Popen(
+            [target_exe, url],
+            creationflags=creation_flags,
+            close_fds=True,
+        )
+        return True, f"Google Chrome を起動しました (PID: {proc.pid}, URL: {url})"
+    except Exception as e:
+        logger.error(f"Failed to launch Chrome: {e}", exc_info=True)
+        return False, f"Chrome 起動失敗: {e}"
 
 
 def get_recent_conversations(limit: int = 10) -> List[Dict[str, Any]]:
@@ -195,8 +291,10 @@ class DiscordBridgeClient(discord.Client):
         self.channel_models: Dict[int, str] = {}
         # channel_id -> conversation_id (for multi-turn memory)
         self.channel_conversations: Dict[int, Optional[str]] = {}
-        # channel_id -> asyncio.subprocess.Process
-        self.active_processes: Dict[int, asyncio.subprocess.Process] = {}
+        # task_id (str) -> asyncio.subprocess.Process
+        self.active_processes: Dict[str, asyncio.subprocess.Process] = {}
+        # channel_id -> Set[str] of task_ids
+        self.channel_tasks: Dict[int, Set[str]] = {}
 
     async def setup_hook(self):
         await self.tree.sync()
@@ -216,6 +314,43 @@ class DiscordBridgeClient(discord.Client):
     def set_model(self, channel_id: int, model: str):
         self.channel_models[channel_id] = model
 
+    def register_task(self, channel_id: int, task_id: str, proc: asyncio.subprocess.Process):
+        self.active_processes[task_id] = proc
+        if channel_id not in self.channel_tasks:
+            self.channel_tasks[channel_id] = set()
+        self.channel_tasks[channel_id].add(task_id)
+
+    def unregister_task(self, channel_id: int, task_id: str):
+        self.active_processes.pop(task_id, None)
+        if channel_id in self.channel_tasks:
+            self.channel_tasks[channel_id].discard(task_id)
+            if not self.channel_tasks[channel_id]:
+                self.channel_tasks.pop(channel_id, None)
+
+    def abort_tasks(self, channel_id: Optional[int] = None, task_id: Optional[str] = None) -> int:
+        """Abort tasks either by specific task_id or for an entire channel."""
+        aborted = 0
+        if task_id and task_id in self.active_processes:
+            p = self.active_processes[task_id]
+            if p.returncode is None:
+                try:
+                    p.kill()
+                    aborted += 1
+                except Exception:
+                    pass
+            return aborted
+
+        target_tasks = self.channel_tasks.get(channel_id, set()).copy() if channel_id else set(self.active_processes.keys())
+        for tid in target_tasks:
+            p = self.active_processes.get(tid)
+            if p and p.returncode is None:
+                try:
+                    p.kill()
+                    aborted += 1
+                except Exception:
+                    pass
+        return aborted
+
 
 client = DiscordBridgeClient()
 
@@ -228,13 +363,56 @@ def check_auth(interaction: discord.Interaction) -> bool:
 
 @client.event
 async def on_ready():
+    metrics = await asyncio.to_thread(get_system_metrics)
     logger.info(f"Discord Bridge Bot logged in as {client.user} (ID: {client.user.id})")
     logger.info(f"Strict Workspace Directory: {WORKSPACE_DIR}")
     logger.info(f"Default Model: {DEFAULT_MODEL}")
+    logger.info(f"System CPU: {metrics['cpu']} | Memory: {metrics['memory']}")
+    logger.info(f"System GPU:\n{metrics['gpu']}")
     if ALLOWED_USER_IDS:
         logger.info(f"Authorized User IDs: {ALLOWED_USER_IDS}")
     else:
         logger.warning("No ALLOWED_USER_IDS set. Anyone in invited channels can control Antigravity!")
+
+    # Optionally notify startup message with system metrics to configured channels
+    embed = discord.Embed(
+        title="🚀 Antigravity Discord Bridge 起動完了",
+        description=f"Antigravity Remote Bridge が起動しました。\n並列チャット処理・Chrome起動・システム監視が有効です。",
+        color=discord.Color.green(),
+        timestamp=datetime.now(),
+    )
+    embed.add_field(name="⚙️ CPU 使用率", value=f"`{metrics['cpu']}`", inline=True)
+    embed.add_field(name="🧠 メモリ (RAM)", value=f"`{metrics['memory']}`", inline=True)
+    embed.add_field(name="⚡ GPU 稼働状況", value=f"```{metrics['gpu']}```", inline=False)
+    embed.add_field(
+        name="ℹ️ 設定情報",
+        value=f"• モデル: `{DEFAULT_MODEL}`\n• ワークスペース: `simulation/v3`\n• コマンド一覧: `!help` / `/status` / `/chrome` / `/chat`",
+        inline=False,
+    )
+
+    # Post to allowed channels or first available text channel
+    target_channels: List[discord.TextChannel] = []
+    if ALLOWED_CHANNEL_IDS:
+        for cid in ALLOWED_CHANNEL_IDS:
+            ch = client.get_channel(cid)
+            if isinstance(ch, discord.TextChannel):
+                target_channels.append(ch)
+
+    if not target_channels:
+        # Send to first available text channel if bot has write permissions
+        for guild in client.guilds:
+            for ch in guild.text_channels:
+                if ch.permissions_for(guild.me).send_messages:
+                    target_channels.append(ch)
+                    break
+            if target_channels:
+                break
+
+    for ch in target_channels:
+        try:
+            await ch.send(embed=embed)
+        except Exception as e:
+            logger.warning(f"Could not send startup message to channel {ch.id}: {e}")
 
 
 # ==========================================
@@ -399,21 +577,66 @@ async def cmd_new(interaction: discord.Interaction):
     await interaction.response.send_message("🔄 Conversation reset. Next message will start a new session in `simulation/v3`.")
 
 
-@client.tree.command(name="abort", description="Abort currently running agent command")
+@client.tree.command(name="status", description="Show system performance metrics (CPU, RAM, GPU) and active tasks")
+async def cmd_status(interaction: discord.Interaction):
+    if not check_auth(interaction):
+        await interaction.response.send_message("❌ Unauthorized.", ephemeral=True)
+        return
+
+    metrics = await asyncio.to_thread(get_system_metrics)
+    active_count = len(client.active_processes)
+    channel_active = len(client.channel_tasks.get(interaction.channel_id, set()))
+    model = client.get_model(interaction.channel_id)
+    conv_id = client.channel_conversations.get(interaction.channel_id)
+    conv_label = conv_id[:8] if conv_id else "新規セッション"
+
+    embed = discord.Embed(
+        title="🖥️ システム稼働状況 (Host System Status)",
+        color=discord.Color.blue(),
+        timestamp=datetime.now(),
+    )
+    embed.add_field(name="⚙️ CPU 使用率", value=f"`{metrics['cpu']}`", inline=True)
+    embed.add_field(name="🧠 メモリ (RAM)", value=f"`{metrics['memory']}`", inline=True)
+    embed.add_field(name="⚡ GPU 稼働状況", value=f"```{metrics['gpu']}```", inline=False)
+    embed.add_field(
+        name="🤖 Antigravity 稼働状況",
+        value=(
+            f"• 実行中タスク数: **{active_count}** 件 (このチャンネル: **{channel_active}** 件)\n"
+            f"• アクティブモデル: **`{model}`**\n"
+            f"• 会話コンテキスト: **`{conv_label}`**\n"
+            f"• 作業ディレクトリ: `simulation/v3`"
+        ),
+        inline=False,
+    )
+    await interaction.response.send_message(embed=embed)
+
+
+@client.tree.command(name="chrome", description="Launch Google Chrome on the host environment")
+@app_commands.describe(url="URL to open in Chrome (default: http://localhost:5000)")
+async def cmd_chrome(interaction: discord.Interaction, url: Optional[str] = "http://localhost:5000"):
+    if not check_auth(interaction):
+        await interaction.response.send_message("❌ Unauthorized.", ephemeral=True)
+        return
+
+    target_url = url.strip() if url else "http://localhost:5000"
+    success, message = await asyncio.to_thread(launch_chrome_browser, target_url)
+    if success:
+        await interaction.response.send_message(f"🌐 {message}")
+    else:
+        await interaction.response.send_message(f"❌ {message}", ephemeral=True)
+
+
+@client.tree.command(name="abort", description="Abort currently running agent tasks in this channel")
 async def cmd_abort(interaction: discord.Interaction):
     if not check_auth(interaction):
         await interaction.response.send_message("❌ Unauthorized.", ephemeral=True)
         return
 
-    proc = client.active_processes.get(interaction.channel_id)
-    if proc and proc.returncode is None:
-        try:
-            proc.kill()
-            await interaction.response.send_message("🛑 Active Antigravity task has been terminated.")
-        except Exception as e:
-            await interaction.response.send_message(f"⚠️ Failed to terminate process: {e}")
+    aborted = client.abort_tasks(channel_id=interaction.channel_id)
+    if aborted > 0:
+        await interaction.response.send_message(f"🛑 {aborted} 件のアクティブタスクを停止しました。")
     else:
-        await interaction.response.send_message("ℹ️ No active task is currently running in this channel.")
+        await interaction.response.send_message("ℹ️ このチャンネルで実行中のタスクはありません。")
 
 
 # ==========================================
@@ -428,18 +651,13 @@ async def execute_agy_prompt(
     interaction: Optional[discord.Interaction] = None,
 ):
     """
-    Runs agy CLI strictly in simulation/v3 workspace,
+    Runs agy CLI strictly in simulation/v3 workspace in parallel,
     streams live progress (thinking, subagents, tools), and posts reply.
+    Supports concurrent executions across and within channels without blocking.
     """
     channel_id = channel.id
-
-    if channel_id in client.active_processes and client.active_processes[channel_id].returncode is None:
-        msg = "⚠️ Another task is already running in this channel. Use `!abort` or `/abort` to cancel it first."
-        if interaction:
-            await interaction.followup.send(msg)
-        else:
-            await channel.send(msg)
-        return
+    task_id = f"{channel_id}_{int(time.time() * 1000)}"
+    active_in_channel = len(client.channel_tasks.get(channel_id, set()))
 
     model = client.get_model(channel_id)
     conv_id = client.channel_conversations.get(channel_id)
@@ -455,11 +673,16 @@ async def execute_agy_prompt(
     if conv_id:
         cmd.extend(["--conversation", conv_id])
 
-    logger.info(f"Running in {WORKSPACE_DIR} (Model: {model}, Conv: {conv_id}): {prompt[:60]}...")
+    logger.info(f"Running Task {task_id} in {WORKSPACE_DIR} (Model: {model}, Conv: {conv_id}): {prompt[:60]}...")
 
     status_embed = discord.Embed(
         title="🚀 Antigravity Agent Running",
-        description=f"**Model**: `{model}`\n**Workspace**: `simulation/v3`\n**Prompt**: {prompt[:120]}{'...' if len(prompt) > 120 else ''}",
+        description=(
+            f"**Task ID**: `{task_id[-8:]}` | **並列タスク**: {active_in_channel + 1}件目\n"
+            f"**Model**: `{model}`\n"
+            f"**Workspace**: `simulation/v3`\n"
+            f"**Prompt**: {prompt[:120]}{'...' if len(prompt) > 120 else ''}"
+        ),
         color=discord.Color.gold(),
     )
     status_embed.add_field(name="Current Status", value="🧠 Initializing & Reasoning...", inline=False)
@@ -475,6 +698,7 @@ async def execute_agy_prompt(
     except Exception:
         pass
 
+    proc = None
     try:
         proc = await asyncio.create_subprocess_exec(
             *cmd,
@@ -482,7 +706,7 @@ async def execute_agy_prompt(
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
-        client.active_processes[channel_id] = proc
+        client.register_task(channel_id, task_id, proc)
 
         accumulated_text = ""
         current_status_line = "🧠 Thinking / Analyzing codebase..."
@@ -602,7 +826,7 @@ async def execute_agy_prompt(
         logger.error(f"Error running agy: {e}", exc_info=True)
         accumulated_text = f"❌ Internal Exception: {e}"
     finally:
-        client.active_processes.pop(channel_id, None)
+        client.unregister_task(channel_id, task_id)
 
     # Clean up status message
     try:
@@ -647,18 +871,56 @@ async def on_message(message: discord.Message):
         cmd_name = parts[0].lower() if parts else ""
         cmd_arg = parts[1].strip() if len(parts) > 1 else ""
 
-        valid_cmds = ("chat", "chats", "history", "resume", "model", "m", "models", "new", "abort", "help")
+        valid_cmds = ("chat", "chats", "history", "resume", "model", "m", "models", "new", "abort", "help", "status", "chrome")
         if cmd_name in valid_cmds:
             if not client.is_authorized(message.author.id, message.channel.id):
                 await message.reply("❌ Unauthorized: You do not have permission to control Antigravity.")
                 return
 
-            if cmd_name == "chat":
+            if cmd_name == "status":
+                metrics = await asyncio.to_thread(get_system_metrics)
+                active_count = len(client.active_processes)
+                channel_active = len(client.channel_tasks.get(message.channel.id, set()))
+                model = client.get_model(message.channel.id)
+                conv_id = client.channel_conversations.get(message.channel.id)
+                conv_label = conv_id[:8] if conv_id else "新規セッション"
+
+                embed = discord.Embed(
+                    title="🖥️ システム稼働状況 (Host System Status)",
+                    color=discord.Color.blue(),
+                    timestamp=datetime.now(),
+                )
+                embed.add_field(name="⚙️ CPU 使用率", value=f"`{metrics['cpu']}`", inline=True)
+                embed.add_field(name="🧠 メモリ (RAM)", value=f"`{metrics['memory']}`", inline=True)
+                embed.add_field(name="⚡ GPU 稼働状況", value=f"```{metrics['gpu']}```", inline=False)
+                embed.add_field(
+                    name="🤖 Antigravity 稼働状況",
+                    value=(
+                        f"• 実行中タスク数: **{active_count}** 件 (このチャンネル: **{channel_active}** 件)\n"
+                        f"• アクティブモデル: **`{model}`**\n"
+                        f"• 会話コンテキスト: **`{conv_label}`**\n"
+                        f"• 作業ディレクトリ: `simulation/v3`"
+                    ),
+                    inline=False,
+                )
+                await message.reply(embed=embed)
+                return
+
+            elif cmd_name == "chrome":
+                target_url = cmd_arg.strip() if cmd_arg else "http://localhost:5000"
+                success, msg = await asyncio.to_thread(launch_chrome_browser, target_url)
+                if success:
+                    await message.reply(f"🌐 {msg}")
+                else:
+                    await message.reply(f"❌ {msg}")
+                return
+
+            elif cmd_name == "chat":
                 if not cmd_arg:
                     await message.reply("⚠️ Please provide a prompt. Usage: `!chat <prompt>`")
                     return
-                async with message.channel.typing():
-                    await execute_agy_prompt(message.channel, cmd_arg, message.author, reply_to_msg=message)
+                # Non-blocking parallel execution
+                asyncio.create_task(execute_agy_prompt(message.channel, cmd_arg, message.author, reply_to_msg=message))
                 return
 
             elif cmd_name in ("chats", "history"):
@@ -735,27 +997,25 @@ async def on_message(message: discord.Message):
                 return
 
             elif cmd_name == "abort":
-                proc = client.active_processes.get(message.channel.id)
-                if proc and proc.returncode is None:
-                    try:
-                        proc.kill()
-                        await message.reply("🛑 Active Antigravity task has been terminated.")
-                    except Exception as e:
-                        await message.reply(f"⚠️ Failed to terminate process: {e}")
+                aborted = client.abort_tasks(channel_id=message.channel.id)
+                if aborted > 0:
+                    await message.reply(f"🛑 {aborted} 件のアクティブタスクを停止しました。")
                 else:
-                    await message.reply("ℹ️ No active task is currently running in this channel.")
+                    await message.reply("ℹ️ このチャンネルで実行中のタスクはありません。")
                 return
 
             elif cmd_name == "help":
                 await message.reply(
                     "**Antigravity Remote Bridge Commands (`simulation/v3`):**\n"
-                    "• `!chat <prompt>`: Send prompt directly to agent\n"
+                    "• `!chat <prompt>`: Send prompt to agent (並列実行対応)\n"
+                    "• `!status` (or `/status`): CPU・メモリ・GPU・タスク稼働状況の表示\n"
+                    "• `!chrome [url]` (or `/chrome`): ローカル環境で Google Chrome を起動\n"
                     "• `!chats` (or `!history`): View recent conversation list & switch session\n"
                     "• `!resume <id>`: Resume previous session by ID (e.g. `!resume 8678b84b`)\n"
                     "• `!model` or `!m [name]`: Change or view model\n"
                     "• `!models`: List all available models\n"
                     "• `!new`: Reset conversation context (start fresh)\n"
-                    "• `!abort`: Terminate currently running task\n"
+                    "• `!abort`: Terminate active tasks in this channel\n"
                     "• Natural Chat: DM or dedicated channel chat or `@Bot <prompt>`"
                 )
                 return
@@ -784,12 +1044,12 @@ async def on_message(message: discord.Message):
         await message.reply(
             f"👋 Antigravity Remote Bridge is ready in `simulation/v3`.\n"
             f"Active Model: **`{current_model}`** | Session: **`{conv_label}`**\n"
-            f"Send me any task, or type `!help` / `!chats` to manage sessions."
+            f"Send me any task, or type `!help` / `!status` / `!chrome` / `!chats` to manage sessions."
         )
         return
 
-    async with message.channel.typing():
-        await execute_agy_prompt(message.channel, prompt, message.author, reply_to_msg=message)
+    # Non-blocking parallel execution
+    asyncio.create_task(execute_agy_prompt(message.channel, prompt, message.author, reply_to_msg=message))
 
 
 @client.event
@@ -798,11 +1058,10 @@ async def on_reaction_add(reaction: discord.Reaction, user: discord.User):
         return
     if str(reaction.emoji) == "🛑":
         channel_id = reaction.message.channel.id
-        proc = client.active_processes.get(channel_id)
-        if proc and proc.returncode is None:
-            if client.is_authorized(user.id, channel_id):
-                proc.kill()
-                await reaction.message.channel.send(f"🛑 Task aborted by {user.mention}.")
+        if client.is_authorized(user.id, channel_id):
+            aborted = client.abort_tasks(channel_id=channel_id)
+            if aborted > 0:
+                await reaction.message.channel.send(f"🛑 {aborted} 件のタスクが {user.mention} により停止されました。")
 
 
 def main():
