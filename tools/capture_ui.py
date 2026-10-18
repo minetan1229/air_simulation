@@ -40,9 +40,28 @@ async def capture_all():
             # Wait until flight finish notification or recorder status updates
             await page.wait_for_selector(".toast:has-text('発射完了'), .flight-finished", timeout=25000)
             await asyncio.sleep(2.0)
+
+            # 着陸完了モーダルが表示されていたら閉じる（または非表示にする）
+            await page.evaluate("""() => {
+                const modal = document.getElementById('flight-result-modal');
+                if (modal) {
+                    modal.hidden = true;
+                    modal.style.display = 'none';
+                }
+                // 飛行の美しい滑空中間点（50%〜70%位置）にシークして飛行軌跡と機体を美しく表示
+                if (window.app && window.app.transport && window.app.transport.history) {
+                    const hist = window.app.transport.history;
+                    if (hist.length > 0) {
+                        const midIndex = Math.floor(hist.length * 0.6);
+                        window.app.transport.seek(midIndex);
+                    }
+                }
+            }""")
+            await asyncio.sleep(1.0)
+
             path_traj = os.path.join(out_dir, "02_flight_trajectory.png")
             await page.screenshot(path=path_traj)
-            print("Saved 02_flight_trajectory.png")
+            print("Saved 02_flight_trajectory.png (landing modal closed, mid-flight trajectory)")
 
         # 3. Wind tunnel toggle
         print("3. Toggling wind tunnel...")
