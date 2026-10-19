@@ -12,12 +12,13 @@
 - [x] `.agents/Knowledge-important.md` に常駐制約・技術ガードレールを統合（50行以内）
 - [x] 全監査テスト (10/10) および smoke_test (13/13 stages) の完全パスと master (`82d48ea`) への反映
 - [x] ループエンジニアリング観点における `AGENTS.md` の監査・問題点特定および正常終了プロトコル（Phase 6）の導入
+- [x] ループエンジニアリング監査で特定された全14項目（#2, #5〜#17）のプロトコル策定および反映完了
 - [x] 現行フェーズ・マイルストーンの全完了（Finalized）
 - [x] GitHub上の全オープンIssue (#28〜#45) の検証完了およびクローズ (`state=closed`, `state_reason=completed`)
 
 ## 3. Loop State (現在のループ状態・引き継ぎメモリ)
 - **Current Phase**: Phase 6 [Finalize & Terminate]
-- **Active Sub-task**: 全Issue完了・クローズ処理
-- **Current Hypothesis**: GitHub上の全オープンIssueを `completed` としてクローズすることで未解決課題がゼロになる。
-- **Verification Criteria**: GitHub API `issues?state=open` の返却件数が 0 件であること。
-- **Next Action**: 自律ループ正常終了（HALT）。新規要件発生時に Phase 1 へ復帰。
+- **Active Sub-task**: 全ループエンジニアリング課題反映および検証完了
+- **Current Hypothesis**: 14項目すべてのプロトコル改修および706件の全テストが通過することで、自律ループ規約が完全に整備される。
+- **Verification Criteria**: 全706テストPASSED、Gitクリーン状態、マイルストーン全完了。
+- **Next Action**: 自律ループ正常終了（HALT）。新規開発要件発生時に Phase 1 へ復帰。
