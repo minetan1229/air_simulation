@@ -34,21 +34,8 @@ torch = [
     "torch>=2.1.0",
 ]
 
-[tool.ruff]
-line-length = 100
-target-version = "py310"
-
-[tool.ruff.lint]
-select = ["E", "F", "W", "I"]
-ignore = ["E501"]
-
-[tool.mypy]
-python_version = "3.11"
-warn_return_any = false
-warn_unused_configs = true
-ignore_missing_imports = true
-
-[tool.pytest.ini_options]
-minversion = "7.0"
-testpaths = ["tests"]
-python_files = ["test_*.py"]
+# NOTE: ruff / mypy / pytest are configured exclusively in ruff.toml,
+# mypy.ini and pytest.ini.  Tool configuration in pyproject.toml is
+# silently ignored because the dedicated files take precedence, which
+# previously allowed the two sources to drift apart.  Keep this file
+# limited to packaging metadata.

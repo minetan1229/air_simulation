@@ -35,7 +35,14 @@
    - GitHub Issue（`tools/check_issues.py` / `tools/read_issues.py`）を確認し、残存課題の修正・解決およびクローズ（`tools/close_resolved_issue.py`）を行って自律ループを正常終了（HALT）。
 
 ## 4. Meta-Control & Protocol Governance (プロトコル改定 #17)
-- `AGENTS.md` 改変はユーザー明示要求または監査合意時のみ行い、無断での改変を禁止する。
+- `AGENTS.md` および `.agents/AGENTS.md` の改変はユーザー明示要求または監査合意時のみ行い、無断での改変を禁止する。
+
+## 4.1 Repository Layout & Tool Hygiene (構成・工具衛生)
+- 運用ツールの正本は `tools/` のみ。`tools/experiments/` は使い捨て調査スクリプト専用の隔離領域で、pytest収集・ruff検査の対象外とする。
+- `tools/experiments/` 配下のスクリプトは**インポート時に数十秒の飛行シミュレーションを実行しうる**ため、テストモジュールから import してはならない。追加するときは同ディレクトリへ置き、`.agents/Knowledge.md` か `.agents/skills/` から参照する（孤立スクリプトを残さない）。
+- 実行時生成物（`runs/`, `jobs/`, `logs/`, `artifacts/`, `models/`, `search/.cache/`）は `.gitignore` で除外し、git に追跡させない。
+- 静的解析の設定は `ruff.toml` / `mypy.ini` / `pytest.ini` に一本化する。`pyproject.toml` に置いた設定は静かに無視され二重正本になるため置かない。
+- `.agents/` のファイル名は `.agents/Project.md`（大文字 `P`）・`.agents/AGENTS.md`（大文字 `AGENTS`）で固定し、大文字小文字を混ぜない。
 
 
 ## 5. Webhook & Progress Notification (進捗通知規約)
@@ -50,6 +57,7 @@
 ## 7. 利用可能なMCPツール一覧 (MCP Tool Inventory)
 - 設定: `.kilo/kilo.jsonc` / 実行基盤: `.kilo/mcp/`（local stdio・外部APIキー不要）/ 導入手順: `.kilo/mcp/README.md`
 - 健全性確認: `python tools/verify_mcp_servers.py`（initialize → tools/list → 実ツールコール）／全カタログは `--list-only`
+- 個別ツール直接呼び出し: `python tools/mcp_call.py <server> <tool> --arg k=v`（`--json '{...}'` 形式も可）
 - 表記: Kiloでは `{server}_{tool}` 形式（例 `context7_resolve-library-id`, `playwright_browser_navigate`）。以下はサーバー別の実ツール名。
 
 | サーバー | ツール | 用途 |

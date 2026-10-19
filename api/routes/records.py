@@ -101,7 +101,13 @@ def get_record_presets():
 
 
 @records_bp.get("/api/v1/records/presets/<key>")
+@records_bp.get("/api/v1/records/preset/<key>")
 def get_record_preset(key: str):
+    """Return one record preset.
+
+    ``/api/v1/records/preset/<name>`` is the path mandated by
+    SPECIFICATION 3.6; the plural form is kept for the existing clients.
+    """
     from physics import records_domain
     try:
         data = records_domain.preset_payload(key)
@@ -192,52 +198,104 @@ def guinness_simulate():
 
 
 @records_bp.get("/api/v1/guinness/verification")
+@records_bp.get("/api/v1/records/guinness")
 def guinness_verification():
-    """Get the verification matrix of all Guinness world records side by side."""
+    """Get the Guinness world-record benchmark specification.
+
+    By default this returns the *specification* of the benchmarks: the
+    published records and the preset parameters they are flown with.  It does
+    **not** fly them -- the previous revision simulated every calibrated
+    preset for 45 simulated seconds each, so a plain ``GET`` occupied the
+    server for about a minute and could be triggered repeatedly by any
+    client.
+
+    Pass ``?verify=1`` to additionally run the verification matrix.  The
+    single-record simulation remains available at ``POST
+    /api/v1/guinness/simulate``.
+    """
     from physics import records_domain
     category = request.args.get("category")
-    keys = None
-    if category:
-        presets = records_domain.list_presets(category=category)
-        keys = [p["key"] for p in presets]
-    report = records_domain.verification_report(keys=keys)
-    return jsonify(report)
+    presets = records_domain.list_presets(category=category)
+    keys = [p["key"] for p in presets]
+
+    verify = str(request.args.get("verify", "")).strip().lower() in ("1", "true", "yes", "on")
+    if verify:
+        report = records_domain.verification_report(keys=keys)
+        return jsonify(report)
+
+    return jsonify({
+        "mode": "specification",
+        "verify": False,
+        "count": len(presets),
+        "presets": presets,
+        "categories": list(records_domain.RECORD_CATEGORIES),
+        "metrics": records_domain.RECORD_METRICS,
+        "note": "Add ?verify=1 to run the verification matrix (slow).",
+    })
 
 
 # ---------------------------------------------------------------------------
 # Error Logging & Diagnostics Endpoints
 # ---------------------------------------------------------------------------
 @records_bp.get("/api/v1/errors")
+@records_bp.get("/api/v1/records/errors")
 def list_errors():
-    """Retrieve error history with optional level, category, and text filtering."""
+    """Retrieve error history with optional level, category, and text filtering.
+
+    The payload is the redacted view: stack traces and client addresses stay
+    in the server log (SPECIFICATION 4.1).
+    """
     limit = int(request.args.get("limit", 100))
     limit = max(1, min(limit, 500))
     level = request.args.get("level")
     category = request.args.get("category")
     search = request.args.get("search")
-    logs = ERROR_LOGGER.get_logs(limit=limit, level=level, category=category, search=search)
+    logs = ERROR_LOGGER.get_logs(
+        limit=limit, level=level, category=category, search=search, public=True
+    )
     return jsonify({
         "errors": logs,
         "count": len(logs),
-        "statistics": ERROR_LOGGER.statistics(),
+        "statistics": ERROR_LOGGER.public_statistics(),
     })
 
 
 @records_bp.post("/api/v1/errors/report")
 def report_client_error():
-    """Receive client-side (frontend JavaScript/WebGL) errors and persist them."""
+    """Receive client-side (frontend JavaScript/WebGL) errors and persist them.
+
+    The client controls every field, so each one is bounded and validated
+    before it reaches the audit log; otherwise a caller could inject arbitrary
+    content into the operator's log files.
+    """
     payload = body()
-    message = payload.get("message", "Frontend error")
-    level = payload.get("level", "ERROR")
-    category = payload.get("category", "frontend")
+    if not isinstance(payload, dict):
+        return api_error("request body must be a JSON object", 400)
+
+    message = str(payload.get("message", "Frontend error"))[:2000]
+    level = str(payload.get("level", "ERROR")).upper()
+    if level not in ("ERROR", "WARNING", "CRITICAL", "INFO", "DEBUG"):
+        return api_error("level must be one of ERROR, WARNING, CRITICAL, INFO, DEBUG", 400)
+    category = str(payload.get("category", "frontend"))[:64]
     details = payload.get("details", {})
+    if not isinstance(details, dict):
+        return api_error("details must be a JSON object", 400)
+    details = {str(k)[:64]: str(v)[:500] for k, v in list(details.items())[:20]}
     traceback_str = payload.get("stack") or payload.get("traceback")
+    if traceback_str is not None:
+        traceback_str = str(traceback_str)[:4000]
 
     try:
         req_path = payload.get("url") or (request.path if request else None)
         client_ip = request.remote_addr if request else None
     except Exception:
         req_path, client_ip = None, None
+
+    status_code = payload.get("status_code", 400)
+    try:
+        status_code = int(status_code)
+    except (TypeError, ValueError):
+        status_code = 400
 
     rec = ERROR_LOGGER.record_error(
         message=message,
@@ -247,7 +305,7 @@ def report_client_error():
         details=details,
         path=req_path,
         method="CLIENT",
-        status_code=payload.get("status_code", 400),
+        status_code=status_code,
         client_ip=client_ip,
     )
     return jsonify({"ok": True, "error_id": rec.id})
@@ -255,8 +313,8 @@ def report_client_error():
 
 @records_bp.get("/api/v1/errors/stats")
 def error_stats():
-    """Get error metrics and log file statuses."""
-    return jsonify(ERROR_LOGGER.statistics())
+    """Get error metrics and log file statuses (without the server paths)."""
+    return jsonify(ERROR_LOGGER.public_statistics())
 
 
 @records_bp.post("/api/v1/errors/clear")

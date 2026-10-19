@@ -46,6 +46,7 @@ from physics.job_manager import (
     ema_update,
     estimate_remaining,
     estimated_completion_iso,
+    eta_from_rate,
     eta_seconds,
     evals_per_second,
     format_duration,
@@ -607,15 +608,51 @@ def test_progress_and_eta_stay_consistent(manager):
         assert 0.0 <= current.progress <= 1.0
         assert current.progress == pytest.approx(count / total)
         assert current.eta_seconds >= 0.0
-    # after the interval the ETA is exactly (total - n) * elapsed / max(n, 1)
+    # after the interval the ETA is derived from the EMA-smoothed throughput:
+    # eta = outstanding / smoothed_rate
     time.sleep(ETA_UPDATE_INTERVAL + 0.05)
     manager.update(record.job_id, 12)
     settled = manager.get(record.job_id)
-    expected = (total - 12) * (settled.elapsed_seconds / max(12, 1))
+    outstanding = total - 12
+    expected = outstanding / settled.evals_per_second
     assert settled.eta_seconds == pytest.approx(expected, rel=1e-12)
     assert settled.progress == pytest.approx(12 / total)
     assert settled.evals_per_second > 0.0
     assert settled.estimated_completion == estimated_completion_iso(settled.eta_seconds)
+
+
+def test_eta_from_rate_uses_the_smoothed_throughput():
+    """The ETA is derived from the EMA-smoothed rate, not the raw closed form."""
+    assert eta_from_rate(10, 100, 5.0) == pytest.approx(90.0 / 5.0)
+    assert eta_from_rate(0, 100, 5.0) == pytest.approx(100.0 / 5.0)
+    # Nothing outstanding -> no remaining time.
+    assert eta_from_rate(100, 100, 5.0) == 0.0
+    # No throughput measured yet -> no estimate.
+    assert eta_from_rate(10, 100, 0.0) == 0.0
+
+
+def test_reported_eta_is_the_smoothed_estimate(manager):
+    """The ETA reported to the client must be the EMA-smoothed one."""
+    total = 100
+    record = manager.create(total_evaluations=total)
+    manager.start(record.job_id)
+
+    time.sleep(ETA_UPDATE_INTERVAL + 0.05)
+    manager.update(record.job_id, 1)
+    first = manager.get(record.job_id)
+    assert first.evals_per_second > 0.0
+    assert first.eta_seconds == pytest.approx(
+        (total - 1) / first.evals_per_second, rel=1e-12
+    )
+
+    time.sleep(ETA_UPDATE_INTERVAL + 0.05)
+    manager.update(record.job_id, 2)
+    second = manager.get(record.job_id)
+    assert second.eta_seconds == pytest.approx(
+        (total - 2) / second.evals_per_second, rel=1e-12
+    )
+    # A steadily progressing job must not report a growing remaining time.
+    assert second.eta_seconds <= first.eta_seconds
 
 
 def test_over_shooting_the_budget_clamps_progress_and_eta(manager):
@@ -705,8 +742,10 @@ def test_estimated_completion_is_a_future_timestamp_while_running(manager):
     now = datetime.now(timezone.utc)
     assert completion > now
     assert (completion - now).total_seconds() == pytest.approx(running.eta_seconds, abs=1.5)
-    # 49 evaluations outstanding at t_bar = elapsed -> eta ~= 49 * elapsed
-    assert running.eta_seconds == pytest.approx(49.0 * running.elapsed_seconds, rel=1e-12)
+    # 49 evaluations outstanding at the EMA-smoothed rate
+    assert running.eta_seconds == pytest.approx(
+        49.0 / running.evals_per_second, rel=1e-12
+    )
     finished = manager.finish(record.job_id)
     assert finished.estimated_completion == finished.finished_at
     assert parse_iso8601(finished.estimated_completion) <= now + timedelta(seconds=2)

@@ -14,6 +14,9 @@ jobs:
   lint-and-typecheck:
     name: Lint & Static Type Check
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: bash
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
@@ -30,11 +33,14 @@ jobs:
           pip install ruff mypy
           if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
 
+      - name: Byte-compile (Syntax Check)
+        run: python -m compileall -q physics api tools app.py smoke_test.py
+
       - name: Syntax & Style Lint (Ruff)
         run: ruff check .
 
       - name: Static Type Check (Mypy)
-        run: mypy --config-file mypy.ini physics app.py api
+        run: mypy --config-file mypy.ini physics api app.py smoke_test.py
 
   test-matrix:
     name: Test (${{ matrix.os }} - Python ${{ matrix.python-version }})
@@ -74,6 +80,9 @@ jobs:
   security-audit:
     name: Security Vulnerability Scan (pip-audit)
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: bash
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
@@ -90,5 +99,9 @@ jobs:
           pip install pip-audit
           if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
 
+      # The audit covers the *declared* dependency set, not the whole
+      # environment: auditing the environment also reports the advisories of
+      # the pip/setuptools build tooling itself, which are not part of the
+      # shipped application.  A finding here fails the build.
       - name: Run pip-audit Dependency Scan
-        run: pip-audit --desc on || true
+        run: pip-audit -r requirements.txt --progress-spinner off

@@ -36,9 +36,10 @@ Flask REST API による物理演算バックエンドと、Three.js を用い�
 
 - **OS**: Windows 10/11, Ubuntu 20.04+, macOS 12+
 - **Python**: 3.10 以上 (3.11 推奨)
-- **アクセラレータ (GPU)**: NVIDIA GPU (CUDA 12.x / Compute Capability 5.0 以上)
+- **アクセラレータ (GPU)**: NVIDIA GPU (CUDA 12.x / Compute Capability 5.0 以上) — 任意
   - 演算バックエンドとして CuPy (`cupy-cuda12x`) を使用。
-  - GPU が明示的に指定された場合、またはバッチ並列計算において GPU が利用不能な場合は即座に `RuntimeError` を送出して処理を停止する（フェイルファスト原則）。CPU への暗黙的フォールバックは禁止。
+  - GPU が利用できない環境（CPU 専用機・CUDA 初期化失敗）では、NumPy および `concurrent.futures` / `multiprocessing` による CPU フォールバックへ**自動的に**移行する（SPECIFICATION §2.1）。
+  - CPU / GPU 経路は**返却スキーマが完全に一致**する（`physics/payload_contract.py`）。ただし CuPy バッチ経路は 3DoF 平行移動アンサンブルであり、6DoF 参照経路と物理計算結果は一致しない。CuPy 経路のペイロードは `approximate=true` / `physics_verification_eligible=false` / `limitations` を必ず伴い、`max_stability` のような参照専用客観指標は選択できない。
 - **ブラウザ**: WebGL 2.0 対応ブラウザ (Google Chrome, Microsoft Edge, Firefox, Safari)
 
 ---
@@ -87,9 +88,12 @@ python app.py
 
 ### 4.2 テストスイートの実行
 ```bash
+# 構文検証
+python -m compileall physics api tools app.py smoke_test.py
+
 # 静的解析 (Ruff / Mypy)
 ruff check .
-mypy physics app.py
+mypy --config-file mypy.ini physics api app.py smoke_test.py
 
 # 単体テスト (pytest)
 pytest tests -q
@@ -104,27 +108,38 @@ python smoke_test.py
 
 ```text
 .
-├── pyproject.toml             # 標準ビルド定義・依存関係・ツール設定
-├── requirements.txt           # 依存パッケージ一覧
-├── setup.ps1 / setup.sh       # 環境自動構築スクリプト
-├── app.py                     # Flask エントリーポイント
-├── smoke_test.py              # 全 13 ステージ統合検証スクリプト
-├── api/                       # REST API ルーティングパッケージ
-│   ├── core.py                # 共通セッション・バリデーション・エラー処理
-│   └── routes/                # 責務別エンドポイント (physics, simulation, mesh, jobs, meta)
-├── physics/                   # 物理演算・流体力学コア
-│   ├── config_schema.py       # データクラス・定数・単位スキーマ
-│   ├── aero_domain.py         # 航空力学モデル・失速・Drag Polar
-│   ├── atmosphere_domain.py   # ISA 1976 標準大気・Sutherland 動粘性
-│   ├── wind_domain.py         # 3D 風場・乱気流・熱上昇気流 (CUDA/GPU)
-│   ├── stress_domain.py       # 動圧・Gフォース・翼面応力テンソル (CUDA/GPU)
-│   ├── flight_sim.py          # 6DoF RK4 軌道積分器・四元数姿勢
-│   ├── parallel_engine.py     # GPU 100機同時アンサンブル / パラメータスイープ
-│   ├── optimizer_domain.py    # NSGA-II / Nelder-Mead / DE 最適化
-│   └── job_manager.py         # ETA・進捗率・非同期ジョブ管理
-├── static/                    # Three.js 3D レンダリング・フロントエンド
-├── templates/                 # メイン計器コンソール HTML
-└── docs/                      # 技術仕様・API・運用ドキュメント
+├── AGENTS.md                    # エージェント基本プロトコル OS
+├── .agents/                     # 自律実行ループ OS プロトコル (Project / Knowledge / skills)
+├── pyproject.toml               # 標準ビルド定義・依存関係
+├── requirements.txt             # 依存パッケージ一覧
+├── ruff.toml / mypy.ini / pytest.ini  # 静的解析・テスト設定の単一正本
+├── setup.ps1 / setup.sh         # 環境自動構築スクリプト (GPU 任意)
+├── app.py                       # Flask エントリーポイント
+├── smoke_test.py                # 全 13 ステージ統合検証スクリプト
+├── api/                         # REST API ルーティングパッケージ
+│   ├── core.py                  # 共通セッション・バリデーション・エラー処理
+│   └── routes/                  # 責務別エンドポイント (meta, physics, simulation, mesh, jobs, records)
+├── physics/                     # 物理演算・流体力学コア
+│   ├── config_schema.py         # データクラス・定数・単位スキーマ
+│   ├── payload_contract.py      # 返却ペイロードのキー契約 (全バックエンド共通)
+│   ├── aero_domain.py           # 航空力学モデル・失速・Drag Polar
+│   ├── atmosphere_domain.py     # ISA 1976 標準大気・Sutherland 動粘性
+│   ├── wind_domain.py           # 3D 風場・乱気流・熱上昇気流 (CUDA/GPU)
+│   ├── stress_domain.py         # 動圧・Gフォース・翼面応力テンソル (CUDA/GPU)
+│   ├── flight_sim.py            # 6DoF RK4 軌道積分器・四元数姿勢
+│   ├── parallel_engine.py       # GPU 100機同時アンサンブル / パラメータスイープ
+│   ├── optimizer_domain.py      # NSGA-II / Nelder-Mead / DE 最適化
+│   ├── mesh_domain.py           # glTF/GLB/OBJ/STL 解析・パネル法・SSRF 防止
+│   ├── records_domain.py        # 世界記録プリセット・検証マトリクス
+│   ├── error_domain.py          # 構造化エラーログ (スタックトレース秘匿)
+│   └── job_manager.py           # ETA・進捗率・非同期ジョブ管理
+├── tests/                       # 総合テストスイート (799 テスト)
+├── tools/                       # 開発・運用・検証ツール
+│   └── experiments/             # 使い捨て調査スクリプト (lint/test 対象外)
+├── search/                      # 航空力学・紙飛行機の調査コーパス
+├── static/                      # Three.js 3D レンダリング・フロントエンド
+├── templates/                   # メイン計器コンソール HTML
+└── docs/                        # 技術仕様・API・運用ドキュメント
 ```
 
 詳細な数式および内部構造については [docs/architecture.md](./docs/architecture.md) を参照のこと。

@@ -30,6 +30,7 @@ from ..core import (
     as_float,
     body,
     domain,
+    merge_overlay,
 )
 
 log = logging.getLogger("paper_airplane")
@@ -83,11 +84,11 @@ def _optimizer_config(payload: Dict[str, Any]) -> OptimizerConfig:
         dvars = list(dvars_raw)
 
     base = as_dict(SESSION.aircraft)
-    base.update(raw.get("aircraft", {}) or {})
+    merge_overlay(base, raw.get("aircraft"), "aircraft")
     env = as_dict(SESSION.environment)
-    env.update(raw.get("environment", {}) or {})
+    merge_overlay(env, raw.get("environment"), "environment")
     launch = as_dict(SESSION.launch)
-    launch.update(raw.get("launch", {}) or {})
+    merge_overlay(launch, raw.get("launch"), "launch")
 
     variable_bounds = raw.get("variable_bounds") or {}
     if not isinstance(variable_bounds, dict):
@@ -232,16 +233,22 @@ def optimizer_result(job_id: str):
 
 
 @jobs_bp.post("/api/v1/investigate/run")
+@jobs_bp.post("/api/v1/jobs/investigate")
 def investigate_run():
+    """Start an auto-investigation job.
+
+    ``/api/v1/jobs/investigate`` is the path mandated by SPECIFICATION 3.5;
+    ``/api/v1/investigate/run`` is kept for the existing clients.
+    """
     if JOB_MANAGER.active_count() >= 4:
         raise BadRequest("server busy: maximum active jobs (4) reached, please wait or cancel running jobs")
     payload = body()
     base_air = as_dict(SESSION.aircraft)
-    base_air.update(payload.get("aircraft", {}) or {})
+    merge_overlay(base_air, payload.get("aircraft"), "aircraft")
     env = as_dict(SESSION.environment)
-    env.update(payload.get("environment", {}) or {})
+    merge_overlay(env, payload.get("environment"), "environment")
     lau = as_dict(SESSION.launch)
-    lau.update(payload.get("launch", {}) or {})
+    merge_overlay(lau, payload.get("launch"), "launch")
 
     aircraft_cfg = from_dict(AircraftConfig, base_air, strict=False)
     environment_cfg = from_dict(EnvironmentConfig, env, strict=False).clamp_ranges()

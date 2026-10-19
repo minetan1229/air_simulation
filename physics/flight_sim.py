@@ -54,7 +54,7 @@ import types
 import typing
 from collections import OrderedDict, deque
 from dataclasses import dataclass, field, fields, is_dataclass, replace
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
 
 import numpy as np
 
@@ -79,6 +79,12 @@ from .config_schema import (
     THROW_STYLE_CATALOGUE,
     FLIGHT_LOG_COLUMNS,
 )
+from .payload_contract import (
+    DEFAULT_VALUES,
+    PAYLOAD_KEYS,
+    empty_payload,
+    normalize_payload,
+)
 from .geometry_utils import (
     angular_acceleration_body,
     body_inertia_tensor,
@@ -99,6 +105,11 @@ from .geometry_utils import (
     world_to_body,
     wind_force_to_body,
 )
+
+#: A three component vector.  NumPy arrays are accepted wherever a plain
+#: sequence is, so the public helpers can be called with the arrays the
+#: integrator produces without converting them first.
+VectorLike = Union[Sequence[float], np.ndarray]
 
 __all__ = [
     "BACKEND",
@@ -132,28 +143,10 @@ BACKEND = "numpy"
 #: Status vocabulary shared with the REST layer.
 STATUS_VALUES: Tuple[str, ...] = ("flying", "landed", "crashed", "timeout", "diverged")
 
-#: Exact key set of the :func:`evaluate_flight` payload (the optimiser relies on it).
-EVALUATE_KEYS: Tuple[str, ...] = (
-    "distance_m",
-    "flight_time_s",
-    "max_altitude_m",
-    "max_ld_ratio",
-    "max_stress_index",
-    "max_stress_pa",
-    "launch_speed_mps",
-    "stall_margin",
-    "stability",
-    "landing_distance_m",
-    "points",
-    "duration_s",
-    "backend",
-    "status",
-    "apogee_time_s",
-    "post_apogee_time_s",
-    "glide_entry_time_s",
-    "stable_glide_duration_s",
-    "apex_recovery_status",
-)
+#: Exact key set of the :func:`evaluate_flight` payload.  Every evaluation
+#: backend (6-DoF reference, CPU batch and CuPy batch) returns exactly these
+#: keys; see :mod:`physics.payload_contract` for the single source of truth.
+EVALUATE_KEYS: Tuple[str, ...] = PAYLOAD_KEYS
 
 # --------------------------------------------------------------------------
 # Numerical guard rails
@@ -232,23 +225,27 @@ _EPS = 1.0e-12
 _CACHE_LOCK = threading.Lock()
 _MODULE_CACHE: Dict[str, Tuple[Any, float]] = {}
 _MISSING_RETRY_S: float = 1.0
-_FUNC_CACHE: Dict[Tuple[int, Tuple[str, ...]], Any] = {}
+_FUNC_CACHE: Dict[Tuple[int, Tuple[str, ...]], Tuple[Optional[str], Any]] = {}
 _PLAN_CACHE: Dict[int, Tuple[Any, Any]] = {}
+_static_aero: Optional[types.ModuleType]
 try:
     from . import aero_domain as _static_aero
 except Exception:
     _static_aero = None
 
+_static_atmo: Optional[types.ModuleType]
 try:
     from . import atmosphere_domain as _static_atmo
 except Exception:
     _static_atmo = None
 
+_static_wind: Optional[types.ModuleType]
 try:
     from . import wind_domain as _static_wind
 except Exception:
     _static_wind = None
 
+_static_stress: Optional[types.ModuleType]
 try:
     from . import stress_domain as _static_stress
 except Exception:
@@ -273,9 +270,9 @@ def _optional_module(name: str) -> Any:
     now = time.monotonic()
     entry = _MODULE_CACHE.get(name)
     if entry is not None:
-        module, last_attempt = entry
-        if module is not None or (now - last_attempt) < _MISSING_RETRY_S:
-            return module
+        cached_module, last_attempt = entry
+        if cached_module is not None or (now - last_attempt) < _MISSING_RETRY_S:
+            return cached_module
     module: Any = None
     for candidate in (f"{__package__}.{name}" if __package__ else name, name):
         try:
@@ -321,19 +318,29 @@ def active_backends() -> Dict[str, str]:
 
 
 def _resolve_callable(module: Any, names: Sequence[str]) -> Any:
-    """First callable of ``names`` present on ``module`` (memoised per module)."""
+    """First callable of ``names`` present on ``module`` (memoised per module).
+
+    The memo is re-validated against the live module attribute on every call,
+    so replacing a domain function at runtime (module reload, test monkeypatch)
+    is picked up instead of being masked by a stale entry.
+    """
     if module is None:
         return None
     key = (id(module), tuple(names))
-    if key in _FUNC_CACHE:
-        return _FUNC_CACHE[key]
+    cached = _FUNC_CACHE.get(key)
+    if cached is not None:
+        cached_name, cached_func = cached
+        if cached_name is not None and getattr(module, cached_name, None) is cached_func:
+            return cached_func
     found = None
+    resolved_name: Optional[str] = None
     for name in names:
         candidate = getattr(module, name, None)
         if callable(candidate):
             found = candidate
+            resolved_name = name
             break
-    _FUNC_CACHE[key] = found
+    _FUNC_CACHE[key] = (resolved_name, found)
     return found
 
 
@@ -687,7 +694,7 @@ def _atmosphere_state_uncached(
             if isinstance(payload, dict):
                 density = _finite(_lookup(payload, ("density_kgm3", "density", "rho")))
                 if density > 0.0:
-                    return {
+                    result: Dict[str, Any] = {
                         "density_kgm3": density,
                         "kinematic_viscosity_m2s": max(
                             _finite(
@@ -712,10 +719,11 @@ def _atmosphere_state_uncached(
                         "reference_chord_m": chord,
                         "backend": "upstream",
                     }
+                    return result
     return _local_atmosphere(env, altitude, chord)
 
 
-def _local_wind(env: EnvironmentConfig, position: Sequence[float], time_s: float) -> np.ndarray:
+def _local_wind(env: EnvironmentConfig, position: VectorLike, time_s: float) -> np.ndarray:
     """Mean wind with a logarithmic boundary layer (exact zero when calm).
 
     ``wind_direction_deg`` follows the same meteorological convention as
@@ -746,17 +754,24 @@ def _local_wind(env: EnvironmentConfig, position: Sequence[float], time_s: float
     return out
 
 
-def wind_vector(position: Sequence[float], env: EnvironmentConfig, time_s: float = 0.0) -> np.ndarray:
+def wind_vector(position: VectorLike, env: EnvironmentConfig, time_s: float = 0.0) -> np.ndarray:
     """Local wind velocity vector in the **z-down world frame** (m/s).
 
     Primary path: ``wind_domain.wind_velocity(position, env, time_s)``.  The
-    upstream solver is defined on a *z-up* height axis (its boundary layer, ground
-    clamp and thermal plume all assume "height above the ground plane, positive
-    up"), so the query point is converted with
-    ``height = ground_level_m - z_state`` and the returned vertical component is
-    negated back into the z-down world frame used by the integrator.  Fallback:
-    :func:`_local_wind`, which returns the exact zero vector for a calm
-    atmosphere so the coupling is perfectly inert.
+    upstream solver is defined on a *z-up* axis whose ground plane is
+    ``z = env.ground_level_m`` (see :mod:`physics.wind_domain`), so the query
+    point is converted with ``z_up = -z_state`` and the returned vertical
+    component is negated back into the z-down world frame used by the
+    integrator.  Fallback: :func:`_local_wind`, which returns the exact zero
+    vector for a calm atmosphere so the coupling is perfectly inert.
+
+    The conversion deliberately passes the **absolute** height above the world
+    origin rather than the height above ground.  Both frames place the ground
+    plane at ``z = ground_level_m`` (NED: ``z = -ground_level_m``), so the
+    wind domain can derive the AGL height itself.  Passing the AGL height
+    instead would make the domain subtract ``ground_level_m`` a second time and
+    collapse the boundary layer (and the thermal plume) whenever the airfield
+    sits at a non-zero elevation.
 
     When the resulting wind field is provably the zero vector the upstream call
     is skipped outright: the mean wind and the turbulence amplitude both scale
@@ -774,8 +789,8 @@ def wind_vector(position: Sequence[float], env: EnvironmentConfig, time_s: float
     module = wind_module()
     func = _resolve_callable(module, ("wind_velocity", "velocity_at", "sample_wind"))
     if func is not None:
-        height = -_finite(position[2]) - _finite(env.ground_level_m)
-        query = np.array([_finite(position[0]), _finite(position[1]), height], dtype=np.float64)
+        z_up = -_finite(position[2])
+        query = np.array([_finite(position[0]), _finite(position[1]), z_up], dtype=np.float64)
         out = _call_upstream(
             func,
             {
@@ -808,7 +823,7 @@ def _local_aero(
     mach: float,
     reynolds: float,
     ground_height_m: float,
-    angular_rate: Sequence[float],
+    angular_rate: VectorLike,
     density: float,
     kinematic_viscosity: float,
 ) -> AeroResult:
@@ -968,7 +983,7 @@ def aero_forces(
     mach: float = 0.0,
     reynolds: Optional[float] = None,
     ground_height_m: float = 1.0,
-    angular_rate: Sequence[float] = (0.0, 0.0, 0.0),
+    angular_rate: VectorLike = (0.0, 0.0, 0.0),
     density: float = 1.225,
     kinematic_viscosity: float = 1.5e-5,
 ) -> AeroResult:
@@ -1075,7 +1090,7 @@ def _local_stress(
     inertial = 0.0
     sigma = root_moment * lever / inertia
     allowable = ALLOWABLE_STRESS_PA_PER_GSM * gsm
-    return {
+    result: Dict[str, Any] = {
         "max_stress_pa": sigma,
         "allowable_stress_pa": allowable,
         "max_stress_index": sigma / allowable,
@@ -1084,6 +1099,7 @@ def _local_stress(
         "inertial_moment_nm": inertial,
         "backend": "numpy",
     }
+    return result
 
 
 def stress_metrics(
@@ -1184,13 +1200,14 @@ def stress_metrics(
                             ),
                             0.0,
                         )
-                        return {
+                        result: Dict[str, Any] = {
                             "max_stress_index": index_value,
                             "max_stress_pa": sigma_value,
                             "root_moment_nm": moment,
                             "allowable_stress_pa": allowable,
                             "backend": "upstream",
                         }
+                        return result
     return _local_stress(aircraft, derived, env, dynamic_pressure_pa, g_load)
 
 
@@ -1198,7 +1215,7 @@ def stress_metrics(
 # Public free functions
 # --------------------------------------------------------------------------
 def effective_alpha_beta(
-    velocity_body: Sequence[float], gravity: Sequence[float], env: Optional[EnvironmentConfig] = None
+    velocity_body: VectorLike, gravity: VectorLike, env: Optional[EnvironmentConfig] = None
 ) -> Tuple[float, float]:
     """Effective flow angles ``(alpha_deg, beta_deg)`` from a body-frame velocity.
 
@@ -1576,8 +1593,8 @@ def resolve_throw(
 
 
 def compute_ground_stations(
-    position_m: Sequence[float],
-    quaternion: Sequence[float],
+    position_m: VectorLike,
+    quaternion: VectorLike,
     environment: EnvironmentConfig,
     derived: Optional[Dict[str, float]] = None,
 ) -> Dict[str, float]:
@@ -2505,13 +2522,23 @@ class FlightSimulator:
         roll, pitch, yaw = euler_zyx_from_quaternion(state.quaternion)
         if landed:
             q_final = quaternion_from_euler(0.0, 0.0, yaw)
-            new_q = tuple(float(v) for v in q_final)
+            new_q = (
+            float(q_final[0]),
+            float(q_final[1]),
+            float(q_final[2]),
+            float(q_final[3]),
+        )
         else:
             settle_rate = 0.25
             new_roll = roll * (1.0 - settle_rate)
             new_pitch = pitch * (1.0 - settle_rate)
             q_settled = quaternion_from_euler(new_roll, new_pitch, yaw)
-            new_q = tuple(float(v) for v in q_settled)
+            new_q = (
+                float(q_settled[0]),
+                float(q_settled[1]),
+                float(q_settled[2]),
+                float(q_settled[3]),
+            )
 
         return StateVector(
             time_s=state.time_s,
@@ -3048,27 +3075,14 @@ def evaluate_flight(
     """
     total = max(_finite(duration_s, 6.0), 0.0)
     step_max = clamp(_finite(dt_max, 2.0e-2), 1.0e-6, 1.0e1)
-    empty = {
-        "distance_m": 0.0,
-        "flight_time_s": 0.0,
-        "max_altitude_m": 0.0,
-        "max_ld_ratio": 0.0,
-        "max_stress_index": 0.0,
-        "max_stress_pa": 0.0,
-        "launch_speed_mps": 0.0,
-        "stall_margin": 0.0,
-        "stability": 0.0,
-        "landing_distance_m": 0.0,
-        "points": 0,
-        "duration_s": float(total),
-        "backend": BACKEND,
-        "status": "diverged",
-        "apogee_time_s": 0.0,
-        "post_apogee_time_s": 0.0,
-        "glide_entry_time_s": None,
-        "stable_glide_duration_s": 0.0,
-        "apex_recovery_status": "not_observed",
-    }
+    empty = empty_payload(
+        duration_s=float(total),
+        status="diverged",
+        model="rigid_body_6dof",
+        approximate=False,
+        physics_verification_eligible=False,
+        limitations=("The 6-DoF integration did not complete.",),
+    )
     try:
         aircraft = (
             aircraft_dict
@@ -3227,9 +3241,28 @@ def summarize_flight(simulator: FlightSimulator, summary: Optional[Dict[str, Any
         "status": status,
         "apogee_time_s": max(_finite(apogee_time), 0.0),
         "post_apogee_time_s": max(_finite(summary.get("flight_time_s", 0.0)) - apogee_time, 0.0),
+        # Diagnostic observables: every backend reports them, so the payload
+        # shape does not depend on which engine produced the numbers.
+        "range_x_m": max(_finite(summary.get("range_x_m", 0.0)), 0.0),
+        "range_y_m": max(_finite(summary.get("range_y_m", 0.0)), 0.0),
+        "horizontal_range_m": max(_finite(summary.get("horizontal_range_m", 0.0)), 0.0),
+        "max_speed_mps": max(_finite(summary.get("max_speed_mps", 0.0)), 0.0),
+        "max_g_load": max(_finite(summary.get("max_g_load", 0.0)), 0.0),
+        "stalled": bool(summary.get("stalled", False)),
+        "landed": bool(summary.get("landed", False)),
+        "crashed": bool(summary.get("crashed", False)),
+        "diverged": bool(summary.get("diverged", False)),
     }
     payload.update(flight_phase_metrics(samples, launch.flight_mode))
-    return {key: payload[key] for key in EVALUATE_KEYS}
+    return normalize_payload(
+        payload,
+        model="rigid_body_6dof",
+        approximate=False,
+        physics_verification_eligible=status not in ("diverged", "failed"),
+        limitations=(
+            "Aerodynamic and material coefficients require experimental calibration.",
+        ),
+    )
 
 
 def flight_from_aircraft(

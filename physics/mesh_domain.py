@@ -43,7 +43,7 @@ import threading
 import urllib.error
 import urllib.parse
 import urllib.request
-from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
+from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple, Union
 
 import numpy as np
 
@@ -334,7 +334,7 @@ def parse_obj(text: str) -> Tuple[np.ndarray, np.ndarray]:
             raise ValueError(f"OBJ payload is not valid UTF-8: {exc}") from exc
 
     pool = _VertexPool()
-    triangles: List[Tuple[int, int, int]] = []
+    triangles: List[Sequence[int]] = []
 
     for raw_line in text.splitlines():
         line = raw_line.split("#", 1)[0].strip()
@@ -496,7 +496,7 @@ def parse_stl(data: bytes) -> Tuple[np.ndarray, np.ndarray]:
             pass  # fall through to the ASCII parser below
 
     try:
-        return parse_stl_ascii(blob)
+        return parse_stl_ascii(blob.decode("utf-8"))
     except (ValueError, UnicodeDecodeError) as ascii_error:
         if len(blob) >= 84:
             raise ValueError(
@@ -725,7 +725,7 @@ def _read_accessor(
             )
         values = np.array(rows, dtype=dtype).reshape(count, n_comp)
 
-    if accessor.get("normalized") and comp_type != 5126 and count:
+    if accessor.get("normalized") and comp_type != 5126 and count and values is not None:
         as_float = values.astype(np.float64)
         if signed:
             limit = float(np.iinfo(dtype).max)
@@ -779,7 +779,7 @@ def _node_matrix(node: Dict[str, Any]) -> np.ndarray:
     return matrix
 
 
-def _node_list(document: Dict[str, Any]) -> List[List[Tuple[int, np.ndarray]]]:
+def _node_list(document: Dict[str, Any]) -> List[Tuple[int, np.ndarray]]:
     """Return ``[(node index, world matrix), ...]`` in breadth-first order."""
     nodes = document.get("nodes", []) or []
     roots: List[int] = []
@@ -790,7 +790,7 @@ def _node_list(document: Dict[str, Any]) -> List[List[Tuple[int, np.ndarray]]]:
         if isinstance(scene, dict):
             roots = [int(i) for i in (scene.get("nodes") or [])]
     if not roots and nodes:
-        child_ids = set()
+        child_ids: set[int] = set()
         for node in nodes:
             if isinstance(node, dict):
                 child_ids.update(int(i) for i in (node.get("children") or []))
@@ -1605,9 +1605,9 @@ def mesh_hash_of(vertices: np.ndarray, faces: np.ndarray) -> str:
     tris = np.ascontiguousarray(np.asarray(faces, dtype=np.int64).reshape(-1, 3))
     digest = hashlib.sha256()
     digest.update(b"paperv3-mesh-v1")
-    digest.update(np.int64(verts.shape).tobytes())
+    digest.update(np.asarray(verts.shape, dtype=np.int64).tobytes())
     digest.update(verts.tobytes())
-    digest.update(np.int64(tris.shape).tobytes())
+    digest.update(np.asarray(tris.shape, dtype=np.int64).tobytes())
     digest.update(tris.tobytes())
     return digest.hexdigest()
 
@@ -1633,16 +1633,62 @@ def _trimesh_load(source: Any, filename: str) -> Optional[Tuple[np.ndarray, np.n
         return None
 
 
-class _NoRedirectHandler(urllib.request.HTTPRedirectHandler):
+#: Host names that resolve to a cloud instance-metadata service.  The address
+#: itself is link-local and therefore already blocked, but the names are
+#: rejected explicitly so the intent is documented and the check does not
+#: depend on the resolver.
+_BLOCKED_HOSTNAMES = frozenset(
+    {
+        "metadata.google.internal",
+        "metadata.goog",
+        "metadata",
+        "instance-data",
+        "instance-data.ec2.internal",
+        "metadata.azure.internal",
+        "metadata.azure.com",
+        "169.254.169.254",
+    }
+)
+
+#: Maximum number of HTTP redirects that are followed.  Every hop is
+#: re-validated (SPECIFICATION 4.2).
+MAX_REDIRECTS = 5
+
+
+def _is_forbidden_address(ip_obj: Union[ipaddress.IPv4Address, ipaddress.IPv6Address]) -> bool:
+    """True when the address must never be reached from the server."""
+    return bool(
+        ip_obj.is_private
+        or ip_obj.is_loopback
+        or ip_obj.is_link_local
+        or ip_obj.is_reserved
+        or ip_obj.is_multicast
+        or ip_obj.is_unspecified
+        or getattr(ip_obj, "is_site_local", False)
+    )
+
+
+class _SafeRedirectHandler(urllib.request.HTTPRedirectHandler):
+    """Follow a redirect only after re-validating the target URL.
+
+    SPECIFICATION 4.2 requires *multi-hop* validation: each redirect target is
+    put through the same SSRF checks as the original request, so a public URL
+    cannot bounce the server into a private network.
+    """
+
+    max_redirections = MAX_REDIRECTS
+
     def redirect_request(self, req, fp, code, msg, headers, newurl):
-        raise ValueError(f"HTTP redirects are disallowed: {newurl}")
+        validate_url_safe(newurl)
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
 
 
 def validate_url_safe(url: str) -> urllib.parse.ParseResult:
     """Validate that ``url`` is safe against SSRF attacks.
 
     Only allows http/https schemes, standard ports (80/443), and non-private/local
-    network IP destinations.
+    network IP destinations.  Cloud instance-metadata services are rejected by
+    name as well as by address.
     """
     parsed = urllib.parse.urlparse(str(url))
     if parsed.scheme not in ("http", "https"):
@@ -1655,9 +1701,12 @@ def validate_url_safe(url: str) -> urllib.parse.ParseResult:
 
     if hostname.lower() in ("localhost", "127.0.0.1", "::1"):
         raise ValueError(f"access to loopback host {hostname!r} is forbidden")
+    if hostname.lower() in _BLOCKED_HOSTNAMES:
+        raise ValueError(f"access to cloud metadata host {hostname!r} is forbidden")
+
     try:
         ip_obj = ipaddress.ip_address(hostname)
-        if ip_obj.is_private or ip_obj.is_loopback or ip_obj.is_link_local:
+        if _is_forbidden_address(ip_obj):
             raise ValueError(f"access to private/local network address {hostname!r} is forbidden")
     except ValueError:
         try:
@@ -1665,7 +1714,7 @@ def validate_url_safe(url: str) -> urllib.parse.ParseResult:
             for _, _, _, _, sockaddr in addr_info:
                 ip_str = sockaddr[0]
                 ip_obj = ipaddress.ip_address(ip_str)
-                if ip_obj.is_private or ip_obj.is_loopback or ip_obj.is_link_local:
+                if _is_forbidden_address(ip_obj):
                     raise ValueError(f"access to private/local network address {ip_str!r} is forbidden")
         except socket.gaierror as exc:
             if getattr(urllib.request.urlopen, "__module__", "") != "urllib.request":
@@ -1682,7 +1731,11 @@ def safe_urlopen_bytes(
     timeout: float = 20.0,
     headers: Optional[Dict[str, str]] = None,
 ) -> bytes:
-    """Safely fetch a URL payload verifying against SSRF and redirect escapes."""
+    """Safely fetch a URL payload verifying against SSRF and redirect escapes.
+
+    Every redirect hop is re-validated, so a public URL cannot bounce the
+    server into a private network.
+    """
     validate_url_safe(url)
     req_headers = {"User-Agent": "paper-airplane-sim/1.0"}
     if headers:
@@ -1693,7 +1746,7 @@ def safe_urlopen_bytes(
         if getattr(urllib.request.urlopen, "__module__", "") != "urllib.request":
             cm = urllib.request.urlopen(request, timeout=float(timeout))
         else:
-            opener = urllib.request.build_opener(_NoRedirectHandler)
+            opener = urllib.request.build_opener(_SafeRedirectHandler)
             cm = opener.open(request, timeout=float(timeout))
         with cm as response:
             try:
@@ -1943,11 +1996,21 @@ def compute_metrics(
         mean_chord_m=float(planform["mean_chord_m"]),
         taper_ratio=float(planform["taper_ratio"]),
         aspect_ratio=float(planform["aspect_ratio"]),
-        cg_m=cg,
+        cg_m=(float(cg[0]), float(cg[1]), float(cg[2])),
         cg_mode=str(properties["cg_mode_used"]),
         volume_m3=float(properties["volume_m3"]),
         mass_kg=float(mass),
-        inertia_tensor=tuple(float(v) for v in inertia.reshape(-1)),
+        inertia_tensor=(
+            float(inertia[0, 0]),
+            float(inertia[0, 1]),
+            float(inertia[0, 2]),
+            float(inertia[1, 0]),
+            float(inertia[1, 1]),
+            float(inertia[1, 2]),
+            float(inertia[2, 0]),
+            float(inertia[2, 1]),
+            float(inertia[2, 2]),
+        ),
         paper_gsm=float(paper_gsm),
         panels=list(panels),
         panel_count=int(len(panels)),

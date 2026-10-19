@@ -10,6 +10,9 @@ jobs:
   verify:
     name: Lint, Type Check & Test
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: bash
     permissions:
       contents: read
       issues: write
@@ -29,15 +32,21 @@ jobs:
           pip install ruff mypy pytest
           if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
 
+      - name: バイトコンパイル (構文検証)
+        run: python -m compileall -q physics api tools app.py smoke_test.py
+
       - name: 構文・スタイル検証 (Ruff)
         run: ruff check .
 
       - name: 静的型検査 (Mypy)
-        run: mypy --config-file mypy.ini physics app.py
+        run: mypy --config-file mypy.ini physics api app.py smoke_test.py
 
       - name: 自動テストの実行 (Pytest)
         id: pytest_step
         run: python tools/run_ci_tests.py
+
+      - name: E2E スモークテスト (Smoke Test)
+        run: python smoke_test.py
 
       - name: テスト失敗時のIssue起票
         if: failure() && steps.pytest_step.outcome == 'failure'
@@ -50,4 +59,4 @@ jobs:
         if: success()
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: python tools/close_resolved_issue.py
+        run: python tools/close_resolved_issue.py

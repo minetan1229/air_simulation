@@ -59,6 +59,7 @@ from .config_schema import (
     from_dict,
     safe_div,
 )
+from .payload_contract import empty_payload, normalize_payload
 
 __all__ = [
     "MAX_AUTO_WORKERS",
@@ -517,28 +518,36 @@ def evaluate_flight_surrogate(
     else:
         status = "landed"
 
-    return {
-        "distance_m": float(distance),
-        "flight_time_s": float(flight_time),
-        "max_altitude_m": float(max_altitude),
-        "max_ld_ratio": float(ld_ratio),
-        "max_stress_index": float(stress_index),
-        "max_stress_pa": float(max(stress_pa, 0.0)),
-        "launch_speed_mps": float(launch_speed),
-        "stall_margin": float(stall_margin),
-        "stability": float(stability),
-        "landing_distance_m": float(landing_distance),
-        "status": status,
-        # Extra diagnostics (never used as objective inputs) -----------------
-        "surrogate": True,
-        **_approximate_model_metadata("analytical_glide_surrogate"),
-        "airspeed_mps": float(airspeed),
-        "stall_speed_mps": float(v_stall),
-        "load_factor": float(load_factor),
-        "dynamic_pressure_pa": float(dynamic_pressure),
-        "trim_alpha_deg": float(alpha_trim_deg),
-        "steps": int(max(1, math.ceil(flight_time / dt))),
-    }
+    return normalize_payload(
+        {
+            "distance_m": float(distance),
+            "flight_time_s": float(flight_time),
+            "max_altitude_m": float(max_altitude),
+            "max_ld_ratio": float(ld_ratio),
+            "max_stress_index": float(stress_index),
+            "max_stress_pa": float(max(stress_pa, 0.0)),
+            "launch_speed_mps": float(launch_speed),
+            "stall_margin": float(stall_margin),
+            "stability": float(stability),
+            "landing_distance_m": float(landing_distance),
+            "status": status,
+            "duration_s": float(duration_s),
+            # Extra diagnostics (never used as objective inputs) -----------------
+            "surrogate": True,
+            "airspeed_mps": float(airspeed),
+            "stall_speed_mps": float(v_stall),
+            "load_factor": float(load_factor),
+            "dynamic_pressure_pa": float(dynamic_pressure),
+            "trim_alpha_deg": float(alpha_trim_deg),
+            "steps": int(max(1, math.ceil(flight_time / dt))),
+        },
+        model="analytical_glide_surrogate",
+        approximate=True,
+        physics_verification_eligible=False,
+        limitations=(
+            "Analytical glide surrogate: no 6-DoF attitude integration and no trajectory sampling.",
+        ),
+    )
 
 
 def as_environment_payload(environment: Any) -> Dict[str, Any]:
@@ -592,31 +601,29 @@ def evaluate_case(case: Dict[str, Any]) -> Dict[str, Any]:
         try:
             result = module.evaluate_flight(aircraft, environment, launch, duration, dt_max)
             if isinstance(result, dict):
-                return {**result, "model": "rigid_body_6dof", "approximate": False,
-                        "physics_verification_eligible": not bool(result.get("status") in ("failed", "diverged")),
-                        "limitations": ["Aerodynamic and material coefficients require experimental calibration."]}
+                return normalize_payload(
+                    result,
+                    model="rigid_body_6dof",
+                    approximate=False,
+                    physics_verification_eligible=not bool(result.get("status") in ("failed", "diverged")),
+                    limitations=("Aerodynamic and material coefficients require experimental calibration.",),
+                )
         except Exception as exc:
-            return {
-                "status": "failed",
-                "error": str(exc),
-                "distance_m": 0.0,
-                "flight_time_s": 0.0,
-                "max_altitude_m": 0.0,
-                "landing_distance_m": 0.0,
-                "max_stress_index": 10.0,
-                "max_stress_pa": 1.0e9,
-                "max_ld_ratio": 0.0,
-                "stall_margin": -10.0,
-                "max_stall_margin": -10.0,
-                "launch_speed_mps": 100.0,
-                "min_launch_speed": 100.0,
-                "stability": -10.0,
-                "max_stability": -10.0,
-                "crashed": True,
-                "diverged": True,
-                "landed": False,
-                "backend": "error",
-            }
+            return empty_payload(
+                status="failed",
+                model="rigid_body_6dof",
+                approximate=False,
+                physics_verification_eligible=False,
+                limitations=(f"Evaluation failed: {exc}",),
+                max_stress_index=10.0,
+                max_stress_pa=1.0e9,
+                stall_margin=-10.0,
+                stability=-10.0,
+                crashed=True,
+                diverged=True,
+                landed=False,
+                backend="error",
+            )
     return evaluate_flight_surrogate(aircraft, environment, launch, duration, dt_max)
 
 
@@ -1364,8 +1371,18 @@ def gpu_batch_evaluate_cases(
             t_val = min(float(item.get("flight_time_s", 0.0)), dur)
             status_raw = str(item.get("status", "flying"))
             crashed = bool(item.get("crashed", status_raw == "crashed"))
+            diverged = bool(item.get("diverged", status_raw == "diverged"))
             landed = bool(item.get("landed", status_raw == "landed" or (t_val < dur - 0.01 and not crashed)))
-            status_str = "crashed" if crashed else ("landed" if landed else "timeout")
+            if crashed:
+                status_str = "crashed"
+            elif diverged:
+                # A diverged integration is not a timeout; relabelling it hides a
+                # numerical failure behind a benign looking status.
+                status_str = "diverged"
+            elif landed:
+                status_str = "landed"
+            else:
+                status_str = "timeout"
             d_val = float(item.get("landing_distance_m", item.get("distance_m", 0.0)))
             r_entry = dict(item)
             r_entry.update({
@@ -1415,6 +1432,7 @@ def gpu_batch_evaluate_cases(
     wind_dirs = []
     gsms = []
     stiffnesses = []
+    stall_alphas = []
 
     for c in cases:
         ac = c.get("aircraft")
@@ -1454,6 +1472,7 @@ def gpu_batch_evaluate_cases(
         cl_asyms.append(0.0035 * aileron + 0.25 * asym_cl)
 
         durations.append(clamp(dur, 1.0, 60.0))
+        stall_alphas.append(max(abs(math.radians(float(ac.stall_alpha_deg))), 1.0e-3))
         rhos.append(float(isa_air_density(float(env.altitude_m))))
         gravities.append(abs(float(env.gravity)))
 
@@ -1510,6 +1529,7 @@ def gpu_batch_evaluate_cases(
     max_steps = int(max_duration / dt)
 
     duration_arr = xp.array(durations, dtype=xp.float64)
+    stall_alpha_arr = xp.array(stall_alphas, dtype=xp.float64)
     active = xp.ones(N, dtype=bool)
     landing_time = xp.copy(duration_arr)
     landing_pos = xp.zeros((N, 3), dtype=xp.float64)
@@ -1598,10 +1618,11 @@ def gpu_batch_evaluate_cases(
         max_g_arr = xp.where(active, xp.maximum(max_g_arr, cur_g), max_g_arr)
         max_q_arr = xp.where(active, xp.maximum(max_q_arr, q), max_q_arr)
 
-        # Stall margin: (alpha_max - alpha) / alpha_max
-        cur_margin = (0.244 - alpha) / 0.244
+        # Stall margin: (alpha_max - alpha) / alpha_max.  The stall angle is a
+        # per-case aircraft property, not a global constant.
+        cur_margin = (stall_alpha_arr - alpha) / stall_alpha_arr
         min_stall_margin_arr = xp.where(active, xp.minimum(min_stall_margin_arr, cur_margin), min_stall_margin_arr)
-        stalled_arr = xp.where(active, stalled_arr | (alpha >= 0.244), stalled_arr)
+        stalled_arr = xp.where(active, stalled_arr | (alpha >= stall_alpha_arr), stalled_arr)
 
         # Ground intersection
         just_landed = active & (new_pos[:, 2] >= 0.0)
@@ -1679,12 +1700,35 @@ def gpu_batch_evaluate_cases(
             "stalled": bool(stalled_np[idx]),
             "landed": bool(t_val < durations[idx]),
             "crashed": crashed,
+            "diverged": False,
             "status": status_str,
             "backend": backend,
             "device_name": device_name,
-            **_approximate_model_metadata("translational_ensemble"),
+            "duration_s": round(float(durations[idx]), 4),
+            "points": 0,
+            # The translational ensemble does not integrate the 6-DoF
+            # rigid-body attitude dynamics, so the trim-residual stability
+            # index and the glide-phase diagnostics are not measurable here.
+            "stability": None,
+            "glide_entry_time_s": None,
+            "stable_glide_duration_s": 0.0,
+            "apex_recovery_status": "not_observed",
         }
-        results.append(res)
+        results.append(
+            normalize_payload(
+                res,
+                model="translational_ensemble",
+                approximate=True,
+                physics_verification_eligible=False,
+                limitations=(
+                    "No coupled 6-DoF rigid-body attitude integration or full inertia tensor.",
+                    "Does not implement the repaired linked trailing-edge and relative-flow dynamics.",
+                    "Cannot verify launch-to-apex recovery or stable glide performance.",
+                    "Reduced stress and atmosphere models are not P1 physics verification results.",
+                    "``stability`` and the glide-phase diagnostics are not measurable on this backend.",
+                ),
+            )
+        )
 
     if progress_cb is not None:
         try:

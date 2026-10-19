@@ -42,7 +42,9 @@ if ($HasUv) {
     & $VenvPython -m pip install -e ".[dev]"
 }
 
-# Verify CUDA / GPU availability
+# Verify CUDA / GPU availability.  The GPU backend is optional: a CPU-only
+# machine must still complete the setup, because every domain has a NumPy
+# fallback (SPECIFICATION 2.1).
 Write-Host "[SETUP] Verifying CUDA GPU acceleration..." -ForegroundColor Cyan
 & $VenvPython -c "
 import cupy as cp
@@ -51,5 +53,9 @@ props = cp.cuda.runtime.getDeviceProperties(dev)
 name = props['name'].decode('utf-8') if isinstance(props['name'], bytes) else str(props['name'])
 print(f'[SUCCESS] GPU Device {dev} detected: {name}')
 "
+if ($LASTEXITCODE -ne 0) {
+    Write-Host "[SETUP] WARNING: no usable CUDA device detected." -ForegroundColor Yellow
+    Write-Host "[SETUP]          The simulator will run on the CPU fallback backend." -ForegroundColor Yellow
+}
 
 Write-Host "[SETUP] Environment setup complete." -ForegroundColor Green

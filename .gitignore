@@ -5,9 +5,6 @@ __pycache__/
 venv/
 .env
 
-node_modules/
-package-lock.json
-
 # Kilo Code local MCP runtime artefacts
 .kilo/mcp/memory.jsonl
 .kilo/mcp/playwright/
@@ -27,13 +24,26 @@ logs/
 *.log
 *.csv
 !tests/**/*.csv
+!search/raw_data/**/*.csv
 smoke_*.json
+pytest_failure_summary.txt
+
+# Regenerable repair / verification artefacts
+artifacts/
+
+# Research corpus caches
+search/.cache/
 
 .pytest_cache/
+.mypy_cache/
+.ruff_cache/
 .coverage
 htmlcov/
 .vscode/
 .idea/
+dist/
+build/
+*.egg
 
 # Prevent accidental shadowing of standard modules
 antigravity.py
