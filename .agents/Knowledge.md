@@ -3,7 +3,7 @@
 <!-- 記述形式: ## [Category] Topic / 検証済みの確定事実のみを簡潔に記述 -->
 
 ## [Architecture & Specs]
-- ルート `AGENTS.md` と `.agents/AGENTS.md` は共通のプロジェクト非依存 Agent Core Protocol OS であり、詳細技術仕様は `docs/SPECIFICATION.md` に集約・遅延読み込み化されている。
+- ルート `AGENTS.md` はプロジェクト非依存の Agent Core Protocol OS（常駐規約）であり、`.agents/AGENTS.md` は `.agents/` ワークスペースの読み込み順序と正本マップを定義する。詳細技術仕様は `docs/SPECIFICATION.md` に集約・遅延読み込み化されている。
 - MCP実行基盤は `.kilo/mcp/`（`launch.mjs` が各サーバーのエントリポイントをcwd非依存に解決）、登録先は `.kilo/kilo.jsonc` の `mcp` キー。外部APIキーは不要。`fetch` のみ専用venv (`.kilo/mcp/venv`) で Python 実行。
 - GPUバッチシミュレーション (`gpu_batch_evaluate_cases`) は非GPU環境（CI/Linux）で `parallel_evaluate` を安全なフォールバックとし、同一のスキーマ（`landed`, `crashed`, `status`, `horizontal_range_m`）を返却する。
 - 飛行シミュレータの世界座標系はNED (+z下向き) であり、風場 (+z上向き) との鉛直風変換（$v_{rel} = v_{aircraft} - wind_{ned}$）を整合させている。
