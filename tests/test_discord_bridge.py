@@ -15,6 +15,8 @@ try:
         AVAILABLE_MODELS,
         DiscordBridgeClient,
         ModelSelectView,
+        PromptReplyModal,
+        SessionReplyView,
     )
     HAS_DISCORD = True
 except ImportError:
@@ -112,6 +114,20 @@ class TestDiscordBridge(unittest.TestCase):
         self.assertIn("gpu", metrics)
         self.assertIsInstance(metrics["cpu"], str)
         self.assertIsInstance(metrics["memory"], str)
+
+    def test_session_reply_view_structure(self):
+        view = SessionReplyView(conv_id="test_session_12345678")
+        self.assertEqual(len(view.children), 1)
+        btn = view.children[0]
+        self.assertIsInstance(btn, discord.ui.Button)
+        self.assertEqual(btn.custom_id, "btn_reply_session:test_session_12345678")
+        self.assertIn("返信する", btn.label)
+
+    def test_prompt_reply_modal_structure(self):
+        modal = PromptReplyModal(target_conv_id="test_session_12345678")
+        self.assertIn("test_ses", modal.title)
+        self.assertEqual(modal.prompt_input.max_length, 2000)
+        self.assertTrue(modal.prompt_input.required)
 
     def test_launch_chrome_browser_not_found(self):
         from tools.discord_bridge import launch_chrome_browser

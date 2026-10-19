@@ -282,6 +282,78 @@ class ChatSelectView(discord.ui.View):
         await self.on_select_callback(interaction, selected_conv)
 
 
+class PromptReplyModal(discord.ui.Modal, title="💬 返信・プロンプト送信 (セッション継続)"):
+    """Modal to enter prompt and continue the conversation session."""
+    prompt_input = discord.ui.TextInput(
+        label="プロンプト / 返信内容",
+        style=discord.TextStyle.paragraph,
+        placeholder="続きの指示や質問を入力してください...",
+        required=True,
+        max_length=2000,
+    )
+
+    def __init__(self, target_conv_id: Optional[str] = None):
+        super().__init__()
+        self.target_conv_id = target_conv_id
+        if target_conv_id:
+            self.title = f"💬 返信 ({target_conv_id[:8]} セッション継続)"
+
+    async def on_submit(self, interaction: discord.Interaction):
+        if not client.is_authorized(interaction.user.id, interaction.channel_id):
+            await interaction.response.send_message("❌ Unauthorized: You do not have permission.", ephemeral=True)
+            return
+
+        if self.target_conv_id:
+            client.channel_conversations[interaction.channel_id] = self.target_conv_id
+
+        user_prompt = self.prompt_input.value.strip()
+        await interaction.response.defer()
+        asyncio.create_task(
+            execute_agy_prompt(
+                interaction.channel,
+                user_prompt,
+                interaction.user,
+                interaction=interaction,
+            )
+        )
+
+
+class SessionReplyView(discord.ui.View):
+    """Interactive Button View attached to bot responses allowing instant replies in the same session."""
+    def __init__(self, conv_id: Optional[str] = None):
+        super().__init__(timeout=None)
+        self.conv_id = conv_id
+
+        # Custom ID encodes conv_id if present to survive restarts
+        btn_custom_id = f"btn_reply_session:{conv_id}" if conv_id else "btn_reply_session:default"
+        self.reply_button = discord.ui.Button(
+            label="💬 返信する (このセッションで継続)",
+            style=discord.ButtonStyle.primary,
+            custom_id=btn_custom_id,
+            emoji="💬",
+        )
+        self.reply_button.callback = self.on_reply_clicked
+        self.add_item(self.reply_button)
+
+    async def on_reply_clicked(self, interaction: discord.Interaction):
+        if not client.is_authorized(interaction.user.id, interaction.channel_id):
+            await interaction.response.send_message("❌ Unauthorized: You do not have permission.", ephemeral=True)
+            return
+
+        # Extract target_conv from instance attribute, custom_id, or channel state
+        target_conv = self.conv_id
+        if not target_conv and interaction.data and "custom_id" in interaction.data:
+            c_id = interaction.data["custom_id"]
+            if c_id.startswith("btn_reply_session:") and c_id != "btn_reply_session:default":
+                target_conv = c_id.split("btn_reply_session:", 1)[1]
+
+        if not target_conv:
+            target_conv = client.channel_conversations.get(interaction.channel_id)
+
+        modal = PromptReplyModal(target_conv_id=target_conv)
+        await interaction.response.send_modal(modal)
+
+
 class DiscordBridgeClient(discord.Client):
     def __init__(self):
         intents = discord.Intents.default()
@@ -299,8 +371,10 @@ class DiscordBridgeClient(discord.Client):
         self.channel_tasks: Dict[int, Set[str]] = {}
 
     async def setup_hook(self):
+        # Register persistent SessionReplyView for dynamic custom_ids
+        self.add_view(SessionReplyView(None))
         await self.tree.sync()
-        logger.info("Application slash commands synced.")
+        logger.info("Application slash commands and persistent views synced.")
 
     def is_authorized(self, user_id: int, channel_id: int) -> bool:
         """Check if user and channel are allowed to issue commands."""
@@ -843,19 +917,26 @@ async def execute_agy_prompt(
     if not accumulated_text.strip():
         accumulated_text = "(Task completed. No text response was returned.)"
 
+    current_conv_id = client.channel_conversations.get(channel_id)
+    reply_view = SessionReplyView(conv_id=current_conv_id)
+
     # Discord 2000 character limit handling
     if len(accumulated_text) <= 1900:
-        await channel.send(accumulated_text)
+        await channel.send(accumulated_text, view=reply_view)
     else:
         if len(accumulated_text) < 4000:
             chunks = [accumulated_text[i:i + 1900] for i in range(0, len(accumulated_text), 1900)]
-            for chunk in chunks:
-                await channel.send(chunk)
+            for idx, chunk in enumerate(chunks):
+                # Attach the interactive reply button to the final chunk
+                if idx == len(chunks) - 1:
+                    await channel.send(chunk, view=reply_view)
+                else:
+                    await channel.send(chunk)
         else:
             file_data = io.BytesIO(accumulated_text.encode("utf-8"))
             discord_file = discord.File(file_data, filename="response.md")
             preview = accumulated_text[:1200] + "\n\n... (Full response attached below as response.md)"
-            await channel.send(content=preview, file=discord_file)
+            await channel.send(content=preview, file=discord_file, view=reply_view)
 
 
 # ==========================================
