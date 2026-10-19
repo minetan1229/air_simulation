@@ -518,7 +518,7 @@ def stage_origami(r: Runner) -> None:
     r.check("archetypes" in catalog, "missing 'archetypes' in /api/v1/origami/archetypes response")
     archetypes = catalog["archetypes"]
     r.check(len(archetypes) >= 3, f"expected at least 3 archetypes, got {len(archetypes)}")
-    keys = {a.get("key") for a in archetypes if isinstance(a, dict)}
+    keys = {str(a.get("key")) for a in archetypes if isinstance(a, dict) and a.get("key")}
     for expected_key in ("classic_dart", "nakamura_lock", "sky_king"):
         r.check(expected_key in keys, f"archetype '{expected_key}' not found in catalog")
     for entry in archetypes:
