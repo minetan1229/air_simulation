@@ -1623,11 +1623,17 @@ def _trimesh_load(source: Any, filename: str) -> Optional[Tuple[np.ndarray, np.n
             mesh = trimesh.load(io.BytesIO(bytes(source)), file_type=filename)
         else:
             mesh = trimesh.load(source, file_type=os.path.basename(filename))
-        if mesh is None or not hasattr(mesh, "vertices"):
+        if mesh is None or not hasattr(mesh, "vertices") or not hasattr(mesh, "faces"):
             return None
+        # ``trimesh.load`` is typed as returning the base ``Geometry`` class,
+        # but the concrete loaders return a ``Trimesh`` with ``vertices`` and
+        # ``faces``.  Read them dynamically so the cross-check keeps working
+        # across trimesh releases.
+        vertices = getattr(mesh, "vertices")
+        faces = getattr(mesh, "faces")
         return (
-            np.asarray(mesh.vertices, dtype=np.float64)[:, :3],
-            np.asarray(mesh.faces, dtype=np.int64).reshape(-1, 3),
+            np.asarray(vertices, dtype=np.float64)[:, :3],
+            np.asarray(faces, dtype=np.int64).reshape(-1, 3),
         )
     except Exception:
         return None
