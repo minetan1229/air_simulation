@@ -17,6 +17,7 @@
 - CI環境（GPU非搭載環境）でGPUバッチを呼び出すテストは、暗黙的例外送出ではなく安全なNumPy/CPUフォールバックとスキーマ互換性が必要。
 - GitHub Actions の Windows runner では PowerShell が既定シェルのため、bash スクリプトを実行するワークフローには `defaults: run: shell: bash` の指定が必須。
 - `pip-audit` は**宣言依存セット**（`pip-audit -r requirements.txt`）に対して実行する。環境全体を監査すると pip / setuptools 自身の advisory が混入し、実装とは無関係に失敗する。
+- **Windows では `mypy` コンソールスクリプトと `python` が別の Python を指しうる**。`mypy` が別 Molly の site-packages を見ると、インストール済みパッケージの型が無言で無視され（`ignore_missing_imports = True`）、CI では検出される型エラーがローカルでは出ない。CI 相当の検証は **クリーンな venv** で行うこと（`python -m mypy` を venv の Python で実行）。実際にこれで `trimesh` の `Geometry.faces` 型エラーが CI でのみ検出された。
 - 使い捨て調査スクリプトは `tools/experiments/` へ隔離し、`ruff.toml` の exclude と `pytest.ini` の `norecursedirs` の両方で除外する（一部スクリプトは import 時に 35 秒のシミュレーションを実行する）。
 - `GET /api/v1/records/guinness` は検証マトリクス全体を実行すると 60 秒超かかる。ベンチマーク仕様のみを返し、検証実行は `?verify=1` の明示指定に限定する。
 - 全監査課題（#28〜#37）は対応完了し、新規監査テストおよび既存テストが全パスして master に反映済み。
