@@ -109,6 +109,7 @@ __all__ = [
     "aero_forces",
     "atmosphere_state",
     "active_backends",
+    "compute_ground_stations",
     "effective_alpha_beta",
     "elevon_effects",
     "evaluate_flight",
@@ -1527,7 +1528,7 @@ def resolve_throw(
         else:
             rates = np.zeros(3, dtype=np.float64)
 
-    height = abs(_finite(cfg.launch_height_m))
+    height = _finite(cfg.launch_height_m)
     raw_pos = getattr(cfg, "launch_position_m", (0.0, 0.0, 0.0))
     pos_x = _finite(raw_pos[0]) if len(raw_pos) > 0 else 0.0
     pos_y = _finite(raw_pos[1]) if len(raw_pos) > 1 else 0.0
@@ -1574,6 +1575,52 @@ def resolve_throw(
     )
 
 
+def compute_ground_stations(
+    position_m: Sequence[float],
+    quaternion: Sequence[float],
+    environment: EnvironmentConfig,
+    derived: Optional[Dict[str, float]] = None,
+) -> Dict[str, float]:
+    """Compute ground altitudes for CG and key airframe stations.
+
+    Altitudes are positive above ground, <= 0 in contact/penetration.
+    """
+    ground = _finite(_config_from(EnvironmentConfig, environment).ground_level_m)
+    z_cg = float(position_m[2])
+    altitude_cg = -z_cg - ground
+
+    mac = max((derived.get("mac_m", 0.08) if derived else 0.08), 1.0e-3)
+    span = max((derived.get("wingspan_m", 0.20) if derived else 0.20), 1.0e-3)
+    semispan = span * 0.5
+
+    # Key body stations relative to CG (x fwd, y right, z down)
+    r_nose = np.array([0.5 * mac, 0.0, 0.0], dtype=np.float64)
+    r_ltip = np.array([-0.3 * mac, -semispan, 0.0], dtype=np.float64)
+    r_rtip = np.array([-0.3 * mac, semispan, 0.0], dtype=np.float64)
+    r_tail = np.array([-0.7 * mac, 0.0, 0.015], dtype=np.float64)
+
+    q = quaternion
+    z_nose = z_cg + float(body_to_world(q, r_nose)[2])
+    z_ltip = z_cg + float(body_to_world(q, r_ltip)[2])
+    z_rtip = z_cg + float(body_to_world(q, r_rtip)[2])
+    z_tail = z_cg + float(body_to_world(q, r_tail)[2])
+
+    alt_nose = -z_nose - ground
+    alt_ltip = -z_ltip - ground
+    alt_rtip = -z_rtip - ground
+    alt_tail = -z_tail - ground
+
+    min_alt = min(altitude_cg, alt_nose, alt_ltip, alt_rtip, alt_tail)
+    return {
+        "altitude_cg": altitude_cg,
+        "alt_nose": alt_nose,
+        "alt_ltip": alt_ltip,
+        "alt_rtip": alt_rtip,
+        "alt_tail": alt_tail,
+        "min_alt": min_alt,
+    }
+
+
 def initial_state(
     launch: LaunchConfig,
     environment: EnvironmentConfig,
@@ -1592,16 +1639,34 @@ def initial_state(
     exactly ``launch_height_m``.
     """
     throw = resolve_throw(launch, aircraft, environment)
+    env_cfg = _config_from(EnvironmentConfig, environment)
+    derived = derived_properties(aircraft) if aircraft is not None else None
+    stations = compute_ground_stations(throw.position_m, throw.quaternion, env_cfg, derived)
+    alt_cg = stations["altitude_cg"]
+    min_alt = stations["min_alt"]
+
+    # Underground / extreme ground penetration guardrail:
+    # If launch_height_m < 0.0, or CG is underground (alt_cg < 0.0), or any key
+    # station penetrates past the numerical tolerance (min_alt < -0.05),
+    # immediately latch crashed=True and zero out initial velocities.
+    launch_height = _finite(getattr(launch, "launch_height_m", 0.0))
+    is_underground = launch_height < 0.0 or alt_cg < 0.0 or min_alt < -0.05
+    crashed = bool(is_underground)
+
+    vel = (0.0, 0.0, 0.0) if crashed else tuple(float(v) for v in throw.velocity_mps)
+    omega = (0.0, 0.0, 0.0) if crashed else tuple(float(v) for v in throw.angular_rate_radps)
+    accel = (0.0, 0.0, 0.0) if crashed else (0.0, 0.0, _finite(env_cfg.gravity))
+
     return StateVector(
         time_s=0.0,
         position_m=tuple(float(v) for v in throw.position_m),  # type: ignore[arg-type]
-        velocity_mps=tuple(float(v) for v in throw.velocity_mps),  # type: ignore[arg-type]
+        velocity_mps=vel,  # type: ignore[arg-type]
         quaternion=tuple(float(v) for v in throw.quaternion),  # type: ignore[arg-type]
-        angular_velocity_radps=tuple(float(v) for v in throw.angular_rate_radps),  # type: ignore[arg-type]
-        acceleration_mps2=(0.0, 0.0, _finite(_config_from(EnvironmentConfig, environment).gravity)),
+        angular_velocity_radps=omega,  # type: ignore[arg-type]
+        acceleration_mps2=accel,
         angular_accel_radps2=(0.0, 0.0, 0.0),
         landed=False,
-        crashed=False,
+        crashed=crashed,
     )
 
 
@@ -1689,6 +1754,8 @@ class FlightSimulator:
         self._diagnostics_cache: Optional[Dict[str, Any]] = None
         self._stiffness_cache: Optional[Tuple[float, float]] = None
         self._refresh_derived()
+        if bool(self.settings.collision_enabled) and not self._state.crashed:
+            self._state = self._apply_ground_contact(self._state)
         self._record_sample()
 
     # -- configuration ----------------------------------------------------
@@ -1809,6 +1876,8 @@ class FlightSimulator:
         self._diagnostics_cache = None
         self._stiffness_cache = None
         self._refresh_derived()
+        if bool(self.settings.collision_enabled) and not self._state.crashed:
+            self._state = self._apply_ground_contact(self._state)
         self._record_sample()
         return self.state
 
@@ -1838,6 +1907,20 @@ class FlightSimulator:
         self._bounce_count = 0
         self._diagnostics_cache = None
         self._stiffness_cache = None
+        if bool(self.settings.collision_enabled):
+            stations = compute_ground_stations(
+                self._state.position_m,
+                self._state.quaternion,
+                self.environment,
+                getattr(self, "_derived", None),
+            )
+            if stations["altitude_cg"] < 0.0 or stations["min_alt"] < -0.05:
+                self._state.crashed = True
+                self._state.landed = False
+                self._state.velocity_mps = (0.0, 0.0, 0.0)
+                self._state.angular_velocity_radps = (0.0, 0.0, 0.0)
+            elif not (self._state.landed or self._state.crashed):
+                self._state = self._apply_ground_contact(self._state)
         self._next_record_time = float(self._state.time_s)
         while self._history and self._history[-1].time_s >= self._state.time_s - 1.0e-9:
             self._history.pop()
@@ -2194,36 +2277,36 @@ class FlightSimulator:
         """
         if not bool(self.settings.collision_enabled) or state.landed or state.crashed:
             return state
-        ground = _finite(self.environment.ground_level_m)
-        altitude_cg = -float(state.position_m[2]) - ground
+        stations = compute_ground_stations(
+            state.position_m,
+            state.quaternion,
+            self.environment,
+            self._derived,
+        )
+        altitude_cg = stations["altitude_cg"]
+        alt_nose = stations["alt_nose"]
+        alt_ltip = stations["alt_ltip"]
+        alt_rtip = stations["alt_rtip"]
+        alt_tail = stations["alt_tail"]
+        min_alt = stations["min_alt"]
 
-        # Multi-point contact tracking
-        mac = max(self._derived.get("mac_m", 0.08), 1.0e-3)
-        span = max(self._derived.get("wingspan_m", 0.20), 1.0e-3)
-        semispan = span * 0.5
-
-        # Key body stations relative to CG (x fwd, y right, z down)
-        r_nose = np.array([0.5 * mac, 0.0, 0.0], dtype=np.float64)
-        r_ltip = np.array([-0.3 * mac, -semispan, 0.0], dtype=np.float64)
-        r_rtip = np.array([-0.3 * mac, semispan, 0.0], dtype=np.float64)
-        r_tail = np.array([-0.7 * mac, 0.0, 0.015], dtype=np.float64)
-
-        q = state.quaternion
-        z_cg = float(state.position_m[2])
-        z_nose = z_cg + float(body_to_world(q, r_nose)[2])
-        z_ltip = z_cg + float(body_to_world(q, r_ltip)[2])
-        z_rtip = z_cg + float(body_to_world(q, r_rtip)[2])
-        z_tail = z_cg + float(body_to_world(q, r_tail)[2])
-
-        # Altitudes (positive above ground, <= 0 means in contact)
-        alt_nose = -z_nose - ground
-        alt_ltip = -z_ltip - ground
-        alt_rtip = -z_rtip - ground
-        alt_tail = -z_tail - ground
-
-        min_alt = min(altitude_cg, alt_nose, alt_ltip, alt_rtip, alt_tail)
         if min_alt > 0.0:
             return state
+
+        # Deep penetration guardrail: if aircraft is buried underground beyond tolerance,
+        # immediately declare crashed and arrest all velocities without teleporting upwards.
+        if altitude_cg < 0.0 or min_alt < -0.05:
+            return StateVector(
+                time_s=state.time_s,
+                position_m=state.position_m,
+                velocity_mps=(0.0, 0.0, 0.0),
+                quaternion=state.quaternion,
+                angular_velocity_radps=(0.0, 0.0, 0.0),
+                acceleration_mps2=(0.0, 0.0, 0.0),
+                angular_accel_radps2=(0.0, 0.0, 0.0),
+                landed=False,
+                crashed=True,
+            )
 
         x, y = float(state.position_m[0]), float(state.position_m[1])
         vx, vy, vz = (float(value) for value in state.velocity_mps)
