@@ -18,3 +18,4 @@
 ## Critical Traps (昇格された重要知見・地雷リスト)
 - CI環境（Linux/Windows）のRunnerシェル差分: GitHub Actionsのrunステップでは `defaults: run: shell: bash` の明示が必須。
 - 座標系変換: 風場は+z上向き、世界NEDは+z下向き。受け渡し境界での符号変換（$w_{\text{NED}} = -w_{\text{wind}}$）を必ず維持せよ。
+- 3D空間境界と接地: 水平100km制限(`HARD_HORIZONTAL_LIMIT_M`)、地中生成即時クラッシュ(`min_alt < -0.05`)、高速降下CCD補間を常時適用せよ。
