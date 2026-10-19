@@ -55,7 +55,8 @@
   - **ケース別 duration_s の個別反映**: バッチシミュレーション内においてケースごとに異なる打ち切り時間上限 `duration_s` を正確に保持・判定し、タイムアウトと着地時刻を個別算出（Issue #28 解決済み）。
 - **安全な CPU / NumPy フォールバック**:
   - GPU 非搭載環境や CUDA 初期化不可環境では、NumPy および `concurrent.futures` / `multiprocessing` による CPU 並列計算へ自動移行。
-  - CPU 経路と GPU 経路で出力 JSON スキーマ（`landed`, `crashed`, `status`, `horizontal_range_m` 等）および物理計算結果が完全一致することを保証（Issue #35 整合性検証済み）。
+  - **返却スキーマの完全一致**: 6DoF 参照経路・CPU バッチ・CuPy バッチ・解析サロゲートのすべてが同一のキー集合（`physics/payload_contract.py` の `PAYLOAD_KEYS`、33 キー）を返す。`tests/test_payload_contract.py` で検証合格（Issue #35）。
+  - **物理計算結果の非一致（重要）**: CuPy バッチ経路は 3DoF 平行移動アンサンブル（固定 `dt = 0.01 s`）であり、6DoF 参照経路（適応 RK4）とは**物理的に同一ではない**。CuPy 経路は `approximate = true` / `physics_verification_eligible = false` / `limitations` を必ず伴い、`max_stability` のような参照専用客観指標は CuPy 経路では選べない（同指標を選ぶ場合は optimiser が開始前に明示的に拒否する）。
 
 ### 2.2 フロントエンド GPU レンダリング
 - Three.js Custom Vertex & Fragment Shaders による翼面動的応力ヒートマップ描画。
@@ -67,6 +68,8 @@
 ## 3. REST API 完全仕様 (Comprehensive REST API Specification)
 
 全エンドポイントは Blueprint 別に分割管理され、不正入力には HTTP 400 と詳細メッセージ、内部例外には HTTP 500 と追跡用 `error_id` を返却し、スタックトレースを秘匿する（Issue #34）。
+
+本仕様書に列挙したパスは**必ず**そのパスでルーティングされる（`tests/test_api_contract.py` が固定化）。旧クライアントとの互換のため一部のパス（例: `/api/v1/meta/schemas`, `/api/v1/investigate/run`, `/api/v1/records/presets/<key>`, `/api/v1/guinness/verification`, `/api/v1/errors`）は**エイリアス**として併存し、双方で同一応答を返す。
 
 ### 3.1 Meta API (`api/routes/meta.py`)
 - `GET /api/v1/meta/health`: サーバー状態、GPU 利用可否、バックエンド情報
@@ -140,20 +143,20 @@
 
 ## 6. 監査課題解決履歴 (Audit Resolutions)
 
-プロジェクト品質監査で提起された重要課題（Issue #28〜#37）は、以下のとおりすべて解決・テスト済みである:
+プロジェクト品質監査で提起された重要課題（Issue #28〜#37）は、以下のとおり解決しテストで検証済みである:
 
 | Issue | 分類 | 課題内容 | 解決内容・検証テスト |
 |---|---|---|---|
 | **#28** | Bug | GPUバッチでケース別の `duration_s` が `landing_time` に反映されない疑い | ケースごとの上限時間を配列保持し個別タイムアウト・着地判定を実装。`tests/test_issue28_gpu_duration.py` で検証合格。 |
 | **#29** | Physics | 6DoF 飛行力学モデルと体積メッシュ CFD の区別明確化 | README および本仕様書に AeroSandbox 準拠 6DoF + パネル法モデルであることを明記。 |
-| **#30** | Physics | 風場（+z上向き）と世界NED（+z下向き）の座標変換整合性 | 鉛直風符号変換経路を厳密化。`tests/test_security_and_frames_audit.py` で上昇風・下降風・無風を検証合格。 |
-| **#31** | Numerics | 固定時間刻み RK4 積分の系統的収束性の検証 | $\Delta t = 0.04 \to 0.005\,\text{s}$ の刻み細分化テストを実装し単調収束を実証。`tests/test_advanced_physics_audit.py` で検証合格。 |
-| **#32** | Aerodynamics | 空力係数の理論・文献出典の独立検証と公開 | `/api/v1/meta/physics-references` エンドポイントを新設し学術引用レジストリを公開。単体テスト検証合格。 |
-| **#33** | Wind Model | 3D風場の有界発散・空間相関・時間連続性の検証 | 乱流場の発散有界性、空間距離に応じた相関減衰、および時間連続性を数値評価。`tests/test_advanced_physics_audit.py` で検証合格。 |
-| **#34** | Security | 予期しない例外時の内部トレースバック漏洩防止 | `api_error()` を改修し、本番環境で `error_id` のみを返却。`tests/test_security_and_frames_audit.py` で検証合格。 |
-| **#35** | GPU | CPU版とGPU版の計算結果・返却スキーマの完全一致 | `gpu_batch_evaluate_cases` の CPU フォールバックを統一スキーマ化。CPU/GPU 一致テストで検証合格。 |
-| **#36** | Mesh | パネル法のメッシュ解像度依存性と揚力整合性の検証 | パネル細分化に伴う揚力・抗力・モーメントの漸近収束を実証。`tests/test_advanced_physics_audit.py` で検証合格。 |
-| **#37** | Security | 3Dメッシュインポート時の SSRF 防止機構 | プライベートIP・ループバック・クラウドメタデータ・非標準ポートを遮断。`tests/test_security_and_frames_audit.py` で検証合格。 |
+| **#30** | Physics | 風場（+z上向き）と世界NED（+z下向き）の座標変換整合性 | 受け渡し境界で `w_NED = -w_wind` 変換と**絶対高度**（AGL ではない）の受け渡しを実装。`tests/test_security_and_frames_audit.py` が本番の `flight_sim.wind_vector` を直接駆動して符号反転と高さ変換を検証（ Winds の AGL 誤変換が修正済み）。 |
+| **#31** | Numerics | 固定時間刻み RK4 積分の系統的収束性の検証 | $\Delta t = 0.04 \to 0.005\,\text{s}$ の刻み細分化テストを実装し、**距離と高度の両方**が単調収束すること、観測収束次数が RK4 と整合すること（≥2.5）を実証。`tests/test_advanced_physics_audit.py` で検証合格。 |
+| **#32** | Aerodynamics | 空力係数の理論・文献出典の独立検証と公開 | `/api/v1/meta/physics-references` エンドポイントを新設し学術引用レジストリを公開。`tests/test_physics_references.py` で公開項目・必須引用・一意性を検証合格。 |
+| **#33** | Wind Model | 3D風場の有界発散・空間相関・時間連続性の検証 | 乱流場の発散有界性（測点・差分幅を走査し、差分幅を拡げるほど残差が 0 へ収束することを実証）、**乱流成分**の空間相関減衰と時間連続性を数値評価。`tests/test_advanced_physics_audit.py` で検証合格。 |
+| **#34** | Security | 予期しない例外時の内部トレースバック漏洩防止 | `api_error()` を改修し、本番環境で `error_id` のみを返却。加えて `/api/v1/errors` および `/api/v1/errors/stats` がスタックトレース・クライアント IP・サーバーログ絶対パスを再公開しないことを保証。`tests/test_security_and_frames_audit.py` / `tests/test_error_logging.py` で検証合格。 |
+| **#35** | GPU | CPU版とGPU版の返却スキーマ完全一致 | `physics/payload_contract.py` を単一正本とし、全バックエンドが同一の 33 キー集合を返すよう統一（CuPy 経路が欠落していた `stability` を解決）。`tests/test_payload_contract.py` でスキーマ一致と optimiser の参照専用客観指標拒否を検証合格。**物理計算結果の一致は保証対象外**（§2.1 参照）。 |
+| **#36** | Mesh | パネル法のメッシュ解像度依存性と揚力整合性の検証 | キャンバー付き翼で**揚力・抗力・モーメント**すべての漸近収束を実証し、粗い分割が未収束であることも併せて確認（平板では分割依存性が無いため検証が自明化していた）。`tests/test_advanced_physics_audit.py` で検証合格。 |
+| **#37** | Security | 3Dメッシュインポート時の SSRF 防止機構 | プライベートIP・ループバック・リンクローカル・クラウドメタデータ（ホスト名明示 deny）・予約/マルチキャスト/未指定アドレス・非標準ポートを遮断。**リダイレクトは各ホップを再検証**したうえで最大 5 ホップまで追従。`tests/test_security_and_frames_audit.py` で検証合格。 |
 
 ---
 
@@ -163,21 +166,24 @@
 .
 ├── AGENTS.md                  # エージェント基本プロトコル OS (プロジェクト非依存)
 ├── .agents/                   # 自律実行ループ OS プロトコル
-│   ├── AGENTS.md              # コンテキスト最小化・テキサスの狙撃兵排除・5フェーズ自律ループ
+│   ├── AGENTS.md              # コンテキスト最小化・テキサスの狙撃兵排除・自律ループの参照マップ
 │   ├── Project.md             # プロジェクトゴール & 現在のループ状態 (Loop State)
 │   ├── Knowledge-important.md # 常駐制約・重要知見リスト (50行以内)
 │   ├── Knowledge.md           # オンデマンド参照ナレッジベース
 │   └── skills/                # 定型作業手順 (loop-handover.md など)
-├── docs/                      # 設計書・学術調査・詳細仕様
-│   ├── SPECIFICATION.md       # 本仕様書 (詳細物理モデル・API・セキュリティ)
-│   └── research/              # 航空力学・紙飛行機論文調査レポート (20件)
+├── docs/                      # 設計書・詳細仕様
+│   └── SPECIFICATION.md       # 本仕様書 (詳細物理モデル・API・セキュリティ)
+├── search/                    # 航空力学・紙飛行機の調査コーパス
+│   ├── topics/                # 分野別調査レポート (20件)
+│   └── raw_data/              # 一次資料・参考文献
 ├── api/                       # 分割された REST API パッケージ
 │   ├── __init__.py
 │   ├── core.py                # Session 状態・共通ヘルパー・エラー応答 (トレースバック秘匿)
 │   └── routes/                # 責務別 Blueprint ルーティング (meta, physics, simulation, mesh, jobs, records)
 ├── physics/                   # 物理・シミュレーションコアエンジン
-├── tests/                     # 総合テストスイート (700+ テスト)
+├── tests/                     # 総合テストスイート (799 テスト / 800 収集項目)
 ├── tools/                     # 開発・運用・検証用ツール群 (notify_discord, discord_bridge 等)
+│   └── experiments/           # 使い捨て調査スクリプト (ruff 検査・pytest 収集の対象外)
 ├── templates/index.html       # Google Clean UI コンソール
 └── static/                    # Three.js 3D ビューア & UI スクリプト群
 ```
@@ -190,15 +196,17 @@
 
 | # | エージェント名 | 担当ファイル | 必須実装内容・責務 |
 |---|---------------|------------|------------------|
-| 0 | `Manager` | `physics/config_schema.py`, `physics/geometry_utils.py`, `app.py`, `smoke_test.py`, `AGENTS.md` | 契約定義・API Blueprint統合・UI・E2Eテスト・Git制御 |
+| 0 | `Manager` | `physics/config_schema.py`, `physics/geometry_utils.py`, `physics/payload_contract.py`, `app.py`, `smoke_test.py`, `AGENTS.md` | 契約定義・返却スキーマ正本・API Blueprint統合・UI・E2Eテスト・Git制御 |
 | 1 | `aero-physics` | `physics/aero_domain.py`, `tests/test_aero.py` | 翼型・失速・Drag Polar・Trim・受動空力弾性・低速渦リフト |
 | 2 | `atmosphere-fluid` | `physics/atmosphere_domain.py`, `physics/wind_domain.py`, `tests/test_atmo_wind.py` | ISA・Sutherland・全可変環境大気・3D Simplex風場・座標変換整合性 |
 | 3 | `structural-stress` | `physics/stress_domain.py`, `tests/test_stress.py` | 動圧・Gフォース・翼根曲げモーメント・頂点応力ヒートマップ |
 | 4 | `mesh-3d` | `physics/mesh_domain.py`, `tests/test_mesh.py` | glTF/GLB/OBJ/STL 解析・慣性テンソル・パネル法・SSRF防止 |
 | 5 | `flight-dynamics` | `physics/flight_sim.py`, `tests/test_flight.py` | 6DoF RK4・四元数・適応/固定時間刻み・リングバッファ |
-| 6 | `parallel-optimizer` | `physics/parallel_engine.py`, `physics/optimizer_domain.py`, `tests/test_optimizer.py` | GPU一括評価・ケース別duration_s・CPU完全一致フォールバック・NSGA-II |
+| 6 | `parallel-optimizer` | `physics/parallel_engine.py`, `physics/optimizer_domain.py`, `tests/test_optimizer.py`, `tests/test_payload_contract.py` | GPU一括評価・ケース別duration_s・CPU/GPU 同一スキーマ・NSGA-II |
 | 7 | `job-eta-storage` | `physics/job_manager.py`, `physics/storage_domain.py`, `tests/test_jobs.py` | JobManager・EMA ETA・進捗管理・JSON/CSV エクスポート |
 | 8 | `ui-gpu-viz` | `templates/index.html`, `static/css/console.css`, `static/js/*.js` | Google Clean UI・Three.js シェーダー・時間軸・テレメトリ |
+| 9 | `records-records` | `physics/records_domain.py`, `physics/error_domain.py`, `tests/test_records.py`, `tests/test_error_logging.py` | 記録プリセット・ギネス記録・検証マトリクス・構造化エラーログ（秘匿） |
+| 10 | `investigation` | `physics/auto_investigate.py`, `physics/investigate/`, `physics/gravity_modifier.py`, `tests/test_investigate.py`, `tests/test_gravity_modifier.py` | 自動診断・日本語自動助言・重力Huh修正・投資判断パイプライン |
 
 ---
 

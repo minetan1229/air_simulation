@@ -39,8 +39,7 @@
 
 ## 4.1 Repository Layout & Tool Hygiene (構成・工具衛生)
 - 運用ツールの正本は `tools/` のみ。`tools/experiments/` は使い捨て調査スクリプト専用の隔離領域で、pytest収集・ruff検査の対象外とする。
-- `tools/experiments/` 配下のスクリプトは**インポート時に数十秒の飞行シミュレーションを実行しうる**ため、テストモジュールから import してはならない。
-- 使い捨てスクリプトを追加するときは `tools/experiments/` へ置き、`.agents/Knowledge.md` か `.agents/skills/` から参照する（孤立スクリプトを残さない）。
+- `tools/experiments/` 配下のスクリプトは**インポート時に数十秒の飛行シミュレーションを実行しうる**ため、テストモジュールから import してはならない。追加するときは同ディレクトリへ置き、`.agents/Knowledge.md` か `.agents/skills/` から参照する（孤立スクリプトを残さない）。
 - 実行時生成物（`runs/`, `jobs/`, `logs/`, `artifacts/`, `models/`, `search/.cache/`）は `.gitignore` で除外し、git に追跡させない。
 - 静的解析の設定は `ruff.toml` / `mypy.ini` / `pytest.ini` に一本化する。`pyproject.toml` に置いた設定は静かに無視され二重正本になるため置かない。
 - `.agents/` のファイル名は `.agents/Project.md`（大文字 `P`）・`.agents/AGENTS.md`（大文字 `AGENTS`）で固定し、大文字小文字を混ぜない。

@@ -11,13 +11,36 @@
 - **バックエンド識別子**: 成功レスポンスには、実行した計算バックエンド（`"backend": "cupy"` / `"torch"` / `"numpy"`）が常に含まれます。
 - **エラーレスポンス**:
   クライアント側の不正リクエスト時は `HTTP 400`、内部エラー時は `HTTP 500` と詳細メッセージが返却されます。
+  内部エラーの応答には追跡用の `error_id` を含みますが、**スタックトレースやサーバーパスは含みません**（SPECIFICATION §4.1）。
   ```json
   {
     "error": "Error description message",
     "status": 400,
-    "timestamp": "2026-10-17T13:20:00Z"
+    "timestamp": "2026-10-17T13:20:00Z",
+    "error_id": "err_20261017T132000Z_ab12cd"
   }
   ```
+
+### 1.1 認証
+
+`API_KEY` 環境変数が設定されている場合、保護対象エンドポイント（下記一覧のうち
+`/api/v1/meta/`・`/api/v1/system/gpu`・`/healthz`・`/static/` を除くもの）は
+`Authorization: Bearer <token>` または `X-API-Key: <token>` を要求します。
+キーは**クエリ文字列では受け付けません**（アクセスログ・履歴・Referer への漏洩防止）。
+比較は定数時間で行われます。
+
+### 1.2 エイリアス
+
+SPECIFICATION §3 に列挙されたパスが正です。旧クライアントとの互換のため、
+以下のパスは同一の応答を返すエイリアスとして併存します。
+
+| 正（SPEC） | エイリアス |
+|:---|:---|
+| `GET /api/v1/meta/schema` | `GET /api/v1/meta/schemas` |
+| `POST /api/v1/jobs/investigate` | `POST /api/v1/investigate/run` |
+| `GET /api/v1/records/preset/<name>` | `GET /api/v1/records/presets/<key>` |
+| `GET /api/v1/records/guinness` | `GET /api/v1/guinness/verification` |
+| `GET /api/v1/records/errors` | `GET /api/v1/errors` |
 
 ---
 
@@ -45,6 +68,31 @@
 | `GET`  | `/api/v1/jobs` | 登録済み全ジョブ一覧とステータス照会 |
 | `POST` | `/api/v1/data/export` | 飛行ログデータの CSV / JSON 形式エクスポート |
 | `POST` | `/api/v1/data/import` | プリセット設定のインポート |
+| `GET`  | `/api/v1/meta/health` | サーバー状態・GPU 利用可否・バックエンド情報の照会 |
+| `GET`  | `/api/v1/meta/schema` | 全設定パラメータの dataclass / JSON スキーマ定義の照会 |
+| `GET`  | `/api/v1/meta/physics-references` | 学術引用・理論的出典レジストリの照会 |
+| `GET`  | `/api/v1/meta/test-fault` | エラーハンドリング検証用フォールト注入（開発・テスト環境のみ） |
+| `GET`  | `/api/v1/system/gpu` | GPU / CuPy の利用可否照会 |
+| `POST` | `/api/v1/system/force-gpu-render` | フロントエンドの GPU 描画強制切替（要認証） |
+| `POST` | `/api/v1/jobs/investigate` | 飛行診断・自動助言生成ジョブの非同期開始 |
+| `GET`  | `/api/v1/jobs/investigate/status/<job_id>` | 自動診断ジョブの進捗照会 |
+| `POST` | `/api/v1/jobs/investigate/cancel/<job_id>` | 自動診断ジョブのキャンセル |
+| `GET`  | `/api/v1/jobs/investigate/result/<job_id>` | 自動診断結果の取得 |
+| `GET`  | `/api/v1/records/presets` | 登録済み機体プリセット一覧の照会 |
+| `GET`  | `/api/v1/records/preset/<name>` | 特定プリセットの詳細パラメータ取得 |
+| `GET`  | `/api/v1/records/guinness` | ギネス世界記録（29.2秒滞空）のベンチマーク仕様照会 |
+| `POST` | `/api/v1/guinness/simulate` | ギネス記録プリセット単体の飛行シミュレーション |
+| `GET`  | `/api/v1/records/throw_techniques` | 投法ルール・競技ルールの照会 |
+| `POST` | `/api/v1/records/apply` | プリセットを現在のセッションへ適用 |
+| `GET`  | `/api/v1/records/errors` | サーバー内部エラー履歴の取得（スタックトレースは非公開） |
+| `POST` | `/api/v1/errors/report` | クライアント側エラーの報告（監査ログへ記録） |
+| `GET`  | `/api/v1/errors/stats` | エラー集計の照会（サーバーログのパスは非公開） |
+| `POST` | `/api/v1/errors/clear` | メモリ上のエラーリングバッファ消去 |
+| `POST` | `/api/v1/simulation/launch` | 発進（投擲）条件の適用と状態更新 |
+| `GET`  | `/api/v1/simulation/history` | 飛行履歴サンプルの取得 |
+| `GET`  | `/api/v1/simulation/history/<index>` | 指定サンプルの取得 |
+| `POST` | `/api/v1/simulation/ensemble` | 多数ケース一括シミュレーション |
+| `POST` | `/api/v1/mesh/overrides/<model_id>` | モデル物理量のオーバーライド設定 |
 
 ---
 
