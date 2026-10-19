@@ -1,0 +1,235 @@
+{
+  "topic_num": "02",
+  "query": "paper airplane flight mechanics launch trajectory",
+  "candidates": [
+    {
+      "primary_paper": {
+        "title": "A Metaverse: Taxonomy, Components, Applications, and Open Challenges",
+        "year": 2022,
+        "doi": "https://doi.org/10.1109/access.2021.3140175",
+        "cited_by_count": 1825,
+        "authors": [
+          "Sangmin Park",
+          "Young‐Gab Kim"
+        ],
+        "abstract": "Unlike previous studies on the Metaverse based on Second Life, the current Metaverse is based on the social value of Generation Z that online and offline selves are not different. With the technological development of deep learning-based high-precision recognition models and natural generation models, Metaverse is being strengthened with various factors, from mobile-based always-on access to connectivity with reality using virtual currency. The integration of enhanced social activities and neural-net methods requires a new definition of Metaverse suitable for the present, different from the previous Metaverse. This paper divides the concepts and essential techniques necessary for realizing the Metaverse into three components (i.e., hardware, software, and contents) and three approaches (i.e., user interaction, implementation, and application) rather than marketing or hardware approach to conduct a comprehensive analysis. Furthermore, we describe essential methods based on three compone"
+      },
+      "second_tier_references": [
+        {
+          "title": "The Oxford Handbook of Virtuality",
+          "year": 2013,
+          "doi": "https://doi.org/10.1093/oxfordhb/9780199826162.001.0001",
+          "authors": [],
+          "abstract": "Abstract An anthology of thinking on virtuality from the perspective of a variety of philosophical and applied fields of study, the Oxford Handbook of Virtuality comprises 44 chapters covering topics such as presence, immersion, emotion, ethics, virtual utopias and dystopias, image, sound, literature, AI, law, economics, education, medical and military applications, religion, and sex. A variety of views on virtuality is offered from each discipline represented, and the relationships between virt"
+        },
+        {
+          "title": "Staging the New Retail Drama: at a Metaverse near you!",
+          "year": 2010,
+          "doi": "https://doi.org/10.4101/jvwr.v2i5.808",
+          "authors": [
+            "Savvas Papagiannidis",
+            "Michael Bourlakis"
+          ],
+          "abstract": "Consumers have traditionally looked for products that could fulfil their needs and retailers responded to demand by initially adopting product-oriented, and then more recently customer-oriented, strategies. This shift was heavily underpinned by technology which enabled retailers to implement more intelligent approaches that evolved around consumers, based on their profiles. The next step in this transformation is now towards a ‘unique’ experience creation, with retailers providing a retail theat"
+        }
+      ]
+    },
+    {
+      "primary_paper": {
+        "title": "The Solar Wind as a Turbulence Laboratory",
+        "year": 2013,
+        "doi": "https://doi.org/10.12942/lrsp-2013-2",
+        "cited_by_count": 1298,
+        "authors": [
+          "R. Bruno",
+          "Vincenzo Ilario Carbone"
+        ],
+        "abstract": "In this review we will focus on a topic of fundamental importance for both astrophysics and plasma physics, namely the occurrence of large-amplitude low-frequency fluctuations of the fields that describe the plasma state.This subject will be treated within the context of the expanding solar wind and the most meaningful advances in this research field will be reported emphasizing the results obtained in the past decade or so.As a matter of fact, Helios inner heliosphere and Ulysses' high latitude observations, recent multi-spacecrafts measurements in the solar wind (Cluster four satellites) and new numerical approaches to the problem, based on the dynamics of complex systems, brought new important insights which helped to better understand how turbulent fluctuations behave in the solar wind.In particular, numerical simulations within the realm of magnetohydrodynamic (MHD) turbulence theory unraveled what kind of physical mechanisms are at the basis of turbulence generation and energy tr"
+      },
+      "second_tier_references": [
+        {
+          "title": "INTRODUCTION TO KINETIC PHYSICS, WAVES AND TURBULENCE IN THE SOLAR WIND",
+          "year": 1992,
+          "doi": "https://doi.org/10.1016/b978-0-08-042049-3.50104-6",
+          "authors": [
+            "E. Marsch"
+          ],
+          "abstract": ""
+        },
+        {
+          "title": "Characteristic Time Scales and Energy Transfer in MHD Turbulence",
+          "year": 2001,
+          "doi": "https://doi.org/10.1007/978-94-015-9638-1_11",
+          "authors": [
+            "Yuji Hattori",
+            "A. Ishizawa"
+          ],
+          "abstract": ""
+        },
+        {
+          "title": "Parametric Instability of a Broad-band Alfvén Wave: Nonlinear Evolution and Saturation",
+          "year": 2001,
+          "doi": "https://doi.org/10.1017/s007418090021989x",
+          "authors": [
+            "Francesco Malara",
+            "Leonardo Primavera",
+            "P. Veltri"
+          ],
+          "abstract": "The nonlinear evolution of parametric instability of a non-monocrhomatic Alfvén wave is studied using numerical simulations. After a linear stage the instability saturates. For β ~ 1 the initial mode remains dominant, except at large scales, where an inverse cascade of backscattered Alfvénic modes is present. A comparison with solar wind data gives a qualitative agreement, indicating that parametric instability could play an important role in the evolution of solar wind turbulence."
+        }
+      ]
+    },
+    {
+      "primary_paper": {
+        "title": "Optimization approaches for civil applications of unmanned aerial vehicles (UAVs) or aerial drones: A survey",
+        "year": 2018,
+        "doi": "https://doi.org/10.1002/net.21818",
+        "cited_by_count": 978,
+        "authors": [
+          "Alena Otto",
+          "Niels A.H. Agatz",
+          "James F. Campbell",
+          "Bruce Golden",
+          "Erwin Pesch"
+        ],
+        "abstract": "Unmanned aerial vehicles (UAVs), or aerial drones, are an emerging technology with significant market potential. UAVs may lead to substantial cost savings in, for instance, monitoring of difficult‐to‐access infrastructure, spraying fields and performing surveillance in precision agriculture, as well as in deliveries of packages. In some applications, like disaster management, transport of medical supplies, or environmental monitoring, aerial drones may even help save lives. In this article, we provide a literature survey on optimization approaches to civil applications of UAVs. Our goal is to provide a fast point of entry into the topic for interested researchers and operations planning specialists. We describe the most promising aerial drone applications and outline characteristics of aerial drones relevant to operations planning. In this review of more than 200 articles, we provide insights into widespread and emerging modeling approaches. We conclude by suggesting promising directio"
+      },
+      "second_tier_references": [
+        {
+          "title": "Optimal Search for a Lost Target in a Bayesian World",
+          "year": 2006,
+          "doi": "https://doi.org/10.1007/10991459_21",
+          "authors": [
+            "Frédéric Bourgault",
+            "Tomonari Furukawa",
+            "Hugh F Durrant-Whyte"
+          ],
+          "abstract": ""
+        },
+        {
+          "title": "Classification of UAVs",
+          "year": 2014,
+          "doi": "https://doi.org/10.1007/978-90-481-9707-1_94",
+          "authors": [
+            "Konstantinos Dalamagkidis"
+          ],
+          "abstract": ""
+        },
+        {
+          "title": "UAV Routing and Coordination in Stochastic, Dynamic Environments",
+          "year": 2014,
+          "doi": "https://doi.org/10.1007/978-90-481-9707-1_28",
+          "authors": [
+            "John J. Enright",
+            "Emilio Frazzoli",
+            "Marco Pavone"
+          ],
+          "abstract": ""
+        },
+        {
+          "title": "Cooperative Mission and Path Planning for a Team of UAVs",
+          "year": 2014,
+          "doi": "https://doi.org/10.1007/978-90-481-9707-1_14",
+          "authors": [
+            "Hyondong Oh",
+            "Hyo‐Sang Shin",
+            "Seungkeun Kim"
+          ],
+          "abstract": ""
+        },
+        {
+          "title": "Multi-team Consensus Bundle Algorithm",
+          "year": 2014,
+          "doi": "https://doi.org/10.1007/978-90-481-9707-1_17",
+          "authors": [
+            "Matthew E. Argyle",
+            "Randal W. Beard",
+            "David W. Casbeer"
+          ],
+          "abstract": ""
+        }
+      ]
+    },
+    {
+      "primary_paper": {
+        "title": "Verification of a six-degree of freedom simulation model for the REMUS autonomous underwater vehicle",
+        "year": 2001,
+        "doi": "https://doi.org/10.1575/1912/3040",
+        "cited_by_count": 681,
+        "authors": [
+          "Timothy Prestero"
+        ],
+        "abstract": "Improving the performance of modular, low-cost autonomous underwater vehicles (AUVs) in such applications as long-range oceanographic survey, autonomous docking, and shallow-water mine countermeasures requires improving the vehicles' maneuvering precision and battery life. These goals can be achieved through the improvement of the vehicle control system. A vehicle dynamics model based on a combination of theory and empirical data would provide an efficient platform for vehicle control system development, and an alternative to the typical trial-and-error method of vehicle control system field tuning. As there exists no standard procedure for vehicle modeling in industry, the simulation of each vehicle system represents a new challenge. Developed by von Alt and associates at the Woods Hole Oceanographic Institute, the REMUS AUV is a small, low-cost platform serving in a range of oceanographic applications. This thesis describes the development and verification of a six degree of freedom,"
+      },
+      "second_tier_references": [
+        {
+          "title": "Introduction of fluid mechanics",
+          "year": 1993,
+          "doi": "https://doi.org/10.1007/978-94-011-1550-6_2",
+          "authors": [
+            "Malcolm J. McPherson"
+          ],
+          "abstract": ""
+        },
+        {
+          "title": "Methods for Predicting Submersible Hydrodynamic Characteristics",
+          "year": 1978,
+          "doi": "https://doi.org/10.21236/ada058612",
+          "authors": [
+            "John E. Fidler",
+            "Charles A. Smith"
+          ],
+          "abstract": "Methods were constructed for predicting the hydrodynamic characteristics of submersible vehicles in pitching attitudes with undeflected tailfins. An extensive set of models was built, representing the geometries of a wide range of submersibles. These models were then tested in a wind tunnel to obtain systematic data over relevant ranges of attitudes and flow conditions. The data were then used, coupled with theoretical results, to develop the prediction methods. The methods deal with the charact"
+        }
+      ]
+    },
+    {
+      "primary_paper": {
+        "title": "Urban Air Mobility: History, Ecosystem, Market Potential, and Challenges",
+        "year": 2021,
+        "doi": "https://doi.org/10.1109/tits.2021.3082767",
+        "cited_by_count": 573,
+        "authors": [
+          "Adam P. Cohen",
+          "Susan Shaheen",
+          "Emily Farrar"
+        ],
+        "abstract": "Since the early 20thcentury, inventors have conceptualized “plane cars” and other urban aerial transportation. Emerging innovations in electrification, automation, and other technologies are enabling new opportunities for on-demand air mobility, business models, and aircraft design. Urban air mobility (UAM) envisions a safe, sustainable, affordable, and accessible air transportation system for passenger mobility, goods delivery, and emergency services within or traversing metropolitan areas. This research employed a multi-method approach comprised of 106 interviews with thought leaders and two stakeholder workshops to construct the history, ecosystem, state of the industry, and potential evolution of UAM. The history, current developments, and anticipated milestones of UAM can be classified into six phases: 1) “flying car” concepts from the early 1910s to 1950s, 2) early UAM operations using scheduled helicopter services from the 1950s to 1980s, 3) re-emergence of on-demand services st"
+      },
+      "second_tier_references": [
+        {
+          "title": "A Study in Reducing the Cost of Vertical Flight with Electric Propulsion",
+          "year": 2017,
+          "doi": "https://doi.org/10.2514/6.2017-3442",
+          "authors": [
+            "Michael Duffy",
+            "Sean R. Wakayama",
+            "Ryan Hupp"
+          ],
+          "abstract": ""
+        },
+        {
+          "title": "Economics of Advanced Thin-Haul Concepts and Operations",
+          "year": 2016,
+          "doi": "https://doi.org/10.2514/6.2016-3767",
+          "authors": [
+            "Anusha Harish",
+            "Christian Perron",
+            "Daniel Bavaro"
+          ],
+          "abstract": "The thin-haul commuter concept refers to an envisioned class of four to nine passenger aircraft operating very short \\nflights and providing scheduled and on-demand air services from smaller airports. Its objective is to enhance regional mobility reach by combining the flexibility of automobile travel with the shorter commute times associated with air travel. To achieve economic viability, the thin-haul commuter concept must provide appreciable economic advantages when compared to current commut"
+        },
+        {
+          "title": "Integrating UAS into the NAS – Regulatory, Technical, and Research Challenges",
+          "year": 2017,
+          "doi": "https://doi.org/10.1017/9781316335765.007",
+          "authors": [
+            "Natasha A. Neogi",
+            "Arunabha Sen"
+          ],
+          "abstract": "This chapter provides the background and context for integrating unmanned aircraft systems (UAS) into a civilian airspace system. This chapter will cover regulatory concerns, social issues, and technical challenges with respect to integration efforts for UAS. As the airspace system continuously evolves, there is a migration towards a state of higher risk. When there is a set of standard designs for aircraft, procedures, and infrastructure, it becomes possible to use well-established frameworks f"
+        }
+      ]
+    }
+  ]
+}

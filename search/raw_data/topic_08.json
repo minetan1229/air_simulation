@@ -1,0 +1,282 @@
+{
+  "topic_num": "08",
+  "query": "aeroelastic wing deformation dynamic pressure structural stress",
+  "candidates": [
+    {
+      "primary_paper": {
+        "title": "Digital Twin: Values, Challenges and Enablers From a Modeling Perspective",
+        "year": 2020,
+        "doi": "https://doi.org/10.1109/access.2020.2970143",
+        "cited_by_count": 1923,
+        "authors": [
+          "Adil Rasheed",
+          "Omer San",
+          "Trond Kvamsdal"
+        ],
+        "abstract": "Digital twin can be defined as a virtual representation of a physical asset enabled through data and simulators for real-time prediction, optimization, monitoring, controlling, and improved decision making. Recent advances in computational pipelines, multiphysics solvers, artificial intelligence, big data cybernetics, data processing and management tools bring the promise of digital twins and their impact on society closer to reality. Digital twinning is now an important and emerging trend in many applications. Also referred to as a computational megamodel, device shadow, mirrored system, avatar or a synchronized virtual prototype, there can be no doubt that a digital twin plays a transformative role not only in how we design and operate cyber-physical intelligent systems, but also in how we advance the modularity of multi-disciplinary systems to tackle fundamental barriers not addressed by the current, evolutionary modeling practices. In this work, we review the recent status of metho"
+      },
+      "second_tier_references": [
+        {
+          "title": "Uncertainty Quantification: Theory, Implementation, and Applications",
+          "year": 2013,
+          "doi": "https://doi.org/10.1137/1.9781611973228",
+          "authors": [
+            "Ralph C. Smith"
+          ],
+          "abstract": "The field of uncertainty quantification is evolving rapidly because of increasing emphasis on models that require quantified uncertainties for large-scale applications, novel algorithm development, and new computational architectures that facilitate implementation of these algorithms. Uncertainty Quantification: Theory, Implementation, and Applications provides readers with the basic concepts, theory, and algorithms necessary to quantify input and response uncertainties for simulation models ari"
+        },
+        {
+          "title": "Model Reduction for Combustion Chemistry",
+          "year": 2010,
+          "doi": "https://doi.org/10.1007/978-94-007-0412-1_9",
+          "authors": [
+            "Dimitris A. Goussis",
+            "Ulrich Maas"
+          ],
+          "abstract": ""
+        },
+        {
+          "title": "Model reduction by CPOD and Kriging",
+          "year": 2009,
+          "doi": "https://doi.org/10.1007/s00158-009-0434-9",
+          "authors": [
+            "Manyu Xiao",
+            "Piotr Breitkopf",
+            "Rajan Filomeno Coelho"
+          ],
+          "abstract": ""
+        },
+        {
+          "title": "Galerkin Method for Nonlinear Dynamics",
+          "year": 2011,
+          "doi": "https://doi.org/10.1007/978-3-7091-0758-4_3",
+          "authors": [
+            "Bernd R. Noack",
+            "Michael Schlegel",
+            "Marek Morzyński"
+          ],
+          "abstract": ""
+        },
+        {
+          "title": "The Computational Man: A Predictive Dynamic Model of Human Physiology",
+          "year": 2009,
+          "doi": "https://doi.org/10.21236/ada507162",
+          "authors": [
+            "Elaine S. Oran",
+            "Carolyn R. Kaplan",
+            "Kailas Kailasanath"
+          ],
+          "abstract": "Abstract : We are developing the Computational Man, which is a dynamic and very fast-running numerical model that computes the time-varying transport of gases, liquids and solids in a human body. C-Man will consist of a coupled network of high-fidelity, reduced-order submodels, each representing a major physiological system, such as the circulatory, respiratory or excretory system. Each physiological system or submodel will be represented as an arbitrarily complex network of multiphase flows in "
+        }
+      ]
+    },
+    {
+      "primary_paper": {
+        "title": "Encyclopedia of Computational Mechanics",
+        "year": 2005,
+        "doi": "https://doi.org/10.1002/0470091355",
+        "cited_by_count": 1374,
+        "authors": [
+          "Roger Ohayon",
+          "Jean‐Sébastien Schotté"
+        ],
+        "abstract": "International audience"
+      },
+      "second_tier_references": [
+        {
+          "title": "Sound and Structural Vibration",
+          "year": 2007,
+          "doi": "https://doi.org/10.1016/b978-0-12-373633-8.x5000-5",
+          "authors": [
+            "Smith, Preston W.",
+            "Richard H. Lyon",
+            "United States.    National Aeronautics and Space Administration."
+          ],
+          "abstract": ""
+        },
+        {
+          "title": "Dynamic Stability of Bodies Containing Fluid",
+          "year": 1968,
+          "doi": "https://doi.org/10.1007/978-3-642-86452-0",
+          "authors": [
+            "N. N. Moiseyev",
+            "V. V. Rumyantsev"
+          ],
+          "abstract": ""
+        },
+        {
+          "title": "Efficient Finite Element Modelling and Simulation of Gas and Fluid Supported Membrane and Shell Structures",
+          "year": 2005,
+          "doi": "https://doi.org/10.1007/1-4020-3317-6_10",
+          "authors": [
+            "T. Rumpel",
+            "Karl Schweizerhof",
+            "Marc Haßler"
+          ],
+          "abstract": ""
+        }
+      ]
+    },
+    {
+      "primary_paper": {
+        "title": "Reengineering Aircraft Structural Life Prediction Using a Digital Twin",
+        "year": 2011,
+        "doi": "https://doi.org/10.1155/2011/154798",
+        "cited_by_count": 1114,
+        "authors": [
+          "Eric J. Tuegel",
+          "Anthony R. Ingraffea",
+          "Thomas G. Eason",
+          "S. Michael Spottswood"
+        ],
+        "abstract": "Reengineering of the aircraft structural life prediction process to fully exploit advances in very high performance digital computing is proposed. The proposed process utilizes an ultrahigh fidelity model of individual aircraft by tail number, a Digital Twin, to integrate computation of structural deflections and temperatures in response to flight conditions, with resulting local damage and material state evolution. A conceptual model of how the Digital Twin can be used for predicting the life of aircraft structure and assuring its structural integrity is presented. The technical challenges to developing and deploying a Digital Twin are discussed in detail."
+      },
+      "second_tier_references": [
+        {
+          "title": "Studies on Fluid-Thermal-Structural Coupling for Aerothermoelasticity in Hypersonic Flow",
+          "year": 2010,
+          "doi": "https://doi.org/10.2514/1.j050193",
+          "authors": [
+            "Adam J. Culler",
+            "Jack J. McNamara"
+          ],
+          "abstract": "The field of aerothermoelasticity plays an important role in the analysis and optimization of airbreathing hypersonic vehicles, impacting the design of the aerodynamic, structural, control, and propulsion systems at both the component and multi-disciplinary levels. This study aims to expand the fundamental understanding of hypersonic aerothermoelasticity by performing systematic investigations into fluid-thermal-structural coupling, and also to develop frameworks, using innovative modeling strat"
+        },
+        {
+          "title": "An extended stochastic finite element method for solving stochastic partial differential equations on random domains",
+          "year": 2008,
+          "doi": "https://doi.org/10.1016/j.cma.2008.06.010",
+          "authors": [
+            "Anthony Nouy",
+            "Alexandre Clément",
+            "Franck Schoefs"
+          ],
+          "abstract": ""
+        },
+        {
+          "title": "DDSim: A hierarchical, probabilistic, multiscale damage and durability simulation system – Part I: Methodology and Level I",
+          "year": 2009,
+          "doi": "https://doi.org/10.1016/j.engfracmech.2009.02.018",
+          "authors": [
+            "John M Emery",
+            "Jacob D. Hochhalter",
+            "Paul A. Wawrzynek"
+          ],
+          "abstract": ""
+        },
+        {
+          "title": "Review of CFD Capabilities",
+          "year": 2005,
+          "doi": "https://doi.org/10.21236/ada537587",
+          "authors": [
+            "Dan Garretson",
+            "Hans U. Mair",
+            "Christopher B. Martin"
+          ],
+          "abstract": "Abstract : The study evaluated the current state of computational fluid dynamics (CFD) and the likely opportunities to further improve CFD over the next 20 years. This briefing summarizes those findings and includes overall findings. Description of approaches to CFD, including historic development of CFD capabilities and likely future development paths. Discussion of metrics for characterizing CFD, including impact on the design process, the state of maturity of CFD, and the cost of CFD relative"
+        }
+      ]
+    },
+    {
+      "primary_paper": {
+        "title": "Multidisciplinary aerospace design optimization: survey of recent developments",
+        "year": 1997,
+        "doi": "https://doi.org/10.1007/bf01197554",
+        "cited_by_count": 1055,
+        "authors": [
+          "Jaroslaw Sobieszczanski‐Sobieski",
+          "R. T. Haftka"
+        ],
+        "abstract": ""
+      },
+      "second_tier_references": [
+        {
+          "title": "A Numerical Comparison of Barrier and Modified Barrier Methods For Large-Scale Bound-Constrained Optimization",
+          "year": 1994,
+          "doi": "https://doi.org/10.1007/978-1-4613-3632-7_16",
+          "authors": [
+            "Stephen G. Nash",
+            "Roman A. Polyak",
+            "Ariela Sofer"
+          ],
+          "abstract": ""
+        },
+        {
+          "title": "A General Framework for Decomposition Analysis in Optimal Design",
+          "year": 1993,
+          "doi": "https://doi.org/10.1115/detc1993-0404",
+          "authors": [
+            "Terrance C. Wagner",
+            "Panos Y. Papalambros"
+          ],
+          "abstract": "Abstract Numerous methods exist in the literature for decomposing mathematical programming (MP) problems. The question for the designer wishing to utilize any of these methods is, what (if any) structure exists in a particular problem, and what (if any) decomposition method(s) may be appropriate for the problem at hand. The paper develops a formal methodology, termed Decomposition Analysis, to answer this question. Decomposition of a mathematical programming problem requires identification of li"
+        },
+        {
+          "title": "Size-Reduction Techniques for the Determination of Efficient Aeroservoelastic Models",
+          "year": 1992,
+          "doi": "https://doi.org/10.1016/b978-0-12-012754-2.50011-x",
+          "authors": [
+            "Mordechay Karpel"
+          ],
+          "abstract": ""
+        }
+      ]
+    },
+    {
+      "primary_paper": {
+        "title": "A review of energy harvesting using piezoelectric materials: state-of-the-art a decade later (2008–2018)",
+        "year": 2019,
+        "doi": "https://doi.org/10.1088/1361-665x/ab36e4",
+        "cited_by_count": 870,
+        "authors": [
+          "Mohsen Safaei",
+          "Henry Angelo Sodano",
+          "Steven R. Anton"
+        ],
+        "abstract": "Abstract Energy harvesting technologies have been explored by researchers for more than two decades as an alternative to conventional power sources (e.g. batteries) for small-sized and low-power electronic devices. The limited life-time and necessity for periodic recharging or replacement of batteries has been a consistent issue in portable, remote, and implantable devices. Ambient energy can usually be found in the form of solar energy, thermal energy, and vibration energy. Amongst these energy sources, vibration energy presents a persistent presence in nature and manmade structures. Various materials and transduction mechanisms have the ability to convert vibratory energy to useful electrical energy, such as piezoelectric, electromagnetic, and electrostatic generators. Piezoelectric transducers, with their inherent electromechanical coupling and high power density compared to electromagnetic and electrostatic transducers, have been widely explored to generate power from vibration ene"
+      },
+      "second_tier_references": [
+        {
+          "title": "Lead-Free Piezoelectrics",
+          "year": 2011,
+          "doi": "https://doi.org/10.1007/978-1-4419-9598-8",
+          "authors": [
+            "Shashank Priya",
+            "Sahn Nahm"
+          ],
+          "abstract": ""
+        },
+        {
+          "title": "An introduction to electric circuits",
+          "year": 2003,
+          "doi": "https://doi.org/10.4324/9780080474311-38",
+          "authors": [
+            "John Bird"
+          ],
+          "abstract": "Section 3 Electrical Applications"
+        },
+        {
+          "title": "A mathematical model for piezoelectric ring energy harvesting technology from vehicle tires",
+          "year": 2015,
+          "doi": "https://doi.org/10.1016/j.ijengsci.2015.05.004",
+          "authors": [
+            "Xiangdong Xie",
+            "Quan Wang"
+          ],
+          "abstract": ""
+        },
+        {
+          "title": "Contact-less Wind Turbine Utilizing Piezoelectric Bimorphs with Magnetic Actuation",
+          "year": 2011,
+          "doi": "https://doi.org/10.1007/978-1-4419-9834-7_21",
+          "authors": [
+            "Scott Bressers",
+            "Dragan Avirovik",
+            "Mickaël Lallart"
+          ],
+          "abstract": ""
+        }
+      ]
+    }
+  ]
+}

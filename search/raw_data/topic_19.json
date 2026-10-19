@@ -1,0 +1,163 @@
+{
+  "topic_num": "19",
+  "query": "aircraft post-stall pushover angle of attack pitching moment recovery",
+  "candidates": [
+    {
+      "primary_paper": {
+        "title": "Flight-Test Techniques for Quantifying Pitch Rate and Angle-of-Attack Rate Dependencies",
+        "year": 2017,
+        "doi": "https://doi.org/10.2514/1.c034407",
+        "cited_by_count": 25,
+        "authors": [
+          "Jared A. Grauer",
+          "Eugene A. Morelli",
+          "Daniel G. Murri"
+        ],
+        "abstract": "Three different types of maneuvers were designed to separately quantify the pitch rate and angle-of-attack rate contributions to the nondimensional aerodynamic pitching moment coefficient. These maneuvers combined pilot inputs and automatic multisine excitations, and they were demonstrated with the subscale T-2 and Bat-4 airplanes using the NASA Airborne Subscale Transport Aircraft Research flight-test facility. Stability and control derivatives (in particular, and ) were accurately estimated from the flight-test data. These maneuvers can be performed with many types of aircraft, and the results can be used to improve physical insight into the flight dynamics, facilitate more accurate comparisons with wind-tunnel experiments or numerical investigations, and increase simulation prediction fidelity."
+      },
+      "second_tier_references": [
+        {
+          "title": "Multiple input design for real-time parameter estimation in the frequency domain",
+          "year": 2003,
+          "doi": "https://doi.org/10.1016/s1474-6670(17)34833-4",
+          "authors": [
+            "Eugene A. Morelli"
+          ],
+          "abstract": ""
+        },
+        {
+          "title": "Flight Test Maneuvers for Efficient Aerodynamic Modeling",
+          "year": 2012,
+          "doi": "https://doi.org/10.2514/1.c031699",
+          "authors": [
+            "Eugene A. Morelli"
+          ],
+          "abstract": "Novel flight test maneuvers for efficient aerodynamic modeling were developed and demonstrated in flight. Orthogonal optimized multi-sine inputs were applied to aircraft control surfaces to excite aircraft dynamic response in all six degrees of freedom simultaneously while keeping the aircraft close to chosen reference flight conditions. Each maneuver was designed for a specific modeling task that cannot be adequately or efficiently accomplished using conventional flight test maneuvers. All of t"
+        },
+        {
+          "title": "Practical Application of a Subscale Transport Aircraft for Flight Research in Control Upset and Failure Conditions",
+          "year": 2008,
+          "doi": "https://doi.org/10.2514/6.2008-6200",
+          "authors": [
+            "Kevin Cunningham",
+            "John V. Foster",
+            "Austin Murch"
+          ],
+          "abstract": "Over the past decade, the goal of reducing the fatal accident rate of large transport aircraft has resulted in research aimed at the problem of aircraft loss-of-control. Starting in 1999, the NASA Aviation Safety Program initiated research that included vehicle dynamics modeling, system health monitoring, and reconfigurable control systems focused on flight regimes beyond the normal flight envelope. In recent years, there has been an increased emphasis on adaptive control technologies for recove"
+        }
+      ]
+    },
+    {
+      "primary_paper": {
+        "title": "Flight Test Techniques - An Overview",
+        "year": 2023,
+        "doi": "https://doi.org/10.61653/joast.v65i4.2013.871",
+        "cited_by_count": 0,
+        "authors": [
+          "Shikha Gupta"
+        ],
+        "abstract": "Flight test techniques towards performance, handling qualities, stability and control are brought out. Hazardous flight conditions are covered. Instrumentation aspects are highlighted. Data reduction and some flight evaluation cases are addressed. Airframe structural performance under different conditions of flight test are explained. Fault tolerant flight control system testing is brought out. Features related to online development of restructurable and reconfigurable control laws are highlighted."
+      },
+      "second_tier_references": [
+        {
+          "title": "Real-Time Parameter Estimation in the Frequency Domain",
+          "year": 2000,
+          "doi": "https://doi.org/10.2514/2.4642",
+          "authors": [
+            "Eugene A. Morelli"
+          ],
+          "abstract": "A method for real-time estimation of parameters in a linear dynamic state-space model was developed and studied. The application is aircraft dynamic model parameter estimation from measured data in flight. Equation error in the frequency domain was used with a recursive Fourier transform for the real-time data analysis. Linear and nonlinear simulation examples and flight test data from the F-18 High Alpha Research Vehicle were used to demonstrate that the technique produces accurate model parame"
+        },
+        {
+          "title": "Flutter Prediction from Flight Flutter Test Data",
+          "year": 2001,
+          "doi": "https://doi.org/10.2514/2.2770",
+          "authors": [
+            "Grigorios Dimitriadis",
+            "Jonathan E. Cooper"
+          ],
+          "abstract": "peer reviewed"
+        },
+        {
+          "title": "On-Line Learning Nonlinear Direct Neurocontrollers for Restructurable Control Systems",
+          "year": 1995,
+          "doi": "https://doi.org/10.2514/3.56672",
+          "authors": [
+            "Marcello Rosario Napolitano",
+            "Steve Naylor",
+            "Charles Neppach"
+          ],
+          "abstract": "This paper describes an innovative approach to the problem of the on-line determination of a control law in order to achieve a dynamic reconfiguration of an aircraft that has sustained extensive damage to a vital control surface. The approach consists of the use of on-line learning neural network controllers that have the capability of bringing an aircraft, whose dynamics can become unstable after a substantial damage, back to an equilibrium condition. This goal has been achieved through the use"
+        },
+        {
+          "title": "Flight Testing with the Flutterometer",
+          "year": 2003,
+          "doi": "https://doi.org/10.2514/2.3132",
+          "authors": [
+            "Rick Lind"
+          ],
+          "abstract": "The flutterometer is an on-line tool that indicates a measure of distance to flutter during a flight test. The measure of distance is computed as a robust flutter margin by applying //-method analysis. The approach is to update the robust flutter margin at a series of test points by analyzing flight data. This paper documents the results of an envelope expansion for the Aerostructures Test Wing that used the flutterometer. Algorithm and implementation details that are critical to the successful "
+        },
+        {
+          "title": "Flight-Test Techniques Employed to Successfully Verify F/A-18E In-Flight Lift and Drag",
+          "year": 2000,
+          "doi": "https://doi.org/10.2514/2.2598",
+          "authors": [
+            "P. W. Niewald",
+            "Steve Parker"
+          ],
+          "abstract": "F/A-18E e ight results successfully cone rmed pree ight aerodynamic and performance predictions. Because this was achieved very early in the e ight-test program, the need to rely heavily on e ight data to characterize aircraft performance capabilities was signie cantly reduced. The original aircraft performance e ight evaluation plan was reduced by 60 e ights with obvious cost benee ts. This was a direct result of early e ight test planning by a working group composed of representatives carefull"
+        }
+      ]
+    },
+    {
+      "primary_paper": {
+        "title": "Evaluating the Effects of Control Surfaces Failure on the GTM",
+        "year": 2019,
+        "doi": "https://doi.org/10.48550/arxiv.1905.09794",
+        "cited_by_count": 0,
+        "authors": [
+          "Ramin Norouzi",
+          "Amirreza Kosari",
+          "Mohammad Hossein Sabour"
+        ],
+        "abstract": "Despite the advances in aircraft guidance and control systems technology, Loss of Control remains as the main cause of the fatal accidents of large transport aircraft. Loss of Control is defined as excursion beyond the allowable flight envelope and is often a consequence of upset condition if improper maneuver is implemented by the pilot. Hence, extensive research in recent years has focused on improving the current fault tolerant control systems and developing new strategies for loss of control prevention and recovery systems. However, success of such systems requires the perception of the damaged aircraft's dynamic behavior and performance, and understanding of its new flight envelope. This paper provides a comprehensive understanding of lateral control surfaces' failure effect on the NASA Generic Transport Model's maneuvering flight envelope; which is a set of attainable steady state maneuvers herein referred to as trim points. The study utilizes a massive database of the Generic Tr"
+      },
+      "second_tier_references": [
+        {
+          "title": "Airborne Subscale Transport Aircraft Research Testbed - Aircraft Model Development",
+          "year": 2005,
+          "doi": "https://doi.org/10.2514/6.2005-6432",
+          "authors": [
+            "Thomas Jordan",
+            "William Langford",
+            "Jeffrey Hill"
+          ],
+          "abstract": "The Airborne Subscale Transport Aircraft Research (AirSTAR) testbed being developed at NASA Langley Research Center is an experimental flight test capability for research experiments pertaining to dynamics modeling and control beyond the normal flight envelope. An integral part of that testbed is a 5.5% dynamically scaled, generic transport aircraft. This remotely piloted vehicle (RPV) is powered by twin turbine engines and includes a collection of sensors, actuators, navigation, and telemetry s"
+        },
+        {
+          "title": "Evaluation of Aircraft Performance and Maneuverability by Computation of Attainable Equilibrium Sets",
+          "year": 2008,
+          "doi": "https://doi.org/10.2514/1.29336",
+          "authors": [
+            "Mikhail G. Goman",
+            "A.V. Khramtsovsky",
+            "E. N. Kolesnikov"
+          ],
+          "abstract": "An aircraft's performance and maneuvering capabilities in steady flight conditions are usually analyzed considering the steady states of the rigid-body equations of motion. A systematic way of computation of the set of all attainable steady states for a general class of helical trajectories is presented. The proposed reconstruction of attainable equilibrium states and their local stability maps provides a comprehensive and consistent representation of the aircraft flight and maneuvering envelope"
+        },
+        {
+          "title": "On-Line Safe Flight Envelope Determination for Impaired Aircraft",
+          "year": 2015,
+          "doi": "https://doi.org/10.1007/978-3-319-17518-8_16",
+          "authors": [
+            "Thomas Lombaerts",
+            "Stefan Schuet",
+            "Diana M. Acosta"
+          ],
+          "abstract": ""
+        }
+      ]
+    }
+  ]
+}
