@@ -5,7 +5,8 @@
 ## Procedure (最小手順)
 1. 現在のサイクルで確定した事実を `.agents/Knowledge.md`（致命的なものは `Knowledge-important.md`）へ1〜2行で蒸留・追記する。
 2. `.agents/Project.md` の `3. Loop State` を最新の状態（完了したタスク、現在棄却された仮説、次サイクルの `Next Action`）に書き換える。
-3. ユーザーに対し「状態の蒸留が完了しました。新しいセッションを開始し、『.agents/AGENTS.md に従ってループを再開せよ』と指示してください」と出力して停止する。
+3. ユーザーに対し「状態の蒸留が完了しました。新しいセッションを開始し、『AGENTS.md に従ってループを再開せよ』と指示してください」と出力して停止する。
+
 
 ## Verification Criteria (事前合否基準の型)
 - 成功条件: 新規セッションのAIが `AGENTS.md`、`Knowledge-important.md`、`Project.md` の3ファイルを読むだけで、一切の文脈ロスなく次の Phase 1 から再開できる状態になっていること。

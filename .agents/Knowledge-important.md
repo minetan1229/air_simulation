@@ -10,8 +10,10 @@
 - **Zero-Placeholder Policy**: `TODO`、`...`、空関数等の記述省略は完全禁止。実動コードのみ記述する。
 - **Git Branch Protocol**: 必ずブランチ作成 (`feat/`, `fix/`, `docs/` 等) → ローカル検証 → master マージの順序を遵守する。
 - **Discord Notification Protocol**: タスク開始・終了・重要警告時に `tools/notify_discord.py` を実行する。
+- **2-Tier Subagent Protocol**: 簡易・量産・後修正タスクは量産型 (kilocode: NVIDIA Nemotron 3.5 Super VL)、重要設計・統合はTier 1 (Main/Pro) に分離。単一コミッター（親）が統合検証する。
 - **Safe CPU Fallback**: GPU (CuPy) バッチは非GPU環境で安全にNumPy/CPUフォールバックし、返却スキーマをGPU版と完全一致させる。
 - **Security & Privacy**: 内部スタックトレースはクライアントに返さず `error_id` のみ返却。外部メッシュURL取込時はSSRFを遮断する。
+
 
 ## Critical Traps (昇格された重要知見・地雷リスト)
 - CI環境（Linux/Windows）のRunnerシェル差分: GitHub Actionsのrunステップでは `defaults: run: shell: bash` の明示が必須。

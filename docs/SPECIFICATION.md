@@ -181,3 +181,43 @@
 ├── templates/index.html       # Google Clean UI コンソール
 └── static/                    # Three.js 3D ビューア & UI スクリプト群
 ```
+
+---
+
+## 8. エージェント役割分担 (Agent Roles v4)
+
+サブエージェント委譲やモジュール別修正を行う際は、以下の担当境界を遵守する：
+
+| # | エージェント名 | 担当ファイル | 必須実装内容・責務 |
+|---|---------------|------------|------------------|
+| 0 | `Manager` | `physics/config_schema.py`, `physics/geometry_utils.py`, `app.py`, `smoke_test.py`, `AGENTS.md` | 契約定義・API Blueprint統合・UI・E2Eテスト・Git制御 |
+| 1 | `aero-physics` | `physics/aero_domain.py`, `tests/test_aero.py` | 翼型・失速・Drag Polar・Trim・受動空力弾性・低速渦リフト |
+| 2 | `atmosphere-fluid` | `physics/atmosphere_domain.py`, `physics/wind_domain.py`, `tests/test_atmo_wind.py` | ISA・Sutherland・全可変環境大気・3D Simplex風場・座標変換整合性 |
+| 3 | `structural-stress` | `physics/stress_domain.py`, `tests/test_stress.py` | 動圧・Gフォース・翼根曲げモーメント・頂点応力ヒートマップ |
+| 4 | `mesh-3d` | `physics/mesh_domain.py`, `tests/test_mesh.py` | glTF/GLB/OBJ/STL 解析・慣性テンソル・パネル法・SSRF防止 |
+| 5 | `flight-dynamics` | `physics/flight_sim.py`, `tests/test_flight.py` | 6DoF RK4・四元数・適応/固定時間刻み・リングバッファ |
+| 6 | `parallel-optimizer` | `physics/parallel_engine.py`, `physics/optimizer_domain.py`, `tests/test_optimizer.py` | GPU一括評価・ケース別duration_s・CPU完全一致フォールバック・NSGA-II |
+| 7 | `job-eta-storage` | `physics/job_manager.py`, `physics/storage_domain.py`, `tests/test_jobs.py` | JobManager・EMA ETA・進捗管理・JSON/CSV エクスポート |
+| 8 | `ui-gpu-viz` | `templates/index.html`, `static/css/console.css`, `static/js/*.js` | Google Clean UI・Three.js シェーダー・時間軸・テレメトリ |
+
+---
+
+## 9. 検証コマンドと CI/CD ガイド (Verification & CI/CD Protocol)
+
+コード変更・機能追加時は、以下の段階的検証を必ずローカル環境で通過させること：
+
+```powershell
+# 1. 構文検証
+python -m compileall physics api tools app.py smoke_test.py
+
+# 2. 静的解析 & コード品質検査
+ruff check .
+mypy physics api app.py smoke_test.py
+
+# 3. ユニットテストおよび監査テストの全実行
+python -m pytest tests -q
+
+# 4. エンドツーエンド統合テスト (API連鎖・最適化ジョブ・ETA・3Dモデル解析)
+python smoke_test.py
+```
+
