@@ -42,9 +42,7 @@
 | B-1 | 責務 §8 | 物理モデルの重複実装 8 種 / 10 組が不一致 | 物理の一意性 | → `no-finish-physics.md` F-5 |
 | B-2 | 責務 §8 | 受動空力弾性が §8 担当外 | 責務境界 | A 群と同一コミット |
 | B-3 | 責務 §8 | `records_domain` が物理モデルを含む | 検証の二重化 | A 群と同一コミット |
-| B-2 | 責務 §8 | 受動空力弾性が §8 担当外 | 責務境界 | A 群と同一コミット |
-| B-3 | 責務 §8 | `records_domain` が物理モデルを含む | 検証の二重化 | A 群と同一コミット |
-| C-1 | REST §3/§4 | `api_error()` が 4xx/5xx で本文を返す | 内部消息の露出 | 即着手可 |
+| C-1 | REST §3/§4 | `api_error()` が 4xx/5xx で本文を返す | 内部情報の露出 | 即着手可 |
 | C-2 | REST §3 | 一部 POST の入力範囲検証が無い | 500 化・過負荷 | 即着手可 |
 | C-3 | REST §3 | `/wind/field` が座標系タグを返さない | 座標系取り違え | 即着手可 |
 | C-4 | REST §3 | API prefix がリテラル 52 箇所 | 変更漏え | 即着手可 |
@@ -145,47 +143,51 @@
 > **担当移動**: `genetic-project` ブランチの `no-finish-physics.md` **F-2**（= `no-finish-physics-supplement.md` §2 F）が
 > 正本。ここでは仕様との差分だけ記す。
 >
-> - **現状**: `physics/aero_domain.py:358` は Hoerner の完全剥離平板揚力 `2 sin a cos^2 a` による近似。
->   失速後は `physics/aero_domain.py:382` `_post_stall_lift_coefficient` が
->   `POST_STALL_BLEND_START_DEG = 45.0`（`:373`）から `post_stall_slope` による線形外挿＋smoothstep ブレンド。
->   Viterna-Corrigan の `A1/A2/B1/B2` 外挿係数と `CD_max → 1.8〜2.0` の関係式は存在しない。
-> - **仕様**: SPEC §1.1:19「失速後抗力 `CD_max` 1.8〜2.0 へ Viterna-Corrigan で外挿し Hoerner 平板抗力へブレンド」。
->   現状は `CD_max` の数値目標に**到達**するが方式が別物。
-> - **影響**: 失速後挙動・回復飛行・着陸分散の予測精度。
-> - **完了条件**: `no-finish-physics.md` F-2 の手順どおり Viterna-Corrigan の 4 係数を実装し Hoerner 平板抗力へ
->   ブレンド。`CD_max` が 1.8〜2.0 域に到達すること、深失速域の `CL(α)` が連続であることを
->   `tests/test_aero.py` に**数値区間で**固定する（現状は外挿の式そのものを test が固定化していない）。
-> - **依存**: A-2（揚力傾斜式）と同時に行うと差分が混在するため、A-2 → A-1 の順で着手する。
+
+- **現状**: `physics/aero_domain.py:358` は Hoerner の完全剥離平板揚力 `2 sin a cos^2 a` による近似。
+  失速後は `physics/aero_domain.py:382` `_post_stall_lift_coefficient` が
+  `POST_STALL_BLEND_START_DEG = 45.0`（`:373`）から `post_stall_slope` による線形外挿＋smoothstep ブレンド。
+  Viterna-Corrigan の `A1/A2/B1/B2` 外挿係数と `CD_max → 1.8〜2.0` の関係式は存在しない。
+- **仕様**: SPEC §1.1:19「失速後抗力 `CD_max` 1.8〜2.0 へ Viterna-Corrigan で外挿し Hoerner 平板抗力へブレンド」。
+  現状は `CD_max` の数値目標に**到達**するが方式が別物であり、§5:135 が Helmbold/Polhamus/Viterna を
+  「準拠」と明記している以上、方法の不一致は正本違反。
+- **影響**: 失速後挙動・回復飛行・着陸分散の予測精度。紙飛行機の主検証。
+- **完了条件**: Viterna-Corrigan の 4 係数を実装し Hoerner 平板抗力へブレンド。
+  `CD_max` が 1.8〜2.0 域に到達すること、深失速域の `CL(α)` が連続であることを
+  `tests/test_aero.py` に**数値区間で**固定する（現状は外挿の式そのものを test が固定化していない）。
+- **前提**: A-2（揚力傾斜式）と同時に行うと差分が混在するため、A-2 → A-1 の順で着手する。
 
 ### A-2. Helmbold 揚力傾斜式が仕様式と不一致
 
-> **担当移動**: `genetic-project` ブランチの `no-finish-physics.md` **E-1**（GPU/CPU -backend 統合）が
+> **担当移動**: `genetic-project` ブランチの `no-finish-physics.md` **E-1**（GPU/CPU backend 統合）が
 > 揚力傾斜式の正本化を含む。差分のみ記す。
 >
-> - **現状**: `physics/aero_domain.py:213` `helmbold_cl_alpha` は
->   `2πAR / (2 + sqrt(AR² (1 + taper) + 4AR/π))`。
->   仕様式は `2πAR / (2 + sqrt(AR² (1 + tan²(Λ_c/2)) + 4))`。
->   相違は 3 点：(a) 定数項が `4AR/π`（仕様は `4`）、(b) `1 + taper_ratio`（仕様は `1 + tan²(Λ_c/2)`、
->   後退角 Λ_c が input として存在しない）、(c) `AR ≤ 4` の適用条件が無い。
-> - **影響**: 全機体の揚力傾斜。低 AR 機（紙飛行機は AR 1〜3）で誤差が最大。
->   さらに `tests/test_aero.py:213-217` は**実装式を固定化**しているため、仕様準拠へ変えると
->   意図せずテストが PASS する形になる（真の検証が無い）。
-> - **完了条件**: 後退角 `Λ_c` を `AircraftConfig` に追加し、仕様式どおりの実装へ置換。
->   `AR ≤ 4` 条件と `AR > 4` の外挿挙動を分岐として明示。`tests/test_aero.py` を
->   「仕様式の実装」に対する検証へ書き換え、`AR` 走査で実測値を固定する。
+
+- **現状**: `physics/aero_domain.py:213` `helmbold_cl_alpha` は
+  `2πAR / (2 + sqrt(AR² (1 + taper) + 4AR/π))`。
+  仕様式は `2πAR / (2 + sqrt(AR² (1 + tan²(Λ_c/2)) + 4))`。
+  相違は 3 点：(a) 定数項が `4AR/π`（仕様は `4`）、(b) `1 + taper_ratio`（仕様は `1 + tan²(Λ_c/2)`、
+  後退角 Λ_c が input として存在しない）、(c) `AR ≤ 4` の適用条件が無い。
+- **影響**: 全機体の揚力傾斜。低 AR 機（紙飛行機は AR 1〜3）で誤差が最大。
+  さらに `tests/test_aero.py:213-217` は**実装式を固定化**しているため、仕様準拠へ変えると
+  意図せずテストが PASS する形になる（真の検証が無い）。
+- **完了条件**: 後退角 `Λ_c` を `AircraftConfig` に追加し、仕様式どおりの実装へ置換。
+  `AR ≤ 4` 条件と `AR > 4` の外挿挙動を分岐として明示。`tests/test_aero.py` を
+  「仕様式の実装」に対する検証へ書き換え、`AR` 走査で実測値を固定する。
 
 ### A-3. Polhamus 渦揚力係数が既定で不活性
 
 > **担当移動**: `genetic-project` ブランチの `no-finish-physics.md` **E-2**（Polhamus 係数）が正本。
 > 差分のみ記す。
 >
-> - **現状**: `physics/config_schema.py:316` `polhamus_kv: float = 0.0`（既定 0 = 渦揚力 항等的に不活性）。
->   `Kp` は Helmbold 傾斜へ焊接されており、Polhamus 係数として独立していない。
->   `cp_shift_gain`（`:318`）、`aeroelastic_compliance`（`:321`）、`cg_offset_x`（`:313`）も既定 0。
-> - **影響**: SPEC §1.1 の受動空力弾性モーフィング（§5:132 / §8 row-1 = aero-physics 担当）が**既定では動かない**。
-> 仕様上は主要機構だが、標準プリセットではその挙動が観測されない。
-> - **完了条件**: `Kp` / `Kv` を独立係数として実装し、既定値を**物理的に妥当な非ゼロ**へ変更。
-> モーフィングの δ_eff(q) 遷移を `tests/test_aero.py` で数値固定する。
+
+- **現状**: `physics/config_schema.py:316` `polhamus_kv: float = 0.0`（既定 0 = 渦揚力 항等的に不活性）。
+  `Kp` は Helmbold 傾斜へ焊接されており、Polhamus 係数として独立していない。
+  `cp_shift_gain`（`:318`）、`aeroelastic_compliance`（`:321`）、`cg_offset_x`（`:313`）も既定 0。
+- **影響**: SPEC §1.1 の受動空力弾性モーフィング（§5:132 / §8 row-1 = aero-physics 担当）が**既定では動かない**。
+  仕様上は主要機構だが、標準プリセットではその挙動が観測されない。
+- **完了条件**: `Kp` / `Kv` を独立係数として実装し、既定値を**物理的に妥当な非ゼロ**へ変更。
+  モーフィングの δ_eff(q) 遷移を `tests/test_aero.py` で数値固定する。
 
 ### A-4. 低速 pushover 動力学の閾値・機構が仕様相違
 
@@ -215,7 +217,7 @@
 - **仕様**: SPEC §1.2 の境界層記述（power law を含む）。`flight_sim.py:726` `_local_wind` は
   独自実装で `[0, 1]` クランプ하며、`wind_domain` 側は無制限で**同一高度でも値が違う**（B-1 と共通原因）。
 - **影響**: 低空（紙飛行機が飛翔する高度帯）の風速予測。
-- **完了条件**: power law（粗度長依存指数 α）表現を追加し、log law との切替・ブレンド条件equilibriumを明記。
+- **完了条件**: power law（粗度長依存指数 α）表現を追加し、log law との切替・ブレンド条件を明記。
   `tests/test_atmo_wind.py` で `wind_domain` と `flight_sim` の高度プロファイル一致を固定する
   （A-6 は B-1 の解消に前提となるため、B-1 と同一コミットで実装する）。
 
@@ -235,7 +237,7 @@
 
 ## B. 物理モジュール責務境界（SPEC §8）— 未着手
 
-> A 群と同一コミット群で実施する（A 群のモデル統一で重複が解消してから move する順序が安全）。
+> A 群と同一コミット群で実施する（A 群のモデル統一で重複が解消してから移動する順序が安全）。
 
 ### B-1. 同一物理モデルの重複実装（8 重複 / 10 組が数値不一致）
 
@@ -243,26 +245,27 @@
 > `_local_wind` / `_local_stress` の重複）が正本で、4 モジュールの精密な一覧を持つ。
 > 全体像のみ記す。
 >
-> - **現状**（正本 → 重複先）:
->   | モデル | 正本 | 重複実装 | 不一致内容 |
->   |---|---|---|---|
->   | Helmbold 揚力傾斜 | `aero_domain.py:213` | `flight_sim.py:506` | 式が 3 系統 |
->   | Prandtl-Glauert | `aero_domain.py:224` | `flight_sim.py:514` | 圧縮性補正のクランプ値が別 |
->   | ISA / 湿潤大気 | `atmosphere_domain.py:100` | `flight_sim.py:567` | 飽和蒸気圧式が別 |
->   | Sutherland 粘性 | `atmosphere_domain.py:244` | `flight_sim.py` 内部 | — |
->   | ABL 風速プロファイル | `wind_domain.py:605` | `flight_sim.py:726` | クランプの有無 |
->   | ガスト包絡 | `wind_domain.py:565` | `flight_sim.py:726` | 時系列の式が別 |
->   | 失速後 CL | `aero_domain.py:382` | `parallel_engine.py:981` | 曲線形状が別 |
->   | 許容応力 | `stress_domain.py:456` | `flight_sim.py:1063` | 桁が別 |
->   | ISA 密度 | `atmosphere_domain.py` | `parallel_engine.py:325` `isa_air_density` | 3 つ目の大気モデル |
-> - **影響**: 「どちらが正しいか」がコードからは判定できず、CUDA 経路と参照経路が別の物理になる根本原因。
-> **A 群のすべての変更が二重実装へ伝播する**ため、A 群着手前に解消すべき。
-> - **完了条件**: `flight_sim.py` から `helmbold_cl_alpha` / `prandtl_glauert` / `ground_effect_factor` /
->   `_local_atmosphere` / `_local_wind` / `_local_aero` / `_local_stress` を削除し、
->   `aero_domain` / `atmosphere_domain` / `wind_domain` / `stress_domain` の一本化へ置換。
->   依存方向を `flight_sim → *_domain` の一方向に限定する。
->   `parallel_engine.py:325` `isa_air_density` は `atmosphere_domain` 参照へ置換。
->   **先に A-2/A-3/A-6 で正本の式を確定させてから** move する（順序を逆にすると二重実装へ仕様修正を_percentage させる）。
+
+- **現状**（正本 → 重複先）:
+  | モデル | 正本 | 重複実装 | 不一致内容 |
+  |---|---|---|---|
+  | Helmbold 揚力傾斜 | `aero_domain.py:213` | `flight_sim.py:506` | 式が 3 系統 |
+  | Prandtl-Glauert | `aero_domain.py:224` | `flight_sim.py:514` | 圧縮性補正のクランプ値が別 |
+  | ISA / 湿潤大気 | `atmosphere_domain.py:100` | `flight_sim.py:567` | 飽和蒸気圧式が別 |
+  | Sutherland 粘性 | `atmosphere_domain.py:244` | `flight_sim.py` 内部 | — |
+  | ABL 風速プロファイル | `wind_domain.py:605` | `flight_sim.py:726` | クランプの有無 |
+  | ガスト包絡 | `wind_domain.py:565` | `flight_sim.py:726` | 時系列の式が別 |
+  | 失速後 CL | `aero_domain.py:382` | `parallel_engine.py:981` | 曲線形状が別 |
+  | 許容応力 | `stress_domain.py:456` | `flight_sim.py:1063` | 桁が別 |
+  | ISA 密度 | `atmosphere_domain.py` | `parallel_engine.py:325` `isa_air_density` | 3 つ目の大気モデル |
+- **影響**: 「どちらが正しいか」がコードからは判定できず、CUDA 経路と参照経路が別の物理になる根本原因。
+  **A 群のすべての変更が二重実装へ伝播する**ため、A 群着手前に解消すべき。
+- **完了条件**: `flight_sim.py` から `helmbold_cl_alpha` / `prandtl_glauert` / `ground_effect_factor` /
+  `_local_atmosphere` / `_local_wind` / `_local_aero` / `_local_stress` を削除し、
+  `aero_domain` / `atmosphere_domain` / `wind_domain` / `stress_domain` の一本化へ置換。
+  依存方向を `flight_sim → *_domain` の一方向に限定する。
+  `parallel_engine.py:325` `isa_air_density` は `atmosphere_domain` 参照へ置換。
+  **先に A-2/A-3/A-6 で正本の式を確定させてから** 移動する（順序を逆にすると二重実装へ仕様修正を余分に発生させる）。
 
 ### B-2. 受動空力弾性モーフィングが §8 の担当外にある
 
@@ -290,7 +293,7 @@
 - **現状**: `api/core.py:90-95` `api_error()` は常に `{"error": str(message), "status", "timestamp", "error_id"}` を返す。
   SPEC §4.1:118「レスポンスにはユニークな `error_id` のみを返却し、詳細トレースバックはサーバーログにのみ記録する」。
 - **影響**: 内部メッセージ（設定名・クラス名・値）がクライアントへ露出する余地。
-  トレースバックの秘匿自体は 500 経路で担保済み（`app.py:124`）、4xx の内部消息が主因。
+  トレースバックの秘匿自体は 500 経路で担保済み（`app.py:124`）、4xx の内部情報が主因。
 - **完了条件**: production モードで本文を `error_id` のみに縮約し、dev モードでは詳細を返す分岐を実装。
   `tests/test_security_and_frames_audit.py` に production 相当の検証を追加する。
 
@@ -315,7 +318,7 @@
 - **完了条件**: 応答に `"frame": "z-up"`（および NED 側の `"frame": "z-down"`）を付与。
   座標系タグの存在を `tests/test_api_contract.py` で固定する。
 
-### C-4. API バージョンパrefix がリテラル 52 箇所に散在
+### C-4. API バージョンの prefix がリテラル 52 箇所に散在
 
 - **現状**: `api/routes/*.py` に `"/api/v1..."` が 52 個のリテラルとして存在。
 - **影響**: バージョン変更時の改行漏え。現状は 1 箇所でもずれると route 登録が割れる。
@@ -334,7 +337,7 @@
 ### C-6. プリセットの SPEC 充足（Suzanne / Dart）
 
 - **現状**: `physics/records_domain.py` の `RECORD_PRESET_CATALOGUE` に `toda_29_2s`（`:1358`）等の
-  戸田拓夫Glu.glider 系は存在するが、SPEC §3.6:105 が名指しする **Suzanne** と **Dart** の
+  戸田拓夫 Glu.glider 系は存在するが、SPEC §3.6:105 が名指しする **Suzanne** と **Dart** の
   プリセットは存在しない。
 - **影響**: SPEC §3.6 の「登録済み機体プリセット（戸田拓夫氏滞空記録機、Suzanne、Dart 等）一覧」の一部が欠落。
   機体形状プリセット换来用途での検証が選べない。
@@ -419,7 +422,7 @@
 - **影響**: CI の実行時間・キャッシュ効率、導入障壁。
 - **完了条件**: GPU 依存を extras（`pyproject.toml` の `gpu` extra）へ分離し、
   CI も GPU ジョブを opt-in 化する。SPEC §2.1 の CPU フォールバックは既に実装済みであり、
-  依存の分離は設置・運用上のSizes 問題。
+  依存の分離は設置・運用上の規模の問題。
 
 ### E-5. `search/tools/` 14 モジュールが lint 対象
 
@@ -495,7 +498,7 @@
 
 ### G-3. `physics/records_domain.py` / `parallel_engine.py` のコメントと実態の乖離
 
-- **現状**: `physics/parallel_engine.py:1527` のコメントは「Vectorized RK4/Euler」と记すに対し、
+- **現状**: `physics/parallel_engine.py:1527` のコメントは「Vectorized RK4/Euler」と記すに対し、
   実装は半陰的 Euler のみ（RK4 ではない）。`physics/records_domain.py` は A 群の relocation 対象。
 - **影響**: 誤読の温床。
 - **完了条件**: コメントを実装に一致させる（A-1 / B-3 と併せて実施）。
@@ -605,7 +608,7 @@
 | 04_collision_geometry | KD-Tree の動的更新 | 4 | 不足 |
 
 **原因**: 収集クエリ設計時に該当語を `core` 語として重み付けしすぎており、
-上位400件の挤出で落ちた。`paper_taxonomy.py` の `core` 重み（SPH=2.0, PBD 系=3.0 等）と
+上位400件の選定枠から外れた。`paper_taxonomy.py` の `core` 重み（SPH=2.0, PBD 系=3.0 等）と
 検索クエリの Recall が、他サブトピック群（例: LES 149件、RANS 264件）に比べ極端に低かった。
 また `select_papers.py` の厳格ルール（標題基点＋コア語2件以上）が
 表記揺れ（"position based" / "XPBD" / "extended position based dynamics"）を
@@ -623,7 +626,7 @@
 3. `python search/tools/select_papers.py --per-category 400` で再選定（他カテゴリの順位変動を確認）。
 4. `python search/tools/translate_titles.py` → `build_reports.py` → `validate_paper_collection.py` を再実行。
 
-**前提**: 対象4サブトピック均有 1件以上の論文が存在する（Crossref/DataCite 上に十分量あることは
+**前提**: 対象4サブトピックいずれも 1件以上の論文が存在する（Crossref/DataCite 上に十分量あることは
 収集クエリで仮確認済み）。再選定時に全体順位が変動し得るため、差分レポートを別途作成する。
 
 ---
@@ -742,7 +745,7 @@ ACM/IEEE 比率が高いことによる。
 **次の手順**:
 1. 87 件のタイトル・抄録を一覧化し、`TECHNIQUES` へ新キーを追加（キー設計は「原文に現れる語」単位）。
 2. `build_reports.py` の `detect_techniques` は AND/OR の一致判定だが、
-   複数語の結合（例: "graph neural network" と "gnn"）を同一視するエイリアス表を增设。
+   複数語の結合（例: "graph neural network" と "gnn"）を同一視するエイリアス表を追加。
 3. 追加後は `build_reports.py` のみ再実行すれば反映される（再収集・再検証は不要）。
 
 ---
