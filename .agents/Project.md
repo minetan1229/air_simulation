@@ -25,7 +25,7 @@
 - **Current Phase**: Phase 6 [Finalize & Terminate] — 完了確認と成果物の公開
 - **Active Sub-task**: `PHYSICS_PAPER_CONFORMANCE_AUDIT.md` の P0〜P3（モデルタグ/応力許容/ヘルンボルド式/風符号 → 失速後空力 → 接地インパルス → GPU 6DoF 一致 → 最適化器の 6DoF 再検証）を実装し、`tests/test_paper_conformance_p0_p1.py`（P0/P1, 26件）と `tests/test_ga_physics_readiness.py`（P2/P3, 21件）で固定化。_branch guard_ は `tools/branch_guard.py` に実装し、テストスイート・`app.py`・`smoke_test.py` に組み込み済み。
 - **Current Hypothesis**: 「6DoF の破綻要因を全て塞げば、GA が探索できる物理的評価基盤になる」こと。合否基準は (a) 既存全テスト PASS、(b) 新規監査テスト P0〜P3 全 PASS、(c) smoke_test 13/13 PASS、(d) 保護ブランチへの書き込みゼロ。
-- **Verification Criteria**: 全 pytest PASS（`python -m pytest tests -q` = 866 PASS）、`python smoke_test.py` 13/13 stages、`ruff check .` / `mypy` 0 件、`git branch --show-current` が `genetic-project`。
+- **Verification Criteria**: 全 pytest PASS（`python -m pytest tests -q` = **866 PASS / 0 failed**, 24分07秒、RAM最大80%・VRAM最大9.6%）、`python smoke_test.py` 13/13 stages、`ruff check .` / `mypy` 0 件、`git branch --show-current` が `genetic-project`。※CPU競合下で全スイートを1回走らせた際に `test_tunneling_ccd.py` 1件が失敗したが、部分集合10通りの再現は無し（負荷依存フレーク、未特定）。
 - **Next Action**: `genetic-project` ブランチの CI 完了確認 → 残 M 級（`static_margin` 接続 M30 / `fold_trailing_deg` 接続 H19 / 実材料の断面モデル H11-M26）を次フェーズで着手。
 - **既知の残課題（今回の変更外・既存）**: `ruff` の `physics/mesh_domain.py` F822 は既存事象。`PHYSICS_PAPER_CONFORMANCE_AUDIT.md` の M 級項目は P3 の残タスクとして次フェーズで着手する。
 

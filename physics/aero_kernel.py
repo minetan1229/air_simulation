@@ -749,12 +749,12 @@ def evaluate_coefficients(
     density = xp.maximum(_finite(xp, density, 1.225), 1.0e-6)
     height = _finite(xp, ground_height_m, 1.0)
 
-    area = xp.maximum(_finite(xp, p.area, 0.015), 1.0e-9)
-    chord = xp.maximum(_finite(xp, p.chord, 0.075), 1.0e-9)
-    span = xp.maximum(_finite(xp, p.span, 0.2), 1.0e-6)
+    area = xp.maximum(p.area, 1.0e-9)
+    chord = xp.maximum(p.chord, 1.0e-9)
+    span = xp.maximum(p.span, 1.0e-6)
 
-    lift_scale = xp.maximum(_finite(xp, p.lift_scale, 1.0), 0.0)
-    drag_scale = xp.maximum(_finite(xp, p.drag_scale, 1.0), 0.0)
+    lift_scale = xp.maximum(p.lift_scale, 0.0)
+    drag_scale = xp.maximum(p.drag_scale, 0.0)
     compressible = xp.asarray(p.compressible)
     ground_enabled = xp.asarray(p.ground_effect_enabled)
 
@@ -794,9 +794,9 @@ def evaluate_coefficients(
     r_hat = _safe_div(xp, _finite(xp, r_rate, 0.0) * span, two_v, 0.0)
     beta_rad = _rad(xp, beta)
 
-    cl_roll = _finite(xp, p.cl_roll_rate, 0.0) * p_hat
-    cm_roll = _finite(xp, p.cm_roll_rate, 0.0) * p_hat
-    cn_roll = _finite(xp, p.cn_roll_rate, 0.0) * p_hat
+    cl_roll = p.cl_roll_rate * p_hat
+    cm_roll = p.cm_roll_rate * p_hat
+    cn_roll = p.cn_roll_rate * p_hat
 
     # Side force: the linear side-force derivative in attached flow, bounded
     # by the flat-plate limit as the body turns broadside to the flow.  A body
@@ -805,30 +805,30 @@ def evaluate_coefficients(
     # coefficients are clamped and wrapped over beta in [-90, 90] with no
     # singularity.  The linear law is kept wherever it is the smaller of the
     # two, so the attached-flow behaviour is unchanged.
-    cy_linear = _finite(xp, p.cy_beta, 0.0) * beta_rad
+    cy_linear = p.cy_beta * beta_rad
     flat_side = 2.0 * xp.sin(beta_rad) * xp.cos(beta_rad) ** 2
     cy = xp.where(
         xp.abs(cy_linear) <= xp.abs(flat_side),
         cy_linear,
         xp.copysign(xp.abs(flat_side), cy_linear),
     )
-    aileron = _finite(xp, p.aileron_deg, 0.0)
-    asym_cl = _finite(xp, p.asymmetry_cl, 0.0)
-    rudder = _finite(xp, p.rudder_deg, 0.0)
+    aileron = p.aileron_deg
+    asym_cl = p.asymmetry_cl
+    rudder = p.rudder_deg
     cl_control = 0.015 * aileron + 0.25 * asym_cl
     roll_coeff = (
-        _finite(xp, p.cl_beta, 0.0) * beta_rad
+        p.cl_beta * beta_rad
         + cl_roll
         + cl_control
-        + _finite(xp, p.cl_pitch_rate, 0.0) * q_hat
-        + _finite(xp, p.cl_yaw_rate, 0.0) * r_hat
+        + p.cl_pitch_rate * q_hat
+        + p.cl_yaw_rate * r_hat
     )
 
     # --- pitching moment ----------------------------------------------------
-    stall_alpha = xp.abs(_finite(xp, p.stall_alpha_deg, 14.0))
+    stall_alpha = xp.abs(p.stall_alpha_deg)
     stall_rad = _rad(xp, stall_alpha)
     alpha_rad = _rad(xp, alpha)
-    cm_alpha_value = _finite(xp, p.cm_alpha, 0.0)
+    cm_alpha_value = p.cm_alpha
     attached = xp.abs(alpha_rad) <= stall_rad
     w_stall = stall_blend_weight(xp, alpha, stall_alpha, p.stall_sharpness)
     linear_val = cm_alpha_value * xp.copysign(stall_rad, alpha_rad)
@@ -840,36 +840,36 @@ def evaluate_coefficients(
     )
 
     cm = (
-        _finite(xp, p.cm0, 0.0)
+        p.cm0
         + cm_alpha_term
-        + _finite(xp, p.cm_q, 0.0) * q_hat
+        + p.cm_q * q_hat
         + elevon["dcm"]
         + cm_roll
-        + _finite(xp, p.cm_pitch_rate, 0.0) * q_hat
-        + _finite(xp, p.cm_yaw_rate, 0.0) * r_hat
+        + p.cm_pitch_rate * q_hat
+        + p.cm_yaw_rate * r_hat
     )
 
     cn_control = 0.010 * rudder - 0.002 * aileron
     yaw_coeff = (
-        _finite(xp, p.cn_beta, 0.0) * beta_rad
+        p.cn_beta * beta_rad
         + cn_roll
         + cn_control
-        + _finite(xp, p.cn_pitch_rate, 0.0) * q_hat
-        + _finite(xp, p.cn_yaw_rate, 0.0) * r_hat
+        + p.cn_pitch_rate * q_hat
+        + p.cn_yaw_rate * r_hat
     )
 
     # --- ground proximity ---------------------------------------------------
     h_b_ratio = _safe_div(xp, xp.maximum(height, 0.0), span, 10.0)
     ground_proximity = xp.where(ground_enabled, xp.exp(-4.0 * h_b_ratio), 0.0)
 
-    cushion_gain = xp.maximum(_finite(xp, p.ground_cushion_lift, 0.0), 0.0)
+    cushion_gain = xp.maximum(p.ground_cushion_lift, 0.0)
     cl = cl + xp.where(
         (cushion_gain > 0.0) & (ground_proximity > 0.0),
         cushion_gain * ground_proximity,
         0.0,
     )
 
-    pitch_coupling = xp.maximum(_finite(xp, p.ground_pitch_coupling, 0.0), 0.0)
+    pitch_coupling = xp.maximum(p.ground_pitch_coupling, 0.0)
     cm = cm + xp.where(
         (pitch_coupling > 0.0) & (ground_proximity > 0.0),
         -pitch_coupling * cl * ground_proximity,
@@ -880,7 +880,7 @@ def evaluate_coefficients(
         xp, alpha, stall_alpha, p.cp_shift_gain
     )
     cp_x = cp_fraction * chord
-    cp_gain = xp.maximum(_finite(xp, p.cp_shift_gain, 0.0), 0.0)
+    cp_gain = xp.maximum(p.cp_shift_gain, 0.0)
     cm = cm + xp.where(
         cp_gain > 0.0,
         -_safe_div(xp, cp_x - 0.25 * chord, chord, 0.0) * cl,
@@ -918,7 +918,7 @@ def evaluate_coefficients(
 
     pitching_nm = (
         q_dyn * area * chord * cm
-        + _finite(xp, p.cg_offset_x, 0.0) * lift_n
+        + p.cg_offset_x * lift_n
         + pushover_moment
         + rot_damping
     )
@@ -963,7 +963,7 @@ def evaluate_coefficients(
         "ground_ratio": ground_ratio,
         "cp_x_m": cp_x,
         "polar_constant": polar,
-        "cl_zero_lift": _finite(xp, p.cL0, 0.0) * lift_scale + elevon["dcl"] * lift_scale,
+        "cl_zero_lift": p.cL0 * lift_scale + elevon["dcl"] * lift_scale,
     }
 
 

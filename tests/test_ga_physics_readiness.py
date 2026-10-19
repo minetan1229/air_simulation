@@ -432,14 +432,25 @@ def test_the_gpu_batch_path_is_tagged_as_the_rigid_body_model() -> None:
     closed-form glide surrogate while reporting itself like the reference
     integrator.  The batched rigid-body model replaced it, so the tag has to
     follow.
+
+    The batch path has two implementations: the vectorised CUDA integrator
+    (``rigid_body_6dof_batch``) and the CPU fallback, which runs the
+    reference integrator itself (``6dof_rk4``).  Both are 6-DoF models, so
+    the family tag is the same and only the detail differs - a runner
+    without a GPU (the CI matrix) must not fail this test.
     """
     rows = parallel_engine.gpu_batch_evaluate_cases(
         [{"aircraft": {}, "environment": {}, "launch": {}, "duration_s": 0.1}] * 2
     )
     assert len(rows) == 2
+    expected_detail = (
+        "rigid_body_6dof_batch"
+        if rows[0].get("backend") == "cupy"
+        else "6dof_rk4"
+    )
     for row in rows:
         assert row["model"] == parallel_engine.RIGID_BODY_MODEL_TAG
-        assert row["model_detail"] == "rigid_body_6dof_batch"
+        assert row["model_detail"] == expected_detail
 
 
 def test_the_gpu_batch_path_agrees_with_the_reference_6dof() -> None:

@@ -1327,8 +1327,22 @@ M-01 反発係数のクランプ統一（`tip_restitution` を新設）／M-02 �
 | `test_optimizer.py` | `verified` キーの新設、GPU 経路の `model` タグ更新、front の重複設計除去 |
 | `test_stress.py` | `stress_shape` キーの新設 |
 
-## B.4 未実施（残課題）
+## B.4 検証結果（2026-10-20）
 
+| 項目 | 結果 |
+|---|---|
+| テストスイート | **866 passed / 0 failed**（24分07秒） |
+| 変更前ベースライン | 776 passed（12分28秒） |
+| 増加分 | 90件（監査 accompany の回帰テスト追加）。所要時間は 2倍に増加 |
+| 増加の主因 | GPU 最適化バッチが 3-DoF 代理から **実 6-DoF GPU 積分器**へ移行したため、1 評価あたりのコストが上昇 |
+| `python -m compileall physics api app.py smoke_test.py` | OK |
+| `python -m ruff check physics api tests` | All checks passed |
+| `python -m mypy physics api app.py smoke_test.py` | Success: no issues found in 37 source files |
+| メモリ | RAM 最大 80%、VRAM 最大 9.6%（8192 MiB 中 1435 MiB）— 90% 未満を維持 |
+
+**既知の残存フレーク**: 全スイートをCPU競合下（別スイートを並走）で実行した1回のみ、`tests/test_tunneling_ccd.py::test_ccd_prevents_false_penetration_crash_and_preserves_rebound` が失敗（"Moderate impact must rebound, not crash"）。単体実行・前後ファイルとの組み合わせ（10通りの部分集合）での再現は**なし**、単独再実行では 866 passed。**負荷依存のフレーク**と判断し、根本原因の特定は未実施。
+
+## B.5 未実施（残課題）
 - **H-01 の完全版**: GPU 経路は 6-DoF GPU 積分器へ移行したが、CPU の RK4 との**数値一致の定量検証**（同一入力での軌道・飛距離の一致）是未実施。SPEC §2.1 の「完全一致」宣言を肯定するには、この照合が必要。
 - **H-11 の完全版**: 折り断面の実 `Z`（`b h²/6`）と実材料定数（E_MD/E_CD/ν）による応力再構成は未実施（較正係数 `KAPPA_SIGMA` は残存）。
 - **H-15 の完全版**: Polhamus の公開式（`K_p sinα cos²α` を含む全揚力式）への置換は未実施（LEV 増分のみ符号修正）。

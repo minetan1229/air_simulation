@@ -365,54 +365,34 @@ def build_params(
     chords = xp.asarray([max(float(item["ref_length_m"]), 1.0e-9) for item in derived])
     spans = xp.asarray([max(float(item["ref_span_m"]), 1.0e-6) for item in derived])
 
+    # Every per-case parameter bundle is built by the shared builder, which
+    # sanitises it: the kernel can then use the values directly instead of
+    # re-checking each of them for finiteness on every evaluation.
+    case_params = [aero_kernel.params_from_aircraft(cfg) for cfg in configs]
+
+    def stacked(field: str) -> Any:
+        return xp.asarray([getattr(item, field) for item in case_params])
+
     aero = aero_kernel.AeroParams(
-        area=areas,
-        chord=chords,
-        span=spans,
-        aspect=xp.asarray([float(item["aspect_ratio"]) for item in derived]),
-        oswald=column("oswald_e", 0.75),
-        cL0=column("cL0"),
-        cl_alpha=xp.asarray(
-            [aero_kernel.params_from_aircraft(cfg).cl_alpha for cfg in configs]
-        ),
-        cl_max=column("cl_max", 0.90),
-        stall_alpha_deg=xp.asarray(
-            [aero_kernel.effective_stall_alpha_deg(cfg) for cfg in configs]
-        ),
-        stall_sharpness=column("stall_sharpness", 1.4),
-        polhamus_kp=column("polhamus_kp"),
-        polhamus_kv=column("polhamus_kv"),
-        cd0=column("cd0", 0.02),
-        re_cd0_exponent=column("re_cd0_exponent"),
-        cm0=column("cm0"),
-        cm_alpha=column("cm_alpha"),
-        cm_q=column("cm_q"),
-        cm_roll_rate=column("cm_roll_rate"),
-        cm_pitch_rate=column("cm_pitch_rate"),
-        cm_yaw_rate=column("cm_yaw_rate"),
-        cl_beta=column("cl_beta"),
-        cl_roll_rate=column("cl_roll_rate"),
-        cl_pitch_rate=column("cl_pitch_rate"),
-        cl_yaw_rate=column("cl_yaw_rate"),
-        cn_beta=column("cn_beta"),
-        cn_roll_rate=column("cn_roll_rate"),
-        cn_pitch_rate=column("cn_pitch_rate"),
-        cn_yaw_rate=column("cn_yaw_rate"),
-        cy_beta=column("cy_beta"),
-        aileron_deg=column("aileron_deg"),
-        asymmetry_cl=column("asymmetry_cl"),
-        rudder_deg=column("rudder_deg"),
-        elevon_deg=column("elevon_deg"),
-        elevon_authority=column("elevon_chord_ratio", 0.22),
-        cg_offset_x=column("cg_offset_x"),
-        cp_shift_gain=column("cp_shift_gain"),
-        ground_cushion_lift=column("ground_cushion_lift"),
-        ground_pitch_coupling=column("ground_pitch_coupling"),
-        lift_scale=ones * max(float(env.lift_scale), 0.0),
-        drag_scale=ones * max(float(env.drag_scale), 0.0),
-        compressible=bool(env.compressibility_enabled),
-        ground_effect_enabled=bool(env.ground_effect_enabled),
+        **{
+            name: stacked(name)
+            for name in (
+                "area", "chord", "span", "aspect", "oswald", "cL0", "cl_alpha",
+                "cl_max", "stall_alpha_deg", "stall_sharpness", "polhamus_kp",
+                "polhamus_kv", "cd0", "re_cd0_exponent", "cm0", "cm_alpha",
+                "cm_q", "cm_roll_rate", "cm_pitch_rate", "cm_yaw_rate",
+                "cl_beta", "cl_roll_rate", "cl_pitch_rate", "cl_yaw_rate",
+                "cn_beta", "cn_roll_rate", "cn_pitch_rate", "cn_yaw_rate",
+                "cy_beta", "aileron_deg", "asymmetry_cl", "rudder_deg",
+                "elevon_deg", "elevon_authority", "cg_offset_x",
+                "cp_shift_gain", "ground_cushion_lift", "ground_pitch_coupling",
+            )
+        }
     )
+    aero.lift_scale = ones * max(float(env.lift_scale), 0.0)
+    aero.drag_scale = ones * max(float(env.drag_scale), 0.0)
+    aero.compressible = xp.asarray(bool(env.compressibility_enabled))
+    aero.ground_effect_enabled = xp.asarray(bool(env.ground_effect_enabled))
 
     if wind_override is not None:
         wind = xp.asarray(wind_override, dtype=xp.float64).reshape(count, 3)

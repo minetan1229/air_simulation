@@ -35,6 +35,7 @@
 - **CuPy固有の非互換2件**: `np.asarray(cupy_array)`（gpu_dynamics.wind_batch）と `xp.where(python_bool, ...)`（gpu_dynamics.atmosphere_batch）は CuPy で例外。`positions.get()` / Python `if` に変更。
 - テストで更新した契約: 翼端反発の旧0.5クランプ前提、側力の線形定義、非対称失速閾値、`g_load` のresultant定義、`error`/`error_id` キー、optimizer の `verified` キー、front の重複設計除去。
 - **残課題**: GPU/CPUの数値一致の定量照合（SPEC §2.1 の「完全一致」宣言の検証）、折り断面の実Zと実材料定数による応力再構成、Polhamus全揚力式、回転付加慣性、パネル法の2π傾斜（2.2倍乖離）。
+- **修正後の検証**: 全866テスト PASS（24分07秒、RAM最大80%・VRAM最大9.6%）。基準776テスト12分28秒から所要時間は2倍（GPU経路が実6DoF積分器へ移行したため）。CPU競合下で全スイートを1回だけ走らせた際に `test_tunneling_ccd.py` の1件が失敗したが、部分集合10通りの再現は無し→**負荷依存フレーク**（未特定）。
 
 ## [Discord Bridge] (2026-10-19, commit 9e4b24c → master 50f5330)
 - `tools/discord_bridge.py` は `agy` CLI を `--output-format stream-json` で駆動する。会話 ID は UUID で brain ディレクトリ名と一致し、`--print-timeout` 超過時は stderr に "print timeout" を出して部分出力を返す（終了コード0の正常終了扱い）。
