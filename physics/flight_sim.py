@@ -161,6 +161,8 @@ EVALUATE_KEYS: Tuple[str, ...] = (
 HARD_SPEED_LIMIT_MPS = 500.0
 #: Hard altitude cap (m) in either direction from ``ground_level_m``.
 HARD_ALTITUDE_LIMIT_M = 1.0e4
+#: Hard horizontal range cap (m) from the world origin sqrt(x^2 + y^2).
+HARD_HORIZONTAL_LIMIT_M = 1.0e5
 #: Hard body-rate cap (rad/s) catching moment / inertia blow-ups.
 HARD_ANGULAR_RATE_LIMIT_RPS = 5.0e3
 #: Number of time-step halving retries before the integration is divergent.
@@ -2152,7 +2154,9 @@ class FlightSimulator:
         if float(np.linalg.norm(vec3(state.angular_velocity_radps))) > HARD_ANGULAR_RATE_LIMIT_RPS:
             return False
         altitude = -float(state.position_m[2]) - _finite(self.environment.ground_level_m)
-        return abs(altitude) <= HARD_ALTITUDE_LIMIT_M
+        if abs(altitude) > HARD_ALTITUDE_LIMIT_M:
+            return False
+        return math.hypot(float(state.position_m[0]), float(state.position_m[1])) <= HARD_HORIZONTAL_LIMIT_M
 
     def _step_is_acceptable(self, previous: StateVector, candidate: StateVector) -> bool:
         """Local truncation-error guard applied to every integrated sub-step.
