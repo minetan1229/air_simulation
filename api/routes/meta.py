@@ -153,6 +153,15 @@ def meta_physics_references():
     })
 
 
+@meta_bp.get("/api/v1/meta/test-fault")
+def meta_test_fault():
+    """Diagnostic fault endpoint for verifying unhandled exception handling."""
+    if not (os.environ.get("FLASK_ENV") == "development" or os.environ.get("TESTING") == "1"):
+        return api_error("test fault endpoint is disabled outside test environments", 403)
+    raise RuntimeError("Simulated internal secret crash at /sensitive/source/path.py:99")
+
+
+
 
 @meta_bp.get("/api/v1/meta/health")
 def meta_health():
