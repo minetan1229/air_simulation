@@ -4,6 +4,7 @@
 
 ## [Architecture & Specs]
 - ルート `AGENTS.md` と `.agents/AGENTS.md` は共通のプロジェクト非依存 Agent Core Protocol OS であり、詳細技術仕様は `docs/SPECIFICATION.md` に集約・遅延読み込み化されている。
+- MCP実行基盤は `.kilo/mcp/`（`launch.mjs` が各サーバーのエントリポイントをcwd非依存に解決）、登録先は `.kilo/kilo.jsonc` の `mcp` キー。外部APIキーは不要。`fetch` のみ専用venv (`.kilo/mcp/venv`) で Python 実行。
 - GPUバッチシミュレーション (`gpu_batch_evaluate_cases`) は非GPU環境（CI/Linux）で `parallel_evaluate` を安全なフォールバックとし、同一のスキーマ（`landed`, `crashed`, `status`, `horizontal_range_m`）を返却する。
 - 飛行シミュレータの世界座標系はNED (+z下向き) であり、風場 (+z上向き) との鉛直風変換（$v_{rel} = v_{aircraft} - wind_{ned}$）を整合させている。
 - 外部メッシュ取得の `validate_url_safe` は、プライベートIP/ループバック/クラウドメタデータ/非標準ポート/リダイレクトを遮断する。
@@ -15,3 +16,4 @@
 - GitHub Actions の Windows runner では PowerShell が既定シェルのため、bash スクリプトを実行するワークフローには `defaults: run: shell: bash` の指定が必須。
 - 全監査課題（#28〜#37）は対応完了し、新規監査テスト10件および既存700+件のテストが全パスして master (82d48ea) に反映済み。
 - 自律ループプロトコルに Phase 6 [Finalize & Terminate]（正常終了）、リトライ上限3回、不一致時ロールバック規約を導入し、ループ制御の完全性を担保。
+- MCP導入（2026-10-19）: context7 / sequential-thinking / fetch / memory / playwright の5サーバーを local stdio で登録し、`kilo mcp list` で全5件 `connected`、`tools/verify_mcp_servers.py` で initialize→tools/list→実ツールコールまで全件PASS。playwright は既存Chromium（`%LOCALAPPDATA%\ms-playwright`）を再利用し、成果物は `.kilo/mcp/playwright/` へ出力される。

@@ -46,4 +46,27 @@
 
 ## 6. Context-Aware Protocol Maintenance (コンテキスト意識維持)
 - 本ファイルは常駐コンテキストのためトークン消費を抑え簡潔を保つ。物理仕様は `docs/SPECIFICATION.md`、手順は `.agents/skills/` を参照。
+
+## 7. 利用可能なMCPツール一覧 (MCP Tool Inventory)
+- 設定: `.kilo/kilo.jsonc` / 実行基盤: `.kilo/mcp/`（local stdio・外部APIキー不要）/ 導入手順: `.kilo/mcp/README.md`
+- 健全性確認: `python tools/verify_mcp_servers.py`（initialize → tools/list → 実ツールコール）／全カタログは `--list-only`
+- 表記: Kiloでは `{server}_{tool}` 形式（例 `context7_resolve-library-id`, `playwright_browser_navigate`）。以下はサーバー別の実ツール名。
+
+| サーバー | ツール | 用途 |
+|---|---|---|
+| `context7` | `resolve-library-id`, `query-docs` | 対象ライブラリの最新仕様・API文書の取得 |
+| `sequential-thinking` | `sequentialthinking` | 多段推論の構造化（仮説→反証→再仮説） |
+| `fetch` | `fetch` | Webページ/論文のMarkdown取得（SSRF遮断・robots.txt準拠は有効） |
+| `memory` | `create_entities`, `create_relations`, `add_observations`, `read_graph`, `search_nodes`, `open_nodes`, `delete_entities`, `delete_relations`, `delete_observations` | セッション跨ぎ知識グラフ永続化（保存先 `.kilo/mcp/memory.jsonl`） |
+| `playwright` | `browser_navigate`, `browser_snapshot`, `browser_click`, `browser_type`, `browser_fill_form`, `browser_press_key`, `browser_hover`, `browser_select_option`, `browser_evaluate`, `browser_take_screenshot`, `browser_console_messages`, `browser_network_requests`, `browser_wait_for`, `browser_find`, `browser_drag`, `browser_handle_dialog`, `browser_resize`, `browser_tabs`, `browser_run_code_unsafe`, `browser_close`（他 計25ツール） | Three.js UIの実ブラウザ操作・描画/コンソール確認 |
+
+## 8. MCP使い分け行動指針 (MCP Usage Policy)
+1. **ライブラリの実装・API利用の前** → 必ず `context7` で最新仕様を引く（記憶ではなく一次情報を優先）。対象: NumPy/SciPy/CuPy/Flask/Three.js/Playwright/MCP SDK等。
+2. **複雑なバグ調査・多段物理推論**（6DoF数値破綻、CCD、翼端接地、エネルギー保存則、姿勢発散等） → `sequential-thinking` を §2 Anti-Fallacy と併用し、仮説・反証基準・棄却理由まで構造化して進める。
+3. **Web調査・文献収集**（`search/` コーパス追加、原典論文、規格/API仕様ページ） → `fetch` を使用。`--allow-private-ips` / `--ignore-robots-txt` は使用禁止（セキュリティ基線の低下）。
+4. **セッション跨ぎの事実保持**（物理定数、仕様値、既知不具合と回避策） → `memory` にエンティティ/関係/観測として記録し、着手時に `read_graph` / `search_nodes` で想起する。`.agents/Knowledge.md` が確定事実の正本であり、`memory` は検索用索引（正本と重複する長文の二重保管は禁止）。
+5. **UIの動作確認**（Three.js描画、コンソールエラー、DOM状態、ネットワーク要求） → `playwright` を使用。`tools/capture_ui.py` / `tools/verify_repair_ui.py` の補完として「実際に描画されるか」を検証する。
+6. **MCP不要のタスク**（ファイル検索/編集、pytest・ruff・mypy実行等） → 既存ツールのみ使用し、MCP呼び出しでコンテキストを浪費させない。
+7. **MCP呼び出し失敗時** → まず `python tools/verify_mcp_servers.py` で接続とツール取得を切り分け、再導入は `.kilo/mcp/README.md` の手順に従う。
+8. **MCP追加・変更時** → `.kilo/kilo.jsonc` を編集 → `verify_mcp_servers.py` → `kilo mcp list` で `connected` を確認 → Kiloセッションを再読込 → 本節の表を同期する。
 

@@ -1,0 +1,35 @@
+{
+  "$schema": "https://app.kilo.ai/config.json",
+  "mcp": {
+    "context7": {
+      "type": "local",
+      "command": ["node", ".kilo/mcp/launch.mjs", "context7"],
+      "enabled": true,
+      "timeout": 60000
+    },
+    "sequential-thinking": {
+      "type": "local",
+      "command": ["node", ".kilo/mcp/launch.mjs", "sequential-thinking"],
+      "enabled": true,
+      "timeout": 30000
+    },
+    "fetch": {
+      "type": "local",
+      "command": ["node", ".kilo/mcp/launch.mjs", "fetch"],
+      "enabled": true,
+      "timeout": 60000
+    },
+    "memory": {
+      "type": "local",
+      "command": ["node", ".kilo/mcp/launch.mjs", "memory"],
+      "enabled": true,
+      "timeout": 30000
+    },
+    "playwright": {
+      "type": "local",
+      "command": ["node", ".kilo/mcp/launch.mjs", "playwright"],
+      "enabled": true,
+      "timeout": 60000
+    }
+  }
+}
