@@ -112,6 +112,20 @@ OBJECTIVE_SOURCES: Dict[str, str] = {
     "max_stability": "stability",
 }
 
+#: Objectives that need the full 6-DoF reference backend.  The reduced-order
+#: CuPy batch and the analytical surrogate do not integrate the rigid-body
+#: attitude dynamics, so they cannot evaluate the trim-residual stability
+#: index.  Selecting one of these objectives on such a backend used to abort
+#: the whole optimisation run with a missing-key error.
+REFERENCE_ONLY_OBJECTIVES: frozenset = frozenset({"max_stability"})
+
+
+def unsupported_objectives(objectives: Sequence[str], model: str) -> List[str]:
+    """Return the objectives that ``model`` cannot serve."""
+    if model == "rigid_body_6dof":
+        return []
+    return [name for name in objectives if name in REFERENCE_ONLY_OBJECTIVES]
+
 #: Characteristic magnitude of each objective, used to make the weighted
 #: aggregate dimensionless.  Two runs that differ by a factor of scale still
 #: contribute comparably to :func:`aggregate_score`.
@@ -195,6 +209,13 @@ def objective_value(name: str, flight: Dict[str, Any]) -> float:
     try:
         value = float(flight[source])
     except (KeyError, TypeError, ValueError) as exc:
+        model = str(flight.get("model", "unknown")) if isinstance(flight, dict) else "unknown"
+        if isinstance(flight, dict) and not flight.get("physics_verification_eligible", True):
+            raise ValueError(
+                f"objective '{name}' needs the payload key '{source}', which the "
+                f"'{model}' backend does not measure. Use the 6-DoF reference backend "
+                f"or drop the objective."
+            ) from exc
         raise ValueError(f"flight payload is missing numeric key '{source}'") from exc
     if not math.isfinite(value):
         raise ValueError(f"flight payload key '{source}' is not finite: {value!r}")
@@ -414,6 +435,14 @@ class _Run:
         gpu_info = get_gpu_info()
         use_gpu = (self.cfg.processes != 1) and gpu_info.get("available") and (gpu_info.get("backend") == "cupy")
         if use_gpu:
+            blocked = unsupported_objectives(self.objectives, "translational_ensemble")
+            if blocked:
+                raise ValueError(
+                    "objective(s) "
+                    + ", ".join(sorted(blocked))
+                    + " require the 6-DoF reference backend; the CuPy batch backend cannot "
+                    "evaluate them. Set optimizer processes to 1 or remove the objective."
+                )
             flights = gpu_batch_evaluate_cases(cases, progress_cb=relay)
             self._used_gpu = True
         else:

@@ -8,83 +8,103 @@
 from __future__ import annotations
 
 import json
-import math
 import urllib.parse
+from unittest import mock
+
+import numpy as np
 import pytest
 
 from app import create_app
 from physics import flight_sim, mesh_domain, wind_domain
-from physics.config_schema import (
-    AircraftConfig,
-    EnvironmentConfig,
-    LaunchConfig,
-    SimulationSettings,
-)
+from physics.config_schema import EnvironmentConfig
 
 
 # ==============================================================================
 # Issue #30: 風場 (+z up) と 機体/世界座標系 (+z down NED) の符号変換検証
 # ==============================================================================
 
-def test_wind_coordinate_transform_updraft_and_downdraft():
-    """Verify +z up in wind domain translates correctly to -z (upward) in NED flight dynamics.
+def test_wind_coordinate_transform_updraft_and_downdraft(monkeypatch):
+    """Verify the +z-up wind domain becomes a +z-down (NED) vector in flight_sim.
 
     In wind_domain:
-      +z is UP (altitude z >= 0)
+      +z is UP (the ground plane sits at ``z = env.ground_level_m``)
     In flight_sim / world NED:
-      +z is DOWN (position z <= 0 is above ground, height h = -pos[2])
+      +z is DOWN (the ground plane sits at ``z = -env.ground_level_m``)
+
+    The hand-off therefore has to negate the vertical component
+    (``w_NED = -w_wind``) and pass the *absolute* height above the world
+    origin, not the height above ground.  This test drives the production
+    conversion in :func:`physics.flight_sim.wind_vector`; the previous
+    revision only evaluated arithmetic on hard-coded literals and therefore
+    proved nothing about the implementation.
     """
+    env = EnvironmentConfig(wind_speed=5.0, gust_intensity=0.0, thermal_strength=0.0)
+
+    observed: dict = {}
+
+    def fake_wind_velocity(position, env, time_s=0.0):
+        observed["position"] = np.asarray(position, dtype=float)
+        observed["time_s"] = time_s
+        return np.array([1.5, -2.5, 3.25])
+
+    monkeypatch.setattr(wind_domain, "wind_velocity", fake_wind_velocity)
+
+    out = flight_sim.wind_vector((10.0, 20.0, -30.0), env, time_s=2.5)
+
+    # Horizontal components pass through unchanged.
+    assert out[0] == pytest.approx(1.5)
+    assert out[1] == pytest.approx(-2.5)
+    # The vertical component is negated into the z-down world frame.
+    assert out[2] == pytest.approx(-3.25)
+    # The query point is converted into the wind domain's z-up axis.  The
+    # absolute height (30 m) is passed, *not* the AGL height, so that the
+    # domain can subtract ``ground_level_m`` exactly once.
+    assert float(observed["position"][2]) == pytest.approx(30.0)
+    assert float(observed["position"][0]) == pytest.approx(10.0)
+    assert float(observed["position"][1]) == pytest.approx(20.0)
+    assert observed["time_s"] == pytest.approx(2.5)
+
+
+def test_wind_coordinate_transform_uses_absolute_height_above_origin():
+    """The z-up query height must not have ``ground_level_m`` subtracted twice.
+
+    ``flight_sim`` reports the AGL height as ``-z - ground_level_m`` and places
+    the ground plane at ``z = -ground_level_m``.  ``wind_domain`` places its
+    ground plane at ``z = +ground_level_m`` and derives the AGL height itself.
+    Handing the domain an AGL height would shift the boundary layer, the
+    ground clamp and the thermal plume by the airfield elevation.
+    """
+    env = EnvironmentConfig(
+        wind_speed=5.0,
+        gust_intensity=0.0,
+        thermal_strength=0.0,
+        ground_level_m=1000.0,
+    )
+
+    seen: dict = {}
+
+    def fake_wind_velocity(position, env, time_s=0.0):
+        seen["z_up"] = float(np.asarray(position, dtype=float)[2])
+        return np.array([0.0, 0.0, 1.0])
+
+    with mock.patch.object(wind_domain, "wind_velocity", fake_wind_velocity):
+        flight_sim.wind_vector((0.0, 0.0, -30.0), env, time_s=0.0)
+
+    # -z_ned = 30 m above the world origin.  The AGL height would be
+    # 30 - 1000 = -970 m, which is not what the domain expects.
+    assert seen["z_up"] == pytest.approx(30.0)
+
+
+def test_wind_vector_is_inert_in_calm_air():
+    """A calm atmosphere must produce the exact zero vector, with no upstream call."""
     env_calm = EnvironmentConfig(wind_speed=0.0, gust_intensity=0.0, thermal_strength=0.0)
-    aircraft = AircraftConfig()
 
-    # Baseline: level flight in calm air
-    probe_calm = flight_sim.aero_forces(
-        aircraft,
-        env_calm,
-        speed_mps=10.0,
-        alpha_deg=2.0,
-        beta_deg=0.0,
-    )
-    assert probe_calm.lift_n > 0.0
+    out = flight_sim.wind_vector((0.0, 0.0, -5.0), env_calm, time_s=0.0)
 
-    # Test that thermal / vertical wind affects relative wind correctly
-    sim = flight_sim.FlightSimulator(
-        aircraft=aircraft,
-        environment=env_calm,
-        launch=LaunchConfig(launch_speed=10.0, launch_angle_deg=0.0, launch_height_m=5.0),
-        settings=SimulationSettings(max_substeps=1),
-    )
-
-    # State: level flight heading North (+x), at altitude 5m (NED pos z = -5.0)
-    state = sim.state
-    assert state.position_m[2] == pytest.approx(-5.0, abs=1e-3)
-    assert state.velocity_mps[0] == pytest.approx(10.0, abs=1e-2)
-    assert state.velocity_mps[2] == pytest.approx(0.0, abs=1e-3)
-
-    # 1. Zero wind produces zero wind velocity vector
-    w_vec = wind_domain.wind_velocity((0.0, 0.0, 5.0), env_calm, time_s=0.0)
-    assert abs(w_vec[0]) < 1e-4
-    assert abs(w_vec[1]) < 1e-4
-    assert abs(w_vec[2]) < 1e-4
-
-    # 2. Updraft: wind velocity in wind domain has wz > 0
-    # In NED coordinates, an updraft corresponds to wind velocity with wz_ned < 0 (pointing up)
-    # The relative airspeed vector is v_rel = v_aircraft - wind_ned
-    v_air = (10.0, 0.0, 0.0)
-    wind_ned_up = (0.0, 0.0, -2.0)  # 2 m/s updraft in NED
-    v_rel_up = (v_air[0] - wind_ned_up[0], v_air[1] - wind_ned_up[1], v_air[2] - wind_ned_up[2])
-
-    # In NED coordinates with body aligned to world:
-    # v_rel_up[2] is +2.0 (relative wind has downward component into aircraft belly, i.e. upward relative inflow),
-    # meaning the aircraft experiences a positive angle of attack increment (alpha = atan2(w, u) > 0)
-    alpha_up_deg = math.degrees(math.atan2(v_rel_up[2], v_rel_up[0]))
-    assert alpha_up_deg > 0.0
-
-    # Conversely, a downdraft produces relative inflow from above (v_rel[2] = -2.0, alpha < 0)
-    wind_ned_down = (0.0, 0.0, 2.0)
-    v_rel_down = (v_air[0] - wind_ned_down[0], v_air[1] - wind_ned_down[1], v_air[2] - wind_ned_down[2])
-    alpha_down_deg = math.degrees(math.atan2(v_rel_down[2], v_rel_down[0]))
-    assert alpha_down_deg < 0.0
+    assert out.shape == (3,)
+    assert out[0] == 0.0
+    assert out[1] == 0.0
+    assert out[2] == 0.0
 
 
 # ==============================================================================

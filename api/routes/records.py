@@ -209,35 +209,62 @@ def guinness_verification():
 # ---------------------------------------------------------------------------
 @records_bp.get("/api/v1/errors")
 def list_errors():
-    """Retrieve error history with optional level, category, and text filtering."""
+    """Retrieve error history with optional level, category, and text filtering.
+
+    The payload is the redacted view: stack traces and client addresses stay
+    in the server log (SPECIFICATION 4.1).
+    """
     limit = int(request.args.get("limit", 100))
     limit = max(1, min(limit, 500))
     level = request.args.get("level")
     category = request.args.get("category")
     search = request.args.get("search")
-    logs = ERROR_LOGGER.get_logs(limit=limit, level=level, category=category, search=search)
+    logs = ERROR_LOGGER.get_logs(
+        limit=limit, level=level, category=category, search=search, public=True
+    )
     return jsonify({
         "errors": logs,
         "count": len(logs),
-        "statistics": ERROR_LOGGER.statistics(),
+        "statistics": ERROR_LOGGER.public_statistics(),
     })
 
 
 @records_bp.post("/api/v1/errors/report")
 def report_client_error():
-    """Receive client-side (frontend JavaScript/WebGL) errors and persist them."""
+    """Receive client-side (frontend JavaScript/WebGL) errors and persist them.
+
+    The client controls every field, so each one is bounded and validated
+    before it reaches the audit log; otherwise a caller could inject arbitrary
+    content into the operator's log files.
+    """
     payload = body()
-    message = payload.get("message", "Frontend error")
-    level = payload.get("level", "ERROR")
-    category = payload.get("category", "frontend")
+    if not isinstance(payload, dict):
+        return api_error("request body must be a JSON object", 400)
+
+    message = str(payload.get("message", "Frontend error"))[:2000]
+    level = str(payload.get("level", "ERROR")).upper()
+    if level not in ("ERROR", "WARNING", "CRITICAL", "INFO", "DEBUG"):
+        return api_error("level must be one of ERROR, WARNING, CRITICAL, INFO, DEBUG", 400)
+    category = str(payload.get("category", "frontend"))[:64]
     details = payload.get("details", {})
+    if not isinstance(details, dict):
+        return api_error("details must be a JSON object", 400)
+    details = {str(k)[:64]: str(v)[:500] for k, v in list(details.items())[:20]}
     traceback_str = payload.get("stack") or payload.get("traceback")
+    if traceback_str is not None:
+        traceback_str = str(traceback_str)[:4000]
 
     try:
         req_path = payload.get("url") or (request.path if request else None)
         client_ip = request.remote_addr if request else None
     except Exception:
         req_path, client_ip = None, None
+
+    status_code = payload.get("status_code", 400)
+    try:
+        status_code = int(status_code)
+    except (TypeError, ValueError):
+        status_code = 400
 
     rec = ERROR_LOGGER.record_error(
         message=message,
@@ -247,7 +274,7 @@ def report_client_error():
         details=details,
         path=req_path,
         method="CLIENT",
-        status_code=payload.get("status_code", 400),
+        status_code=status_code,
         client_ip=client_ip,
     )
     return jsonify({"ok": True, "error_id": rec.id})
@@ -255,8 +282,8 @@ def report_client_error():
 
 @records_bp.get("/api/v1/errors/stats")
 def error_stats():
-    """Get error metrics and log file statuses."""
-    return jsonify(ERROR_LOGGER.statistics())
+    """Get error metrics and log file statuses (without the server paths)."""
+    return jsonify(ERROR_LOGGER.public_statistics())
 
 
 @records_bp.post("/api/v1/errors/clear")

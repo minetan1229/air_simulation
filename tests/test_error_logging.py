@@ -158,3 +158,60 @@ def test_api_error_logging_endpoints():
     res_stats = client.get("/api/v1/errors/stats")
     assert res_stats.status_code == 200
     assert "by_level" in res_stats.get_json()
+
+
+def test_error_endpoints_do_not_republish_stack_traces_or_server_paths():
+    """SPECIFICATION 4.1: the REST layer must not leak what the 500 handler hides.
+
+    The 500 handler deliberately returns only an ``error_id``.  The diagnostic
+    endpoints used to re-publish the very same stack traces -- and the absolute
+    path of the server log directory -- to any client.
+    """
+    client = flask_app_module.app.test_client()
+
+    secret = "SENSITIVE_INTERNAL_DETAIL_DO_NOT_PUBLISH"
+    res_report = client.post(
+        "/api/v1/errors/report",
+        json={
+            "message": "shader failure",
+            "level": "ERROR",
+            "category": "webgl",
+            "stack": f"Traceback (most recent call last):\n  {secret}",
+            "details": {"gpu": "Test GPU"},
+        },
+    )
+    assert res_report.status_code == 200
+
+    res_list = client.get("/api/v1/errors?limit=50")
+    assert res_list.status_code == 200
+    raw = res_list.get_data(as_text=True)
+    assert secret not in raw
+    assert "Traceback (most recent call last)" not in raw
+    for entry in res_list.get_json()["errors"]:
+        assert "traceback_str" not in entry
+        assert "client_ip" not in entry
+        assert isinstance(entry["has_traceback"], bool)
+
+    res_stats = client.get("/api/v1/errors/stats")
+    assert res_stats.status_code == 200
+    stats_raw = res_stats.get_data(as_text=True)
+    files = res_stats.get_json()["log_files"]
+    # Only the file names are published, never the server directory.
+    assert os.sep not in files["text"]
+    assert os.sep not in files["jsonl"]
+    assert "logs" + os.sep not in stats_raw
+
+
+def test_error_report_rejects_invalid_payloads():
+    """A client must not be able to inject arbitrary content into the audit log."""
+    client = flask_app_module.app.test_client()
+
+    res_level = client.post("/api/v1/errors/report", json={"message": "x", "level": "NOT_A_LEVEL"})
+    assert res_level.status_code == 400
+
+    res_details = client.post("/api/v1/errors/report", json={"message": "x", "details": "not-a-mapping"})
+    assert res_details.status_code == 400
+
+    res_ok = client.post("/api/v1/errors/report", json={"message": "x", "level": "WARNING"})
+    assert res_ok.status_code == 200
+    assert res_ok.get_json()["ok"] is True

@@ -45,6 +45,28 @@ class ErrorRecord:
         d = asdict(self)
         return d
 
+    def to_public_dict(self) -> Dict[str, Any]:
+        """Client-safe view of the record.
+
+        The stack trace and the client address stay in the server log; the
+        REST layer must not re-publish what the 500 handler deliberately
+        suppresses (SPECIFICATION 4.1).  ``has_traceback`` tells the operator
+        that a trace exists in the server log without disclosing it.
+        """
+        details = self.details if isinstance(self.details, dict) else {}
+        return {
+            "id": self.id,
+            "timestamp": self.timestamp,
+            "level": self.level,
+            "category": self.category,
+            "message": self.message,
+            "details": dict(list(details.items())[:20]),
+            "method": self.method,
+            "status_code": self.status_code,
+            "path": self.path,
+            "has_traceback": bool(self.traceback_str),
+        }
+
 
 class ErrorLoggerDomain:
     """Thread-safe persistent error logger and in-memory ring buffer."""
@@ -161,8 +183,13 @@ class ErrorLoggerDomain:
         level: Optional[str] = None,
         category: Optional[str] = None,
         search: Optional[str] = None,
+        public: bool = False,
     ) -> List[Dict[str, Any]]:
-        """Retrieve recent errors from in-memory ring buffer with optional filtering."""
+        """Retrieve recent errors from in-memory ring buffer with optional filtering.
+
+        ``public=True`` returns the redacted view (no stack trace, no client
+        address) that the REST layer serves to clients.
+        """
         with self._lock:
             records = list(self._buffer)
 
@@ -182,7 +209,7 @@ class ErrorLoggerDomain:
                 in_tb = r.traceback_str and s_lower in r.traceback_str.lower()
                 if not (in_msg or in_path or in_tb):
                     continue
-            results.append(r.to_dict())
+            results.append(r.to_public_dict() if public else r.to_dict())
             if len(results) >= limit:
                 break
 
@@ -219,6 +246,24 @@ class ErrorLoggerDomain:
                 else 0,
             },
         }
+
+    def public_statistics(self) -> Dict[str, Any]:
+        """Statistics without the absolute server log paths.
+
+        The absolute path of the server log directory is deployment
+        information and must not be published through the REST layer
+        (SPECIFICATION 4.1); the file names and their sizes are enough for an
+        operator to confirm that logging works.
+        """
+        stats = self.statistics()
+        files = stats.get("log_files", {})
+        stats["log_files"] = {
+            "text": os.path.basename(str(files.get("text", ""))),
+            "jsonl": os.path.basename(str(files.get("jsonl", ""))),
+            "text_size_bytes": files.get("text_size_bytes", 0),
+            "jsonl_size_bytes": files.get("jsonl_size_bytes", 0),
+        }
+        return stats
 
 
 # Singleton instance for application-wide logging
