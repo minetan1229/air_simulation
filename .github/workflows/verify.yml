@@ -2,7 +2,9 @@ name: Python Code Verification
 
 on:
   push:
-    branches: [ "master" ]
+    # The genetic-project phase is isolated from master, so its own branch
+    # has to be verified too.
+    branches: [ "master", "genetic-project" ]
   pull_request:
     branches: [ "master" ]
 

@@ -2,7 +2,10 @@ name: CI Pipeline
 
 on:
   push:
-    branches: [ "master", "feat/*", "fix/*" ]
+    # The genetic-project phase is carried out on its own branch (master is
+    # protected by tools/branch_guard.py), so that branch has to be verified
+    # by CI as well.
+    branches: [ "master", "feat/*", "fix/*", "genetic-project" ]
   pull_request:
     branches: [ "master" ]
 
