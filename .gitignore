@@ -33,3 +33,6 @@ htmlcov/
 
 # Prevent accidental shadowing of standard modules
 antigravity.py
+
+# Paper collection pipeline cache (regenerable with search/tools/collect_papers.py)
+search/.cache/
