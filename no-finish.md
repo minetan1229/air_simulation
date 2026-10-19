@@ -10,6 +10,20 @@
 > 収録時点: 2026-10-20 ／ 基準 commit: master `42d80e8`
 > 検証状態: master は CI 全グリーン（compileall / ruff / mypy / pytest 860 件 / smoke_test 13 ステージ）
 
+### 担当分割（重要）
+
+残課題は **2 系統** に分かれる。同一ファイルに二重に書かないこと。
+
+| 系統 | 収録場所 | 対象 |
+|---|---|---|
+| **仕様準拠** | 本ファイル「第一部」 | `docs/SPECIFICATION.md`（物理 §1 / GPU §2 / REST §3 / セキュリティ §4 / 構成 §7 / 責務境界 §8 / 検証 CI §9）への実装乖離、API・セキュリティ・運用・テスト・衛生 |
+| **物理コア再構成** | `genetic-project` ブランチの `no-finish.md` ＋ `no-finish-physics-supplement.md` | `physics/aero_kernel.py` / `physics/gpu_dynamics.py` 導入に伴う据え置き・繰延（`genetic-project` の 866 PASS 基準） |
+
+> **統合上の注意**: `genetic-project` ブランチもルート `no-finish.md` を持つため、マージ時に
+> add/add 競合する。解消方針は **本ファイル（統一版）を正とする**。`genetic-project` 側の
+> 物理バックログは `no-finish-physics.md` へリネームして取り込み、物理セクションの
+> 詳細（E-1 GPU/CPU、Polhamus、Helmbold、失速外挿、`_local_*` 重複 等）はそちらを正とする。
+
 ---
 
 ## 0. 全体索引
@@ -18,14 +32,16 @@
 
 | # | 区分 | 残課題 | 影響 | 着手可否 |
 |---|---|---|---|---|
-| A-1 | 物理 §1 | Viterna-Corrigan 深失速モデル未実装 | 深失速・回復飛行 | 前提 B-1 完了後 |
-| A-2 | 物理 §1 | Helmbold 式が仕様式と不一致 | 全機体の揚力傾斜 | 前提 B-1 完了後 |
-| A-3 | 物理 §1 | Polhamus 係数・空力弾性が既定で不活性 | 受動空力弾性 | 前提 B-1 完了後 |
+| A-1 | 物理 §1 | Viterna-Corrigan 深失速モデル未実装 | 深失速・回復飛行 | → `no-finish-physics.md` F-2 |
+| A-2 | 物理 §1 | Helmbold 式が仕様式と不一致 | 全機体の揚力傾斜 | → `no-finish-physics.md` E-1 |
+| A-3 | 物理 §1 | Polhamus 係数・空力弾性が既定で不活性 | 受動空力弾性 | → `no-finish-physics.md` E-2 |
 | A-4 | 物理 §1 | 低速 pushover 閾値 3.0（仕様 2.0）・機構不活性 | 発進直後 | 前提 B-1 完了後 |
 | A-5 | 物理 §1 | 構造応力が迎角 α を受けない | 翼根応力 | 前提 B-1 完了後 |
 | A-6 | 物理 §1 | ABL に power law が無い | 低空風速 | 前提 B-1 完了後 |
 | A-7 | 物理 §1 | 接地散逸上限が主機体バウンス未適用 | 地上衝突 | 前提 B-1 完了後 |
-| B-1 | 責務 §8 | 物理モデルの重複実装 8 種 / 10 組が不一致 | 物理の一意性 | 先行着手可 |
+| B-1 | 責務 §8 | 物理モデルの重複実装 8 種 / 10 組が不一致 | 物理の一意性 | → `no-finish-physics.md` F-5 |
+| B-2 | 責務 §8 | 受動空力弾性が §8 担当外 | 責務境界 | A 群と同一コミット |
+| B-3 | 責務 §8 | `records_domain` が物理モデルを含む | 検証の二重化 | A 群と同一コミット |
 | B-2 | 責務 §8 | 受動空力弾性が §8 担当外 | 責務境界 | A 群と同一コミット |
 | B-3 | 責務 §8 | `records_domain` が物理モデルを含む | 検証の二重化 | A 群と同一コミット |
 | C-1 | REST §3/§4 | `api_error()` が 4xx/5xx で本文を返す | 内部消息の露出 | 即着手可 |
@@ -86,8 +102,8 @@
 
 | 区分 | 件数 | 状態 |
 |---|---|---|
-| A. 物理モデル仕様準拠（SPEC §1） | 7 | **未着手**（並行作業と競合） |
-| B. 物理モジュール責務境界（SPEC §8） | 3 | **未着手**（並行作業と競合） |
+| A. 物理モデル仕様準拠（SPEC §1） | 7 | 3 件は `no-finish-physics.md` へ担当移動、4 件は残存 |
+| B. 物理モジュール責務境界（SPEC §8） | 3 | 1 件は `no-finish-physics.md` へ担当移動、2 件は残存 |
 | C. API / 契約の残差 | 6 | 未着手（影響小） |
 | D. セキュリティの残差 | 4 | 未着手（影響中） |
 | E. 運用ツール / CI の残差 | 6 | 未着手（影響小） |
@@ -107,6 +123,10 @@
 `physics/optimizer_domain.py`（234 行）/ `physics/stress_domain.py`（133 行）/ `physics/wind_domain.py`（157 行）/
 `physics/atmosphere_domain.py`（90 行）の改変が未コミットのまま存在する。
 
+このため A-1 / A-2 / A-3 / B-1 の 4 項目は **担当を `no-finish-physics.md` へ移し**、
+本台帳には仕様との差分のみを残した。残る A-4 / A-5 / A-6 / A-7 / B-2 / B-3 は
+`genetic-project` のバックログに該当項目が無いため、本台帳が正本である。
+
 したがって:
 
 1. **A / B 群は、並行作業の統合完了後に着手する。** 先に着手すると同一箇所を二重実装し、統合時に全面衝突する。
@@ -120,44 +140,52 @@
 > 影響: 物理計算結果そのもの。着手のたびに全シミュレーション結果の基準値が変わるため、
 > **必ず特性テスト（characterization test）を先に追加してから**変更する。
 
-### A-1. Viterna & Corrigan 1982 の深失速モデルが未実装 ★最重要
+### A-1. Viterna & Corrigan 1982 の深失速モデルが未実装
 
-- **現状**: `physics/aero_domain.py:358` は Hoerner の完全剥離平板揚力 `2 sin a cos^2 a` による近似。
-  失速後は `physics/aero_domain.py:382` `_post_stall_lift_coefficient` が
-  `POST_STALL_BLEND_START_DEG = 45.0`（`:373`）から `post_stall_slope` による線形外挿＋smoothstep ブレンド。
-  Viterna-Corrigan の `A1/A2/B1/B2` 外挿係数と `CD_max → 1.8〜2.0` のRelationships は存在しない。
-- **仕様**: SPEC §1.1:19「失速後抗力 `CD_max` 1.8〜2.0 へ Viterna-Corrigan で外挿し Hoerner 平板抗力へブレンド」。
-  現状は `CD_max` の数値目標に**到達**するが方式が別物であり、§5:135 がHelmbold/Polhamus/Viterna を
-  「準拠」と明記している以上、方法の不一致は正本違反。
-- **影響**: 失速後挙動・回復飛行・着陸分散の予測精度。紙飛行機の主validator。
-- **完了条件**: Viterna-Corrigan の 4 係数を実装し Hoerner 平板抗力へブレンド。
-  `CD_max` が 1.8〜2.0 域に到達すること、深失速域の `CL(α)` が連続であることを
-  `tests/test_aero.py` に**数値区間で**固定する（現状は外挿の式そのものを test が固定化していない）。
-- **前提**: A-2（揚力傾斜式）と同時に行うと差分が混在するため、A-2 → A-1 の順で着手する。
+> **担当移動**: `genetic-project` ブランチの `no-finish-physics.md` **F-2**（= `no-finish-physics-supplement.md` §2 F）が
+> 正本。ここでは仕様との差分だけ記す。
+>
+> - **現状**: `physics/aero_domain.py:358` は Hoerner の完全剥離平板揚力 `2 sin a cos^2 a` による近似。
+>   失速後は `physics/aero_domain.py:382` `_post_stall_lift_coefficient` が
+>   `POST_STALL_BLEND_START_DEG = 45.0`（`:373`）から `post_stall_slope` による線形外挿＋smoothstep ブレンド。
+>   Viterna-Corrigan の `A1/A2/B1/B2` 外挿係数と `CD_max → 1.8〜2.0` の関係式は存在しない。
+> - **仕様**: SPEC §1.1:19「失速後抗力 `CD_max` 1.8〜2.0 へ Viterna-Corrigan で外挿し Hoerner 平板抗力へブレンド」。
+>   現状は `CD_max` の数値目標に**到達**するが方式が別物。
+> - **影響**: 失速後挙動・回復飛行・着陸分散の予測精度。
+> - **完了条件**: `no-finish-physics.md` F-2 の手順どおり Viterna-Corrigan の 4 係数を実装し Hoerner 平板抗力へ
+>   ブレンド。`CD_max` が 1.8〜2.0 域に到達すること、深失速域の `CL(α)` が連続であることを
+>   `tests/test_aero.py` に**数値区間で**固定する（現状は外挿の式そのものを test が固定化していない）。
+> - **依存**: A-2（揚力傾斜式）と同時に行うと差分が混在するため、A-2 → A-1 の順で着手する。
 
 ### A-2. Helmbold 揚力傾斜式が仕様式と不一致
 
-- **現状**: `physics/aero_domain.py:213` `helmbold_cl_alpha` は
-  `2πAR / (2 + sqrt(AR² (1 + taper) + 4AR/π))`。
-  仕様式は `2πAR / (2 + sqrt(AR² (1 + tan²(Λ_c/2)) + 4))`。
-  相違は 3 点：(a) 定数項が `4AR/π`（仕様は `4`）、(b) `1 + taper_ratio`（仕様は `1 + tan²(Λ_c/2)`、
-  後退角 Λ_c が input として存在しない）、(c) `AR ≤ 4` の適用条件が無い。
-- **影響**: 全機体の揚力傾斜。低 AR 機（紙飛行機は AR 1〜3）で誤差が最大。
-  さらに `tests/test_aero.py:213-217` は**実装式を固定化**しているため、仕様準拠へ変えると
-  意図せずテストが PASS する形になる（真の検証が無い）。
-- **完了条件**: 後退角 `Λ_c` を `AircraftConfig` に追加し、仕様式どおりの実装へ置換。
-  `AR ≤ 4` 条件と `AR > 4` の外挿挙動を分岐として明示。`tests/test_aero.py` を
-  「仕様式の実装」に対する検証へ書き換え、`AR` 走査で実測値を固定する。
+> **担当移動**: `genetic-project` ブランチの `no-finish-physics.md` **E-1**（GPU/CPU -backend 統合）が
+> 揚力傾斜式の正本化を含む。差分のみ記す。
+>
+> - **現状**: `physics/aero_domain.py:213` `helmbold_cl_alpha` は
+>   `2πAR / (2 + sqrt(AR² (1 + taper) + 4AR/π))`。
+>   仕様式は `2πAR / (2 + sqrt(AR² (1 + tan²(Λ_c/2)) + 4))`。
+>   相違は 3 点：(a) 定数項が `4AR/π`（仕様は `4`）、(b) `1 + taper_ratio`（仕様は `1 + tan²(Λ_c/2)`、
+>   後退角 Λ_c が input として存在しない）、(c) `AR ≤ 4` の適用条件が無い。
+> - **影響**: 全機体の揚力傾斜。低 AR 機（紙飛行機は AR 1〜3）で誤差が最大。
+>   さらに `tests/test_aero.py:213-217` は**実装式を固定化**しているため、仕様準拠へ変えると
+>   意図せずテストが PASS する形になる（真の検証が無い）。
+> - **完了条件**: 後退角 `Λ_c` を `AircraftConfig` に追加し、仕様式どおりの実装へ置換。
+>   `AR ≤ 4` 条件と `AR > 4` の外挿挙動を分岐として明示。`tests/test_aero.py` を
+>   「仕様式の実装」に対する検証へ書き換え、`AR` 走査で実測値を固定する。
 
 ### A-3. Polhamus 渦揚力係数が既定で不活性
 
-- **現状**: `physics/config_schema.py:316` `polhamus_kv: float = 0.0`（既定 0 = 渦揚力 항等的に不活性）。
-  `Kp` は Helmbold 傾斜へ焊接されており、Polhamus 係数として独立していない。
-  `cp_shift_gain`（`:318`）、`aeroelastic_compliance`（`:321`）、`cg_offset_x`（`:313`）も既定 0。
-- **影響**: SPEC §1.1 の受動空力弾性モーフィング（§5:132 / §8 row-1 = aero-physics 担当）が**既定では動かない**。
-  仕様上は主要機構だが、標準プリセットではその挙動が観測されない。
-- **完了条件**: `Kp` / `Kv` を独立係数として実装し、既定値を**物理的に妥当な非ゼロ**へ変更。
-  モーフィングの δ_eff(q) 遷移を `tests/test_aero.py` で数値固定する。
+> **担当移動**: `genetic-project` ブランチの `no-finish-physics.md` **E-2**（Polhamus 係数）が正本。
+> 差分のみ記す。
+>
+> - **現状**: `physics/config_schema.py:316` `polhamus_kv: float = 0.0`（既定 0 = 渦揚力 항等的に不活性）。
+>   `Kp` は Helmbold 傾斜へ焊接されており、Polhamus 係数として独立していない。
+>   `cp_shift_gain`（`:318`）、`aeroelastic_compliance`（`:321`）、`cg_offset_x`（`:313`）も既定 0。
+> - **影響**: SPEC §1.1 の受動空力弾性モーフィング（§5:132 / §8 row-1 = aero-physics 担当）が**既定では動かない**。
+> 仕様上は主要機構だが、標準プリセットではその挙動が観測されない。
+> - **完了条件**: `Kp` / `Kv` を独立係数として実装し、既定値を**物理的に妥当な非ゼロ**へ変更。
+> モーフィングの δ_eff(q) 遷移を `tests/test_aero.py` で数値固定する。
 
 ### A-4. 低速 pushover 動力学の閾値・機構が仕様相違
 
@@ -211,26 +239,30 @@
 
 ### B-1. 同一物理モデルの重複実装（8 重複 / 10 組が数値不一致）
 
-- **現状**（正本 → 重複先）:
-  | モデル | 正本 | 重複実装 | 不一致内容 |
-  |---|---|---|---|
-  | Helmbold 揚力傾斜 | `aero_domain.py:213` | `flight_sim.py:506` | 式が 3 系統 |
-  | Prandtl-Glauert | `aero_domain.py:224` | `flight_sim.py:514` | 圧縮性補正のクランプ値が別 |
-  | ISA / 湿潤大気 | `atmosphere_domain.py:100` | `flight_sim.py:567` | 飽和蒸気圧式が別 |
-  | Sutherland 粘性 | `atmosphere_domain.py:244` | `flight_sim.py` 内部 | — |
-  | ABL 風速プロファイル | `wind_domain.py:605` | `flight_sim.py:726` | クランプの有無 |
-  | ガスト包絡 | `wind_domain.py:565` | `flight_sim.py:726` | 時系列の式が別 |
-  | 失速後 CL | `aero_domain.py:382` | `parallel_engine.py:981` | 曲線形状が別 |
-  | 許容応力 | `stress_domain.py:456` | `flight_sim.py:1063` | 桁が別 |
-  | ISA 密度 | `atmosphere_domain.py` | `parallel_engine.py:325` `isa_air_density` | 3 つ目の大気モデル |
-- **影響**: 「どちらが正しいか」がコードからは判定できず、CUDA 経路と参照経路が別の物理になる根本原因。
-  **A 群のすべての変更が二重実装へ伝播する**ため、A 群着手前に解消すべき。
-- **完了条件**: `flight_sim.py` から `helmbold_cl_alpha` / `prandtl_glauert` / `ground_effect_factor` /
-  `_local_atmosphere` / `_local_wind` / `_local_aero` / `_local_stress` を削除し、
-  `aero_domain` / `atmosphere_domain` / `wind_domain` / `stress_domain` の一本化へ置換。
-  依存方向を `flight_sim → *_domain` の一方向に限定する。
-  `parallel_engine.py:325` `isa_air_density` は `atmosphere_domain` 参照へ置換。
-  **先に A-2/A-3/A-6 で正本の式を確定させてから** move する（順序を逆にすると二重実装へ仕様修正を_percentage させる）。
+> **担当移動**: `genetic-project` ブランチの `no-finish-physics.md` **F-5**（`_local_atmosphere` /
+> `_local_wind` / `_local_stress` の重複）が正本で、4 モジュールの精密な一覧を持つ。
+> 全体像のみ記す。
+>
+> - **現状**（正本 → 重複先）:
+>   | モデル | 正本 | 重複実装 | 不一致内容 |
+>   |---|---|---|---|
+>   | Helmbold 揚力傾斜 | `aero_domain.py:213` | `flight_sim.py:506` | 式が 3 系統 |
+>   | Prandtl-Glauert | `aero_domain.py:224` | `flight_sim.py:514` | 圧縮性補正のクランプ値が別 |
+>   | ISA / 湿潤大気 | `atmosphere_domain.py:100` | `flight_sim.py:567` | 飽和蒸気圧式が別 |
+>   | Sutherland 粘性 | `atmosphere_domain.py:244` | `flight_sim.py` 内部 | — |
+>   | ABL 風速プロファイル | `wind_domain.py:605` | `flight_sim.py:726` | クランプの有無 |
+>   | ガスト包絡 | `wind_domain.py:565` | `flight_sim.py:726` | 時系列の式が別 |
+>   | 失速後 CL | `aero_domain.py:382` | `parallel_engine.py:981` | 曲線形状が別 |
+>   | 許容応力 | `stress_domain.py:456` | `flight_sim.py:1063` | 桁が別 |
+>   | ISA 密度 | `atmosphere_domain.py` | `parallel_engine.py:325` `isa_air_density` | 3 つ目の大気モデル |
+> - **影響**: 「どちらが正しいか」がコードからは判定できず、CUDA 経路と参照経路が別の物理になる根本原因。
+> **A 群のすべての変更が二重実装へ伝播する**ため、A 群着手前に解消すべき。
+> - **完了条件**: `flight_sim.py` から `helmbold_cl_alpha` / `prandtl_glauert` / `ground_effect_factor` /
+>   `_local_atmosphere` / `_local_wind` / `_local_aero` / `_local_stress` を削除し、
+>   `aero_domain` / `atmosphere_domain` / `wind_domain` / `stress_domain` の一本化へ置換。
+>   依存方向を `flight_sim → *_domain` の一方向に限定する。
+>   `parallel_engine.py:325` `isa_air_density` は `atmosphere_domain` 参照へ置換。
+>   **先に A-2/A-3/A-6 で正本の式を確定させてから** move する（順序を逆にすると二重実装へ仕様修正を_percentage させる）。
 
 ### B-2. 受動空力弾性モーフィングが §8 の担当外にある
 
@@ -499,25 +531,35 @@
 ## 2. 推奨着手順（依存関係順）
 
 ```
-[前提] 並行物理コア再構成の統合完了を待つ
+[前提] 並行物理コア再構成（genetic-project）の統合完了を待つ
    │
-   ├─ 1. B-1 物理モデルの一本化（重複を先に潰す）
-   │     └─ 正本の式を先に確定: A-2 → A-3 → A-6 → A-1 → A-4
+   ├─ 1. 物理側（本台帳に残した項目のみ。担当移動した 4 項目は no-finish-physics.md が正本）
+   │     B-1 物理モデルの一本化 → A-4 pushover → A-5 応力への α
+   │     → A-6 ABL power law → A-7 接地散逸上限 → B-2 / B-3 責務境界の移動
+   │     ※ 特性テスト（変更前の数値を固定する回帰テスト）を先に追加してから実装に入る
    │
-   ├─ 2. A 群の仕様準拠（結果が変わるため特性テストを先に追加）
-   │     A-2 Helmbold 式 → A-3/A-4 Polhamus・pushover → A-1 Viterna-Corrigan
-   │     → A-5 応力への α → A-6 ABL power law → A-7 接地散逸上限
-   │
-   ├─ 3. B-2 / B-3 責務境界の移動（A 群と同一コミット群で）
-   │
-   └─ 4. F-3 + C-2（ストレージ検証・入力検証）／ C-1・C-3・C-4・C-5・C-6
-        D-1〜D-3 / E-1〜E-6 / F-1・F-2 / G-1〜G-5 / H-1（別セッション）
+   └─ 2. 非物理側（並行作業と非衝突。今すぐ着手可）
+         F-3 + C-2（ストレージ検証・入力検証）／ C-1・C-3・C-4・C-5・C-6
+         D-1〜D-3 / E-1〜E-6 / F-1・F-2 / G-1〜G-5 / H-1（別セッション）
 ```
 
-- 1〜3 は**物理結果を変える**ため、各コミットで
+- **1** は**物理結果を変える**ため、各コミットで
   `compileall` / `ruff` / `mypy` / `pytest` / `smoke_test` を全通過させ、
-  かつ**特性テスト（変更前の数値を固定する回帰テスト）を先に追加**してから実装に入る。
-- 4 の各項目は物理結果を変えないため、並行作業と非競合のうちに個別に進行できる。
+  かつ特性テストを先に追加してから実装に入る。
+- **2** の各項目は物理結果を変えないため、並行作業と非競合のうちに個別に進行できる。
+- **H-1**（Discord トークンローテーション）は本セッションからは実行できず、オペレータ操作が必要。
+
+---
+
+## 3. 本ファイルが古くなっていないかの確認手順
+
+- 本台帳の evidence（`file:line` 参照）は基準 commit `42d80e8` / `defd482` 時点の値。
+  物理コア再構成の統合後は、**A 群・B 群の evidence を再採取**してから着手する。
+- 物理側の正本は `no-finish-physics.md`（`genetic-project` ブランチ由来）であり、
+  そこに A-1 / A-2 / A-3 / B-1 の詳細がある。両ファイルの内容が食い違ったら
+  **物理側を正とする**（`genetic-project` が実装会同伴のため）。
+- 手順の確認: `python tools/check_runs.py` / `python tools/check_issues.py` で
+  CI と Issue の状態を再取得し、本台帳の各「現状」記述と実装が一致するかを確認する。
 
 ---
 
