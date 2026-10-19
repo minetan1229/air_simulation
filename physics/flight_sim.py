@@ -2260,7 +2260,9 @@ class FlightSimulator:
         norm = float(np.linalg.norm(np.asarray(candidate.quaternion, dtype=np.float64)))
         return math.isfinite(norm) and abs(norm - 1.0) <= 1.0e-6
 
-    def _apply_ground_contact(self, state: StateVector) -> StateVector:
+    def _apply_ground_contact(
+        self, state: StateVector, prev_state: Optional[StateVector] = None
+    ) -> StateVector:
         """Resolve ground contact, latching the ``landed`` / ``crashed`` flags.
 
         The ground plane is ``z = -ground_level_m`` because +z points down.  The
@@ -2274,6 +2276,12 @@ class FlightSimulator:
         Tracks positions of nose, left wingtip, right wingtip, and tail keel relative to ground.
         If a wingtip strikes first before the main body, introduces a ground cartwheel / roll-yaw torque damping.
         If nose strikes at high impact speed, resolves crumple deceleration.
+
+        Continuous Collision Detection (CCD):
+        When sweeping from a previous state in the air (min_alt_prev > 0) to contact
+        or penetration (min_alt_curr <= 0), the contact instant tau in [0, 1] is
+        interpolated, position is clamped to the surface (min_alt ~ 0), and impact
+        dynamics are triggered accurately without tunneling underground.
         """
         if not bool(self.settings.collision_enabled) or state.landed or state.crashed:
             return state
@@ -2290,10 +2298,79 @@ class FlightSimulator:
         alt_tail = stations["alt_tail"]
         min_alt = stations["min_alt"]
 
+        # Continuous Collision Detection (CCD):
+        # Check if the airframe crossed the ground plane between prev_state and state.
+        if prev_state is not None and not (prev_state.landed or prev_state.crashed):
+            prev_stations = compute_ground_stations(
+                prev_state.position_m,
+                prev_state.quaternion,
+                self.environment,
+                self._derived,
+            )
+            min_alt_prev = prev_stations["min_alt"]
+            if min_alt_prev > 0.0 and min_alt <= 0.0:
+                denom = min_alt_prev - min_alt
+                tau = clamp(min_alt_prev / denom, 0.0, 1.0) if denom > 1.0e-12 else 0.0
+                dt_step = max(float(state.time_s) - float(prev_state.time_s), 0.0)
+                t_impact = float(prev_state.time_s) + tau * dt_step
+
+                p_prev = np.asarray(prev_state.position_m, dtype=np.float64)
+                p_curr = np.asarray(state.position_m, dtype=np.float64)
+                p_interp = (1.0 - tau) * p_prev + tau * p_curr
+
+                v_prev = np.asarray(prev_state.velocity_mps, dtype=np.float64)
+                v_curr = np.asarray(state.velocity_mps, dtype=np.float64)
+                v_interp = (1.0 - tau) * v_prev + tau * v_curr
+
+                q_prev = np.asarray(prev_state.quaternion, dtype=np.float64)
+                q_curr = np.asarray(state.quaternion, dtype=np.float64)
+                if float(np.dot(q_prev, q_curr)) < 0.0:
+                    q_curr = -q_curr
+                q_interp = quaternion_normalize((1.0 - tau) * q_prev + tau * q_curr)
+
+                w_prev = np.asarray(prev_state.angular_velocity_radps, dtype=np.float64)
+                w_curr = np.asarray(state.angular_velocity_radps, dtype=np.float64)
+                w_interp = (1.0 - tau) * w_prev + tau * w_curr
+
+                # Clamp lowest station exactly onto ground level (altitude = 0.0)
+                st_interp = compute_ground_stations(
+                    p_interp,
+                    q_interp,
+                    self.environment,
+                    self._derived,
+                )
+                min_alt_interp = st_interp["min_alt"]
+                p_clamped_z = p_interp[2] + min_alt_interp
+
+                state = StateVector(
+                    time_s=t_impact,
+                    position_m=(float(p_interp[0]), float(p_interp[1]), float(p_clamped_z)),
+                    velocity_mps=(float(v_interp[0]), float(v_interp[1]), float(v_interp[2])),
+                    quaternion=(float(q_interp[0]), float(q_interp[1]), float(q_interp[2]), float(q_interp[3])),
+                    angular_velocity_radps=(float(w_interp[0]), float(w_interp[1]), float(w_interp[2])),
+                    acceleration_mps2=(0.0, 0.0, 0.0),
+                    angular_accel_radps2=(0.0, 0.0, 0.0),
+                    landed=False,
+                    crashed=False,
+                )
+                stations = compute_ground_stations(
+                    state.position_m,
+                    state.quaternion,
+                    self.environment,
+                    self._derived,
+                )
+                altitude_cg = stations["altitude_cg"]
+                alt_nose = stations["alt_nose"]
+                alt_ltip = stations["alt_ltip"]
+                alt_rtip = stations["alt_rtip"]
+                alt_tail = stations["alt_tail"]
+                min_alt = stations["min_alt"]
+
         if min_alt > 0.0:
             return state
 
-        # Deep penetration guardrail: if aircraft is buried underground beyond tolerance,
+        # Deep penetration guardrail: if aircraft is buried underground beyond tolerance
+        # (and not resolved by CCD, e.g. underground initial spawn or loaded underground state),
         # immediately declare crashed and arrest all velocities without teleporting upwards.
         if altitude_cg < 0.0 or min_alt < -0.05:
             return StateVector(
@@ -2719,11 +2796,12 @@ class FlightSimulator:
             time_s = float(self._state.time_s)
             core = self._compute_dynamics(y0, time_s)
             h = min(self._timestep_from(core, y0, time_s), remaining)
+            previous_state = self._state
             if not self._advance(h, y0, time_s, self._derivative(y0, time_s, core)):
                 break
+            self._state = self._apply_ground_contact(self._state, previous_state)
             travelled += float(self._state.time_s) - time_s
             used += 1
-            self._state = self._apply_ground_contact(self._state)
             self._diagnostics_cache = None
             self._record_sample()
             if self._state.landed or self._state.crashed:
