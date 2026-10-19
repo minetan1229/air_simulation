@@ -46,6 +46,114 @@ def meta_schemas():
     )
 
 
+@meta_bp.get("/api/v1/meta/physics-references")
+def meta_physics_references():
+    """Structured registry of academic citations, governing equations, and AeroSandbox references."""
+    references = [
+        {
+            "id": "helmbold_1942",
+            "domain": "aerodynamics",
+            "model": "Helmbold Triangular Wing Lift Slope",
+            "equation": "C_Lalpha = 2*pi*AR / (2 + sqrt(AR^2*(1 + lambda) + 4*AR/pi))",
+            "authors": "Helmbold, H. B.",
+            "year": 1942,
+            "title": "Der unverwundene Dreiecksflügel als Trägerfläche höchsten Auftriebs",
+            "publication": "Jahrbuch 1942 der deutschen Luftfahrtforschung, I, 111-113",
+            "aerosandbox_reference": "aerosandbox.aerodynamics.buildup (AeroBuildup low-AR wing corrections)",
+        },
+        {
+            "id": "polhamus_1966",
+            "domain": "aerodynamics",
+            "model": "Polhamus Suction Analogy Leading-Edge Vortex Lift",
+            "equation": "C_L = K_p * sin(alpha) * cos^2(alpha) + K_v * sin^2(alpha) * cos(alpha)",
+            "authors": "Polhamus, E. C.",
+            "year": 1966,
+            "title": "A Concept of the Vortex Lift of Sharp-Edge Delta Wings Based on a Leading-Edge-Suction Analogy",
+            "publication": "NASA Technical Note NASA TN D-3767",
+            "url": "https://ntrs.nasa.gov/citations/19670003058",
+            "aerosandbox_reference": "aerosandbox.aerodynamics.buildup (slender delta wing vortex lift models)",
+        },
+        {
+            "id": "viterna_corrigan_1982",
+            "domain": "aerodynamics",
+            "model": "Viterna-Corrigan Post-Stall Extrapolation",
+            "equation": "C_L = A_1*sin(2*alpha) + A_2*cos^2(alpha)/sin(alpha); C_D = B_1*sin(alpha) + B_2*cos(alpha)",
+            "authors": "Viterna, L. A., and Corrigan, R. D.",
+            "year": 1982,
+            "title": "Fixed Pitch Rotor Performance of Large Horizontal Axis Wind Turbines",
+            "publication": "NASA Lewis Research Center, NASA TM-83021 / DOE/NASA/20320-35",
+            "url": "https://ntrs.nasa.gov/citations/19830006272",
+            "aerosandbox_reference": "aerosandbox.aerodynamics.airfoil (Airfoil post-stall Viterna method)",
+        },
+        {
+            "id": "hoerner_1965",
+            "domain": "aerodynamics",
+            "model": "Hoerner Flat Plate Separated Crossflow and Base Drag",
+            "equation": "C_N = 2.0 * sin(alpha) * cos^2(alpha)",
+            "authors": "Hoerner, S. F.",
+            "year": 1965,
+            "title": "Fluid-Dynamic Drag: Practical Information on Aerodynamic Drag and Hydrodynamic Resistance",
+            "publication": "Hoerner Fluid Dynamics, Brick Town, NJ",
+            "aerosandbox_reference": "aerosandbox.aerodynamics.buildup (crossflow drag and flat-plate normal force)",
+        },
+        {
+            "id": "wieselsberger_1922",
+            "domain": "aerodynamics",
+            "model": "Wieselsberger Wing Ground Effect Induced Drag Reduction",
+            "equation": "phi_GE = 16*(h/b)^2 / (1 + 16*(h/b)^2)",
+            "authors": "Wieselsberger, C.",
+            "year": 1922,
+            "title": "Wing Resistance Near the Ground",
+            "publication": "ZFM, Vol. 12, pp. 145-147; translated in NACA TM 77 (1922)",
+            "url": "https://ntrs.nasa.gov/citations/19930090888",
+            "aerosandbox_reference": "aerosandbox.aerodynamics.buildup (ground effect reduction factor)",
+        },
+        {
+            "id": "us_standard_atmosphere_1976",
+            "domain": "atmosphere",
+            "model": "U.S. Standard Atmosphere 1976 Geopotential Barometric Lapse Rate",
+            "equation": "T(h) = T0 - L*h, p(h) = p0*(T/T0)^(g/(L*R)), rho = p / (R*T)",
+            "authors": "NOAA, NASA, and USAF",
+            "year": 1976,
+            "title": "U.S. Standard Atmosphere, 1976",
+            "publication": "NOAA-S/T 76-1562, NASA-TM-X-74335, Washington, D.C.",
+            "url": "https://ntrs.nasa.gov/citations/19770009539",
+            "aerosandbox_reference": "aerosandbox.atmosphere.Atmosphere",
+        },
+        {
+            "id": "sutherland_1893",
+            "domain": "atmosphere",
+            "model": "Sutherland Temperature-Dependent Dynamic Viscosity",
+            "equation": "mu = mu0 * (T/T0)^1.5 * (T0 + S) / (T + S)",
+            "authors": "Sutherland, W.",
+            "year": 1893,
+            "title": "The Viscosity of Gases and Molecular Force",
+            "publication": "Philosophical Magazine, 5(36), pp. 507-531",
+            "doi": "10.1080/14786449308620508",
+            "aerosandbox_reference": "aerosandbox.atmosphere.Atmosphere (dynamic_viscosity calculation)",
+        },
+        {
+            "id": "prandtl_glauert_1928",
+            "domain": "aerodynamics",
+            "model": "Prandtl-Glauert Subsonic Compressibility Correction",
+            "equation": "beta = sqrt(1 - M^2), C_p = C_p0 / beta, dCL/dalpha = (dCL/dalpha)_0 / beta",
+            "authors": "Glauert, H.",
+            "year": 1928,
+            "title": "The Effect of Compressibility on the Lift of an Aerofoil",
+            "publication": "Proceedings of the Royal Society of London, Series A, 118(779), pp. 113-119",
+            "doi": "10.1098/rspa.1928.0039",
+            "aerosandbox_reference": "aerosandbox.aerodynamics.buildup (compressibility scaling)",
+        },
+    ]
+    return jsonify({
+        "status": "ok",
+        "count": len(references),
+        "references": references,
+        "timestamp": utc_now_iso(),
+    })
+
+
+
 @meta_bp.get("/api/v1/meta/health")
 def meta_health():
     domains = {}

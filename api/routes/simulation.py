@@ -162,22 +162,20 @@ def simulation_launch():
 
         should_ensemble = bool(payload.get("include_ensemble") or payload.get("ensemble"))
         if should_ensemble and gpu_info.get("available") and gpu_info.get("backend") == "cupy":
-            try:
-                ensemble_res = parallel.gpu_ensemble_simulation(
-                    aircraft=aircraft,
-                    environment=environment,
-                    launch=launch,
-                    settings=settings,
-                    n_trajectories=128,
-                    max_sample_tracks=64,
-                )
-                if ensemble_res and "sample_trajectories" in ensemble_res:
-                    sample_trajectories = ensemble_res["sample_trajectories"]
-                    ensemble_data = ensemble_res
-                    backend_name_str = f"cupy ({gpu_info.get('device_name', 'RTX 4060')})"
-                    device_name_str = gpu_info.get("device_name")
-            except Exception as exc:
-                log.warning("GPU ensemble simulation fallback: %s", exc)
+            ensemble_res = parallel.gpu_ensemble_simulation(
+                aircraft=aircraft,
+                environment=environment,
+                launch=launch,
+                settings=settings,
+                n_trajectories=128,
+                max_sample_tracks=64,
+            )
+            if ensemble_res and "sample_trajectories" in ensemble_res:
+                sample_trajectories = ensemble_res["sample_trajectories"]
+                ensemble_data = ensemble_res
+                backend_name_str = f"cupy ({gpu_info.get('device_name', 'RTX 4060')})"
+                device_name_str = gpu_info.get("device_name")
+
 
         return jsonify(
             {

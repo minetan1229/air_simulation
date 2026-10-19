@@ -855,11 +855,12 @@ def test_derived_load_stress_scales_as_speed_squared(cfg,env):
     assert fast["max_stress_pa"] == pytest.approx(4.0*slow["max_stress_pa"],rel=1e-12)
 
 
-def test_numpy_backend_fallback(cfg,monkeypatch):
-    monkeypatch.setattr(sd,"_CUPY_MODULE",None)
-    out = sd.stress_field(cfg,10.0,1.0,backend="cupy")
-    assert out["backend"] == "numpy"
-    assert sd.active_backend() == "numpy"
+def test_cupy_unavailability_raises_runtime_error(cfg, monkeypatch):
+    monkeypatch.setattr(sd, "_CUPY_MODULE", None)
+    with pytest.raises(RuntimeError, match="Hardware acceleration \\(CUDA GPU\\) is required"):
+        sd.stress_field(cfg, 10.0, 1.0, backend="cupy")
+    assert sd.active_backend(force_cpu=True) == "numpy"
+
 
 
 def test_tapered_root_moment_matches_independent_load_quadrature(cfg):

@@ -84,3 +84,35 @@ def test_gpu_batch_landing_within_duration():
     assert results[1]["landed"] is False
     assert results[1]["status"] == "timeout"
     assert results[1]["flight_time_s"] <= 3.0
+
+
+def test_cpu_batch_fallback_respects_durations():
+    """Verify that when running in CPU fallback mode (force_cpu=True), duration and schema are respected."""
+    cases = [
+        {
+            "aircraft": AircraftConfig(),
+            "environment": EnvironmentConfig(),
+            "launch": LaunchConfig(launch_height_m=50.0, launch_speed=10.0, launch_angle_deg=0.0),
+            "duration_s": 2.0,
+        },
+        {
+            "aircraft": AircraftConfig(),
+            "environment": EnvironmentConfig(),
+            "launch": LaunchConfig(launch_height_m=0.2, launch_speed=2.0, launch_angle_deg=-10.0),
+            "duration_s": 10.0,
+        },
+    ]
+
+    results = gpu_batch_evaluate_cases(cases, force_cpu=True)
+
+    assert len(results) == 2
+    # Case 0: 2.0s timeout
+    assert results[0]["flight_time_s"] <= 2.0
+    assert results[0]["landed"] is False
+    assert results[0]["status"] == "timeout"
+
+    # Case 1: lands quickly
+    assert results[1]["flight_time_s"] < 2.0
+    assert results[1]["landed"] is True
+    assert results[1]["status"] == "landed"
+

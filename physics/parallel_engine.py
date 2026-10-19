@@ -775,21 +775,21 @@ def gpu_ensemble_simulation(
     lnc_cfg = launch if isinstance(launch, LaunchConfig) else from_dict(LaunchConfig, launch or {})
     derived = derived_properties(air_cfg)
 
-    # 1. Decide execution backend (CuPy GPU vs NumPy CPU)
+    # 1. Decide execution backend (CuPy GPU with safe NumPy CPU fallback)
     xp = np
     backend = "numpy"
-    gpu_info = get_gpu_info()
     device_name = None
-    if not force_cpu and gpu_info["available"]:
+    gpu_info = get_gpu_info()
+    if not force_cpu and gpu_info["available"] and gpu_info["backend"] == "cupy":
         try:
-            if gpu_info["backend"] == "cupy":
-                import cupy as cp
-                xp = cp
-                backend = "cupy"
-                device_name = gpu_info.get("device_name")
+            import cupy as cp
+            xp = cp
+            backend = "cupy"
+            device_name = gpu_info.get("device_name")
         except Exception:
             xp = np
             backend = "numpy"
+
 
     # Clamp trajectory count
     N = int(clamp(n_trajectories, 16, 4096))
@@ -1357,15 +1357,38 @@ def gpu_batch_evaluate_cases(
     use_gpu = (not force_cpu) and gpu_info["available"] and (gpu_info["backend"] == "cupy")
 
     if not use_gpu:
-        return parallel_evaluate(cases, processes=0, progress_cb=progress_cb)
+        raw_results = parallel_evaluate(cases, processes=0, progress_cb=progress_cb)
+        cpu_results: List[Dict[str, Any]] = []
+        for idx, item in enumerate(raw_results):
+            dur = float(cases[idx].get("duration_s", 20.0))
+            t_val = min(float(item.get("flight_time_s", 0.0)), dur)
+            status_raw = str(item.get("status", "flying"))
+            crashed = bool(item.get("crashed", status_raw == "crashed"))
+            landed = bool(item.get("landed", status_raw == "landed" or (t_val < dur - 0.01 and not crashed)))
+            status_str = "crashed" if crashed else ("landed" if landed else "timeout")
+            d_val = float(item.get("landing_distance_m", item.get("distance_m", 0.0)))
+            r_entry = dict(item)
+            r_entry.update({
+                "distance_m": round(d_val, 4),
+                "flight_time_s": round(t_val, 4),
+                "horizontal_range_m": round(d_val, 4),
+                "range_x_m": round(d_val, 4),
+                "range_y_m": 0.0,
+                "landed": landed,
+                "crashed": crashed,
+                "status": status_str,
+            })
+            cpu_results.append(r_entry)
+        return cpu_results
 
     try:
         import cupy as xp
     except Exception:
-        return parallel_evaluate(cases, processes=0, progress_cb=progress_cb)
+        return gpu_batch_evaluate_cases(cases, progress_cb=progress_cb, force_cpu=True)
 
     backend = "cupy"
     device_name = gpu_info.get("device_name")
+
 
     # 1. Vectorize inputs across all N cases
     masses = []
