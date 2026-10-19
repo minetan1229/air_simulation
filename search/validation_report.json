@@ -1,0 +1,45 @@
+{
+  "generated_at": "2026-10-19T15:04:13+00:00",
+  "structural": {
+    "errors": [],
+    "categories": {
+      "01_aerodynamics_cfd": {
+        "entries": 400,
+        "chunks": 8,
+        "dois": 400
+      },
+      "02_mechanics_multiphysics": {
+        "entries": 400,
+        "chunks": 8,
+        "dois": 400
+      },
+      "03_numerical_solvers": {
+        "entries": 400,
+        "chunks": 8,
+        "dois": 400
+      },
+      "04_collision_geometry": {
+        "entries": 400,
+        "chunks": 8,
+        "dois": 400
+      },
+      "05_gpu_realtime_sim": {
+        "entries": 400,
+        "chunks": 8,
+        "dois": 400
+      }
+    }
+  },
+  "registry": {
+    "checked": 2000,
+    "ok": 2000,
+    "failed": []
+  },
+  "url": {
+    "checked": 2000,
+    "ok": 2000,
+    "failed": []
+  },
+  "errors": [],
+  "passed": true
+}
