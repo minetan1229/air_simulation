@@ -823,12 +823,28 @@ def main() -> int:
     parser.add_argument("--stage", action="append", help="run only the named stage (repeatable)")
     parser.add_argument("--list", action="store_true", help="list stage names and exit")
     parser.add_argument("--quiet", action="store_true", help="only print the summary")
+    parser.add_argument(
+        "--allow-protected-branch",
+        action="store_true",
+        help="run even when the checked-out branch is master/main",
+    )
     args = parser.parse_args()
 
     if args.list:
         for name, _fn in STAGES:
             print(name)
         return 0
+
+    # Branch guard: the genetic-project phase is isolated from master, so the
+    # end-to-end verification must not be executed from a protected branch.
+    # The check runs before any stage, and it does not change the stage count.
+    from tools.branch_guard import BranchViolation, assert_branch_allowed, describe_status
+
+    try:
+        branch_status = assert_branch_allowed(allow_protected=bool(args.allow_protected_branch))
+    except BranchViolation as exc:
+        print(f"{FAIL} branch guard: {exc}", file=sys.stderr)
+        return 2
 
     from app import app
 
@@ -846,11 +862,12 @@ def main() -> int:
     print("=" * 78)
     print("  3D PAPER AIRPLANE SIMULATOR - END-TO-END SMOKE TEST")
     print("  backend: reported by each stage (CPU/CUDA capabilities vary by domain)")
+    print(f"  {describe_status(branch_status)}")
     print("=" * 78)
 
     started = time.perf_counter()
     for name, fn in selected:
-        runner.stage(name, lambda fn=fn: fn(runner))
+        runner.stage(name, lambda fn=fn: fn(runner))  # type: ignore[misc]
     total = time.perf_counter() - started
 
     passed = sum(1 for _n, ok, _m, _e in runner.results if ok)

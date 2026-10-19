@@ -38,7 +38,8 @@ Flask REST API による物理演算バックエンドと、Three.js を用い�
 - **Python**: 3.10 以上 (3.11 推奨)
 - **アクセラレータ (GPU)**: NVIDIA GPU (CUDA 12.x / Compute Capability 5.0 以上)
   - 演算バックエンドとして CuPy (`cupy-cuda12x`) を使用。
-  - GPU が明示的に指定された場合、またはバッチ並列計算において GPU が利用不能な場合は即座に `RuntimeError` を送出して処理を停止する（フェイルファスト原則）。CPU への暗黙的フォールバックは禁止。
+  - GPU が利用不能な場合は NumPy / `multiprocessing` による **CPU フォールバックへ自動的に移行する**（返却スキーマは GPU 経路と同一）。CUDA 初期化に失敗しても `RuntimeError` で停止しない。
+  - **経路ごとに物理モデルが異なる**: GPU 最適化バッチ経路は正規経路と同一の 13 状態 RK4 剛体モデルをベクトル化して積分する（`model = "rigid_body_6dof"`）。一方、GPU モンテカルロ・アンサンブル経路と解析的滑翔サーホゲートは **縮約モデル**であり（`model = "reduced_surrogate"`）、6DoF 再検証には使用できない。各ペイロードの `model` / `model_detail` タグで判別できる。
 - **ブラウザ**: WebGL 2.0 対応ブラウザ (Google Chrome, Microsoft Edge, Firefox, Safari)
 
 ---
