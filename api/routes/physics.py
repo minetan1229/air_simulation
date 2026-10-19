@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import gzip
+import json
 from typing import Any, Dict
-from flask import Blueprint, jsonify
+from flask import Blueprint, Response, jsonify, request
 
 from physics.config_schema import AircraftConfig, EnvironmentConfig, as_dict
 from ..core import (
@@ -194,6 +196,19 @@ def wind_field():
         )
     )
     data.setdefault("backend", wind.active_backend())
+
+    # Check if client accepts gzip or requested compact binary encoding
+    accept_encoding = request.headers.get("Accept-Encoding", "")
+    if "gzip" in accept_encoding and not request.args.get("raw"):
+        json_bytes = json.dumps(data).encode("utf-8")
+        # Only compress if payload is large enough (> 1KB)
+        if len(json_bytes) > 1024:
+            compressed = gzip.compress(json_bytes, compresslevel=6)
+            resp = Response(compressed, mimetype="application/json")
+            resp.headers["Content-Encoding"] = "gzip"
+            resp.headers["Content-Length"] = str(len(compressed))
+            return resp
+
     return jsonify(data)
 
 

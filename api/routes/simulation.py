@@ -45,6 +45,12 @@ def simulation_step():
     if substeps is not None and not (1 <= substeps <= 256):
         raise BadRequest("'substeps' must lie within [1, 256]")
 
+    # Optional multi-step execution to stream 10-60 simulation steps in one round-trip
+    n_steps = payload.get("n_steps")
+    n_steps = 1 if n_steps is None else as_int(n_steps, "n_steps")
+    if not (1 <= n_steps <= 240):
+        raise BadRequest("'n_steps' must lie within [1, 240]")
+
     with SESSION.lock:
         if payload.get("aircraft"):
             SESSION.set_aircraft(build(AircraftConfig, payload["aircraft"]))
@@ -58,8 +64,21 @@ def simulation_step():
             SESSION.set_settings(build(SimulationSettings, payload["simulation"]))
 
         simulator = SESSION.simulator_instance()
-        result = simulator.step(dt=dt, substeps=substeps)
-    out = dict(result)
+        if n_steps == 1:
+            result = simulator.step(dt=dt, substeps=substeps)
+            out = dict(result)
+        else:
+            steps_list = []
+            for _ in range(n_steps):
+                res = simulator.step(dt=dt, substeps=substeps)
+                steps_list.append(res)
+                if res.get("terminated", False):
+                    break
+            last = steps_list[-1]
+            out = dict(last)
+            out["steps"] = steps_list
+            out["n_steps"] = len(steps_list)
+
     gpu_info = domain("parallel_engine").get_gpu_info()
     if gpu_info.get("available"):
         out.setdefault("backend", gpu_info["backend"])

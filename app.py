@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+import os
 import threading
 import traceback
 from typing import Any, Dict, Optional, Tuple
@@ -15,6 +16,7 @@ from typing import Any, Dict, Optional, Tuple
 from flask import Flask, Response, jsonify, render_template, request
 from werkzeug.exceptions import HTTPException
 
+from physics.config_schema import utc_now_iso
 from api.core import (
     BadRequest,
     NotFound,
@@ -123,8 +125,59 @@ def _handle_unexpected(exc: Exception):
 
 
 # ---------------------------------------------------------------------------
+# Authentication Middleware
+# ---------------------------------------------------------------------------
+@app.before_request
+def _check_authentication() -> Optional[Tuple[Response, int]]:
+    """Validate Bearer token / API Key on protected API endpoints when API_KEY is configured."""
+    api_key = os.environ.get("API_KEY", "").strip()
+    if not api_key:
+        return None  # Auth is optional when API_KEY is not configured
+
+    # Exempt public, health check, UI and diagnostic routes
+    path = request.path or "/"
+    if (
+        request.method == "OPTIONS"
+        or path in ("/", "/healthz", "/healthz/ready", "/healthz/live")
+        or path.startswith(("/static/", "/api/v1/meta/", "/api/v1/system/"))
+    ):
+        return None
+
+    auth_header = request.headers.get("Authorization", "").strip()
+    token = None
+    if auth_header.lower().startswith("bearer "):
+        token = auth_header[7:].strip()
+    elif request.headers.get("X-API-Key"):
+        token = request.headers.get("X-API-Key", "").strip()
+    elif "api_key" in request.args:
+        token = request.args.get("api_key", "").strip()
+
+    if not token or token != api_key:
+        return api_error("Unauthorized: invalid or missing API Key / Bearer token", 401, category="security")
+    return None
+
+
+# ---------------------------------------------------------------------------
 # Security & CORS headers
 # ---------------------------------------------------------------------------
+def _is_origin_allowed(origin: str) -> bool:
+    if not origin:
+        return False
+    # Standard local origins
+    if (
+        origin.startswith("http://127.0.0.1:")
+        or origin.startswith("http://localhost:")
+        or origin.startswith("https://127.0.0.1:")
+        or origin.startswith("https://localhost:")
+        or origin in ("http://127.0.0.1", "http://localhost")
+    ):
+        return True
+
+    # User configured allowed origins from ALLOWED_ORIGINS env
+    allowed_list = [o.strip() for o in os.environ.get("ALLOWED_ORIGINS", "").split(",") if o.strip()]
+    return origin in allowed_list
+
+
 @app.after_request
 def _add_security_headers(response: Response) -> Response:
     response.headers["X-Content-Type-Options"] = "nosniff"
@@ -139,17 +192,11 @@ def _add_security_headers(response: Response) -> Response:
         "connect-src 'self' ws: wss:;"
     )
     origin = request.headers.get("Origin", "")
-    allowed = (
-        origin.startswith("http://127.0.0.1:")
-        or origin.startswith("http://localhost:")
-        or origin.startswith("https://127.0.0.1:")
-        or origin.startswith("https://localhost:")
-        or origin in ("http://127.0.0.1", "http://localhost")
-    )
+    allowed = _is_origin_allowed(origin)
     if "Access-Control-Allow-Origin" not in response.headers:
         response.headers["Access-Control-Allow-Origin"] = origin if allowed else "http://127.0.0.1:5000"
         response.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS, DELETE"
-        response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization, X-Simulation-Session"
+        response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization, X-Simulation-Session, X-API-Key"
     return response
 
 
@@ -158,21 +205,15 @@ def _add_security_headers(response: Response) -> Response:
 def _handle_options(path: str = ""):
     resp = Response(status=204)
     origin = request.headers.get("Origin", "")
-    allowed = (
-        origin.startswith("http://127.0.0.1:")
-        or origin.startswith("http://localhost:")
-        or origin.startswith("https://127.0.0.1:")
-        or origin.startswith("https://localhost:")
-        or origin in ("http://127.0.0.1", "http://localhost")
-    )
+    allowed = _is_origin_allowed(origin)
     resp.headers["Access-Control-Allow-Origin"] = origin if allowed else "http://127.0.0.1:5000"
     resp.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS, DELETE"
-    resp.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization, X-Simulation-Session"
+    resp.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization, X-Simulation-Session, X-API-Key"
     return resp
 
 
 # ---------------------------------------------------------------------------
-# UI Entry Points
+# UI & Health Check Entry Points
 # ---------------------------------------------------------------------------
 @app.get("/")
 def index():
@@ -182,6 +223,32 @@ def index():
 @app.get("/healthz")
 def healthz():
     return jsonify({"status": "ok"})
+
+
+@app.get("/healthz/live")
+def healthz_live():
+    """Liveness probe: verifies process is responding."""
+    return jsonify({
+        "status": "alive",
+        "timestamp": utc_now_iso(),
+    })
+
+
+@app.get("/healthz/ready")
+def healthz_ready():
+    """Readiness probe: checks memory, active job capacity, and domain readiness."""
+    from physics.job_manager import JOB_MANAGER
+    gpu_info = domain("parallel_engine").get_gpu_info()
+    active_jobs = JOB_MANAGER.active_count()
+    ready = active_jobs < 4
+    return jsonify({
+        "status": "ready" if ready else "busy",
+        "ready": ready,
+        "active_jobs": active_jobs,
+        "max_jobs": 4,
+        "gpu": gpu_info,
+        "timestamp": utc_now_iso(),
+    }), (200 if ready else 503)
 
 
 # ---------------------------------------------------------------------------

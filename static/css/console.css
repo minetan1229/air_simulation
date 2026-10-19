@@ -3141,4 +3141,69 @@ input[type="range"]:focus-visible { outline: 2px solid var(--accent); outline-of
   margin-top: 4px;
 }
 
+/* ------------------------------------------------------------------ */
+/* Responsive Layout (Tablets & Mobile Screens)                        */
+/* ------------------------------------------------------------------ */
+@media (max-width: 1080px) {
+  :root {
+    --rail-l: 260px;
+    --rail-r: 280px;
+  }
+  .toprail .brand-sub {
+    display: none;
+  }
+}
+
+@media (max-width: 860px) {
+  .stage {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: 1fr;
+    position: relative;
+  }
+
+  .rail-left, .rail-right {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    z-index: var(--z-overlay);
+    width: 320px;
+    max-width: 85vw;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
+    transition: transform 200ms ease;
+  }
+
+  .rail-left {
+    left: 0;
+    transform: translateX(-100%);
+  }
+
+  .rail-right {
+    right: 0;
+    transform: translateX(100%);
+  }
+
+  .rail-left.mobile-open,
+  .rail-right.mobile-open {
+    transform: translateX(0);
+  }
+
+  .toprail-actions .header-eta {
+    display: none;
+  }
+
+  .toprail-readouts {
+    padding: 0 6px;
+    gap: 8px;
+  }
+}
+
+@media (max-width: 600px) {
+  .toprail .brand-text {
+    display: none;
+  }
+  .readout:not(.readout-run):not(:first-child) {
+    display: none;
+  }
+}
+
 
