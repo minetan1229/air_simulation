@@ -44,3 +44,6 @@
 
 ## 4. Meta-Control & Protocol Governance (プロトコル改定規約 #17)
 - `AGENTS.md` 自体の改変（Level 1 メタ制御）は、ユーザーの明示的な要求または監査合意がある場合に限り行い、改定時は `.agents/AGENTS.md` との二重整合性を完全に保たなければならない。
+
+## 5. agents.mdを編集
+-　agents.mdはcontextを気にして編集する
