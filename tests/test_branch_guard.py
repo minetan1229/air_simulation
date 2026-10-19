@@ -59,8 +59,17 @@ def repo(tmp_path: Path) -> Path:
 
 @pytest.fixture(autouse=True)
 def _clean_guard_env(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Every test starts from the default (strict) policy."""
+    """Every test starts from the default (strict) policy.
+
+    The CI markers are removed as well.  A GitHub runner exports
+    ``GITHUB_ACTIONS`` and ``CI``, and the guard downgrades itself to a
+    warning there - without this, every strict-policy assertion below would
+    depend on where the suite happens to run.  The downgrade is exercised
+    explicitly by ``test_a_ci_runner_downgrades_the_guard_to_a_warning``.
+    """
     monkeypatch.delenv(branch_guard.GUARD_ENV_VAR, raising=False)
+    monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
+    monkeypatch.delenv("CI", raising=False)
 
 
 # ---------------------------------------------------------------------------
@@ -159,6 +168,7 @@ def test_a_ci_runner_downgrades_the_guard_to_a_warning(
     """
     monkeypatch.delenv(branch_guard.GUARD_ENV_VAR, raising=False)
     monkeypatch.setenv("GITHUB_ACTIONS", "true")
+    monkeypatch.setenv("CI", "true")
     status = guard_status(repo_root=repo)
     assert status["mode"] == "warn"
     assert status["severity"] == "warning"
