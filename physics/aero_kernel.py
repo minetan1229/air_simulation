@@ -72,6 +72,7 @@ __all__ = [
     "separated_pressure_drag_coefficient",
     "drag_coefficient",
     "elevon_effects",
+    "trailing_edge_fold_effects",
     "center_of_pressure_fraction",
     "evaluate_coefficients",
     "effective_stall_alpha_deg",
@@ -620,6 +621,24 @@ def elevon_effects(
     return {"dcl": dcl, "dcm": dcm, "dalpha_trim_deg": dalpha}
 
 
+def trailing_edge_fold_effects(xp: Any, fold_trailing_deg: Any) -> Dict[str, Any]:
+    """Aerodynamic increments from full-span trailing-edge fold angle (vectorised).
+
+    A positive fold angle is trailing-edge-down (camber increase): adds lift (dcl > 0)
+    and introduces a nose-down moment (dcm < 0).
+    A negative fold angle is trailing-edge-up (reflex): reduces lift (dcl < 0)
+    and introduces a nose-up pitch trim moment (dcm > 0), essential for tailless paper gliders.
+    Also produces a profile drag increment dcd scaling with sin^2(fold).
+    """
+    fold = _finite(xp, fold_trailing_deg, 0.0)
+    rad = _rad(xp, fold)
+    dcl = 0.015 * fold
+    dcm = -0.012 * fold
+    sin_val = xp.sin(rad)
+    dcd = 0.035 * (sin_val ** 2)
+    return {"dcl": dcl, "dcm": dcm, "dcd": dcd}
+
+
 def center_of_pressure_fraction(
     xp: Any, alpha_deg: Any, stall_alpha_deg: Any, cp_shift_gain: Any
 ) -> Any:
@@ -685,6 +704,7 @@ class AeroParams:
     rudder_deg: Any = 0.0
     elevon_deg: Any = 0.0
     elevon_authority: Any = 0.22
+    fold_trailing_deg: Any = 0.0
     cg_offset_x: Any = 0.0
     cp_shift_gain: Any = 0.0
     ground_cushion_lift: Any = 0.0
@@ -761,6 +781,7 @@ def evaluate_coefficients(
     elevon = elevon_effects(
         xp, p.elevon_deg, p.elevon_authority, p.cm0, p.cm_alpha
     )
+    te_fold = trailing_edge_fold_effects(xp, p.fold_trailing_deg)
     slope = p.lift_slope(xp, mach)
     polar = p.polar_constant(xp)
 
@@ -774,12 +795,12 @@ def evaluate_coefficients(
         cl_max=p.cl_max,
         polhamus_kp=p.polhamus_kp,
         polhamus_kv=p.polhamus_kv,
-        cl_offset=elevon["dcl"],
+        cl_offset=elevon["dcl"] + te_fold["dcl"],
     )
     cl = cl_raw * lift_scale
 
     ground_ratio = ground_effect_factor(xp, height, span, ground_enabled)
-    cd0 = parasite_drag_coefficient(xp, p.cd0, reynolds, p.re_cd0_exponent)
+    cd0 = parasite_drag_coefficient(xp, p.cd0, reynolds, p.re_cd0_exponent) + te_fold["dcd"]
     cd = (
         cd0
         + (cl * cl / xp.maximum(polar, 1.0e-12)) * ground_ratio
@@ -844,6 +865,7 @@ def evaluate_coefficients(
         + cm_alpha_term
         + p.cm_q * q_hat
         + elevon["dcm"]
+        + te_fold["dcm"]
         + cm_roll
         + p.cm_pitch_rate * q_hat
         + p.cm_yaw_rate * r_hat
@@ -949,6 +971,9 @@ def evaluate_coefficients(
         "elevon_dcl": elevon["dcl"],
         "elevon_dcm": elevon["dcm"],
         "elevon_dalpha_trim_deg": elevon["dalpha_trim_deg"],
+        "te_fold_dcl": te_fold["dcl"],
+        "te_fold_dcm": te_fold["dcm"],
+        "te_fold_dcd": te_fold["dcd"],
         "q_dyn": q_dyn,
         "lift_n": lift_n,
         "drag_n": drag_n,
@@ -963,7 +988,7 @@ def evaluate_coefficients(
         "ground_ratio": ground_ratio,
         "cp_x_m": cp_x,
         "polar_constant": polar,
-        "cl_zero_lift": p.cL0 * lift_scale + elevon["dcl"] * lift_scale,
+        "cl_zero_lift": p.cL0 * lift_scale + (elevon["dcl"] + te_fold["dcl"]) * lift_scale,
     }
 
 
@@ -1045,6 +1070,7 @@ def params_from_aircraft(cfg: AircraftConfig) -> AeroParams:
         rudder_deg=_finite_scalar(getattr(cfg, "rudder_deg", 0.0), 0.0),
         elevon_deg=_finite_scalar(cfg.elevon_deg, 0.0),
         elevon_authority=clamp(abs(_finite_scalar(cfg.elevon_chord_ratio, 0.22)), 0.0, 1.0),
+        fold_trailing_deg=_finite_scalar(getattr(cfg, "fold_trailing_deg", 0.0), 0.0),
         cg_offset_x=_finite_scalar(cfg.cg_offset_x, 0.0),
         cp_shift_gain=_finite_scalar(cfg.cp_shift_gain, 0.0),
         ground_cushion_lift=_finite_scalar(cfg.ground_cushion_lift, 0.0),

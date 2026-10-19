@@ -16,6 +16,7 @@ __all__ = [
     "stress_domain",
     "mesh_domain",
     "origami_domain",
+    "origami_genome",
     "flight_sim",
     "parallel_engine",
     "optimizer_domain",

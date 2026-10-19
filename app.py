@@ -7,11 +7,16 @@ section 10 / prompt.md section 7.
 from __future__ import annotations
 
 import argparse
+import hmac
 import logging
 import os
 import threading
 import traceback
 from typing import Any, Dict, Optional, Tuple
+
+import dotenv
+
+dotenv.load_dotenv()
 
 from flask import Flask, Response, jsonify, render_template, request
 from werkzeug.exceptions import HTTPException
@@ -137,11 +142,12 @@ def _check_authentication() -> Optional[Tuple[Response, int]]:
         return None  # Auth is optional when API_KEY is not configured
 
     # Exempt public, health check, UI and diagnostic routes
+    # Note: /api/v1/system/gpu (read-only) is exempt, while /api/v1/system/force-gpu-render is protected.
     path = request.path or "/"
     if (
         request.method == "OPTIONS"
-        or path in ("/", "/healthz", "/healthz/ready", "/healthz/live")
-        or path.startswith(("/static/", "/api/v1/meta/", "/api/v1/system/"))
+        or path in ("/", "/healthz", "/healthz/ready", "/healthz/live", "/api/v1/system/gpu")
+        or path.startswith(("/static/", "/api/v1/meta/"))
     ):
         return None
 
@@ -151,10 +157,8 @@ def _check_authentication() -> Optional[Tuple[Response, int]]:
         token = auth_header[7:].strip()
     elif request.headers.get("X-API-Key"):
         token = request.headers.get("X-API-Key", "").strip()
-    elif "api_key" in request.args:
-        token = request.args.get("api_key", "").strip()
 
-    if not token or token != api_key:
+    if not token or not hmac.compare_digest(token, api_key):
         return api_error("Unauthorized: invalid or missing API Key / Bearer token", 401, category="security")
     return None
 

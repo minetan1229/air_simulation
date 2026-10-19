@@ -101,6 +101,7 @@ def get_record_presets():
 
 
 @records_bp.get("/api/v1/records/presets/<key>")
+@records_bp.get("/api/v1/records/preset/<key>")
 def get_record_preset(key: str):
     from physics import records_domain
     try:
@@ -192,22 +193,29 @@ def guinness_simulate():
 
 
 @records_bp.get("/api/v1/guinness/verification")
+@records_bp.get("/api/v1/records/guinness")
 def guinness_verification():
-    """Get the verification matrix of all Guinness world records side by side."""
+    """Get the Guinness world record benchmark specification, or run the verification matrix when ?verify=1."""
     from physics import records_domain
-    category = request.args.get("category")
-    keys = None
-    if category:
-        presets = records_domain.list_presets(category=category)
-        keys = [p["key"] for p in presets]
-    report = records_domain.verification_report(keys=keys)
-    return jsonify(report)
+    verify = request.args.get("verify") in ("1", "true")
+    if verify:
+        category = request.args.get("category")
+        keys = None
+        if category:
+            presets = records_domain.list_presets(category=category)
+            keys = [p["key"] for p in presets]
+        report = records_domain.verification_report(keys=keys, duration_s=60.0)
+        return jsonify(report)
+
+    benchmark = records_domain.preset_payload("toda_29_2s")
+    return jsonify(benchmark)
 
 
 # ---------------------------------------------------------------------------
 # Error Logging & Diagnostics Endpoints
 # ---------------------------------------------------------------------------
 @records_bp.get("/api/v1/errors")
+@records_bp.get("/api/v1/records/errors")
 def list_errors():
     """Retrieve error history with optional level, category, and text filtering."""
     limit = int(request.args.get("limit", 100))
@@ -215,11 +223,11 @@ def list_errors():
     level = request.args.get("level")
     category = request.args.get("category")
     search = request.args.get("search")
-    logs = ERROR_LOGGER.get_logs(limit=limit, level=level, category=category, search=search)
+    logs = ERROR_LOGGER.get_logs(limit=limit, level=level, category=category, search=search, public=True)
     return jsonify({
         "errors": logs,
         "count": len(logs),
-        "statistics": ERROR_LOGGER.statistics(),
+        "statistics": ERROR_LOGGER.public_statistics(),
     })
 
 
@@ -228,16 +236,43 @@ def report_client_error():
     """Receive client-side (frontend JavaScript/WebGL) errors and persist them."""
     payload = body()
     message = payload.get("message", "Frontend error")
-    level = payload.get("level", "ERROR")
-    category = payload.get("category", "frontend")
+    if not isinstance(message, str):
+        raise BadRequest("'message' must be a string")
+    if len(message) > 2000:
+        raise BadRequest("'message' must not exceed 2000 characters")
+
+    level = str(payload.get("level", "ERROR")).upper()
+    valid_levels = {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}
+    if level not in valid_levels:
+        raise BadRequest(f"'level' must be one of {', '.join(sorted(valid_levels))}")
+
+    category = str(payload.get("category", "frontend"))
+    if len(category) > 64:
+        raise BadRequest("'category' must not exceed 64 characters")
+
     details = payload.get("details", {})
+    if details is not None and not isinstance(details, dict):
+        raise BadRequest("'details' must be a JSON object")
+    if details is None:
+        details = {}
+
     traceback_str = payload.get("stack") or payload.get("traceback")
+    if traceback_str is not None and not isinstance(traceback_str, str):
+        raise BadRequest("'stack' or 'traceback' must be a string")
+    if traceback_str and len(traceback_str) > 10000:
+        traceback_str = traceback_str[:10000]
 
     try:
         req_path = payload.get("url") or (request.path if request else None)
         client_ip = request.remote_addr if request else None
     except Exception:
         req_path, client_ip = None, None
+
+    status_code = payload.get("status_code", 400)
+    try:
+        status_code = int(status_code)
+    except (TypeError, ValueError):
+        status_code = 400
 
     rec = ERROR_LOGGER.record_error(
         message=message,
@@ -247,7 +282,7 @@ def report_client_error():
         details=details,
         path=req_path,
         method="CLIENT",
-        status_code=payload.get("status_code", 400),
+        status_code=status_code,
         client_ip=client_ip,
     )
     return jsonify({"ok": True, "error_id": rec.id})
@@ -256,7 +291,7 @@ def report_client_error():
 @records_bp.get("/api/v1/errors/stats")
 def error_stats():
     """Get error metrics and log file statuses."""
-    return jsonify(ERROR_LOGGER.statistics())
+    return jsonify(ERROR_LOGGER.public_statistics())
 
 
 @records_bp.post("/api/v1/errors/clear")

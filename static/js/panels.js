@@ -42,6 +42,20 @@ const FIELD_TABLE = {
       ],
     },
     { key: "progression", label: "折り工程 α", unit: "%", scale: 100, min: 0, max: 100, step: 1, digits: 0, section: "origami" },
+    { key: "genome_enabled", kind: "toggle", label: "無作為折り方（遺伝子）", section: "origami" },
+    {
+      key: "genome_strategy",
+      kind: "select",
+      label: "遺伝子戦略",
+      section: "origami",
+      options: [
+        ["families", "折り族群（折可行的）"],
+        ["free", "完全無作為"],
+      ],
+    },
+    { key: "genome_seed", label: "遺伝子シード", min: 0, max: 9999, step: 1, digits: 0, section: "origami" },
+    { key: "genome_steps", label: "折り手数", min: 2, max: 24, step: 1, digits: 0, section: "origami" },
+    { key: "genome_step", label: "折り手順", min: 0, max: 24, step: 1, digits: 0, section: "origami" },
   ],
   fold: [
     { key: "fold_leading_deg", label: "前縁折り角", unit: DEG, min: 0, max: 90, step: 0.5, digits: 1 },

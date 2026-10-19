@@ -253,3 +253,50 @@ export async function requestOrigamiMesh(options) {
   }
   return response.json();
 }
+
+/**
+ * Ask the server for every intermediate state of a random fold programme.
+ *
+ * The payload carries the solid after 0, 1, 2, ... folds, so a slider can
+ * walk through the folding one move at a time.
+ *
+ * @param {{seed: number, stepCount: number, strategy: string,
+ *          signal: AbortSignal}} options
+ * @returns {Promise<object>} the step states and the fold programme
+ */
+export async function requestOrigamiGenomeSteps(options) {
+  const params = new URLSearchParams({
+    seed: String(Math.round(Number(options.seed) || 0)),
+    step_count: String(Math.max(1, Math.round(Number(options.stepCount) || 8))),
+    strategy: String(options.strategy || "families"),
+  });
+  const response = await fetch(`/api/v1/origami/genome/steps?${params.toString()}`, {
+    signal: options.signal,
+  });
+  if (!response.ok) {
+    throw new Error(`origami genome step request failed with ${response.status}`);
+  }
+  return response.json();
+}
+
+/**
+ * Ask the server for the folding recipe of a random fold programme.
+ *
+ * @param {{seed: number, stepCount: number, strategy: string,
+ *          signal: AbortSignal}} options
+ * @returns {Promise<object>} the step table, the Markdown and the SVG
+ */
+export async function requestOrigamiRecipe(options) {
+  const params = new URLSearchParams({
+    seed: String(Math.round(Number(options.seed) || 0)),
+    step_count: String(Math.max(1, Math.round(Number(options.stepCount) || 8))),
+    strategy: String(options.strategy || "families"),
+  });
+  const response = await fetch(`/api/v1/origami/genome/recipe?${params.toString()}`, {
+    signal: options.signal,
+  });
+  if (!response.ok) {
+    throw new Error(`origami recipe request failed with ${response.status}`);
+  }
+  return response.json();
+}

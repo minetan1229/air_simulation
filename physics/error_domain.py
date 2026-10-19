@@ -45,6 +45,13 @@ class ErrorRecord:
         d = asdict(self)
         return d
 
+    def to_public_dict(self) -> Dict[str, Any]:
+        d = asdict(self)
+        has_tb = bool(d.pop("traceback_str", None))
+        d.pop("client_ip", None)
+        d["has_traceback"] = has_tb
+        return d
+
 
 class ErrorLoggerDomain:
     """Thread-safe persistent error logger and in-memory ring buffer."""
@@ -161,6 +168,7 @@ class ErrorLoggerDomain:
         level: Optional[str] = None,
         category: Optional[str] = None,
         search: Optional[str] = None,
+        public: bool = False,
     ) -> List[Dict[str, Any]]:
         """Retrieve recent errors from in-memory ring buffer with optional filtering."""
         with self._lock:
@@ -182,7 +190,7 @@ class ErrorLoggerDomain:
                 in_tb = r.traceback_str and s_lower in r.traceback_str.lower()
                 if not (in_msg or in_path or in_tb):
                     continue
-            results.append(r.to_dict())
+            results.append(r.to_public_dict() if public else r.to_dict())
             if len(results) >= limit:
                 break
 
@@ -219,6 +227,19 @@ class ErrorLoggerDomain:
                 else 0,
             },
         }
+
+    def public_statistics(self) -> Dict[str, Any]:
+        """Summary metrics of recorded errors with sanitized public paths."""
+        stats = self.statistics()
+        log_files = stats.get("log_files", {})
+        public_files = {
+            "text": os.path.basename(log_files.get("text", "")),
+            "jsonl": os.path.basename(log_files.get("jsonl", "")),
+            "text_size_bytes": log_files.get("text_size_bytes", 0),
+            "jsonl_size_bytes": log_files.get("jsonl_size_bytes", 0),
+        }
+        stats["log_files"] = public_files
+        return stats
 
 
 # Singleton instance for application-wide logging

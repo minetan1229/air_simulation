@@ -13,11 +13,12 @@ use ``1e-12`` or tighter, mixed closed forms use ``1e-9`` .. ``1e-6``.
 from __future__ import annotations
 
 import math
-from dataclasses import fields
+from dataclasses import fields, replace
 
+import numpy as np
 import pytest
 
-from physics import aero_domain
+from physics import aero_domain, aero_kernel
 from physics.aero_domain import (
     ELEVON_LIFT_PER_DEG,
     ELEVON_MOMENT_PER_DEG,
@@ -33,6 +34,7 @@ from physics.aero_domain import (
     drag_polar_minima,
     elevon_authority,
     elevon_effects,
+    trailing_edge_fold_effects,
     evaluate_aero,
     evaluate_aero_state,
     flat_plate_lift_coefficient,
@@ -46,6 +48,8 @@ from physics.aero_domain import (
     polhamus_lift_coefficient,
     effective_stall_alpha_deg,
     prandtl_glauert,
+    trim_alpha_from_elevon,
+    elevon_for_trim,
     trim_solution,
     wave_drag_coefficient,
 )
@@ -153,6 +157,7 @@ def _analytic_config() -> AircraftConfig:
         re_cd0_exponent=0.15,
         elevon_deg=0.0,
         elevon_chord_ratio=0.05,
+        fold_trailing_deg=0.0,
         cm0=0.045,
         cm_alpha=-0.85,
         cm_q=-12.0,
@@ -1173,5 +1178,125 @@ def test_apex_low_speed_pushover_dynamics(cfg: AircraftConfig, env: EnvironmentC
     geom = derived_properties(cfg)
     expected_cruise_pm = res_cruise.dynamic_pressure_pa * geom["ref_area_m2"] * geom["ref_length_m"] * res_cruise.cm
     assert res_cruise.pitching_moment_nm == pytest.approx(expected_cruise_pm, rel=1e-9)
+
+
+# ==========================================================================
+# 20. Trailing-edge fold aerodynamic coupling tests
+# ==========================================================================
+def test_trailing_edge_fold_effects_closed_form() -> None:
+    """Verify trailing_edge_fold_effects against exact closed-form definitions."""
+    angles = [0.0, 5.0, 10.0, 15.0, -5.0, -10.0, -15.0]
+    for angle in angles:
+        # Domain function test
+        cfg = AircraftConfig(fold_trailing_deg=angle)
+        effects = trailing_edge_fold_effects(cfg)
+        expected_rad = deg2rad(angle)
+        expected_dcl = 0.015 * angle
+        expected_dcm = -0.012 * angle
+        expected_dcd = 0.035 * (math.sin(expected_rad) ** 2)
+
+        assert effects["dcl"] == pytest.approx(expected_dcl, rel=1e-12)
+        assert effects["dcm"] == pytest.approx(expected_dcm, rel=1e-12)
+        assert effects["dcd"] == pytest.approx(expected_dcd, rel=1e-12)
+
+        # Kernel scalar test
+        kernel_scalar = aero_kernel.trailing_edge_fold_effects(aero_kernel.ScalarMath, angle)
+        assert kernel_scalar["dcl"] == pytest.approx(expected_dcl, rel=1e-12)
+        assert kernel_scalar["dcm"] == pytest.approx(expected_dcm, rel=1e-12)
+        assert kernel_scalar["dcd"] == pytest.approx(expected_dcd, rel=1e-12)
+
+    # Kernel numpy batch array test
+    angles_arr = np.array(angles, dtype=np.float64)
+    kernel_batch = aero_kernel.trailing_edge_fold_effects(np, angles_arr)
+    rad_arr = np.radians(angles_arr)
+    np.testing.assert_allclose(kernel_batch["dcl"], 0.015 * angles_arr, rtol=1e-12)
+    np.testing.assert_allclose(kernel_batch["dcm"], -0.012 * angles_arr, rtol=1e-12)
+    np.testing.assert_allclose(kernel_batch["dcd"], 0.035 * (np.sin(rad_arr) ** 2), rtol=1e-12)
+
+
+def test_trailing_edge_fold_lift_moment_drag_alterations(cfg: AircraftConfig, env: EnvironmentConfig) -> None:
+    """Verify that fold_trailing_deg modifies lift, moment, and profile drag in evaluate_aero."""
+    cfg_zero = replace(cfg, fold_trailing_deg=0.0)
+    cfg_fold = replace(cfg, fold_trailing_deg=10.0)
+
+    res_zero = evaluate_aero(cfg_zero, env, 10.0, 4.0)
+    res_fold = evaluate_aero(cfg_fold, env, 10.0, 4.0)
+
+    # Positive fold (trailing edge down) adds lift (dcl = 0.015 * 10 = +0.15)
+    assert res_fold.cl - res_zero.cl == pytest.approx(0.15, rel=1e-9)
+    assert res_fold.lift_n > res_zero.lift_n
+
+    # Positive fold produces nose-down pitching moment (dcm = -0.012 * 10 = -0.12)
+    assert res_fold.cm - res_zero.cm == pytest.approx(-0.12, rel=1e-9)
+    assert res_fold.pitching_moment_nm < res_zero.pitching_moment_nm
+
+    # Drag increases due to profile drag dcd = 0.035 * sin(10 deg)^2 + induced drag from higher lift
+    expected_dcd = 0.035 * (math.sin(deg2rad(10.0)) ** 2)
+    assert res_fold.cd_min - res_zero.cd_min == pytest.approx(expected_dcd, rel=1e-9)
+    assert res_fold.cd > res_zero.cd
+
+    # Verify kernel evaluate_coefficients returns te_fold components
+    params = aero_kernel.params_from_config(cfg_fold, env)
+    coeffs = aero_kernel.evaluate_coefficients(
+        aero_kernel.ScalarMath,
+        params,
+        alpha_deg=4.0,
+        speed=10.0,
+    )
+    assert "te_fold_dcl" in coeffs
+    assert "te_fold_dcm" in coeffs
+    assert "te_fold_dcd" in coeffs
+    assert coeffs["te_fold_dcl"] == pytest.approx(0.15, rel=1e-12)
+    assert coeffs["te_fold_dcm"] == pytest.approx(-0.12, rel=1e-12)
+    assert coeffs["te_fold_dcd"] == pytest.approx(expected_dcd, rel=1e-12)
+
+
+def test_trailing_edge_reflex_pitching_moment_and_trim(cfg: AircraftConfig, env: EnvironmentConfig) -> None:
+    """Verify reflex trailing edge (fold_trailing_deg < 0) provides nose-up pitching moment for trim."""
+    cfg_zero = replace(cfg, fold_trailing_deg=0.0)
+    cfg_reflex = replace(cfg, fold_trailing_deg=-8.0)
+
+    # Reflex fold effects
+    te_reflex = trailing_edge_fold_effects(cfg_reflex)
+    assert te_reflex["dcl"] == pytest.approx(-0.12, rel=1e-12)   # 0.015 * -8
+    assert te_reflex["dcm"] == pytest.approx(0.096, rel=1e-12)   # -0.012 * -8 = +0.096 (nose-up!)
+    assert te_reflex["dcd"] > 0.0
+
+    # Static pitching moment increases (moves positive/nose-up)
+    res_zero = evaluate_aero(cfg_zero, env, 8.0, 2.0)
+    res_reflex = evaluate_aero(cfg_reflex, env, 8.0, 2.0)
+    assert res_reflex.cm - res_zero.cm == pytest.approx(0.096, rel=1e-9)
+    assert res_reflex.pitching_moment_nm > res_zero.pitching_moment_nm
+
+    # Closed-form trim angle of attack accounts for reflex moment
+    alpha_trim_zero = trim_alpha_from_elevon(cfg_zero, 0.0)
+    alpha_trim_reflex = trim_alpha_from_elevon(cfg_reflex, 0.0)
+    # Nose-up moment requires higher alpha for restoring stable nose-down moment (cm_alpha < 0)
+    assert alpha_trim_reflex > alpha_trim_zero
+    # Elevon required to trim at a given alpha (e.g. 5 deg) shifts towards push / less pull
+    assert elevon_for_trim(cfg_reflex, 5.0) > elevon_for_trim(cfg_zero, 5.0)
+
+    # Trim solution verifies exact nulling of static moment
+    trim_sol = trim_solution(cfg_reflex, env, speed_mps=8.0)
+    assert trim_sol["trimmed"] is True
+    assert abs(trim_sol["residual_cm"]) < 1e-6
+
+
+def test_drag_polar_accounts_for_trailing_edge_fold(cfg: AircraftConfig) -> None:
+    """Verify that drag_polar and drag_polar_minima account for trailing edge fold increments."""
+    cfg_zero = replace(cfg, fold_trailing_deg=0.0)
+    cfg_fold = replace(cfg, fold_trailing_deg=12.0)
+
+    polar_zero = drag_polar(cfg_zero, points=31)
+    polar_fold = drag_polar(cfg_fold, points=31)
+
+    expected_dcd = 0.035 * (math.sin(deg2rad(12.0)) ** 2)
+    assert polar_fold["analytic"]["cd_min"] - polar_zero["analytic"]["cd_min"] == pytest.approx(expected_dcd, rel=1e-9)
+    assert polar_fold["cd_min"] - polar_zero["cd_min"] == pytest.approx(expected_dcd, abs=1e-4)
+
+    minima_zero = drag_polar_minima(cfg_zero)
+    minima_fold = drag_polar_minima(cfg_fold)
+    assert minima_fold["cd_min"] - minima_zero["cd_min"] == pytest.approx(expected_dcd, rel=1e-9)
+
 
 

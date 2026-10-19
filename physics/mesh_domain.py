@@ -245,7 +245,7 @@ class _VertexPool:
 
 
 def _finish_mesh(
-    pool: _VertexPool, faces: List[Sequence[int]]
+    pool: _VertexPool, faces: Sequence[Sequence[int]]
 ) -> Tuple[np.ndarray, np.ndarray]:
     """Materialise a vertex/face pair, dropping degenerate polygons."""
     vertices = pool.array()
@@ -1625,17 +1625,60 @@ def _trimesh_load(source: Any, filename: str) -> Optional[Tuple[np.ndarray, np.n
             mesh = trimesh.load(source, file_type=os.path.basename(filename))
         if mesh is None or not hasattr(mesh, "vertices"):
             return None
+        vertices = getattr(mesh, "vertices", None)
+        faces = getattr(mesh, "faces", None)
+        if vertices is None or faces is None:
+            return None
         return (
-            np.asarray(mesh.vertices, dtype=np.float64)[:, :3],
-            np.asarray(mesh.faces, dtype=np.int64).reshape(-1, 3),
+            np.asarray(vertices, dtype=np.float64)[:, :3],
+            np.asarray(faces, dtype=np.int64).reshape(-1, 3),
         )
     except Exception:
         return None
 
 
+_BLOCKED_HOSTNAMES: set[str] = {
+    "metadata.google.internal",
+    "metadata.internal",
+    "169.254.169.254",
+    "instance-data",
+    "localhost",
+    "127.0.0.1",
+    "::1",
+}
+
+
+def _is_forbidden_address(ip_obj: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
+    """Check if IP address is private, loopback, link-local, reserved, multicast, or unspecified."""
+    return (
+        ip_obj.is_private
+        or ip_obj.is_loopback
+        or ip_obj.is_link_local
+        or ip_obj.is_reserved
+        or ip_obj.is_multicast
+        or ip_obj.is_unspecified
+    )
+
+
 class _NoRedirectHandler(urllib.request.HTTPRedirectHandler):
-    def redirect_request(self, req, fp, code, msg, headers, newurl):
+    def redirect_request(self, req: Any, fp: Any, code: int, msg: str, headers: Any, newurl: str) -> Any:
         raise ValueError(f"HTTP redirects are disallowed: {newurl}")
+
+
+class _SafeRedirectHandler(urllib.request.HTTPRedirectHandler):
+    """Safely follows HTTP redirects up to max_hops, re-validating each hop against SSRF."""
+
+    def __init__(self, max_hops: int = 5) -> None:
+        super().__init__()
+        self.max_hops = max_hops
+        self.hops = 0
+
+    def redirect_request(self, req: Any, fp: Any, code: int, msg: str, headers: Any, newurl: str) -> Any:
+        self.hops += 1
+        if self.hops > self.max_hops:
+            raise ValueError(f"too many redirects ({self.hops} > {self.max_hops}) fetching {newurl!r}")
+        validate_url_safe(newurl)
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
 
 
 def validate_url_safe(url: str) -> urllib.parse.ParseResult:
@@ -1649,15 +1692,16 @@ def validate_url_safe(url: str) -> urllib.parse.ParseResult:
         raise ValueError(f"unsupported URL scheme {parsed.scheme!r} in {url!r}")
     if parsed.port and parsed.port not in (80, 443):
         raise ValueError(f"port {parsed.port} is not allowed; only standard HTTP/HTTPS ports (80, 443) are supported")
-    hostname = parsed.hostname or ""
+    hostname = (parsed.hostname or "").strip().lower()
     if not hostname:
         raise ValueError(f"invalid host in URL {url!r}")
 
-    if hostname.lower() in ("localhost", "127.0.0.1", "::1"):
-        raise ValueError(f"access to loopback host {hostname!r} is forbidden")
+    if hostname in _BLOCKED_HOSTNAMES:
+        raise ValueError(f"access to blocked host {hostname!r} is forbidden")
+
     try:
         ip_obj = ipaddress.ip_address(hostname)
-        if ip_obj.is_private or ip_obj.is_loopback or ip_obj.is_link_local:
+        if _is_forbidden_address(ip_obj):
             raise ValueError(f"access to private/local network address {hostname!r} is forbidden")
     except ValueError:
         try:
@@ -1665,7 +1709,7 @@ def validate_url_safe(url: str) -> urllib.parse.ParseResult:
             for _, _, _, _, sockaddr in addr_info:
                 ip_str = sockaddr[0]
                 ip_obj = ipaddress.ip_address(ip_str)
-                if ip_obj.is_private or ip_obj.is_loopback or ip_obj.is_link_local:
+                if _is_forbidden_address(ip_obj):
                     raise ValueError(f"access to private/local network address {ip_str!r} is forbidden")
         except socket.gaierror as exc:
             if getattr(urllib.request.urlopen, "__module__", "") != "urllib.request":
@@ -1693,7 +1737,7 @@ def safe_urlopen_bytes(
         if getattr(urllib.request.urlopen, "__module__", "") != "urllib.request":
             cm = urllib.request.urlopen(request, timeout=float(timeout))
         else:
-            opener = urllib.request.build_opener(_NoRedirectHandler)
+            opener = urllib.request.build_opener(_SafeRedirectHandler)
             cm = opener.open(request, timeout=float(timeout))
         with cm as response:
             try:
@@ -1911,13 +1955,14 @@ def compute_metrics(
     sheet_area = planform_area if planform_area > 0.0 else float(properties["surface_area_m2"])
     mass = paper_mass_from_mesh(sheet_area, paper_gsm)
 
-    cg = tuple(float(v) for v in properties["cg_m"])
-    specific = inertia_tensor_mesh(verts, tris, max(mass, 1.0e-12), cg)
+    cg_tuple = tuple(float(v) for v in properties["cg_m"])
+    cg_3: Tuple[float, float, float] = (cg_tuple[0], cg_tuple[1], cg_tuple[2])
+    specific = inertia_tensor_mesh(verts, tris, max(mass, 1.0e-12), cg_3)
     trace = float(np.trace(specific))
     if not np.all(np.isfinite(specific)) or trace <= 0.0:
         # Uniform surface mass on an open paper sheet. Exact triangle
         # second moments preserve body axes and off-diagonal components.
-        corners = verts[tris] - np.asarray(cg)
+        corners = verts[tris] - np.asarray(cg_3)
         areas = 0.5 * np.linalg.norm(np.cross(corners[:, 1] - corners[:, 0],
                                             corners[:, 2] - corners[:, 0]), axis=1)
         weights = areas / max(float(areas.sum()), 1.0e-30) / 12.0
@@ -1927,6 +1972,13 @@ def compute_metrics(
             second += np.einsum("i,ij,ik->jk", weights, corners[:, index], corners[:, index])
         specific = np.trace(second) * np.eye(3) - second
     inertia = specific * mass
+
+    raw_inertia = tuple(float(v) for v in inertia.reshape(-1))
+    inertia_9: Tuple[float, float, float, float, float, float, float, float, float] = (
+        raw_inertia[0], raw_inertia[1], raw_inertia[2],
+        raw_inertia[3], raw_inertia[4], raw_inertia[5],
+        raw_inertia[6], raw_inertia[7], raw_inertia[8],
+    )
 
     metrics = MeshMetrics(
         model_id=str(model_id or make_uuid()),
@@ -1943,11 +1995,11 @@ def compute_metrics(
         mean_chord_m=float(planform["mean_chord_m"]),
         taper_ratio=float(planform["taper_ratio"]),
         aspect_ratio=float(planform["aspect_ratio"]),
-        cg_m=cg,
+        cg_m=cg_3,
         cg_mode=str(properties["cg_mode_used"]),
         volume_m3=float(properties["volume_m3"]),
         mass_kg=float(mass),
-        inertia_tensor=tuple(float(v) for v in inertia.reshape(-1)),
+        inertia_tensor=inertia_9,
         paper_gsm=float(paper_gsm),
         panels=list(panels),
         panel_count=int(len(panels)),

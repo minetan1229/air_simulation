@@ -54,12 +54,24 @@ import types
 import typing
 from collections import OrderedDict, deque
 from dataclasses import dataclass, field, fields, is_dataclass, replace
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
 from uuid import uuid4
 
 import numpy as np
 
 log = logging.getLogger(__name__)
+
+from .payload_contract import (
+    DEFAULT_VALUES,
+    PAYLOAD_KEYS,
+    empty_payload,
+    normalize_payload,
+)
+
+#: A three component vector.  NumPy arrays are accepted wherever a plain
+#: sequence is, so the public helpers can be called with the arrays the
+#: integrator produces without converting them first.
+VectorLike = Union[Sequence[float], np.ndarray]
 
 from .config_schema import (
     AeroResult,
@@ -141,30 +153,10 @@ STATUS_VALUES: Tuple[str, ...] = (
     "error",
 )
 
-#: Exact key set of the :func:`evaluate_flight` payload (the optimiser relies on it).
-EVALUATE_KEYS: Tuple[str, ...] = (
-    "distance_m",
-    "flight_time_s",
-    "max_altitude_m",
-    "max_ld_ratio",
-    "max_stress_index",
-    "max_stress_pa",
-    "launch_speed_mps",
-    "stall_margin",
-    "stability",
-    "landing_distance_m",
-    "points",
-    "duration_s",
-    "backend",
-    "status",
-    "apogee_time_s",
-    "post_apogee_time_s",
-    "glide_entry_time_s",
-    "stable_glide_duration_s",
-    "apex_recovery_status",
-    "error",
-    "error_id",
-)
+#: Exact key set of the :func:`evaluate_flight` payload.  Every evaluation
+#: backend (6-DoF reference, CPU batch and CuPy batch) returns exactly these
+#: keys; see :mod:`physics.payload_contract` for the single source of truth.
+EVALUATE_KEYS: Tuple[str, ...] = PAYLOAD_KEYS
 
 
 class FlightDivergenceError(RuntimeError):
@@ -299,23 +291,27 @@ _EPS = 1.0e-12
 _CACHE_LOCK = threading.Lock()
 _MODULE_CACHE: Dict[str, Tuple[Any, float]] = {}
 _MISSING_RETRY_S: float = 1.0
-_FUNC_CACHE: Dict[Tuple[int, Tuple[str, ...]], Any] = {}
+_FUNC_CACHE: Dict[Tuple[int, Tuple[str, ...]], Tuple[Optional[str], Any]] = {}
 _PLAN_CACHE: Dict[int, Tuple[Any, Any]] = {}
+_static_aero: Optional[types.ModuleType]
 try:
     from . import aero_domain as _static_aero
 except Exception:
     _static_aero = None
 
+_static_atmo: Optional[types.ModuleType]
 try:
     from . import atmosphere_domain as _static_atmo
 except Exception:
     _static_atmo = None
 
+_static_wind: Optional[types.ModuleType]
 try:
     from . import wind_domain as _static_wind
 except Exception:
     _static_wind = None
 
+_static_stress: Optional[types.ModuleType]
 try:
     from . import stress_domain as _static_stress
 except Exception:
@@ -340,9 +336,9 @@ def _optional_module(name: str) -> Any:
     now = time.monotonic()
     entry = _MODULE_CACHE.get(name)
     if entry is not None:
-        module, last_attempt = entry
-        if module is not None or (now - last_attempt) < _MISSING_RETRY_S:
-            return module
+        cached_module, last_attempt = entry
+        if cached_module is not None or (now - last_attempt) < _MISSING_RETRY_S:
+            return cached_module
     module: Any = None
     for candidate in (f"{__package__}.{name}" if __package__ else name, name):
         try:
@@ -394,19 +390,29 @@ def active_backends() -> Dict[str, str]:
 
 
 def _resolve_callable(module: Any, names: Sequence[str]) -> Any:
-    """First callable of ``names`` present on ``module`` (memoised per module)."""
+    """First callable of ``names`` present on ``module`` (memoised per module).
+
+    The memo is re-validated against the live module attribute on every call,
+    so replacing a domain function at runtime (module reload, test monkeypatch)
+    is picked up instead of being masked by a stale entry.
+    """
     if module is None:
         return None
     key = (id(module), tuple(names))
-    if key in _FUNC_CACHE:
-        return _FUNC_CACHE[key]
+    cached = _FUNC_CACHE.get(key)
+    if cached is not None:
+        cached_name, cached_func = cached
+        if cached_name is not None and getattr(module, cached_name, None) is cached_func:
+            return cached_func
     found = None
+    resolved_name: Optional[str] = None
     for name in names:
         candidate = getattr(module, name, None)
         if callable(candidate):
             found = candidate
+            resolved_name = name
             break
-    _FUNC_CACHE[key] = found
+    _FUNC_CACHE[key] = (resolved_name, found)
     return found
 
 
@@ -629,22 +635,37 @@ ELEVON_LIFT_PER_DEG = 0.020
 ELEVON_MOMENT_PER_DEG = 0.030
 
 
-def elevon_effects(elevon_deg: float, cfg: AircraftConfig) -> Dict[str, float]:
+def elevon_effects(
+    elevon_deg: float, cfg: AircraftConfig, fold_trailing_deg: Optional[float] = None
+) -> Dict[str, float]:
     """Elevon (trailing-edge fold) authority: ``dcl``, ``dcm``, ``dalpha_trim_deg``.
 
     A trailing edge folded **down** (positive ``elevon_deg``) adds lift
     (``dcl > 0``) and trims the airframe nose-down (``dcm < 0``), demanding a
     larger angle of attack to trim.  The authority is the deflected chord
     fraction ``clamp(|cfg.elevon_chord_ratio|, 0, 1)``.
+    Accounts for full-span trailing-edge fold moment in ``dalpha_trim_deg``.
     """
     deflection = _finite(elevon_deg)
     authority = clamp(abs(_finite(cfg.elevon_chord_ratio, 0.22)), 0.0, 1.0)
     dcl = authority * ELEVON_LIFT_PER_DEG * deflection
     dcm = -authority * ELEVON_MOMENT_PER_DEG * deflection
+    fold = (
+        _finite(getattr(cfg, "fold_trailing_deg", 0.0), 0.0)
+        if fold_trailing_deg is None
+        else _finite(fold_trailing_deg, 0.0)
+    )
+    te_fold_dcm = -0.012 * fold
     cm_alpha = _finite(cfg.cm_alpha)
     if abs(cm_alpha) < 1.0e-12:
         return {"dcl": dcl, "dcm": dcm, "dalpha_trim_deg": 0.0}
-    return {"dcl": dcl, "dcm": dcm, "dalpha_trim_deg": rad2deg(safe_div(-(_finite(cfg.cm0) + dcm), cm_alpha, 0.0))}
+    return {
+        "dcl": dcl,
+        "dcm": dcm,
+        "dalpha_trim_deg": rad2deg(
+            safe_div(-(_finite(cfg.cm0) + dcm + te_fold_dcm), cm_alpha, 0.0)
+        ),
+    }
 
 
 def _local_atmosphere(env: EnvironmentConfig, altitude_m: float, chord_m: float) -> Dict[str, float]:
@@ -701,7 +722,7 @@ def _local_atmosphere(env: EnvironmentConfig, altitude_m: float, chord_m: float)
 #: therefore makes the four RK4 stages of a step (and the step-rejection
 #: retries) share one evaluation, removing ~75% of the atmosphere work from the
 #: inner loop without any loss of accuracy.
-_ATMOSPHERE_CACHE: "OrderedDict[tuple, Dict[str, float]]" = OrderedDict()
+_ATMOSPHERE_CACHE: "OrderedDict[tuple, Dict[str, Any]]" = OrderedDict()
 _ATMOSPHERE_CACHE_LIMIT = 256
 _ATMOSPHERE_QUANTUM_M = 1.0e-3
 _ATMOSPHERE_LOCK = threading.Lock()
@@ -709,7 +730,7 @@ _ATMOSPHERE_LOCK = threading.Lock()
 
 def atmosphere_state(
     env: EnvironmentConfig, altitude_m: float = 0.0, reference_chord_m: float = 0.1
-) -> Dict[str, float]:
+) -> Dict[str, Any]:
     """Air density, kinematic viscosity and sound speed at ``altitude_m``.
 
     ``altitude_m`` is the height **above the ground plane** (the integrator
@@ -757,7 +778,7 @@ def atmosphere_state(
 
 def _atmosphere_state_uncached(
     env: EnvironmentConfig, altitude: float, chord: float
-) -> Dict[str, float]:
+) -> Dict[str, Any]:
     module = atmosphere_module()
     func = _resolve_callable(module, ("evaluate_atmosphere", "atmosphere", "evaluate"))
     if func is not None:
@@ -777,7 +798,7 @@ def _atmosphere_state_uncached(
             if isinstance(payload, dict):
                 density = _finite(_lookup(payload, ("density_kgm3", "density", "rho")))
                 if density > 0.0:
-                    return {
+                    result: Dict[str, Any] = {
                         "density_kgm3": density,
                         "kinematic_viscosity_m2s": max(
                             _finite(
@@ -802,10 +823,11 @@ def _atmosphere_state_uncached(
                         "reference_chord_m": chord,
                         "backend": "upstream",
                     }
+                    return result
     return _local_atmosphere(env, altitude, chord)
 
 
-def _local_wind(env: EnvironmentConfig, position: Sequence[float], time_s: float) -> np.ndarray:
+def _local_wind(env: EnvironmentConfig, position: VectorLike, time_s: float) -> np.ndarray:
     """Mean wind with a logarithmic boundary layer (exact zero when calm).
 
     ``wind_direction_deg`` follows the same meteorological convention as
@@ -836,7 +858,7 @@ def _local_wind(env: EnvironmentConfig, position: Sequence[float], time_s: float
     return out
 
 
-def wind_vector(position: Sequence[float], env: EnvironmentConfig, time_s: float = 0.0) -> np.ndarray:
+def wind_vector(position: VectorLike, env: EnvironmentConfig, time_s: float = 0.0) -> np.ndarray:
     """Local wind velocity vector in the **z-down world frame** (m/s).
 
     Primary path: ``wind_domain.wind_velocity(position, env, time_s)``.  The
@@ -933,7 +955,7 @@ def aero_forces(
     mach: float = 0.0,
     reynolds: Optional[float] = None,
     ground_height_m: float = 1.0,
-    angular_rate: Sequence[float] = (0.0, 0.0, 0.0),
+    angular_rate: VectorLike = (0.0, 0.0, 0.0),
     density: float = 1.225,
     kinematic_viscosity: float = 1.5e-5,
 ) -> AeroResult:
@@ -1079,7 +1101,7 @@ def _local_stress(
     inertial = 0.0
     sigma = root_moment * lever / inertia
     allowable = allowable_stress_pa(aircraft)
-    return {
+    result: Dict[str, Any] = {
         "max_stress_pa": sigma,
         "allowable_stress_pa": allowable,
         "max_stress_index": sigma / allowable,
@@ -1088,6 +1110,7 @@ def _local_stress(
         "inertial_moment_nm": inertial,
         "backend": "numpy",
     }
+    return result
 
 
 def stress_metrics(
@@ -1103,9 +1126,9 @@ def stress_metrics(
     reynolds: float = 0.0,
     altitude_m: float = 0.0,
     ground_height_m: float = 1.0,
-    angular_rate: Sequence[float] = (0.0, 0.0, 0.0),
+    angular_rate: VectorLike = (0.0, 0.0, 0.0),
     density_kgm3: float = 1.225,
-) -> Dict[str, float]:
+) -> Dict[str, Any]:
     """Wing stress index, preferring the upstream ``stress_domain``.
 
     ``g_load`` is the specific-force load factor used as the structural load
@@ -1188,7 +1211,7 @@ def stress_metrics(
                             ),
                             0.0,
                         )
-                        return {
+                        stress_result: Dict[str, Any] = {
                             "max_stress_index": index_value,
                             # The index IS the utilisation sigma / sigma_allow
                             # (0 = safe, 1 = at the allowable).  It is reported
@@ -1200,6 +1223,7 @@ def stress_metrics(
                             "allowable_stress_pa": allowable,
                             "backend": "upstream",
                         }
+                        return stress_result
     return _local_stress(aircraft, derived, env, dynamic_pressure_pa, g_load)
 
 
@@ -1207,7 +1231,7 @@ def stress_metrics(
 # Public free functions
 # --------------------------------------------------------------------------
 def effective_alpha_beta(
-    velocity_body: Sequence[float], gravity: Sequence[float], env: Optional[EnvironmentConfig] = None
+    velocity_body: VectorLike, gravity: VectorLike, env: Optional[EnvironmentConfig] = None
 ) -> Tuple[float, float]:
     """Effective flow angles ``(alpha_deg, beta_deg)`` from a body-frame velocity.
 
@@ -1585,8 +1609,8 @@ def resolve_throw(
 
 
 def compute_ground_stations(
-    position_m: Sequence[float],
-    quaternion: Sequence[float],
+    position_m: VectorLike,
+    quaternion: VectorLike,
     environment: EnvironmentConfig,
     derived: Optional[Dict[str, float]] = None,
 ) -> Dict[str, float]:
@@ -2161,17 +2185,26 @@ class FlightSimulator:
             morph_factor = 1.0 / (1.0 + (pressure_ratio ** morph_exponent))
             base_elevon = float(self.aircraft.elevon_deg)
             effective_elevon_deg = base_elevon * morph_factor
+            base_fold_trailing = float(getattr(self.aircraft, "fold_trailing_deg", 0.0))
+            effective_fold_trailing_deg = base_fold_trailing * morph_factor
             effective_cm0 = float(self.aircraft.cm0)
             effective_cL0 = float(self.aircraft.cL0)
             compliance_deflection = 12.0 * aero_comp_gain * (pressure_ratio ** 1.5) / (1.0 + (pressure_ratio ** 1.5))
             trailing_edge_bend_deg = compliance_deflection
         else:
             effective_elevon_deg = float(self.aircraft.elevon_deg)
+            effective_fold_trailing_deg = float(getattr(self.aircraft, "fold_trailing_deg", 0.0))
             effective_cm0 = float(self.aircraft.cm0)
             effective_cL0 = float(self.aircraft.cL0)
             trailing_edge_bend_deg = 0.0
 
-        aero_cfg = replace(self.aircraft, cL0=effective_cL0, cm0=effective_cm0, elevon_deg=clamp(effective_elevon_deg, -45.0, 45.0))
+        aero_cfg = replace(
+            self.aircraft,
+            cL0=effective_cL0,
+            cm0=effective_cm0,
+            elevon_deg=clamp(effective_elevon_deg, -45.0, 45.0),
+            fold_trailing_deg=clamp(effective_fold_trailing_deg, -90.0, 90.0),
+        )
 
         result = aero_forces(
             aero_cfg,
@@ -2650,7 +2683,12 @@ class FlightSimulator:
         # towards level by 25 % per sub-step with no torque, no contact
         # reaction and no friction work, which was an artificial attitude
         # restoring torque.
-        new_q = tuple(float(value) for value in state.quaternion)
+        new_q = (
+            float(state.quaternion[0]),
+            float(state.quaternion[1]),
+            float(state.quaternion[2]),
+            float(state.quaternion[3]),
+        )
 
         return StateVector(
             time_s=state.time_s,
@@ -3228,29 +3266,14 @@ def evaluate_flight(
     """
     total = max(_finite(duration_s, 6.0), 0.0)
     step_max = clamp(_finite(dt_max, 2.0e-2), 1.0e-6, 1.0e1)
-    empty = {
-        "distance_m": 0.0,
-        "flight_time_s": 0.0,
-        "max_altitude_m": 0.0,
-        "max_ld_ratio": 0.0,
-        "max_stress_index": 0.0,
-        "max_stress_pa": 0.0,
-        "launch_speed_mps": 0.0,
-        "stall_margin": 0.0,
-        "stability": 0.0,
-        "landing_distance_m": 0.0,
-        "points": 0,
-        "duration_s": float(total),
-        "backend": BACKEND,
-        "status": "diverged",
-        "apogee_time_s": 0.0,
-        "post_apogee_time_s": 0.0,
-        "glide_entry_time_s": None,
-        "stable_glide_duration_s": 0.0,
-        "apex_recovery_status": "not_observed",
-        "error": None,
-        "error_id": None,
-    }
+    empty = empty_payload(
+        duration_s=float(total),
+        status="diverged",
+        model="rigid_body_6dof",
+        approximate=False,
+        physics_verification_eligible=False,
+        limitations=("The 6-DoF integration did not complete.",),
+    )
     try:
         aircraft = (
             aircraft_dict
@@ -3281,7 +3304,15 @@ def evaluate_flight(
     except FlightDivergenceError as exc:
         # A physical divergence: the integration left its stable region.  The
         # status is reported as such and the reason is kept for the audit.
-        return {**empty, "status": "diverged", "error": str(exc)}
+        return empty_payload(
+            duration_s=float(total),
+            status="diverged",
+            model="rigid_body_6dof",
+            approximate=False,
+            physics_verification_eligible=False,
+            limitations=("The 6-DoF integration did not complete.",),
+            error=str(exc),
+        )
     except (ValueError, KeyError, TypeError, IndexError) as exc:
         # An implementation error (bad configuration, unexpected payload).  It
         # must never be reported as a legitimate 0 m flight: the optimiser
@@ -3291,12 +3322,16 @@ def evaluate_flight(
         import uuid
 
         logging.getLogger(__name__).exception("Flight evaluation failed")
-        return {
-            **empty,
-            "status": "error",
-            "error": type(exc).__name__,
-            "error_id": uuid.uuid4().hex,
-        }
+        return empty_payload(
+            duration_s=float(total),
+            status="error",
+            model="rigid_body_6dof",
+            approximate=False,
+            physics_verification_eligible=False,
+            limitations=(f"Flight evaluation failed: {type(exc).__name__}",),
+            error=type(exc).__name__,
+            error_id=uuid.uuid4().hex,
+        )
     return summarize_flight(simulator, summary)
 
 
@@ -3420,7 +3455,7 @@ def summarize_flight(simulator: FlightSimulator, summary: Optional[Dict[str, Any
         "flight_time_s": max(_finite(summary.get("flight_time_s", 0.0)), 0.0),
         "max_altitude_m": max(_finite(max_altitude), 0.0),
         "max_ld_ratio": max(_finite(max_ld), 0.0),
-        "max_stress_index": max(_finite(max_stress_index), 0.0),
+        "max_stress_index": clamp(_finite(max_stress_index), 0.0, 1.0),
         "max_stress_pa": max(_finite(max_stress_pa), 0.0),
         "launch_speed_mps": max(_finite(launch_speed), 0.0),
         "stall_margin": _finite(stall_margin, 0.0),
@@ -3434,9 +3469,28 @@ def summarize_flight(simulator: FlightSimulator, summary: Optional[Dict[str, Any
         "post_apogee_time_s": max(_finite(summary.get("flight_time_s", 0.0)) - apogee_time, 0.0),
         "error": summary.get("error"),
         "error_id": summary.get("error_id"),
+        # Diagnostic observables: every backend reports them, so the payload
+        # shape does not depend on which engine produced the numbers.
+        "range_x_m": max(_finite(summary.get("range_x_m", 0.0)), 0.0),
+        "range_y_m": max(_finite(summary.get("range_y_m", 0.0)), 0.0),
+        "horizontal_range_m": max(_finite(summary.get("horizontal_range_m", 0.0)), 0.0),
+        "max_speed_mps": max(_finite(summary.get("max_speed_mps", 0.0)), 0.0),
+        "max_g_load": max(_finite(summary.get("max_g_load", 0.0)), 0.0),
+        "stalled": bool(summary.get("stalled", False)),
+        "landed": bool(summary.get("landed", False)),
+        "crashed": bool(summary.get("crashed", False)),
+        "diverged": bool(summary.get("diverged", False)),
     }
     payload.update(flight_phase_metrics(samples, launch.flight_mode))
-    return {key: payload[key] for key in EVALUATE_KEYS}
+    return normalize_payload(
+        payload,
+        model="rigid_body_6dof",
+        approximate=False,
+        physics_verification_eligible=status not in ("diverged", "failed", "error"),
+        limitations=(
+            "Aerodynamic and material coefficients require experimental calibration.",
+        ),
+    )
 
 
 def flight_from_aircraft(

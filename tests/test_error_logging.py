@@ -158,3 +158,105 @@ def test_api_error_logging_endpoints():
     res_stats = client.get("/api/v1/errors/stats")
     assert res_stats.status_code == 200
     assert "by_level" in res_stats.get_json()
+
+
+def test_error_record_to_public_dict():
+    rec_with_tb = ErrorRecord(
+        id="err_pub_1",
+        timestamp="2026-10-19T00:00:00Z",
+        level="ERROR",
+        category="api",
+        message="Simulated crash",
+        details={"route": "/step"},
+        traceback_str="Traceback (most recent call last):\n  File 'secret.py'...",
+        path="/step",
+        method="POST",
+        status_code=500,
+        client_ip="192.168.1.50",
+    )
+    pub = rec_with_tb.to_public_dict()
+    assert "traceback_str" not in pub
+    assert "client_ip" not in pub
+    assert pub["has_traceback"] is True
+    assert pub["message"] == "Simulated crash"
+    assert pub["id"] == "err_pub_1"
+
+    rec_no_tb = ErrorRecord(
+        id="err_pub_2",
+        timestamp="2026-10-19T00:00:00Z",
+        level="INFO",
+        category="meta",
+        message="Status check",
+    )
+    pub_no_tb = rec_no_tb.to_public_dict()
+    assert "traceback_str" not in pub_no_tb
+    assert "client_ip" not in pub_no_tb
+    assert pub_no_tb["has_traceback"] is False
+
+
+def test_public_statistics_removes_absolute_paths(temp_logger):
+    stats = temp_logger.statistics()
+    pub_stats = temp_logger.public_statistics()
+
+    # Original statistics has full paths
+    assert os.path.isabs(stats["log_files"]["text"]) or os.path.dirname(stats["log_files"]["text"])
+
+    # Public statistics has only basenames
+    assert pub_stats["log_files"]["text"] == "error.log"
+    assert pub_stats["log_files"]["jsonl"] == "error.jsonl"
+    assert "/" not in pub_stats["log_files"]["text"] and "\\" not in pub_stats["log_files"]["text"]
+
+
+def test_api_records_errors_information_leakage():
+    client = flask_app_module.app.test_client()
+
+    # Ensure at least one error with traceback exists
+    client.post("/api/v1/aerodynamics/calculate", json={"speed_mps": -99.0})
+
+    resp = client.get("/api/v1/records/errors")
+    assert resp.status_code == 200
+    data = resp.get_json()
+
+    for err in data.get("errors", []):
+        assert "traceback_str" not in err, "Public error logs must not leak traceback_str"
+        assert "client_ip" not in err, "Public error logs must not leak client_ip"
+        assert "has_traceback" in err
+
+    pub_files = data.get("statistics", {}).get("log_files", {})
+    assert "/" not in pub_files.get("text", "") and "\\" not in pub_files.get("text", "")
+
+
+def test_report_client_error_strict_validation():
+    client = flask_app_module.app.test_client()
+
+    # 1. Message exceeding 2000 characters
+    long_msg = "X" * 2001
+    resp_long = client.post("/api/v1/errors/report", json={"message": long_msg})
+    assert resp_long.status_code == 400
+    assert "must not exceed 2000 characters" in resp_long.get_json()["error"]
+
+    # 2. Non-string message
+    resp_type = client.post("/api/v1/errors/report", json={"message": 12345})
+    assert resp_type.status_code == 400
+    assert "'message' must be a string" in resp_type.get_json()["error"]
+
+    # 3. Disallowed level
+    resp_lvl = client.post("/api/v1/errors/report", json={"message": "ok", "level": "UNKNOWN_LEVEL"})
+    assert resp_lvl.status_code == 400
+    assert "'level' must be one of" in resp_lvl.get_json()["error"]
+
+    # 4. Non-dict details
+    resp_det = client.post("/api/v1/errors/report", json={"message": "ok", "details": "not_dict"})
+    assert resp_det.status_code == 400
+    assert "'details' must be a JSON object" in resp_det.get_json()["error"]
+
+    # 5. Valid report
+    resp_valid = client.post("/api/v1/errors/report", json={
+        "message": "Valid error report",
+        "level": "warning",
+        "details": {"canvas": "threejs"},
+    })
+    assert resp_valid.status_code == 200
+    assert resp_valid.get_json()["ok"] is True
+    assert "error_id" in resp_valid.get_json()
+

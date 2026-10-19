@@ -75,6 +75,14 @@ SHEET_LENGTH_M: float = 0.297
 #: Number of segments used to tessellate a rolled crease fold.
 ROLL_SAMPLES: int = 5
 
+#: Amplitude of the bulge a folded paper packet develops between its creases.
+#: A stack of folded sheets is never flat: the layers bow apart towards the
+#: middle of the panel, which is what gives a folded nose its soft pocket.
+PACKET_CAMBER_M: float = 2.0e-4
+
+#: Distance over which the packet grows from the crease line to full camber.
+CAMBER_SPAN_M: float = 0.012
+
 #: Parallelism tolerance used when deciding that two faces are coplanar.
 PARALLEL_EPS: float = 0.995
 
@@ -745,7 +753,10 @@ class LayerAssignment:
     max_layers: int
 
 
-def assign_layers(faces: Sequence[FoldedFace]) -> LayerAssignment:
+def assign_layers(
+    faces: Sequence[FoldedFace],
+    group_order: Optional[Dict[str, int]] = None,
+) -> LayerAssignment:
     """Order the folded faces into a stack and derive their layer index.
 
     Two faces can only fight for the depth buffer when they are parallel and
@@ -754,12 +765,23 @@ def assign_layers(faces: Sequence[FoldedFace]) -> LayerAssignment:
     normal; the layer index is the length of the longest path in the
     resulting DAG, which guarantees that any two overlapping faces are
     separated by at least one full layer pitch.
+
+    ``group_order`` is an optional hint: the panels of a group with a higher
+    rank are stacked *below* the panels of a group with a lower rank when
+    they are coplanar.  It is how a fold programme that says "fold this
+    panel on top" overrides the default tie break without breaking the
+    separation guarantee.
     """
     count = len(faces)
     index: Dict[int, int] = {face.fid: 0 for face in faces}
     reference: Dict[int, Vec3] = {face.fid: face.normal for face in faces}
     if count == 0:
         return LayerAssignment(index=index, reference=reference, max_layers=0)
+
+    def rank(face: FoldedFace) -> int:
+        if not group_order:
+            return 0
+        return int(group_order.get(face.group, 0))
 
     # 1. cluster the parallel, overlapping faces.
     parent = list(range(count))
@@ -828,10 +850,12 @@ def assign_layers(faces: Sequence[FoldedFace]) -> LayerAssignment:
                     below = True
                 elif abs(db - da) <= DEPTH_EPS:
                     # Coplanar layers (a flat fold): break the tie with the
-                    # fold level and the face id so the order is deterministic.
+                    # fold level, the stack order hint and the face id so the
+                    # order is deterministic.
                     fa, fb = faces[a], faces[b]
                     if fa.level < fb.level or (
-                        fa.level == fb.level and fa.fid < fb.fid
+                        fa.level == fb.level
+                        and (rank(fa), fa.fid) < (rank(fb), fb.fid)
                     ):
                         below = True
                 if below:
@@ -1018,7 +1042,7 @@ def _line_intersection_3d(
     """Intersection of the line ``p + s*d1`` with the line ``q + u*d2``."""
     cross = _cross3(d1, d2)
     denom = _dot3(cross, cross)
-    if denom <= 1e-20:
+    if denom <= 1e-6:
         return None
     delta = _sub3(q, p)
     s = _dot3(_cross3(delta, d2), cross) / denom
@@ -1056,13 +1080,16 @@ def _roll_samples(
         d1 = _unit3(_cross3(crease_dir, parent_normal))
         d2 = _unit3(_cross3(crease_dir, child_normal))
         v = _line_intersection_3d(p, d1, c, d2)
+        if v is not None and (
+            _len3(_sub3(v, p)) > 3.0 * length or _len3(_sub3(v, c)) > 3.0 * length
+        ):
+            v = None
         if v is not None:
             q1 = _add3(p, _scale3(_sub3(v, p), 1.0 / 3.0))
             q2 = _add3(c, _scale3(_sub3(v, c), 1.0 / 3.0))
         else:
-            handle = length * 0.6
-            q1 = _sub3(p, _scale3(d1, handle / 3.0))
-            q2 = _add3(c, _scale3(d2, handle / 3.0))
+            q1 = _add3(p, _scale3(chord, 1.0 / 3.0))
+            q2 = _add3(p, _scale3(chord, 2.0 / 3.0))
         mid = _cubic_bezier(p, q1, q2, c, t)
         tangent = _cubic_bezier_tangent(p, q1, q2, c, t)
         normal = _cross3(crease_dir, tangent)
@@ -1083,15 +1110,52 @@ def build_mesh(
     alpha: float = 1.0,
     params: Optional[Dict[str, float]] = None,
     scale: float = 1.0,
+    span_m: Optional[float] = None,
 ) -> OrigamiMesh:
     """Build the folded origami mesh of one archetype.
 
     ``alpha`` is the folding progression: ``0`` is the flat sheet, ``1`` the
-    fully folded aeroplane.  ``scale`` multiplies the whole model so it can
-    be matched to a configured wingspan.
+    fully folded aeroplane.  ``scale`` multiplies the whole model, ``span_m``
+    scales it so that the *wing span of the folded model* matches the given
+    value exactly (the folded span is narrower than the sheet it was cut
+    from, so scaling by the sheet width would undersize the aeroplane).
     """
     alpha = max(0.0, min(1.0, float(alpha)))
     pattern = build_pattern(archetype, params, alpha)
+    return build_pattern_mesh(pattern, alpha, scale, archetype, span_m)
+
+
+def compile_creases(
+    creases: Sequence[Crease],
+    sheet: Optional[Sequence[Vec2]] = None,
+    alpha: float = 1.0,
+    key: str = "program",
+    label: str = "program",
+) -> CreasePattern:
+    """Compile an arbitrary fold programme into a folded crease pattern.
+
+    This is the public entry point of the folding engine: the creases are
+    listed in the order in which they are physically folded, and every crease
+    cuts the pieces it crosses along the *current* position of its crease
+    line.  A genome of the procedural engine is therefore nothing but an
+    ordered list of creases.
+
+    ``sheet`` defaults to the unit square in sheet space.
+    """
+    alpha = max(0.0, min(1.0, float(alpha)))
+    outline = list(sheet) if sheet else [(0.0, 0.0), (1.0, 0.0), (1.0, 1.0), (0.0, 1.0)]
+    return _compile_pattern(key, label, outline, list(creases), alpha)
+
+
+def build_pattern_mesh(
+    pattern: CreasePattern,
+    alpha: float = 1.0,
+    scale: float = 1.0,
+    archetype: str = "program",
+    span_m: Optional[float] = None,
+) -> OrigamiMesh:
+    """Build the renderable mesh of an already compiled fold programme."""
+    alpha = max(0.0, min(1.0, float(alpha)))
     faces = _fold_faces(pattern)
     layers = assign_layers(faces)
 
@@ -1276,10 +1340,19 @@ def build_mesh(
         scale=scale,
     )
     _assign_elastic_weights(mesh, faces)
-    if abs(scale - 1.0) > 1e-12:
-        mesh.positions = [_scale3(p, scale) for p in mesh.positions]
-        mesh.paper_thickness_m = thickness * scale
-        mesh.layer_pitch_m = pitch * scale
+    factor = scale
+    if span_m is not None and span_m > 0.0:
+        # Match the wing span of the *folded* model, not the width of the
+        # sheet it was cut from.
+        lo, hi = mesh.bounds()
+        current = hi[2] - lo[2]
+        if current > 1e-9:
+            factor *= span_m / current
+    if abs(factor - 1.0) > 1e-12:
+        mesh.positions = [_scale3(p, factor) for p in mesh.positions]
+        mesh.paper_thickness_m = thickness * factor
+        mesh.layer_pitch_m = pitch * factor
+        mesh.scale = factor
     return mesh
 
 
@@ -1435,6 +1508,25 @@ def _assign_elastic_weights(mesh: OrigamiMesh, faces: Sequence[FoldedFace]) -> N
         mesh.elastic_weights[index] = station * station
         twist = max(0.0, min(1.0, (x_le - position[0]) / chord))
         mesh.twist_weights[index] = twist
+
+
+def _camber_weight(
+    point: Vec3, segments: Sequence[Tuple[Vec3, Vec3]]
+) -> float:
+    """How far a point sits from the nearest crease line (0 .. 1).
+
+    The weight is zero on the crease itself and rises smoothly towards the
+    middle of the panel, which is where a folded paper packet bulges.
+    """
+    if not segments:
+        return 0.0
+    distance = min(
+        _point_segment_distance_3d(point, a, b) for a, b in segments
+    )
+    if distance >= CAMBER_SPAN_M:
+        return 1.0
+    t = distance / CAMBER_SPAN_M
+    return t * t * (3.0 - 2.0 * t)
 
 
 def _crease_weight(links: Sequence[CreaseLink], point: Vec3) -> float:

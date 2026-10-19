@@ -511,6 +511,104 @@ def stage_mesh(r: Runner) -> None:
     r.post("/api/v1/mesh/select", {"model_id": "nope"}, expect=400)
 
 
+def stage_origami(r: Runner) -> None:
+    """Procedural origami geometry, genome generation, and recipe endpoints."""
+    # 1. GET /api/v1/origami/archetypes
+    catalog = r.get("/api/v1/origami/archetypes")
+    r.check("archetypes" in catalog, "missing 'archetypes' in /api/v1/origami/archetypes response")
+    archetypes = catalog["archetypes"]
+    r.check(len(archetypes) >= 3, f"expected at least 3 archetypes, got {len(archetypes)}")
+    keys = {a.get("key") for a in archetypes if isinstance(a, dict)}
+    for expected_key in ("classic_dart", "nakamura_lock", "sky_king"):
+        r.check(expected_key in keys, f"archetype '{expected_key}' not found in catalog")
+    for entry in archetypes:
+        r.check(bool(entry.get("label")), f"archetype {entry.get('key')} missing label")
+        r.check("shape_flag" in entry, f"archetype {entry.get('key')} missing shape_flag")
+    r.log(f"origami archetypes: {len(archetypes)} verified ({', '.join(sorted(keys))})")
+
+    # 2. POST /api/v1/origami/mesh (valid payload and 400 validations)
+    mesh_payload = r.post(
+        "/api/v1/origami/mesh",
+        {"archetype": "classic_dart", "alpha": 0.8, "wingspan_m": 0.18},
+    )
+    r.check("stats" in mesh_payload and "positions" in mesh_payload, "mesh response missing stats/positions")
+    r.check("normals" in mesh_payload and "indices" in mesh_payload, "mesh response missing normals/indices")
+    v_count = mesh_payload["stats"]["vertices"]
+    t_count = mesh_payload["stats"]["triangles"]
+    r.check(v_count > 0, "mesh vertices count must be > 0")
+    r.check(t_count > 0, "mesh triangles count must be > 0")
+    r.check(len(mesh_payload["positions"]) == 3 * v_count, "positions length mismatch")
+    r.check(len(mesh_payload["normals"]) == 3 * v_count, "normals length mismatch")
+    r.check(len(mesh_payload["indices"]) == 3 * t_count, "indices length mismatch")
+    r.check(mesh_payload.get("paper_thickness_m", 0.0) > 0.0, "paper_thickness_m must be positive")
+    r.check(mesh_payload.get("max_layers", 0) >= 1, "max_layers must be >= 1")
+    r.log(f"origami mesh: {v_count} verts, {t_count} tris, max_layers={mesh_payload.get('max_layers')}")
+
+    # Mesh 400 validations
+    r.post("/api/v1/origami/mesh", {"archetype": "invalid_archetype"}, expect=400)
+    r.post("/api/v1/origami/mesh", {"alpha": -0.1}, expect=400)
+    r.post("/api/v1/origami/mesh", {"alpha": 1.5}, expect=400)
+    r.post("/api/v1/origami/mesh", {"wingspan_m": 0.0}, expect=400)
+    r.post("/api/v1/origami/mesh", {"wingspan_m": -1.0}, expect=400)
+    r.post("/api/v1/origami/mesh", {"alpha": "not_a_float"}, expect=400)
+
+    # 3. GET /api/v1/origami/genome (?seed=42&step_count=6&strategy=families)
+    genome_data = r.get("/api/v1/origami/genome?seed=42&step_count=6&strategy=families")
+    r.check("genome" in genome_data, "missing 'genome' in genome response")
+    r.check("geometry" in genome_data, "missing 'geometry' in genome response")
+    r.check("grip" in genome_data, "missing 'grip' in genome response")
+    r.check("recipe" in genome_data, "missing 'recipe' in genome response")
+    r.check(len(genome_data["recipe"]) == 6, f"expected 6 recipe steps, got {len(genome_data['recipe'])}")
+    r.check(len(genome_data["genome"]["steps"]) == 6, f"expected 6 genome steps, got {len(genome_data['genome']['steps'])}")
+    r.check(genome_data["genome"].get("seed") == 42, f"seed mismatch: {genome_data['genome'].get('seed')}")
+    r.check("valid" in genome_data["grip"], "missing 'valid' in grip report")
+    r.log(f"genome generated: 6 steps (strategy=families, seed=42), grip_valid={genome_data['grip']['valid']}")
+
+    # 4. POST /api/v1/origami/genome (round-trip genome)
+    evaluated = r.post("/api/v1/origami/genome", {"genome": genome_data["genome"]})
+    r.check("genome" in evaluated, "missing 'genome' in evaluated response")
+    r.check("geometry" in evaluated, "missing 'geometry' in evaluated response")
+    r.check("grip" in evaluated, "missing 'grip' in evaluated response")
+    r.check("recipe" in evaluated, "missing 'recipe' in evaluated response")
+    r.check(len(evaluated["genome"]["steps"]) == 6, "genome steps count mismatch in round-trip")
+    r.check(evaluated["grip"]["valid"] == genome_data["grip"]["valid"], "grip validation mismatch in round-trip")
+    r.check(len(evaluated["recipe"]) == 6, "recipe length mismatch in round-trip")
+    r.log(f"genome round-trip evaluated: {len(evaluated['recipe'])} steps verified")
+
+    # 5. GET /api/v1/origami/genome/recipe (?archetype=classic_dart)
+    recipe_data = r.get("/api/v1/origami/genome/recipe?archetype=classic_dart")
+    r.check("steps" in recipe_data and "markdown" in recipe_data and "svg" in recipe_data, "missing recipe keys")
+    r.check(len(recipe_data["steps"]) > 0, "recipe has no steps")
+    r.check(recipe_data["svg"].startswith("<svg"), "svg does not start with '<svg'")
+    r.check("</svg>" in recipe_data["svg"], "svg missing closing tag")
+    r.check(len(recipe_data["markdown"]) > 0, "recipe markdown is empty")
+    r.check(recipe_data.get("valid") is True, "classic_dart recipe expected to be valid")
+    r.log(f"recipe: {len(recipe_data['steps'])} steps, svg len={len(recipe_data['svg'])}, valid={recipe_data['valid']}")
+
+    # 6. GET /api/v1/origami/genome/steps (?archetype=classic_dart&alpha=1.0)
+    steps_data = r.get("/api/v1/origami/genome/steps?archetype=classic_dart&alpha=1.0")
+    r.check("states" in steps_data and "step_count" in steps_data, "missing states/step_count in /steps")
+    r.check(steps_data["step_count"] > 0, "step_count must be > 0")
+    r.check(len(steps_data["states"]) == steps_data["step_count"] + 1, "states length mismatch with step_count + 1")
+    r.check(steps_data["states"][0].get("step_index") == 0, "initial state step_index must be 0")
+    for st in steps_data["states"]:
+        r.check("positions" in st and "indices" in st, "state missing positions or indices")
+    r.log(f"genome steps: {steps_data['step_count']} steps, {len(steps_data['states'])} intermediate states")
+
+    # 7. Query validation 400 errors
+    r.get("/api/v1/origami/genome?step_count=0", expect=400)
+    r.get("/api/v1/origami/genome?step_count=65", expect=400)
+    r.get("/api/v1/origami/genome?step_count=not_an_int", expect=400)
+    r.get("/api/v1/origami/genome?strategy=bogus", expect=400)
+    r.get("/api/v1/origami/genome?archetype=nonexistent_plane", expect=400)
+    r.post("/api/v1/origami/genome", {"genome": {"steps": [{}]}}, expect=400)
+    r.get("/api/v1/origami/genome/recipe?archetype=nonexistent_plane", expect=400)
+    r.get("/api/v1/origami/genome/steps?archetype=nonexistent_plane", expect=400)
+    r.get("/api/v1/origami/genome/steps?archetype=classic_dart&alpha=-0.1", expect=400)
+    r.get("/api/v1/origami/genome/steps?archetype=classic_dart&alpha=1.5", expect=400)
+    r.get("/api/v1/origami/genome/steps?archetype=classic_dart&alpha=invalid_float", expect=400)
+
+
 def stage_optimizer(r: Runner) -> None:
     request_payload = {
         "objectives": [{"name": "max_distance", "weight": 1.0}, {"name": "min_max_stress", "weight": 0.5}],
@@ -809,6 +907,7 @@ STAGES: List[Tuple[str, Callable[[Runner], None]]] = [
     ("stress", stage_stress),
     ("simulation", stage_simulation),
     ("mesh import", stage_mesh),
+    ("origami", stage_origami),
     ("optimizer job", stage_optimizer),
     ("optimizer cancel", stage_optimizer_cancel),
     ("batch", stage_batch),

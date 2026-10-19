@@ -61,6 +61,7 @@ from .config_schema import (
     from_dict,
     safe_div,
 )
+from .payload_contract import empty_payload, normalize_payload
 from .aero_domain import elevon_effects, helmbold_cl_alpha
 from . import gpu_dynamics
 from .stress_domain import (
@@ -624,28 +625,37 @@ def evaluate_flight_surrogate(
     else:
         status = "landed"
 
-    return {
-        "distance_m": float(distance),
-        "flight_time_s": float(flight_time),
-        "max_altitude_m": float(max_altitude),
-        "max_ld_ratio": float(ld_ratio),
-        "max_stress_index": float(stress_index),
-        "max_stress_pa": float(max(stress_pa, 0.0)),
-        "launch_speed_mps": float(launch_speed),
-        "stall_margin": float(stall_margin),
-        "stability": float(stability),
-        "landing_distance_m": float(landing_distance),
-        "status": status,
-        # Extra diagnostics (never used as objective inputs) -----------------
-        "surrogate": True,
-        **_approximate_model_metadata("analytical_glide_surrogate"),
-        "airspeed_mps": float(airspeed),
-        "stall_speed_mps": float(v_stall),
-        "load_factor": float(load_factor),
-        "dynamic_pressure_pa": float(dynamic_pressure),
-        "trim_alpha_deg": float(alpha_trim_deg),
-        "steps": int(max(1, math.ceil(flight_time / dt))),
-    }
+    return normalize_payload(
+        {
+            "distance_m": float(distance),
+            "flight_time_s": float(flight_time),
+            "max_altitude_m": float(max_altitude),
+            "max_ld_ratio": float(ld_ratio),
+            "max_stress_index": float(stress_index),
+            "max_stress_pa": float(max(stress_pa, 0.0)),
+            "launch_speed_mps": float(launch_speed),
+            "stall_margin": float(stall_margin),
+            "stability": float(stability),
+            "landing_distance_m": float(landing_distance),
+            "status": status,
+            "duration_s": float(horizon),
+            # Extra diagnostics (never used as objective inputs) -----------------
+            "surrogate": True,
+            **_approximate_model_metadata("analytical_glide_surrogate"),
+            "airspeed_mps": float(airspeed),
+            "stall_speed_mps": float(v_stall),
+            "load_factor": float(load_factor),
+            "dynamic_pressure_pa": float(dynamic_pressure),
+            "trim_alpha_deg": float(alpha_trim_deg),
+            "steps": int(max(1, math.ceil(flight_time / dt))),
+        },
+        model=REDUCED_MODEL_TAG,
+        approximate=True,
+        physics_verification_eligible=False,
+        limitations=(
+            "Analytical glide surrogate: no 6-DoF attitude integration and no trajectory sampling.",
+        ),
+    )
 
 
 def as_environment_payload(environment: Any) -> Dict[str, Any]:
@@ -699,36 +709,40 @@ def evaluate_case(case: Dict[str, Any]) -> Dict[str, Any]:
         try:
             result = module.evaluate_flight(aircraft, environment, launch, duration, dt_max)
             if isinstance(result, dict):
-                return {**result, "model": RIGID_BODY_MODEL_TAG, "model_detail": "6dof_rk4",
-                        "approximate": False,
-                        "physics_verification_eligible": not bool(result.get("status") in ("failed", "diverged", "error")),
-                        "limitations": ["Aerodynamic and material coefficients require experimental calibration."]}
+                return normalize_payload(
+                    {**result, "model_detail": "6dof_rk4"},
+                    model=RIGID_BODY_MODEL_TAG,
+                    approximate=False,
+                    physics_verification_eligible=not bool(result.get("status") in ("failed", "diverged", "error")),
+                    limitations=("Aerodynamic and material coefficients require experimental calibration.",),
+                )
         except Exception as exc:
-            return {
-                "status": "failed",
-                "error": str(exc),
-                "distance_m": 0.0,
-                "flight_time_s": 0.0,
-                "max_altitude_m": 0.0,
-                "landing_distance_m": 0.0,
-                "max_stress_index": 10.0,
-                "max_stress_pa": 1.0e9,
-                "max_ld_ratio": 0.0,
-                "stall_margin": -10.0,
-                "max_stall_margin": -10.0,
-                "launch_speed_mps": 100.0,
-                "min_launch_speed": 100.0,
-                "stability": -10.0,
-                "max_stability": -10.0,
-                "crashed": True,
-                "diverged": True,
-                "landed": False,
-                "backend": "error",
-                "model": RIGID_BODY_MODEL_TAG,
-                "model_detail": "6dof_rk4",
-                "approximate": False,
-                "physics_verification_eligible": False,
-            }
+            return empty_payload(
+                status="failed",
+                error=str(exc),
+                distance_m=0.0,
+                flight_time_s=0.0,
+                max_altitude_m=0.0,
+                landing_distance_m=0.0,
+                max_stress_index=10.0,
+                max_stress_pa=1.0e9,
+                max_ld_ratio=0.0,
+                stall_margin=-10.0,
+                max_stall_margin=-10.0,
+                launch_speed_mps=100.0,
+                min_launch_speed=100.0,
+                stability=-10.0,
+                max_stability=-10.0,
+                crashed=True,
+                diverged=True,
+                landed=False,
+                backend="error",
+                model=RIGID_BODY_MODEL_TAG,
+                model_detail="6dof_rk4",
+                approximate=False,
+                physics_verification_eligible=False,
+                limitations=(f"Evaluation failed: {exc}",),
+            )
     return evaluate_flight_surrogate(aircraft, environment, launch, duration, dt_max)
 
 

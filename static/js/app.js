@@ -30,6 +30,7 @@ import {
   ORIGAMI_ARCHETYPES,
   buildOrigamiGeometry,
   requestOrigamiMesh,
+  requestOrigamiGenomeSteps,
 } from "./origami.js";
 import { store } from "./state.js";
 import { Gauges, PolarChart, StripChart } from "./telemetry.js";
@@ -1726,16 +1727,36 @@ class ConsoleApp {
     const enabled = Boolean(state.enabled);
     const archetype = String(state.archetype || "classic_dart");
     const progression = Math.max(0, Math.min(1, Number(state.progression ?? 1)));
+    const genomeEnabled = Boolean(state.genome_enabled);
+    const genomeSeed = Math.round(Number(state.genome_seed ?? 0) || 0);
+    const genomeSteps = Math.max(2, Math.round(Number(state.genome_steps ?? 8) || 8));
+    const genomeStrategy = String(state.genome_strategy || "families");
+    const genomeStep = Math.max(0, Math.round(Number(state.genome_step ?? 0) || 0));
     const note = this.dom["origami-summary"];
     if (note) {
-      const label = ORIGAMI_ARCHETYPES.find((a) => a.key === archetype);
-      note.textContent = enabled
-        ? `α ${fmt(progression * 100, 0)}% · ${label ? label.key : archetype}`
-        : "OFF";
+      if (genomeEnabled) {
+        note.textContent = `遺伝子 #${genomeSeed} · ${genomeStrategy} · 手 ${genomeStep}/${genomeSteps}`;
+      } else {
+        const label = ORIGAMI_ARCHETYPES.find((a) => a.key === archetype);
+        note.textContent = enabled
+          ? `α ${fmt(progression * 100, 0)}% · ${label ? label.key : archetype}`
+          : "OFF";
+      }
     }
     if (!enabled) {
       this._origamiAbort = null;
       this.viewport.clearOrigamiGeometry();
+      return;
+    }
+    if (genomeEnabled) {
+      const signature = `genome|${genomeSeed}|${genomeSteps}|${genomeStrategy}|${genomeStep}`;
+      if (signature === this._origamiSignature) return;
+      this._origamiSignature = signature;
+      if (this._origamiTimer) clearTimeout(this._origamiTimer);
+      this._origamiTimer = setTimeout(
+        () => this._loadOrigamiGenome(genomeSeed, genomeSteps, genomeStrategy, genomeStep),
+        60
+      );
       return;
     }
     const signature = `${archetype}|${progression.toFixed(3)}|${this.store.data.aircraft.wingspan_m}|${this.store.data.aircraft.dihedral_deg}|${this.store.data.aircraft.elevon_deg}|${this.store.data.aircraft.fold_tip_deg}|${this.store.data.aircraft.fold_trailing_deg}`;
@@ -1743,6 +1764,43 @@ class ConsoleApp {
     this._origamiSignature = signature;
     if (this._origamiTimer) clearTimeout(this._origamiTimer);
     this._origamiTimer = setTimeout(() => this._loadOrigami(archetype, progression), 60);
+  }
+
+  /**
+   * Load a random fold programme and show the state of one of its steps.
+   *
+   * The server folds the programme and returns the solid of every
+   * intermediate state, so the step slider walks through the folding one
+   * move at a time.
+   */
+  async _loadOrigamiGenome(seed, stepCount, strategy, step) {
+    if (this._origamiAbort) this._origamiAbort.abort();
+    const controller = new AbortController();
+    this._origamiAbort = controller;
+    try {
+      const payload = await requestOrigamiGenomeSteps({
+        seed,
+        stepCount,
+        strategy,
+        signal: controller.signal,
+      });
+      if (controller.signal.aborted) return;
+      const states = payload.states || [];
+      if (!states.length) return;
+      const index = Math.min(Math.max(step, 0), states.length - 1);
+      const state = states[index];
+      const geometry = buildOrigamiGeometry(state);
+      const bounds = state.bounds || { min: [0, 0, 0], max: [0, 0, 0] };
+      const semispan = Math.max(Math.abs(bounds.max[2] - bounds.min[2]) * 0.5, 1e-3);
+      this.viewport.setOrigamiGeometry(geometry, semispan);
+      this._origamiStates = states;
+    } catch (error) {
+      if (error && error.name === "AbortError") return;
+      this.notify(
+        `折り方遺伝子の読み込みに失敗しました: ${this._describe(error)}`,
+        "error"
+      );
+    }
   }
 
   async _loadOrigami(archetype, progression) {

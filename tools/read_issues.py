@@ -13,4 +13,5 @@ try:
             print(issue.get('body', ''))
             print("-" * 50)
 except Exception as e:
-    print(f"Error fetching issues: {e}")
+    print(f"Error fetching issues: {e}", file=sys.stderr)
+    sys.exit(1)

@@ -528,11 +528,13 @@ def drag_coefficient(
     the **induced** part only, because a ground effect does not change the
     profile drag.
     """
+    te_fold = trailing_edge_fold_effects(cfg)
     cl = lift_coefficient(alpha_deg, cfg, compressible=compressible, mach=mach, cl_offset=cl_offset)
     induced = cl * cl / _polar_constant(cfg)
     factor = 1.0 if ground_height_m is None else ground_effect_factor(ground_height_m, _span(cfg), True)
     return (
         parasite_drag_coefficient(cfg, reynolds)
+        + te_fold["dcd"]
         + induced * factor
         + separated_pressure_drag_coefficient(alpha_deg, cfg, reynolds)
         + wave_drag_coefficient(mach, compressible)
@@ -574,7 +576,13 @@ def elevon_effects(elevon_deg: float, cfg: AircraftConfig) -> Dict[str, float]:
 
 def trim_alpha_from_elevon(cfg: AircraftConfig, elevon_deg: float) -> float:
     """Closed-form angle of attack that nulls the static pitching moment."""
-    return float(elevon_effects(elevon_deg, cfg)["dalpha_trim_deg"])
+    elevon = elevon_effects(elevon_deg, cfg)
+    te_fold = trailing_edge_fold_effects(cfg)
+    cm_alpha = _finite(cfg.cm_alpha)
+    if abs(cm_alpha) < 1.0e-12:
+        return 0.0
+    cm_static = _finite(cfg.cm0) + elevon["dcm"] + te_fold["dcm"]
+    return float(rad2deg(-cm_static / cm_alpha))
 
 
 def elevon_for_trim(cfg: AircraftConfig, alpha_deg: float) -> float:
@@ -582,7 +590,8 @@ def elevon_for_trim(cfg: AircraftConfig, alpha_deg: float) -> float:
     gain = elevon_authority(cfg) * ELEVON_MOMENT_PER_DEG
     if gain <= 1.0e-12:
         return 0.0
-    required = -(_finite(cfg.cm0) + _finite(cfg.cm_alpha) * deg2rad(alpha_deg))
+    te_fold = trailing_edge_fold_effects(cfg)
+    required = -(_finite(cfg.cm0) + _finite(cfg.cm_alpha) * deg2rad(alpha_deg) + te_fold["dcm"])
     return clamp(-required / gain, -ELEVON_MAX_DEG, ELEVON_MAX_DEG)
 
 
@@ -596,13 +605,8 @@ def trailing_edge_fold_effects(cfg: AircraftConfig) -> Dict[str, float]:
     Also produces a profile drag increment dcd scaling with sin^2(fold).
     """
     fold_deg = _finite(getattr(cfg, "fold_trailing_deg", 0.0), 0.0)
-    if fold_deg == 0.0:
-        return {"dcl": 0.0, "dcm": 0.0, "dcd": 0.0}
-    rad = deg2rad(fold_deg)
-    dcl = 0.015 * fold_deg
-    dcm = -0.012 * fold_deg
-    dcd = 0.035 * (math.sin(rad) ** 2)
-    return {"dcl": dcl, "dcm": dcm, "dcd": dcd}
+    effects = aero_kernel.trailing_edge_fold_effects(_SCALAR, fold_deg)
+    return {key: float(value) for key, value in effects.items()}
 
 
 # --------------------------------------------------------------------------
@@ -627,7 +631,8 @@ def drag_polar_minima(
     an angle of attack.
     """
     constant = _polar_constant(cfg)
-    cd0 = parasite_drag_coefficient(cfg, reynolds)
+    te_fold = trailing_edge_fold_effects(cfg)
+    cd0 = parasite_drag_coefficient(cfg, reynolds) + te_fold["dcd"]
     zero_lift = _finite(cfg.cL0) if cl_zero_lift is None else _finite(cl_zero_lift)
     slope = lift_slope_per_rad(cfg) if slope_per_rad is None else _finite(slope_per_rad)
     cl_at_ld_max = math.sqrt(max(cd0, 0.0) * constant)
@@ -665,19 +670,22 @@ def drag_polar(
     alphas: List[float] = [high if index == count - 1 else low + step * index for index in range(count)]
 
     slope = lift_slope_per_rad(cfg)
+    te_fold = trailing_edge_fold_effects(cfg)
+    elevon = elevon_effects(cfg.elevon_deg, cfg)
+    total_cl_offset = elevon["dcl"] + te_fold["dcl"]
     cols_cl: List[float] = []
     cols_cd: List[float] = []
     cols_ld: List[float] = []
     for alpha in alphas:
-        cl = lift_coefficient(alpha, cfg, compressible=False, mach=0.0)
-        cd = drag_coefficient(alpha, cfg, reynolds=reynolds, ground_height_m=None)
+        cl = lift_coefficient(alpha, cfg, compressible=False, mach=0.0, cl_offset=total_cl_offset)
+        cd = drag_coefficient(alpha, cfg, reynolds=reynolds, ground_height_m=None, cl_offset=total_cl_offset)
         cols_cl.append(cl)
         cols_cd.append(cd)
         cols_ld.append(safe_div(cl, cd, 0.0) if cd > _CD_FLOOR else 0.0)
 
     best_cd = min(range(count), key=lambda i: cols_cd[i])
     best_ld = max(range(count), key=lambda i: cols_ld[i])
-    zero_lift = _finite(cfg.cL0) + elevon_effects(cfg.elevon_deg, cfg)["dcl"]
+    zero_lift = _finite(cfg.cL0) + total_cl_offset
     minima = drag_polar_minima(cfg, reynolds=reynolds, cl_zero_lift=zero_lift, slope_per_rad=slope)
 
     return {

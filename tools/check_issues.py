@@ -8,6 +8,11 @@ if sys.stdout.encoding.lower() != 'utf-8':
         sys.stdout.reconfigure(encoding='utf-8')
     except Exception:
         pass
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 
 from tools.notify_discord import load_env_file
 
@@ -34,5 +39,6 @@ try:
                 body = x.get('body') or ''
                 print(f"   Body: {body[:300]}")
 except Exception as e:
-    print("Error fetching issues:", e)
+    print(f"Error fetching issues: {e}", file=sys.stderr)
+    sys.exit(1)
 

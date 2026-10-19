@@ -27,6 +27,7 @@ meta_bp = Blueprint("meta", __name__)
 
 
 @meta_bp.get("/api/v1/meta/schemas")
+@meta_bp.get("/api/v1/meta/schema")
 def meta_schemas():
     """Single source of truth for the UI sliders, objective list and ranges."""
     return jsonify(

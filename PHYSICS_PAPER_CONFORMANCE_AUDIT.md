@@ -111,6 +111,8 @@ Helmbold (1942) / Polhamus (1966,1971) / Viterna & Corrigan (1982) / Wieselsberg
 
 `physics/aero_domain.py` は**係数計算をすべて `aero_kernel` へ委譲**する薄いラッパになった（`lift_coefficient` / `drag_coefficient` / `stall_blend_weight` / `separated_pressure_drag_coefficient` / `elevon_effects` / `center_of_pressure_x` / `evaluate_aero`）。Consequently **空力モデルに実装は1つしかない**。
 
+カーネルは**2つの実行バックエンド**を持つ: `aero_kernel.ScalarMath`（純 `math`、配列確保なし）と NumPy/CuPy。6DoF 参照経路は `ScalarMath` を、GPU batch は NumPy/CuPy を使う。**式は同一**で、`tools/check_aero_kernel_parity.py` が 9856 状態 × 8 構成で**ビット一致**（`rel = 0.0`）を検証する。`ScalarMath` を使うのは、6DoF 積分器は 1 ステップあたり 4 状態評価するため、NumPy 0-d 配列を経由すると空力評価が約30倍遅くなり調査パイプラインが停止するため。
+
 ### 解決した課題
 
 | 課題 | 原因 | 解決 | 検証 |
@@ -134,8 +136,16 @@ Helmbold (1942) / Polhamus (1966,1971) / Viterna & Corrigan (1982) / Wieselsberg
 | `status` | landed ×5 | landed ×5 | 一致 |
 | `flight_time_s` | 3.4852 / 3.7158 / 3.5154 / 3.7449 / 3.8358 | 3.4834 / 3.7138 / 3.5170 / 3.7428 / 3.8492 | ≤0.4 % |
 | `distance_m` | 16.193 / 14.754 / 17.704 / 17.675 / 16.436 | 16.231 / 14.954 / 17.824 / 17.723 / 16.581 | ≤1.4 % |
+| `max_ld_ratio` / `stability` | — | — | ≤0.3 %（接地インパルス除外後） |
 
 `max_stress_pa` は**ビット一致**（`rel = 1e-9`）する。`max_stress_index` も同一。
+
+### 併せて是正した付随欠陥
+
+| 欠陥 | 内容 | 是正 |
+|---|---|---|
+| `max_ld_ratio` が接地インパルスに汚染 | 参照経路は接地衝突**直後**のサンプルも L/D 統計に含め、glider の実 best glide 7.8 に対して 13.8（ダウンフォース過渡）を報告していた | `_is_contact_sample()` を追加し、接触で終わった飛行の最終サンプルを L/D 統計（と trim 点の決定）から除外。GPU batch と同じ意味になる |
+| `stability` の定義不一致 | 参照経路は best-glide 点の**静的**trim 残差 `C_m` を使うが、batch は瞬時 `C_m`（β・角速度項を含む）を使っていた | batch も同じ静的残差（`β=0`、角速度 0）を使うよう変更し、参照と一致 |
 
 ### 残る既知の限定（正直に明記）
 
@@ -143,6 +153,7 @@ Helmbold (1942) / Polhamus (1966,1971) / Viterna & Corrigan (1982) / Wieselsberg
 - batch の風場は**全ケース共通の時刻**（アクティブケースの平均時刻）で評価する。
 - 接地は機体ステーション（ノーズ・翼端・尾・キール）で判定し、衝撃 G は参照と同じ `n = 1 + v²/(2 g d)`（`d = 0.031 m`）を使う。ただし CCD（接触瞬間の補間）とクランプ弾性係数は batch 側では簡略化。
 - batch の慣性テンソルは**対角項のみ**（`inertia_xy/xz/yz` は 0）。参照経路の `body_inertia_tensor` は非対角項を許すため、極小のモーメント差が残る。
+- **GPU の性能**: 13状態 RK4 は要素演算が約200回/状態評価、4段/ステップ。CuPy の 1 kernel launch オーバーヘッドが Windows/WDDM 環境では約100 µs あり、本機では 1状態評価あたり約21 ms（CPU/numpy は約1.5 ms）。したがって**この環境では GPU 過程が CPU より遅い**。Linux/CI では launch overhead が 1/10 程度になり、N が十分大きい批量で GPU が有利になる。`gpu_batch_evaluate_cases` はこの環境差を吸収するため Models は単一実装のままである。
 
 ---
 
@@ -1308,7 +1319,7 @@ Helmbold (1942) / Polhamus (1966,1971) / Viterna & Corrigan (1982) / Wieselsberg
 | H-16 | 熱上昇柱の巻き込み流の**符号を反転**し、柱頂より上は流出・柱基部は流入（連続性 `∇·V≠0` の解消） | `wind_domain.py` |
 | H-17 | 風向の符号規約を**共有ヘルパー**へ統一（GPU 2経路の90°回転・符号反転を解消） | `parallel_engine.py` |
 | H-18 | 付加質量の部分実装（重力未スケール、回転付加慣性欠落）を是正 | `flight_sim.py` |
-| H-19 | 折り後縁の空力モデル `trailing_edge_fold_effects` を**接続**（最適化の設計変数が不活性だった問題） | `aero_domain.py` |
+| H-19 | 折り後縁の空力モデル `trailing_edge_fold_effects` は**未接続**（`physics/aero_domain.py:589` で定義・`:99` で export されているが**呼び出し元が無い**）。`fold_trailing_deg` は最適化設計変数でありながら**空力には影響しない**。据え置き（`no-finish.md` A-2） | `aero_domain.py` |
 | H-20 | ステップ受入判定を**微分に基づく相対判定**へ変更（`h` でスケールされない絶対閾値の解消）。棄却回数をテレメトリへ露出 | `flight_sim.py` |
 
 ## B.2 実施済み（中重要度）
@@ -1347,6 +1358,8 @@ M-01 反発係数のクランプ統一（`tip_restitution` を新設）／M-02 �
 - **H-11 の完全版**: 折り断面の実 `Z`（`b h²/6`）と実材料定数（E_MD/E_CD/ν）による応力再構成は未実施（較正係数 `KAPPA_SIGMA` は残存）。
 - **H-15 の完全版**: Polhamus の公開式（`K_p sinα cos²α` を含む全揚力式）への置換は未実施（LEV 増分のみ符号修正）。
 - **H-18 の完全版**: 回転付加慣性の実装は未実施。
+- **H-19 の完全版**: `trailing_edge_fold_effects` の**接続は未実施**（定義のみ存在）。`fold_trailing_deg` は引き続き空力に影響しない。
+- **M-17 の完全版**: 投入ピッチの `torque_rate[1] *= 0.10`（`flight_sim.py:1498`）は未撤去。
 - **M-12/M-13/M-14（パネル法）**: 3D可視化パネルの揚力傾斜は依然 2π（2次元翼型）で参照経路と 2.2 倍乖離。
 - **M-24（風向/乱流の残差）**, **M-30/M-31（`static_margin` と Drag Polar 既定 Re）**, 低重要度 30 件の大半。
 

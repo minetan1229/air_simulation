@@ -29,7 +29,7 @@
   5. *Distill & Loop*: 確定事実は `.agents/Knowledge.md`、現在地は `.agents/Project.md` へ記録。肥大時は `.agents/skills/loop-handover.md` 実行。
   6. *Finalize & Terminate*: ローカル全通過 → 対象ブランチへマージ&push（既定は master。`genetic-project` フェーズは §2 ブランチ隔離に従い master 宛の操作を禁止）→ CI完了確認 → Issue確認クローズ後HALT。
 - **1.4 規約統治**: ユーザー明示指示・監査合意なき本ファイル改変禁止。仕様は `docs/SPECIFICATION.md`、知見は `.agents/Knowledge.md` に集約。
-
+- **1.5**: 値は物理的な値を使用し、意図的に調整された値にならないようにする
 ---
 
 ## 2. Guardrails（常駐制約）

@@ -30,6 +30,7 @@ from ..core import (
     as_float,
     body,
     domain,
+    merge_overlay,
 )
 
 log = logging.getLogger("paper_airplane")
@@ -82,12 +83,9 @@ def _optimizer_config(payload: Dict[str, Any]) -> OptimizerConfig:
     else:
         dvars = list(dvars_raw)
 
-    base = as_dict(SESSION.aircraft)
-    base.update(raw.get("aircraft", {}) or {})
-    env = as_dict(SESSION.environment)
-    env.update(raw.get("environment", {}) or {})
-    launch = as_dict(SESSION.launch)
-    launch.update(raw.get("launch", {}) or {})
+    base = merge_overlay(as_dict(SESSION.aircraft), raw.get("aircraft"), "aircraft")
+    env = merge_overlay(as_dict(SESSION.environment), raw.get("environment"), "environment")
+    launch = merge_overlay(as_dict(SESSION.launch), raw.get("launch"), "launch")
 
     variable_bounds = raw.get("variable_bounds") or {}
     if not isinstance(variable_bounds, dict):
@@ -232,16 +230,14 @@ def optimizer_result(job_id: str):
 
 
 @jobs_bp.post("/api/v1/investigate/run")
+@jobs_bp.post("/api/v1/jobs/investigate")
 def investigate_run():
     if JOB_MANAGER.active_count() >= 4:
         raise BadRequest("server busy: maximum active jobs (4) reached, please wait or cancel running jobs")
     payload = body()
-    base_air = as_dict(SESSION.aircraft)
-    base_air.update(payload.get("aircraft", {}) or {})
-    env = as_dict(SESSION.environment)
-    env.update(payload.get("environment", {}) or {})
-    lau = as_dict(SESSION.launch)
-    lau.update(payload.get("launch", {}) or {})
+    base_air = merge_overlay(as_dict(SESSION.aircraft), payload.get("aircraft"), "aircraft")
+    env = merge_overlay(as_dict(SESSION.environment), payload.get("environment"), "environment")
+    lau = merge_overlay(as_dict(SESSION.launch), payload.get("launch"), "launch")
 
     aircraft_cfg = from_dict(AircraftConfig, base_air, strict=False)
     environment_cfg = from_dict(EnvironmentConfig, env, strict=False).clamp_ranges()

@@ -42,4 +42,5 @@ try:
             event = r.get("event")
             print(f"Run #{r_num} [{name}] id={r_id} status={status} conclusion={conclusion} branch={branch} commit={commit} event={event}")
 except Exception as e:
-    print("Error fetching runs:", e)
+    print(f"Error fetching runs: {e}", file=sys.stderr)
+    sys.exit(1)

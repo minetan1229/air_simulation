@@ -82,6 +82,7 @@ def close_resolved_ci_issues() -> int:
                 print(f"Issue #{issue_number} closed successfully.")
     except Exception as exc:
         print(f"Warning: Failed to auto-close CI issue: {exc}", file=sys.stderr)
+        return 1
 
     return 0
 

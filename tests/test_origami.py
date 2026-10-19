@@ -319,9 +319,11 @@ def test_folded_faces_do_not_self_intersect(archetype):
             od._add3(point, od._scale3(ref, amount)) for point in face.poly3d
         ]
     for i, a in enumerate(faces):
+        a_face = pattern.face_by_id(a.fid)
+        assert a_face is not None
         for b in faces[i + 1 :]:
             linked = any(
-                link.neighbour_fid == b.fid for link in pattern.face_by_id(a.fid).links
+                link.neighbour_fid == b.fid for link in a_face.links
             )
             if linked:
                 continue
@@ -408,3 +410,26 @@ def test_archetype_catalog_lists_the_three_prototypes():
     assert [entry["key"] for entry in catalog] == list(od.ARCHETYPES)
     assert all(entry["label"] for entry in catalog)
     assert {entry["shape_flag"] for entry in catalog} == {0, 1, 2}
+
+
+def test_bezier_crease_no_spike_across_parameter_sweep():
+    """Crease Bézier curves must not spike or diverge beyond sheet bounds.
+
+    Regression test for Bézier spike divergence when panels are nearly
+    parallel (e.g. elevon_deg or fold_trailing_deg near 0 or varied).
+    The bounding box max X coordinate must never exceed the paper nose
+    position (~0.1485 m, capped at 0.15 m).
+    """
+    elevon_angles = [-30.0, -15.0, -2.0, 0.0, 2.0, 15.0, 30.0]
+    trailing_angles = [0.0, 5.0, 15.0, 30.0, 45.0]
+    for elevon in elevon_angles:
+        for trailing in trailing_angles:
+            mesh = od.build_mesh(
+                od.ARCHETYPE_DART,
+                params={"elevon_deg": elevon, "fold_trailing_deg": trailing},
+            )
+            _, max_pt = mesh.bounds()
+            assert max_pt[0] <= 0.15, (
+                f"Spike detected for elevon={elevon}, trailing={trailing}: max_x={max_pt[0]}"
+            )
+

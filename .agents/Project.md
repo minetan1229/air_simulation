@@ -20,12 +20,12 @@
 - [x] `agents.md` を「常駐コア（規約・ガードレール）+ 参照索引」に再構成し、知識・技能・現在地の正本は `.agents/` 配下へ維持（重複長文の常駐回避）
 - [x] **プロシージャル折り紙3Dジオメトリ（2026-10-20 新マイルストーン）**: `physics/origami_domain.py` に展開図コンパイラ→三次元ヒンジ列→多層ソルidd生成を実装。Classic Dart / Nakamura Lock / Sky King の3機体、折り工程 α、Z-Fighting 構造的排除、紙の厚み・折り目ロール・PBR紙材質を実装し、UI に折り工程スライダーと機体タイプ切替を統合。
 - [x] **genetic-project フェーズ立上り（2026-10-20）**: `genetic-project` ブランチを新規作成し、GA（遺伝的アルゴリズム）実装前に物理的健全性（P0〜P3）を確立する専用フェーズへ移行。`master`/`main` とは完全に分離（コミット・マージ・チェリーピック・PR 禁止）。`tools/branch_guard.py` による保護ブランチ実行停止を `conftest.py` / `app.py` / `smoke_test.py` に実装。
+- [x] **無作為折り方遺伝子エンジン（2026-10-20 新マイルストーン）**: `physics/origami_genome.py` に折り操作のシーケンスを遺伝子として表現する Procedural Origami Engine を実装。`FoldStep`（折り線・山/谷別角度 -180..+180°・対称性・層順序・対象パネル）、世代0の完全無作為生成、保持可能判定（持ち手/キール幾何フィルタ＋重心位置＋自己貫通検査）、折り手順レシピ（手順表・Markdown・展開図 SVG）と段階メッシュ生成を実装し、API 6 系統と UI の折り手順スライダを統合。
 
 ## 3. Loop State (現在のループ状態・引き継ぎメモリ)
-- **Current Phase**: Phase 6 [Finalize & Terminate] — 完了確認と成果物の公開
-- **Active Sub-task**: `PHYSICS_PAPER_CONFORMANCE_AUDIT.md` の P0〜P3（モデルタグ/応力許容/ヘルンボルド式/風符号 → 失速後空力 → 接地インパルス → GPU 6DoF 一致 → 最適化器の 6DoF 再検証）を実装し、`tests/test_paper_conformance_p0_p1.py`（P0/P1, 26件）と `tests/test_ga_physics_readiness.py`（P2/P3, 21件）で固定化。_branch guard_ は `tools/branch_guard.py` に実装し、テストスイート・`app.py`・`smoke_test.py` に組み込み済み。
-- **Current Hypothesis**: 「6DoF の破綻要因を全て塞げば、GA が探索できる物理的評価基盤になる」こと。合否基準は (a) 既存全テスト PASS、(b) 新規監査テスト P0〜P3 全 PASS、(c) smoke_test 13/13 PASS、(d) 保護ブランチへの書き込みゼロ。
-- **Verification Criteria**: 全 pytest PASS（`python -m pytest tests -q` = **866 PASS / 0 failed**, 24分07秒、RAM最大80%・VRAM最大9.6%）、`python smoke_test.py` 13/13 stages、`ruff check .` / `mypy` 0 件、`git branch --show-current` が `genetic-project`。※CPU競合下で全スイートを1回走らせた際に `test_tunneling_ccd.py` 1件が失敗したが、部分集合10通りの再現は無し（負荷依存フレーク、未特定）。
-- **Next Action**: `genetic-project` ブランチの CI 完了確認 → 残 M 級（`static_margin` 接続 M30 / `fold_trailing_deg` 接続 H19 / 実材料の断面モデル H11-M26）を次フェーズで着手。
-- **既知の残課題（今回の変更外・既存）**: `ruff` の `physics/mesh_domain.py` F822 は既存事象。`PHYSICS_PAPER_CONFORMANCE_AUDIT.md` の M 級項目は P3 の残タスクとして次フェーズで着手する。
-
+- **Current Phase**: Phase 4 [Verify / Stage] — 無作為折り方遺伝子エンジン検証完了・ステージング
+- **Status Summary**: `physics/origami_genome.py` および `tests/test_origami_genome.py`（22/22 テスト完全PASS）のコンパイル・監査・単体テスト完了。折り紙エンドポイント（`/origami/genome`, `/genome/recipe`, `/genome/steps`）検証完了。
+- **Branch & Safety**: `genetic-project` ブランチ保護確認（`tools/branch_guard.py` PASS）。未追跡ファイルおよびループ状態のステージング完了。
+- **Verification Criteria**: `test_origami_genome.py` (22 PASS), `branch_guard.py` (0 error), `compileall` (0 syntax error).
+- **Next Action**: `genetic-project` ブランチでのコミット作成および次期GA最適化ループ（適合度評価・交叉・変異）への移行。
+- **既知の残課題（既存）**: `physics/mesh_domain.py` F822（既存）、`PHYSICS_PAPER_CONFORMANCE_AUDIT.md` M級項目（次フェーズ）。

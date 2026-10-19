@@ -186,6 +186,17 @@ def merge_environment(payload: Optional[Dict[str, Any]], base: EnvironmentConfig
     return env.clamp_ranges()
 
 
+def merge_overlay(base: Dict[str, Any], overlay: Any, field: str) -> Dict[str, Any]:
+    """Merge an overlay dict onto base dict, rejecting non-dict overlay values with 400 BadRequest."""
+    out = dict(base)
+    if overlay is None:
+        return out
+    if not isinstance(overlay, dict):
+        raise BadRequest(f"'{field}' must be a JSON object")
+    out.update(overlay)
+    return out
+
+
 # ---------------------------------------------------------------------------
 # Session state
 # ---------------------------------------------------------------------------
