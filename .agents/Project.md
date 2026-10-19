@@ -13,10 +13,11 @@
 - [x] 全監査テスト (10/10) および smoke_test (13/13 stages) の完全パスと master (`82d48ea`) への反映
 - [x] ループエンジニアリング観点における `AGENTS.md` の監査・問題点特定および正常終了プロトコル（Phase 6）の導入
 - [x] 現行フェーズ・マイルストーンの全完了（Finalized）
+- [x] GitHub上の全オープンIssue (#28〜#45) の検証完了およびクローズ (`state=closed`, `state_reason=completed`)
 
 ## 3. Loop State (現在のループ状態・引き継ぎメモリ)
 - **Current Phase**: Phase 6 [Finalize & Terminate]
-- **Active Sub-task**: 全フェーズ完了・正常終了処理
-- **Current Hypothesis**: 全監査テスト通過およびプロトコル改修の完了により、全フェーズが健全に完了状態となる。
-- **Verification Criteria**: 全テストパス、Gitクリーン状態、マイルストーン全完了。
+- **Active Sub-task**: 全Issue完了・クローズ処理
+- **Current Hypothesis**: GitHub上の全オープンIssueを `completed` としてクローズすることで未解決課題がゼロになる。
+- **Verification Criteria**: GitHub API `issues?state=open` の返却件数が 0 件であること。
 - **Next Action**: 自律ループ正常終了（HALT）。新規要件発生時に Phase 1 へ復帰。
