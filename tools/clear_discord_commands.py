@@ -70,7 +70,11 @@ async def run_cleaner(all_clean: bool, target_guild_id: int | None):
             print(f"⚠️ Error clearing global commands: {e}")
 
         if not all_clean:
-            print("\nNote: When you next start tools/discord_bridge.py, only its 4 commands (/model, /models, /new, /abort) will be registered cleanly.")
+            print(
+                "\nNote: When you next start tools/discord_bridge.py, only its 10 commands "
+                "(/chat, /chats, /resume, /models, /model, /new, /status, /chrome, /abort, /help) "
+                "will be registered cleanly."
+            )
         else:
             print("\nAll slash commands for this bot have been completely removed.")
 
