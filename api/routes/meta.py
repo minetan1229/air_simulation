@@ -27,8 +27,13 @@ meta_bp = Blueprint("meta", __name__)
 
 
 @meta_bp.get("/api/v1/meta/schemas")
+@meta_bp.get("/api/v1/meta/schema")
 def meta_schemas():
-    """Single source of truth for the UI sliders, objective list and ranges."""
+    """Single source of truth for the UI sliders, objective list and ranges.
+
+    ``/api/v1/meta/schema`` is the path mandated by SPECIFICATION 3.1;
+    ``/api/v1/meta/schemas`` is kept for the existing clients.
+    """
     return jsonify(
         {
             "aircraft": AIRCRAFT_SCHEMA,

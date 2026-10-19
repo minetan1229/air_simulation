@@ -101,7 +101,13 @@ def get_record_presets():
 
 
 @records_bp.get("/api/v1/records/presets/<key>")
+@records_bp.get("/api/v1/records/preset/<key>")
 def get_record_preset(key: str):
+    """Return one record preset.
+
+    ``/api/v1/records/preset/<name>`` is the path mandated by
+    SPECIFICATION 3.6; the plural form is kept for the existing clients.
+    """
     from physics import records_domain
     try:
         data = records_domain.preset_payload(key)
@@ -192,22 +198,47 @@ def guinness_simulate():
 
 
 @records_bp.get("/api/v1/guinness/verification")
+@records_bp.get("/api/v1/records/guinness")
 def guinness_verification():
-    """Get the verification matrix of all Guinness world records side by side."""
+    """Get the Guinness world-record benchmark specification.
+
+    By default this returns the *specification* of the benchmarks: the
+    published records and the preset parameters they are flown with.  It does
+    **not** fly them -- the previous revision simulated every calibrated
+    preset for 45 simulated seconds each, so a plain ``GET`` occupied the
+    server for about a minute and could be triggered repeatedly by any
+    client.
+
+    Pass ``?verify=1`` to additionally run the verification matrix.  The
+    single-record simulation remains available at ``POST
+    /api/v1/guinness/simulate``.
+    """
     from physics import records_domain
     category = request.args.get("category")
-    keys = None
-    if category:
-        presets = records_domain.list_presets(category=category)
-        keys = [p["key"] for p in presets]
-    report = records_domain.verification_report(keys=keys)
-    return jsonify(report)
+    presets = records_domain.list_presets(category=category)
+    keys = [p["key"] for p in presets]
+
+    verify = str(request.args.get("verify", "")).strip().lower() in ("1", "true", "yes", "on")
+    if verify:
+        report = records_domain.verification_report(keys=keys)
+        return jsonify(report)
+
+    return jsonify({
+        "mode": "specification",
+        "verify": False,
+        "count": len(presets),
+        "presets": presets,
+        "categories": list(records_domain.RECORD_CATEGORIES),
+        "metrics": records_domain.RECORD_METRICS,
+        "note": "Add ?verify=1 to run the verification matrix (slow).",
+    })
 
 
 # ---------------------------------------------------------------------------
 # Error Logging & Diagnostics Endpoints
 # ---------------------------------------------------------------------------
 @records_bp.get("/api/v1/errors")
+@records_bp.get("/api/v1/records/errors")
 def list_errors():
     """Retrieve error history with optional level, category, and text filtering.
 

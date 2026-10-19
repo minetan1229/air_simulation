@@ -7,6 +7,7 @@ section 10 / prompt.md section 7.
 from __future__ import annotations
 
 import argparse
+import hmac
 import logging
 import os
 import threading
@@ -134,13 +135,18 @@ def _check_authentication() -> Optional[Tuple[Response, int]]:
     if not api_key:
         return None  # Auth is optional when API_KEY is not configured
 
-    # Exempt public, health check, UI and diagnostic routes
+    # Exempt public, health check, UI and read-only diagnostic routes.
     path = request.path or "/"
     if (
         request.method == "OPTIONS"
         or path in ("/", "/healthz", "/healthz/ready", "/healthz/live")
-        or path.startswith(("/static/", "/api/v1/meta/", "/api/v1/system/"))
+        or path.startswith(("/static/", "/api/v1/meta/"))
     ):
+        return None
+    # ``/api/v1/system/gpu`` is a read-only capability probe; the sibling
+    # ``/api/v1/system/force-gpu-render`` changes server state and therefore
+    # stays behind the API key.
+    if path == "/api/v1/system/gpu":
         return None
 
     auth_header = request.headers.get("Authorization", "").strip()
@@ -149,10 +155,10 @@ def _check_authentication() -> Optional[Tuple[Response, int]]:
         token = auth_header[7:].strip()
     elif request.headers.get("X-API-Key"):
         token = request.headers.get("X-API-Key", "").strip()
-    elif "api_key" in request.args:
-        token = request.args.get("api_key", "").strip()
 
-    if not token or token != api_key:
+    # The key is deliberately *not* accepted from the query string: query
+    # strings end up in access logs, browser history and Referer headers.
+    if not token or not hmac.compare_digest(token, api_key):
         return api_error("Unauthorized: invalid or missing API Key / Bearer token", 401, category="security")
     return None
 

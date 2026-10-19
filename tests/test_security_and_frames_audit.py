@@ -180,7 +180,47 @@ def test_mesh_ssrf_and_redirect_rejections():
         with pytest.raises(ValueError, match="unsupported URL scheme"):
             mesh_domain.validate_url_safe(bad_url)
 
-    # 5. Redirect disallowance in _NoRedirectHandler
-    handler = mesh_domain._NoRedirectHandler()
-    with pytest.raises(ValueError, match="HTTP redirects are disallowed"):
-        handler.redirect_request(None, None, 302, "Found", {}, "http://evil.com/target")
+    # 5. Cloud instance-metadata services are rejected by name as well as by
+    #    address (SPECIFICATION 4.2).
+    for bad_url in [
+        "http://metadata.google.internal/computeMetadata/v1/",
+        "http://metadata.goog/",
+        "http://instance-data/latest/meta-data/",
+        "http://metadata.azure.internal/",
+    ]:
+        with pytest.raises(ValueError, match="metadata|forbidden"):
+            mesh_domain.validate_url_safe(bad_url)
+
+    # 6. Reserved, multicast and unspecified addresses are blocked too.
+    for bad_url in [
+        "http://0.0.0.0/model.glb",
+        "http://224.0.0.1/model.glb",
+        "http://240.0.0.1/model.glb",
+    ]:
+        with pytest.raises(ValueError, match="private/local|forbidden"):
+            mesh_domain.validate_url_safe(bad_url)
+
+
+def test_mesh_redirect_hops_are_validated():
+    """SPECIFICATION 4.2 requires *multi-hop* redirect validation.
+
+    A redirect target must be re-validated with the same SSRF checks as the
+    original request, so a public URL cannot bounce the server into a private
+    network.  The previous revision rejected every redirect outright, which
+    satisfied the security intent but not the documented multi-hop rule.
+    """
+    handler = mesh_domain._SafeRedirectHandler()
+
+    # A redirect into the private network is refused.
+    with pytest.raises(ValueError, match="private/local|forbidden|loopback"):
+        handler.redirect_request(
+            None, None, 302, "Found", {}, "http://127.0.0.1/model.glb"
+        )
+    with pytest.raises(ValueError, match="private/local|forbidden"):
+        handler.redirect_request(
+            None, None, 302, "Found", {}, "http://169.254.169.254/latest/meta-data/"
+        )
+
+    # The number of hops is bounded.
+    assert mesh_domain._SafeRedirectHandler.max_redirections == mesh_domain.MAX_REDIRECTS
+    assert mesh_domain.MAX_REDIRECTS <= 5

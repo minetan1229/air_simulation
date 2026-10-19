@@ -113,6 +113,21 @@ def body() -> Dict[str, Any]:
     return payload
 
 
+def merge_overlay(base: Dict[str, Any], overlay: Any, field: str) -> Dict[str, Any]:
+    """Merge a client-supplied overlay onto ``base``.
+
+    A non-mapping overlay is a *client* error, so it must be reported as HTTP
+    400.  ``dict.update("abc")`` raises ``ValueError`` and would otherwise be
+    reported as an internal server error.
+    """
+    if overlay is None:
+        return base
+    if not isinstance(overlay, dict):
+        raise BadRequest(f"'{field}' must be a JSON object")
+    base.update(overlay)
+    return base
+
+
 def require(payload: Dict[str, Any], key: str) -> Any:
     if key not in payload:
         raise BadRequest(f"missing required field '{key}'")

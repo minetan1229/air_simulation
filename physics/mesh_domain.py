@@ -1633,16 +1633,62 @@ def _trimesh_load(source: Any, filename: str) -> Optional[Tuple[np.ndarray, np.n
         return None
 
 
-class _NoRedirectHandler(urllib.request.HTTPRedirectHandler):
+#: Host names that resolve to a cloud instance-metadata service.  The address
+#: itself is link-local and therefore already blocked, but the names are
+#: rejected explicitly so the intent is documented and the check does not
+#: depend on the resolver.
+_BLOCKED_HOSTNAMES = frozenset(
+    {
+        "metadata.google.internal",
+        "metadata.goog",
+        "metadata",
+        "instance-data",
+        "instance-data.ec2.internal",
+        "metadata.azure.internal",
+        "metadata.azure.com",
+        "169.254.169.254",
+    }
+)
+
+#: Maximum number of HTTP redirects that are followed.  Every hop is
+#: re-validated (SPECIFICATION 4.2).
+MAX_REDIRECTS = 5
+
+
+def _is_forbidden_address(ip_obj: ipaddress._BaseAddress) -> bool:
+    """True when the address must never be reached from the server."""
+    return bool(
+        ip_obj.is_private
+        or ip_obj.is_loopback
+        or ip_obj.is_link_local
+        or ip_obj.is_reserved
+        or ip_obj.is_multicast
+        or ip_obj.is_unspecified
+        or getattr(ip_obj, "is_site_local", False)
+    )
+
+
+class _SafeRedirectHandler(urllib.request.HTTPRedirectHandler):
+    """Follow a redirect only after re-validating the target URL.
+
+    SPECIFICATION 4.2 requires *multi-hop* validation: each redirect target is
+    put through the same SSRF checks as the original request, so a public URL
+    cannot bounce the server into a private network.
+    """
+
+    max_redirections = MAX_REDIRECTS
+
     def redirect_request(self, req, fp, code, msg, headers, newurl):
-        raise ValueError(f"HTTP redirects are disallowed: {newurl}")
+        validate_url_safe(newurl)
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
 
 
 def validate_url_safe(url: str) -> urllib.parse.ParseResult:
     """Validate that ``url`` is safe against SSRF attacks.
 
     Only allows http/https schemes, standard ports (80/443), and non-private/local
-    network IP destinations.
+    network IP destinations.  Cloud instance-metadata services are rejected by
+    name as well as by address.
     """
     parsed = urllib.parse.urlparse(str(url))
     if parsed.scheme not in ("http", "https"):
@@ -1655,9 +1701,12 @@ def validate_url_safe(url: str) -> urllib.parse.ParseResult:
 
     if hostname.lower() in ("localhost", "127.0.0.1", "::1"):
         raise ValueError(f"access to loopback host {hostname!r} is forbidden")
+    if hostname.lower() in _BLOCKED_HOSTNAMES:
+        raise ValueError(f"access to cloud metadata host {hostname!r} is forbidden")
+
     try:
         ip_obj = ipaddress.ip_address(hostname)
-        if ip_obj.is_private or ip_obj.is_loopback or ip_obj.is_link_local:
+        if _is_forbidden_address(ip_obj):
             raise ValueError(f"access to private/local network address {hostname!r} is forbidden")
     except ValueError:
         try:
@@ -1665,7 +1714,7 @@ def validate_url_safe(url: str) -> urllib.parse.ParseResult:
             for _, _, _, _, sockaddr in addr_info:
                 ip_str = sockaddr[0]
                 ip_obj = ipaddress.ip_address(ip_str)
-                if ip_obj.is_private or ip_obj.is_loopback or ip_obj.is_link_local:
+                if _is_forbidden_address(ip_obj):
                     raise ValueError(f"access to private/local network address {ip_str!r} is forbidden")
         except socket.gaierror as exc:
             if getattr(urllib.request.urlopen, "__module__", "") != "urllib.request":
@@ -1682,7 +1731,11 @@ def safe_urlopen_bytes(
     timeout: float = 20.0,
     headers: Optional[Dict[str, str]] = None,
 ) -> bytes:
-    """Safely fetch a URL payload verifying against SSRF and redirect escapes."""
+    """Safely fetch a URL payload verifying against SSRF and redirect escapes.
+
+    Every redirect hop is re-validated, so a public URL cannot bounce the
+    server into a private network.
+    """
     validate_url_safe(url)
     req_headers = {"User-Agent": "paper-airplane-sim/1.0"}
     if headers:
@@ -1693,7 +1746,7 @@ def safe_urlopen_bytes(
         if getattr(urllib.request.urlopen, "__module__", "") != "urllib.request":
             cm = urllib.request.urlopen(request, timeout=float(timeout))
         else:
-            opener = urllib.request.build_opener(_NoRedirectHandler)
+            opener = urllib.request.build_opener(_SafeRedirectHandler)
             cm = opener.open(request, timeout=float(timeout))
         with cm as response:
             try:
