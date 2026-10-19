@@ -866,14 +866,15 @@ def test_wind_field_reports_the_backend_that_actually_ran():
 @pytest.mark.parametrize("requested", ["cupy", "torch"])
 def test_unavailable_gpu_request_never_claims_a_gpu(requested):
     env = EnvironmentConfig(wind_speed=5.0, gust_intensity=0.3, thermal_strength=1.0)
-    field = wind.wind_field([0, 0, 0], [3, 3, 4], 3, env, 0.0, backend=requested)
-    assert isinstance(field["backend"], str) and field["backend"] != ""
-    assert field["backend_requested"] == requested
-    if wind.active_backend() != requested:
-        assert field["backend"] == "numpy"
-        reference = wind.wind_field([0, 0, 0], [3, 3, 4], 3, env, 0.0, backend="numpy")
-        assert np.array_equal(np.asarray(field["vectors"]), np.asarray(reference["vectors"]))
-        assert np.array_equal(np.asarray(field["positions"]), np.asarray(reference["positions"]))
+    if wind.active_backend() == requested:
+        field = wind.wind_field([0, 0, 0], [3, 3, 4], 3, env, 0.0, backend=requested)
+        assert field["backend"] == requested
+        assert field["backend_requested"] == requested
+    else:
+        # GPU backend is requested but unavailable on this device -> must raise RuntimeError immediately
+        with pytest.raises(RuntimeError, match="Hardware acceleration \\(CUDA GPU\\) is required"):
+            wind.wind_field([0, 0, 0], [3, 3, 4], 3, env, 0.0, backend=requested)
+
 
 
 def test_backend_requests_agree_with_numpy_to_machine_precision():

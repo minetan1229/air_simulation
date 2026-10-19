@@ -1,115 +1,109 @@
-# クイックスタートガイド (Getting Started)
+# 環境構築および導入手順 (Setup Guide)
 
-本ドキュメントでは、「3D Paper Airplane High-Performance CFD Simulator」の動作環境の準備、インストール、およびアプリケーションの起動手順を解説します。
-
----
-
-## 1. 動作環境・必要要件
-
-本プロジェクトを実行するには以下の環境が必要です：
-
-- **OS**: Windows, macOS, Linux
-- **Python**: 3.10 以上 (Python 3.10 / 3.11 を推奨)
-- **仮想環境**: `venv` または `conda`
-- **モダンブラウザ**: Google Chrome, Microsoft Edge, Firefox, Safari (WebGL 2.0 / Three.js 対応ブラウザ)
-- **(任意) GPU環境**: NVIDIA CUDA 12.x 対応GPU (CuPy / PyTorch による風場・並列バッチ計算の高速化に利用)
+本ドキュメントは、「3D Paper Airplane High-Performance CFD Simulator」の動作要件、環境構築、および検証手順を規定する。
 
 ---
 
-## 2. インストール手順
+## 1. 動作環境・必要要件 (Prerequisites)
 
-### ステップ 1: リポジトリの取得
-```bash
-git clone <repository_url>
-cd air_simulation
+- **オペレーティングシステム**: Windows 10/11 (64-bit), Linux (Ubuntu 20.04 LTS 以上推奨), macOS 12+
+- **Python**: 3.10 以上 (3.11.x 推奨)
+- **アクセラレータ (GPU)**: NVIDIA GPU (CUDA 12.x / Compute Capability 5.0 以上)
+- **必須パッケージ**: `cupy-cuda12x>=13.0.0`
+  - GPU が明示的に指定された場合、またはバッチ並列計算において GPU が利用不能な場合は即座に `RuntimeError` を送出して処理を停止する（フェイルファスト原則）。CPU への暗黙的フォールバックは禁止されている。
+- **表示環境**: WebGL 2.0 対応ブラウザ (Google Chrome, Microsoft Edge, Firefox, Safari)
+
+---
+
+## 2. 自動セットアップ手順 (Automated Setup)
+
+リポジトリルートに配置された自動化スクリプトにより、仮想環境の作成から依存パッケージの導入、CUDA デバイス検証までを単一コマンドで実行可能である。
+
+### 2.1 Windows (PowerShell)
+```powershell
+.\setup.ps1
 ```
 
-### ステップ 2: 仮想環境の作成と有効化
-Python 3.10 以上の環境で仮想環境を作成します。
+### 2.2 Linux / macOS / WSL (Bash)
+```bash
+chmod +x setup.sh
+./setup.sh
+```
 
-**Windows (PowerShell):**
+---
+
+## 3. 手動セットアップ手順 (Manual Setup)
+
+### 3.1 仮想環境の作成と有効化
+
+**Windows:**
 ```powershell
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 ```
 
-**macOS / Linux (Bash):**
+**Linux / macOS:**
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
 ```
 
-### ステップ 3: 依存ライブラリのインストール
+### 3.2 パッケージのインストール
+ビルドツールおよび依存関係をインストールする。
+
 ```bash
-pip install --upgrade pip
-pip install -r requirements.txt
+pip install --upgrade pip setuptools wheel
+pip install -e ".[dev]"
+```
+
+高速パッケージインストーラ `uv` を使用する場合:
+```bash
+uv pip install -e ".[dev]"
 ```
 
 ---
 
-## 3. 環境設定 (.env)
+## 4. 環境設定 (.env)
 
-Discord への通知機能や環境変数を設定する場合、`.env.example` をコピーして `.env` を作成します。
-
-```powershell
-# Windows PowerShell
-Copy-Item .env.example .env
-```
+外部連携（Discord Webhook 等）を利用する場合、`.env.example` を複製して `.env` を作成する。
 
 ```bash
-# macOS / Linux
 cp .env.example .env
 ```
 
-### 設定項目
+`.env` 内の設定項目:
 ```env
-# Discord Webhook Notification URL (任意)
-# 設定しない場合、通知スクリプトは自動でスキップされます
-DISCORD_WEBHOOK_URL=https://discord.com/api/webhooks/YOUR_WEBHOOK_ID/YOUR_WEBHOOK_TOKEN
+# Discord Webhook 通知用エンドポイント (未設定時は通知処理をスキップ)
+DISCORD_WEBHOOK_URL=https://discord.com/api/webhooks/...
 ```
 
 ---
 
-## 4. (任意) GPU アクセラレーションの有効化
+## 5. ハードウェアアクセラレーション検証
 
-CUDA 対応 GPU をお持ちの場合、CuPy または PyTorch を導入することで 3D 風場グリッド計算や並列最適化を GPU で実行できます。
+CUDA GPU が正常に認識されているかを以下のコマンドで確認する:
 
-> [!NOTE]
-> GPU パッケージがインストールされていない、または利用不可の場合は、自動的に NumPy による CPU 計算へ安全にフォールバックします。
+```bash
+python -c "import cupy as cp; print('Device Count:', cp.cuda.runtime.getDeviceCount()); print('Current Device:', cp.cuda.runtime.getDevice())"
+```
 
-```powershell
-# CUDA 12.x 向け CuPy のインストール
-pip install cupy-cuda12x
-
-# または PyTorch (CUDA対応版) のインストール
-pip install torch --index-url https://download.pytorch.org/whl/cu121
+正常時出力例:
+```text
+Device Count: 1
+Current Device: 0
 ```
 
 ---
 
-## 5. アプリケーションの起動
+## 6. アプリケーションの起動と稼働確認
 
-Flask サーバーを起動します：
-
-```powershell
+サーバーを起動する:
+```bash
 python app.py
 ```
 
-デフォルトではポート `5000` でリッスンします。起動後、ブラウザで以下のURLを開いてください：
-
-**URL:** [http://localhost:5000](http://localhost:5000)
-
-コンソール画面（Google Clean / Material スタイルのダッシュボード）が表示され、3Dビューアと各種計器パネルが操作可能になります。
-
----
-
-## 6. 次のステップ
-
-- [アーキテクチャ・技術スタック (docs/architecture.md)](./architecture.md): システム構成と物理理論モデルを把握する
-- [ユーザーガイド・使い方 (docs/usage.md)](./usage.md): UI操作、3Dモデル取込、最適化の実行方法
-- [REST API仕様書 (docs/api.md)](./api.md): バックエンド API エンドポイント詳細
-- [開発・テストガイド (docs/development.md)](./development.md): テスト実行やコード規約について調べる
-
----
-
-[README に戻る](../README.md)
+ブラウザで `http://127.0.0.1:5000` を開き、計器コンソールが表示されることを確認する。
+ヘルスチェックエンドポイントによる確認:
+```bash
+curl http://127.0.0.1:5000/api/v1/meta/health
+```

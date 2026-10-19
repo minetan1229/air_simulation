@@ -207,7 +207,7 @@ def generate_markdown(topic_cfg):
         lines.append(f"- **発行年**: {r_year} 年")
         lines.append(f"- **DOI**: [{r_doi}]({r_doi})")
         lines.append(f"- **要旨**: {r_abstract}")
-        lines.append(f"- **理論的役割**: 第1階層論文における基礎理論・構成方程式（または実験手法・先行ベンチマーク）を提供しており、シミュレータにおける数式導出の源泉となっている。")
+        lines.append("- **理論的役割**: 第1階層論文における基礎理論・構成方程式（または実験手法・先行ベンチマーク）を提供しており、シミュレータにおける数式導出の源泉となっている。")
         lines.append("")
 
     lines.append("---")

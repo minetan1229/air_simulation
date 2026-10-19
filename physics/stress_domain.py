@@ -631,9 +631,26 @@ def stress_field(
     # Decide backend (cupy GPU vs numpy CPU)
     xp = np
     actual_backend = "numpy"
-    if backend in ("auto", "cupy") and _CUPY_MODULE is not None:
+    if backend == "cupy":
+        if _CUPY_MODULE is None:
+            raise RuntimeError(
+                "CuPy GPU backend requested for stress field calculation, but CUDA accelerator is unavailable. "
+                "Hardware acceleration (CUDA GPU) is required and CPU fallback is strictly prohibited."
+            )
         xp = _CUPY_MODULE
         actual_backend = "cupy"
+    elif backend == "auto":
+        if _CUPY_MODULE is not None:
+            xp = _CUPY_MODULE
+            actual_backend = "cupy"
+        else:
+            actual_backend = "numpy"
+    elif backend == "numpy":
+        xp = np
+        actual_backend = "numpy"
+    else:
+        raise ValueError(f"unknown stress backend '{backend}'; expected 'auto', 'cupy' or 'numpy'")
+
 
     q = max(_finite_or(dynamic_pressure_pa, 0.0), 0.0)
     nz = max(_finite_or(load_factor, 0.0), 0.0)

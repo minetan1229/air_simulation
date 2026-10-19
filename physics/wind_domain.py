@@ -213,21 +213,28 @@ def _array_module(backend: str):
 def _resolve_backend(requested: str) -> Tuple[str, str]:
     """Map a user request onto the backend that will really run.
 
-    Returns ``(backend, backend_requested)``.  An explicit GPU request that
-    cannot be honoured degrades to NumPy and the response then honestly says
-    ``"numpy"`` -- a GPU is never claimed without evidence.
+    Returns ``(backend, backend_requested)``. Explicit GPU requests ('cupy', 'torch')
+    require functional CUDA hardware and raise RuntimeError immediately if unavailable.
+    CPU fallback is strictly prohibited.
     """
     name = str(requested or "auto").strip().lower()
     if name == "auto":
-        return active_backend(), "auto"
+        real = active_backend()
+        return real, "auto"
     if name == "numpy":
         return "numpy", name
     if name in ("cupy", "torch"):
         real = active_backend()
-        return (name, name) if real == name else ("numpy", name)
+        if real != name:
+            raise RuntimeError(
+                f"Requested GPU backend '{name}' is unavailable on this system. "
+                "Hardware acceleration (CUDA GPU) is required and CPU fallback is strictly prohibited."
+            )
+        return name, name
     raise ValueError(
         f"unknown wind backend '{requested}'; expected 'auto', 'numpy', 'cupy' or 'torch'"
     )
+
 
 
 class _Ops:
