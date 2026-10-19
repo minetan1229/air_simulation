@@ -1,0 +1,15 @@
+.git/
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.env
+.pytest_cache/
+.coverage
+htmlcov/
+runs/
+jobs/
+logs/
+*.log
+models/
+archive/

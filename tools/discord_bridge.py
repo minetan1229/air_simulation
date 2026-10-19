@@ -379,7 +379,7 @@ async def on_ready():
     # Optionally notify startup message with system metrics to configured channels
     embed = discord.Embed(
         title="🚀 Antigravity Discord Bridge 起動完了",
-        description=f"Antigravity Remote Bridge が起動しました。\n並列チャット処理・Chrome起動・システム監視が有効です。",
+        description="Antigravity Remote Bridge が起動しました。\n並列チャット処理・Chrome起動・システム監視が有効です。",
         color=discord.Color.green(),
         timestamp=datetime.now(),
     )

@@ -1486,8 +1486,9 @@ def gpu_batch_evaluate_cases(
     max_duration = max(durations)
     max_steps = int(max_duration / dt)
 
+    duration_arr = xp.array(durations, dtype=xp.float64)
     active = xp.ones(N, dtype=bool)
-    landing_time = xp.full(N, max_duration, dtype=xp.float64)
+    landing_time = xp.copy(duration_arr)
     landing_pos = xp.zeros((N, 3), dtype=xp.float64)
     phi = xp.copy(roll_rad)
     p_rate = xp.zeros(N, dtype=xp.float64)
@@ -1585,12 +1586,20 @@ def gpu_batch_evaluate_cases(
             dz = xp.maximum(new_pos[:, 2] - pos[:, 2], 1e-6)
             frac = xp.clip((-pos[:, 2]) / dz, 0.0, 1.0)
             t_impact = (t - dt) + frac * dt
+            t_impact = xp.minimum(t_impact, duration_arr)
             landing_time = xp.where(just_landed, t_impact, landing_time)
 
             p_impact = pos + (new_pos - pos) * frac[:, None]
             p_impact[:, 2] = 0.0
             landing_pos = xp.where(just_landed[:, None], p_impact, landing_pos)
             active = active & ~just_landed
+
+        # Timeout check: cases that reached their individual duration limit without landing
+        just_timed_out = active & (t >= duration_arr)
+        if xp.any(just_timed_out):
+            landing_time = xp.where(just_timed_out, duration_arr, landing_time)
+            landing_pos = xp.where(just_timed_out[:, None], new_pos, landing_pos)
+            active = active & ~just_timed_out
 
         pos = xp.where(active[:, None], new_pos, pos)
         vel = xp.where(active[:, None], new_vel, vel)
@@ -1626,7 +1635,7 @@ def gpu_batch_evaluate_cases(
     results: List[Dict[str, Any]] = []
     for idx in range(N):
         d_val = float(landing_d_np[idx])
-        t_val = float(landing_t_np[idx])
+        t_val = min(float(landing_t_np[idx]), float(durations[idx]))
         crashed = bool(max_g_np[idx] > 35.0 or max_stress_idx_np[idx] >= 1.0)
         status_str = "crashed" if crashed else ("landed" if t_val < durations[idx] else "timeout")
 
