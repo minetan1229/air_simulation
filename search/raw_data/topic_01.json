@@ -1,0 +1,152 @@
+{
+  "topic_num": "01",
+  "query": "aerodynamics of paper airplanes",
+  "candidates": [
+    {
+      "primary_paper": {
+        "title": "The interdisciplinary study of coordination",
+        "year": 1994,
+        "doi": "https://doi.org/10.1145/174666.174668",
+        "cited_by_count": 3497,
+        "authors": [
+          "Thomas W. Malone",
+          "Kevin Crowston"
+        ],
+        "abstract": "This survey characterizes an emerging research area, sometimes called coordination theory , that focuses on the interdisciplinary study of coordination. Research in this area uses and extends ideas about coordination from disciplines such as computer science, organization theory, operations research, economics, linguistics, and psychology. A key insight of the framework presented here is that coordination can be seen as the process of managing dependencies among activities. Further progress, therefore, should be possible by characterizing different kinds of dependencies and identifying the coordination processes that can be used to manage them. A variety of processes are analyzed from this perspective, and commonalities across disciplines are identified. Processes analyzed include those for managing shared resources, producer/consumer relationships, simultaneity constraints , and task/subtask dependencies . Section 3 summarizes ways of applying a coordination perspective in three diffe"
+      },
+      "second_tier_references": [
+        {
+          "title": "The Structuring of Organizations",
+          "year": 1989,
+          "doi": "https://doi.org/10.1007/978-1-349-20317-8_23",
+          "authors": [
+            "Henry Mintzberg"
+          ],
+          "abstract": "This [reading] argues that […] spans of control, types of formalization and decentralization, planning systems, and matrix structures should not be picked and chosen independently, the way a shopper picks vegetables at the market or a diner a meal at a buffet table. Rather, these and other parameters of organizational design should logically configure into internally consistent groupings. Like most phenomena — atoms, ants, and stars — characteristics of organizations appear to fall into natural "
+        },
+        {
+          "title": "Information technology puts power in control systems",
+          "year": 1987,
+          "doi": "https://doi.org/10.5555/29526.29527",
+          "authors": [
+            "William J. Bruns",
+            "F. Warren McFarlan"
+          ],
+          "abstract": "A new regulation takes effect: some companies respond quickly; others can't. Budget guidelines are changed: some companies distribute them immediately; others can't. The difference is information technology. Applied imaginatively, it can transform the way businesses collect and use data."
+        }
+      ]
+    },
+    {
+      "primary_paper": {
+        "title": "Unmanned aerial systems for photogrammetry and remote sensing: A review",
+        "year": 2014,
+        "doi": "https://doi.org/10.1016/j.isprsjprs.2014.02.013",
+        "cited_by_count": 2960,
+        "authors": [
+          "I. Colomina",
+          "Pere Molina"
+        ],
+        "abstract": "We discuss the evolution and state-of-the-art of the use of Unmanned Aerial Systems (UAS) in the field of Photogrammetry and Remote Sensing (PaRS). UAS, Remotely-Piloted Aerial Systems, Unmanned Aerial Vehicles or simply, drones are a hot topic comprising a diverse array of aspects including technology, privacy rights, safety and regulations, and even war and peace. Modern photogrammetry and remote sensing identified the potential of UAS-sourced imagery more than thirty years ago. In the last five years, these two sister disciplines have developed technology and methods that challenge the current aeronautical regulatory framework and their own traditional acquisition and processing methods. Navety and ingenuity have combined off-the-shelf, low-cost equipment with sophisticated computer vision, robotics and geomatic engineering. The results are cm-level resolution and accuracy products that can be generated even with cameras costing a few-hundred euros. In this review article, following"
+      },
+      "second_tier_references": [
+        {
+          "title": "BRIEF: Binary Robust Independent Elementary Features",
+          "year": 2010,
+          "doi": "https://doi.org/10.1007/978-3-642-15561-1_56",
+          "authors": [
+            "Michael Calonder",
+            "Vincent Lepetit",
+            "Christoph Strecha"
+          ],
+          "abstract": ""
+        },
+        {
+          "title": "Visual SLAM: Why filter?",
+          "year": 2012,
+          "doi": "https://doi.org/10.1016/j.imavis.2012.02.009",
+          "authors": [
+            "Hauke Strasdat",
+            "J. M. M. Montiel",
+            "Andrew J. Davison"
+          ],
+          "abstract": ""
+        },
+        {
+          "title": "Low-Cost and Open-Source Solutions for Automated Image Orientation – A Critical Overview",
+          "year": 2012,
+          "doi": "https://doi.org/10.1007/978-3-642-34234-9_5",
+          "authors": [
+            "Fabio Remondino A",
+            "Silvio Del Pizzo",
+            "Thomas P. Kersten"
+          ],
+          "abstract": ""
+        },
+        {
+          "title": "Error analysis and attitude observability of a monocular GPS/visual odometry integrated navigation filter",
+          "year": 2012,
+          "doi": "https://doi.org/10.1177/0278364911433777",
+          "authors": [
+            "Damien Dusha",
+            "Luis Mejías"
+          ],
+          "abstract": "In this paper, we present a method for the recovery of position and absolute attitude (including pitch, roll and yaw) using a novel fusion of monocular visual odometry and GPS measurements in a similar manner to a classic loosely coupled GPS/INS error state navigation filter. The proposed filter does not require additional restrictions or assumptions such as platform-specific dynamics, map matching, feature tracking, visual loop closing, gravity vector or additional sensors such as an inertial m"
+        }
+      ]
+    },
+    {
+      "primary_paper": {
+        "title": "Aerodynamic design via control theory",
+        "year": 1988,
+        "doi": "https://doi.org/10.1007/bf01061285",
+        "cited_by_count": 1943,
+        "authors": [
+          "Antony Jameson B"
+        ],
+        "abstract": ""
+      },
+      "second_tier_references": [
+        {
+          "title": "Wing Design by Numerical Optimization",
+          "year": 1978,
+          "doi": "https://doi.org/10.2514/3.58379",
+          "authors": [
+            "Raymond M. Hicks",
+            "Preston A. Henne"
+          ],
+          "abstract": "A study was conducted to assess the feasibility of performing computerized wing design by numerical optimization. The design program combined a full potential, inviscid aerodynamics code with a conjugate gradient optimization algorithm. Three design problems were selected to demonstrate the design technique. The first involved modifying the upper surface of the inboard 50% of a swept wing to reduce the shock drag subject to a constraint on wing volume. The second involved modifying the entire up"
+        },
+        {
+          "title": "Calculation of Inviscid Transonic Flow over a Complete Aircraft",
+          "year": 1986,
+          "doi": "https://doi.org/10.2514/6.1986-103",
+          "authors": [
+            "Antony Jameson B",
+            "Timothy Baker",
+            "Nigel P. Weatherill"
+          ],
+          "abstract": "U.S.A. We present preliminary results for the calculation of inviscid transonic \\now over a complete aircraft. These results have been obtained by a novel approach that combines a new procedure for mesh generation with a new nite element method for solving the Euler equations."
+        },
+        {
+          "title": "Iterative solution of transonic flows over airfoils and wings, including flows at mach 1",
+          "year": 1974,
+          "doi": "https://doi.org/10.1002/cpa.3160270302",
+          "authors": [
+            "Antony Jameson B"
+          ],
+          "abstract": ""
+        },
+        {
+          "title": "Computational Fluid Dynamics of Airfoils and Wings",
+          "year": 1982,
+          "doi": "https://doi.org/10.1016/b978-0-12-493280-7.50006-1",
+          "authors": [
+            "Paul R. Garabedian",
+            "Geoffrey B. McFadden"
+          ],
+          "abstract": ""
+        }
+      ]
+    }
+  ]
+}
