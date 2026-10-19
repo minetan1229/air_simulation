@@ -33,7 +33,16 @@ def notify_discord(content: str) -> None:
 
 
 def main() -> int:
-    cmd = [sys.executable, "-m", "pytest", "-ra", "--tb=short"]
+    cmd = [
+        sys.executable,
+        "-m",
+        "pytest",
+        "-ra",
+        "--tb=short",
+        "--cov=physics",
+        "--cov=api",
+        "--cov-report=term-missing:skip-covered",
+    ]
     print(f"Running: {' '.join(cmd)}", flush=True)
 
     proc = subprocess.Popen(

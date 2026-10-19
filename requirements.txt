@@ -5,6 +5,7 @@ scipy>=1.15.3
 
 # Test / verification
 pytest>=9.1.1
+pytest-cov>=6.0.0
 
 # Optional mesh analysis backend (pure-NumPy fallback is always available)
 trimesh>=5.1.1 ; python_version >= "3.8"
