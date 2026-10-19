@@ -143,3 +143,5 @@ python smoke_test.py
 ```
 
 詳細な数式および内部構造については [docs/architecture.md](./docs/architecture.md) を参照のこと。
+
+Discord から Antigravity エージェントを操作するブリッジについては [docs/discord-bridge.md](./docs/discord-bridge.md) を参照のこと。
