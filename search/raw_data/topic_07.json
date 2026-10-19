@@ -1,0 +1,225 @@
+{
+  "topic_num": "07",
+  "query": "Viterna post-stall aerodynamic model wind turbine airfoil",
+  "candidates": [
+    {
+      "primary_paper": {
+        "title": "Modeling of the UAE Wind Turbine for Refinement of FAST{_}AD",
+        "year": 2003,
+        "doi": "https://doi.org/10.2172/15005920",
+        "cited_by_count": 172,
+        "authors": [
+          "Jason M. Jonkman"
+        ],
+        "abstract": "The Unsteady Aerodynamics Experiment (UAE) research wind turbine was modeled both aerodynamically and structurally in the FAST{_}AD wind turbine design code, and its response to wind inflows was simulated for a sample of test cases. A study was conducted to determine why wind turbine load magnitude discrepancies-inconsistencies in aerodynamic force coefficients, rotor shaft torque, and out-of-plane bending moments at the blade root across a range of operating conditions-exist between load predictions made by FAST{_}AD and other modeling tools and measured loads taken from the actual UAE wind turbine during the NASA-Ames wind tunnel tests. The acquired experimental test data represent the finest, most accurate set of wind turbine aerodynamic and induced flow field data available today. A sample of the FAST{_}AD model input parameters most critical to the aerodynamics computations was also systematically perturbed to determine their effect on load and performance predictions. Attention w"
+      },
+      "second_tier_references": [
+        {
+          "title": "Unsteady Aerodynamics Experiment Phase VI: Wind Tunnel Test Configurations and Available Data Campaigns",
+          "year": 2001,
+          "doi": "https://doi.org/10.2172/15000240",
+          "authors": [
+            "M. Maureen Hand",
+            "David A. Simms",
+            "Lee Jay Fingersh"
+          ],
+          "abstract": "The primary objective of the insteady aerodynamics experiment was to provide information needed to quantify the full-scale, three-dimensional aerodynamic behavior of horizontal-axis wind turbines. This report is intended to familiarize the user with the entire scope of the wind tunnel test and to support the use of the resulting data."
+        },
+        {
+          "title": "NREL Unsteady Aerodynamics Experiment in the NASA-Ames Wind Tunnel: A Comparison of Predictions to Measurements",
+          "year": 2001,
+          "doi": "https://doi.org/10.2172/783409",
+          "authors": [
+            "David A. Simms",
+            "Scott Schreck",
+            "M. Maureen Hand"
+          ],
+          "abstract": "Currently, wind turbine designers rely on safety factors to compensate for the effects of unknown loads acting on the turbine structure. This results in components that are overdesigned because precise load levels and load paths are unknown. To advance wind turbine technology, the forces acting on the turbine structure must be accurately characterized because these forces translate directly into loads imparted to the wind turbine structure and resulting power production. Once these forces are mo"
+        }
+      ]
+    },
+    {
+      "primary_paper": {
+        "title": "Definition of a benchmark for low Reynolds number propeller aeroacoustics",
+        "year": 2021,
+        "doi": "https://doi.org/10.1016/j.ast.2021.106707",
+        "cited_by_count": 162,
+        "authors": [
+          "Damiano Casalino",
+          "Edoardo Grande",
+          "Gianluca Romani",
+          "Daniele Ragni",
+          "Francesco Avallone"
+        ],
+        "abstract": "Experimental and numerical results of a propeller of 0.3 m diameter operated at 5000 RPM and axial velocity ranging from 0 to 20 m/s and advance ratio ranging from 0 to 0.8 are presented as a preliminary step towards the definition of a benchmark configuration for low Reynolds number propeller aeroacoustics. The corresponding rotational tip Mach number is 0.23 and the Reynolds number based on the blade sectional chord and flow velocity varies from about 46000 to 106000 in the operational domain and in the 30% to 100% blade radial range. Force and noise measurements carried out in a low-speed semi-anechoic wind-tunnel are compared to scale-resolved CFD and low-fidelity numerical predictions. Results identify the experimental and numerical challenges of the benchmark and the relevance of fundamental research questions related to transition and other low Reynolds number effects."
+      },
+      "second_tier_references": [
+        {
+          "title": "XFOIL: An Analysis and Design System for Low Reynolds Number Airfoils",
+          "year": 1989,
+          "doi": "https://doi.org/10.1007/978-3-642-84010-4_1",
+          "authors": [
+            "Mark Drela"
+          ],
+          "abstract": ""
+        },
+        {
+          "title": "An advanced time approach for acoustic analogy predictions",
+          "year": 2003,
+          "doi": "https://doi.org/10.1016/s0022-460x(02)00986-0",
+          "authors": [
+            "Damiano Casalino"
+          ],
+          "abstract": ""
+        },
+        {
+          "title": "Rotating Blade Trailing-Edge Noise: Experimental Validation of Analytical Model",
+          "year": 2010,
+          "doi": "https://doi.org/10.2514/1.43840",
+          "authors": [
+            "Yannick Rozenberg",
+            "Michel Roger",
+            "Stéphane Moreau"
+          ],
+          "abstract": "International audience"
+        }
+      ]
+    },
+    {
+      "primary_paper": {
+        "title": "Wind Turbine Post-Stall Airfoil Performance Characteristics Guidelines for Blade-Element Momentum Methods",
+        "year": 2005,
+        "doi": "https://doi.org/10.2514/6.2005-591",
+        "cited_by_count": 151,
+        "authors": [
+          "James L. Tangler",
+          "David Kocurek"
+        ],
+        "abstract": "The objective of this study was to provide post-stall airfoil data input guidelines for the prediction of peak and post-peak rotor power when using blade-element momentum theory. A steady-state data set from the Unsteady Aerodynamic Experiment (UAE) rotor test was used to provide guidelines for the development of a global post-stall method for the prediction of post-stall 3-D airfoil characteristics to be used with 2-D airfoil data. Based on these UAE data, methods to emulate the 3-D aerodynamics in the post-stall region were explored. Also suggested are experimental tests needed to better understand the 3-D flow physics and to quantify needed theory or empirical factors for a global post-stall approach to support blade-element momentum methods. I."
+      },
+      "second_tier_references": [
+        {
+          "title": "Unsteady Aerodynamics Experiment Phase VI: Wind Tunnel Test Configurations and Available Data Campaigns",
+          "year": 2001,
+          "doi": "https://doi.org/10.2172/15000240",
+          "authors": [
+            "M. Maureen Hand",
+            "David A. Simms",
+            "Lee Jay Fingersh"
+          ],
+          "abstract": "The primary objective of the insteady aerodynamics experiment was to provide information needed to quantify the full-scale, three-dimensional aerodynamic behavior of horizontal-axis wind turbines. This report is intended to familiarize the user with the entire scope of the wind tunnel test and to support the use of the resulting data."
+        },
+        {
+          "title": "NREL Unsteady Aerodynamics Experiment in the NASA-Ames Wind Tunnel: A Comparison of Predictions to Measurements",
+          "year": 2001,
+          "doi": "https://doi.org/10.2172/783409",
+          "authors": [
+            "David A. Simms",
+            "Scott Schreck",
+            "M. Maureen Hand"
+          ],
+          "abstract": "Currently, wind turbine designers rely on safety factors to compensate for the effects of unknown loads acting on the turbine structure. This results in components that are overdesigned because precise load levels and load paths are unknown. To advance wind turbine technology, the forces acting on the turbine structure must be accurately characterized because these forces translate directly into loads imparted to the wind turbine structure and resulting power production. Once these forces are mo"
+        },
+        {
+          "title": "Theoretical and experimental power from large horizontal-axis wind turbines",
+          "year": 1982,
+          "doi": "https://doi.org/10.2172/6763041",
+          "authors": [
+            "L. A. Viterna",
+            "D. C. Janetzke"
+          ],
+          "abstract": "A method for calculating the output power from large horizontal-axis wind turbines is presented. Modifications to the airfoil characteristics and the momentum portion of classical blade element-momentum theory are given that improve correlation with measured data. Improvement is particularly evident at low tip speed ratios where aerodynamic stall can occur as the blade experiences high angles of attack. Output power calculated using the modified theory is compared with measured data for several "
+        }
+      ]
+    },
+    {
+      "primary_paper": {
+        "title": "Rotor Blade Performance Analysis with Blade Element Momentum Theory",
+        "year": 2017,
+        "doi": "https://doi.org/10.1016/j.egypro.2017.03.477",
+        "cited_by_count": 112,
+        "authors": [
+          "Faisal Mahmuddin"
+        ],
+        "abstract": "In order to optimally explore and utilize wind energy, an optimal design of wind turbine propeller blades needs to be obtained. Therefore, a computational method to analyze and optimize the performance of the blades needs to be developed. For that purpose, a computational method based on the Blade Element Momentum (BEM) theory is developed in the present study. In this method, the propeller blade is divided into several elements and it is assumed that there is no aerodynamic interaction amongst the elements. Furthermore, the equations from momentum and blade element theories are combined to obtain equations which are useful in blades design process. In the analysis, tip and root losses proposed by Prandtl are also implemented. The computation results are validated using Qblade software. A good agreement can be found from comparison of the results computed from the developed BEM and QBlade."
+      },
+      "second_tier_references": [
+        {
+          "title": "Airplane Propellers",
+          "year": 1935,
+          "doi": "https://doi.org/10.1007/978-3-642-91487-4_3",
+          "authors": [
+            "H. Glauert"
+          ],
+          "abstract": ""
+        },
+        {
+          "title": "AeroDyn Theory Manual",
+          "year": 2005,
+          "doi": "https://doi.org/10.2172/15014831",
+          "authors": [
+            "Patrick Moriarty",
+            "Alexander Hansen"
+          ],
+          "abstract": "AeroDyn is a set of routines used in conjunction with an aeroelastic simulation code to predict the aerodynamics of horizontal axis wind turbines. These subroutines provide several different models whose theoretical bases are described in this manual. AeroDyn contains two models for calculating the effect of wind turbine wakes: the blade element momentum theory and the generalized dynamic-wake theory. Blade element momentum theory is the classical standard used by many wind turbine designers and"
+        }
+      ]
+    },
+    {
+      "primary_paper": {
+        "title": "The Performance Test of Three Different Horizontal Axis Wind Turbine (HAWT) Blade Shapes Using Experimental and Numerical Methods",
+        "year": 2013,
+        "doi": "https://doi.org/10.3390/en6062784",
+        "cited_by_count": 101,
+        "authors": [
+          "Fei‐Bin Hsiao",
+          "Chi-Jeng Bai",
+          "Wen Tong Chong"
+        ],
+        "abstract": "Three different horizontal axis wind turbine (HAWT) blade geometries with the same diameter of 0.72 m using the same NACA4418 airfoil profile have been investigated both experimentally and numerically. The first is an optimum (OPT) blade shape, obtained using improved blade element momentum (BEM) theory. A detailed description of the blade geometry is also given. The second is an untapered and optimum twist (UOT) blade with the same twist distributions as the OPT blade. The third blade is untapered and untwisted (UUT). Wind tunnel experiments were used to measure the power coefficients of these blades, and the results indicate that both the OPT and UOT blades perform with the same maximum power coefficient, Cp = 0.428, but it is located at different tip speed ratio, λ = 4.92 for the OPT blade and λ = 4.32 for the UOT blade. The UUT blade has a maximum power coefficient of Cp = 0.210 at λ = 3.86. After the tests, numerical simulations were performed using a full three-dimensional comput"
+      },
+      "second_tier_references": [
+        {
+          "title": "Wind Energy Explained",
+          "year": 2009,
+          "doi": "https://doi.org/10.1002/9781119994367",
+          "authors": [
+            "James F. Manwell",
+            "John G. McGowan",
+            "Anthony Rogers"
+          ],
+          "abstract": "Preface Acknowledgements Introduction: Modern wind energy and its origins Modern wind turbines History of wind energy Wind characteristics and resources Introduction General characteristics of the wind resource Characteristics of the atmospheric boundary layer Wind data analysis and resource estimation Wind turbine energy production estimates using statistical techniques Overview of available resource assessment data Wind measurements and instrumentation Advanced topics Aerodynamics of wind turb"
+        },
+        {
+          "title": "XFOIL: An Analysis and Design System for Low Reynolds Number Airfoils",
+          "year": 1989,
+          "doi": "https://doi.org/10.1007/978-3-642-84010-4_1",
+          "authors": [
+            "Mark Drela"
+          ],
+          "abstract": ""
+        },
+        {
+          "title": "NREL Unsteady Aerodynamics Experiment in the NASA-Ames Wind Tunnel: A Comparison of Predictions to Measurements",
+          "year": 2001,
+          "doi": "https://doi.org/10.2172/783409",
+          "authors": [
+            "David A. Simms",
+            "Scott Schreck",
+            "M. Maureen Hand"
+          ],
+          "abstract": "Currently, wind turbine designers rely on safety factors to compensate for the effects of unknown loads acting on the turbine structure. This results in components that are overdesigned because precise load levels and load paths are unknown. To advance wind turbine technology, the forces acting on the turbine structure must be accurately characterized because these forces translate directly into loads imparted to the wind turbine structure and resulting power production. Once these forces are mo"
+        },
+        {
+          "title": "Wind turbine technology : fundamental concepts of wind turbine engineering",
+          "year": 2009,
+          "doi": "https://doi.org/10.1115/1.802601",
+          "authors": [
+            "David A. Spera"
+          ],
+          "abstract": "Describes past and present wind turbines and provides detailed mathematical models developed by leaders in the fields of aerodynamics, structural dynamics and fatigue, meteorology, acoustic and electromagnetic emissions, commercial wind power applications, and utility power systems. Economics, costs, the integration of wind power plants into utility systems, and color photographs of current commercial wind turbines are included"
+        }
+      ]
+    }
+  ]
+}

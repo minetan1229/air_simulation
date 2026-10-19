@@ -1,0 +1,322 @@
+{
+  "topic_num": "10",
+  "query": "US standard atmosphere Sutherland dynamic viscosity model",
+  "candidates": [
+    {
+      "primary_paper": {
+        "title": "Marine Anthropogenic Litter",
+        "year": 2015,
+        "doi": "https://doi.org/10.1007/978-3-319-16510-3",
+        "cited_by_count": 3510,
+        "authors": [
+          "Melanie Bergmann",
+          "Lars Gutow",
+          "Michaël Klages"
+        ],
+        "abstract": "This book describes how man-made litter, primarily plastic, has spread into the remotest parts of the oceans and covers all aspects of this pollution problem from the impacts on wildlife and human hea"
+      },
+      "second_tier_references": [
+        {
+          "title": "Microplastics in the Marine Environment: Distribution, Interactions and Effects",
+          "year": 2015,
+          "doi": "https://doi.org/10.1007/978-3-319-16510-3_10",
+          "authors": [
+            "Amy Lusher"
+          ],
+          "abstract": "Microplastics are an emerging marine pollutant. It is important to understand their distribution in the marine environment and their implications on marine habitats and marine biota. Microplastics have been found in almost every marine habitat around the world, with plastic composition and environmental conditions significantly affecting their distribution. Marine biota interact with microplastics including birds, fish, turtles, mammals and invertebrates. The biological repercussions depend on t"
+        },
+        {
+          "title": "Micro- and Nano-plastics and Human Health",
+          "year": 2015,
+          "doi": "https://doi.org/10.1007/978-3-319-16510-3_13",
+          "authors": [
+            "Tamara Susan Galloway"
+          ],
+          "abstract": "Plastics are highly versatile materials that have brought huge societal benefits. They can be manufactured at low cost and their lightweight and adaptable nature has a myriad of applications in all aspects of everyday life, including food packaging, consumer products, medical devices and construction. By 2050, however, it is anticipated that an extra 33 billion tonnes of plastic will be added to the planet. Given that most currently used plastic polymers are highly resistant to degradation, this"
+        },
+        {
+          "title": "Plastics and the Environment",
+          "year": 2020,
+          "doi": "https://doi.org/10.2307/j.ctv10crf29.7",
+          "authors": [],
+          "abstract": "Preface. Acknowledgments. Contributors. PART 1. An Environmental Primer (A. Andrady). Common Plastics Materials (A. Andrady). Polymers and Energy (I. Boustead) PART 2. Plastics in Packaging (S. Selke) Plastics in Agriculture (I. Hussain & H. Hamid). Coatings (L. Hill). Wastes From Textiles Processing (B. Smith). PART 3. Environmental Effects on Polymeric Materials (N. Searle). Biodegradable Polymers (S. McCarthy). Plastics in the Marine Environment (M. Gregory and A. Andrady). Flammability of Po"
+        },
+        {
+          "title": "Synthetic Fibers as Indicators of Municipal Sewage Sludge, Sludge Products, and Sewage Treatment Plant Effluents",
+          "year": 1998,
+          "doi": "https://doi.org/10.1023/a:1004908110793",
+          "authors": [
+            "Daniel R. S. Habib",
+            "David C. Locke",
+            "Leonard J. Cannone"
+          ],
+          "abstract": ""
+        }
+      ]
+    },
+    {
+      "primary_paper": {
+        "title": "Gravity wave dynamics and effects in the middle atmosphere",
+        "year": 2003,
+        "doi": "https://doi.org/10.1029/2001rg000106",
+        "cited_by_count": 2656,
+        "authors": [
+          "David C. Fritts",
+          "M. Joan Alexander"
+        ],
+        "abstract": "Atmospheric gravity waves have been a subject of intense research activity in recent years because of their myriad effects and their major contributions to atmospheric circulation, structure, and variability. Apart from occasionally strong lower‐atmospheric effects, the major wave influences occur in the middle atmosphere, between ∼ 10 and 110 km altitudes because of decreasing density and increasing wave amplitudes with altitude. Theoretical, numerical, and observational studies have advanced our understanding of gravity waves on many fronts since the review by Fritts [1984a] ; the present review will focus on these more recent contributions. Progress includes a better appreciation of gravity wave sources and characteristics, the evolution of the gravity wave spectrum with altitude and with variations of wind and stability, the character and implications of observed climatologies, and the wave interaction and instability processes that constrain wave amplitudes and spectral shape. Rec"
+      },
+      "second_tier_references": [
+        {
+          "title": "Interactions between Gravity Waves and the Diurnal Tide in the Mesosphere and Lower Thermosphere",
+          "year": 1991,
+          "doi": "https://doi.org/10.2151/jmsj1965.69.5_523",
+          "authors": [
+            "S. Miyahara",
+            "J. M. Forbes"
+          ],
+          "abstract": ""
+        },
+        {
+          "title": "Gravity-Wave Parameters in the Lower Stratosphere",
+          "year": 1997,
+          "doi": "https://doi.org/10.1007/978-3-642-60654-0_2",
+          "authors": [
+            "Robert A. Vincent",
+            "S. J. Allen",
+            "Stephen D. Eckermann"
+          ],
+          "abstract": ""
+        },
+        {
+          "title": "Short-Period Disturbances in the Equatorial Lower Stratosphere",
+          "year": 1994,
+          "doi": "https://doi.org/10.2151/jmsj1965.72.6_859",
+          "authors": [
+            "Kaoru Sato",
+            "Fumihiro Hasegawa",
+            "Isamu Hirota"
+          ],
+          "abstract": ""
+        },
+        {
+          "title": "Equatorial Inertia-Gravity Waves in the Lower Stratosphere Revealed by TOGA-COARE TOP Data",
+          "year": 1999,
+          "doi": "https://doi.org/10.2151/jmsj1965.77.3_721",
+          "authors": [
+            "Koji Wada",
+            "Tsuyoshi Nitta",
+            "Kaoru Sato"
+          ],
+          "abstract": ""
+        },
+        {
+          "title": "The Effect of Parameterized Gravity Wave Drag on Simulations of the Middle Atmosphere during Northern Winter 1991/1992 — General Evolution",
+          "year": 1997,
+          "doi": "https://doi.org/10.1007/978-3-642-60654-0_20",
+          "authors": [
+            "Bryan Lawrence"
+          ],
+          "abstract": ""
+        }
+      ]
+    },
+    {
+      "primary_paper": {
+        "title": "Modules for Experiments in Stellar Astrophysics ( ): Convective Boundaries, Element Diffusion, and Massive Star Explosions",
+        "year": 2018,
+        "doi": "https://doi.org/10.3847/1538-4365/aaa5a8",
+        "cited_by_count": 2146,
+        "authors": [
+          "Bill Paxton",
+          "Josiah Schwab",
+          "Evan B. Bauer",
+          "Lars Bildsten",
+          "Sergei I. Blinnikov"
+        ],
+        "abstract": "Abstract We update the capabilities of the software instrument Modules for Experiments in Stellar Astrophysics ( MESA ) and enhance its ease of use and availability. Our new approach to locating convective boundaries is consistent with the physics of convection, and yields reliable values of the convective-core mass during both hydrogen- and helium-burning phases. Stars with become white dwarfs and cool to the point where the electrons are degenerate and the ions are strongly coupled, a realm now available to study with MESA due to improved treatments of element diffusion, latent heat release, and blending of equations of state. Studies of the final fates of massive stars are extended in MESA by our addition of an approximate Riemann solver that captures shocks and conserves energy to high accuracy during dynamic epochs. We also introduce a 1D capability for modeling the effects of Rayleigh–Taylor instabilities that, in combination with the coupling to a public version of the radiation"
+      },
+      "second_tier_references": [
+        {
+          "title": "The Gaia mission",
+          "year": 2016,
+          "doi": "https://doi.org/10.1051/0004-6361/201629272",
+          "authors": [
+            "T. Prusti",
+            "Jos H. J. de Bruijne",
+            "A. G. A. Brown"
+          ],
+          "abstract": "Gaia is a cornerstone mission in the science programme of the EuropeanSpace Agency (ESA). The spacecraft construction was approved in 2006, following a study in which the original interferometric concept was changed to a direct-imaging approach. Both the spacecraft and the payload were built by European industry. The involvement of the scientific community focusses on data processing for which the international Gaia Data Processing and Analysis Consortium (DPAC) was selected in 2007. Gaia was la"
+        },
+        {
+          "title": "Why and Where: A Characterization of Data Provenance",
+          "year": 2001,
+          "doi": "https://doi.org/10.1007/3-540-44503-x_20",
+          "authors": [
+            "Peter Buneman",
+            "Sanjeev Khanna",
+            "Tan Wang-Chiew"
+          ],
+          "abstract": ""
+        },
+        {
+          "title": "Super-Eddington stellar winds driven by near-surface energy deposition",
+          "year": 2016,
+          "doi": "https://doi.org/10.1093/mnras/stw365",
+          "authors": [
+            "Eliot Quataert",
+            "Rodrigo Fernández",
+            "Daniel Kasen"
+          ],
+          "abstract": "We develop analytic and numerical models of the properties of super-Eddington stellar winds, motivated by phases in stellar evolution when super-Eddington energy deposition (via, e.g. unstable fusion, wave heating, or a binary companion) heats a region near the stellar surface. This appears to occur in the giant eruptions of luminous blue variables (LBVs), Type IIn supernovae progenitors, classical novae, and X-ray bursts. We show that when the wind kinetic power exceeds Eddington, the photons a"
+        },
+        {
+          "title": "- and Oxygen-Burning Stars and Pre-Supernova Models",
+          "year": 1967,
+          "doi": "https://doi.org/10.1086/149318",
+          "authors": [
+            "G. Rakavy",
+            "G. Shaviv",
+            "Z. Zinamon"
+          ],
+          "abstract": ""
+        },
+        {
+          "title": "A ONE-DIMENSIONAL MODEL FOR RAYLEIGH–TAYLOR INSTABILITY IN SUPERNOVA REMNANTS",
+          "year": 2016,
+          "doi": "https://doi.org/10.3847/0004-637x/821/2/76",
+          "authors": [
+            "Paul C. Duffell"
+          ],
+          "abstract": "ABSTRACT This study presents a method for approximating the multidimensional effects of Rayleigh–Taylor (RT) instability as a modification of the one-dimensional (1D) hydro equations. This modification is similar to the Shakura–Sunyaev α prescription for modeling the coarse-grained effects of turbulence in astrophysical disks. The model introduces several dimensionless tunable parameters that are calibrated by comparing with high-resolution two-dimensional axisymmetric numerical calculations of "
+        }
+      ]
+    },
+    {
+      "primary_paper": {
+        "title": "The HadGEM2 family of Met Office Unified Model climate configurations",
+        "year": 2011,
+        "doi": "https://doi.org/10.5194/gmd-4-723-2011",
+        "cited_by_count": 933,
+        "authors": [
+          "The HadGEM2 Development Team: G. M. Martin",
+          "Nicolas Bellouin",
+          "William James Collins",
+          "I. D. Culverwell",
+          "Paul R. Halloran"
+        ],
+        "abstract": "Abstract. We describe the HadGEM2 family of climate configurations of the Met Office Unified Model, MetUM. The concept of a model \"family\" comprises a range of specific model configurations incorporating different levels of complexity but with a common physical framework. The HadGEM2 family of configurations includes atmosphere and ocean components, with and without a vertical extension to include a well-resolved stratosphere, and an Earth-System (ES) component which includes dynamic vegetation, ocean biology and atmospheric chemistry. The HadGEM2 physical model includes improvements designed to address specific systematic errors encountered in the previous climate configuration, HadGEM1, namely Northern Hemisphere continental temperature biases and tropical sea surface temperature biases and poor variability. Targeting these biases was crucial in order that the ES configuration could represent important biogeochemical climate feedbacks. Detailed descriptions and evaluations of particu"
+      },
+      "second_tier_references": [
+        {
+          "title": "A stratospheric influence on the winter NAO and North Atlantic surface climate",
+          "year": 2005,
+          "doi": "https://doi.org/10.1029/2005gl023226",
+          "authors": [
+            "Adam A. Scaife",
+            "Jeff R Knight",
+            "Geoffrey K. Vallis"
+          ],
+          "abstract": "The North Atlantic Oscillation (NAO) has a profound effect on winter climate variability around the Atlantic basin. Strengthening of the NAO in recent decades has altered surface climate in these regions at a rate far in excess of global mean warming. However, only weak NAO trends are reproduced in climate simulations of the 20th Century, even with prescribed climate forcings and historical sea‐surface conditions. Here we show that the unexplained strengthening of the NAO can be fully simulated "
+        },
+        {
+          "title": "Chapter 6.1 Ocean heat transport",
+          "year": 2001,
+          "doi": "https://doi.org/10.1016/s0074-6142(01)80134-0",
+          "authors": [
+            "Harry L. Bryden",
+            "Shiro Imawaki"
+          ],
+          "abstract": ""
+        },
+        {
+          "title": "Uncertainties in the climate mean state of global observations, reanalyses, and the GFDL climate model",
+          "year": 2008,
+          "doi": "https://doi.org/10.1029/2007jd009278",
+          "authors": [
+            "Thomas J. Reichler",
+            "Junsu Kim"
+          ],
+          "abstract": "Climate research relies on realistic atmospheric data over long periods of time. Global reanalyses or observations are commonly used for this type of work. However, the many problems associated with both the reanalyses and observations cast doubts on the reliability of such data for climate applications, and users often need to know how large the errors and uncertainties associated with the different data sets are. This paper is a systematic assessment of the errors and uncertainties contained i"
+        },
+        {
+          "title": "Non-local mixing of momentum in the convective boundary layer",
+          "year": 1997,
+          "doi": "https://doi.org/10.1023/a:1000388830859",
+          "authors": [
+            "A. R. Brown",
+            "Alan L. M. Grant"
+          ],
+          "abstract": ""
+        }
+      ]
+    },
+    {
+      "primary_paper": {
+        "title": "Microbial lipases and their industrial applications: a comprehensive review",
+        "year": 2020,
+        "doi": "https://doi.org/10.1186/s12934-020-01428-8",
+        "cited_by_count": 890,
+        "authors": [
+          "Prem Chandra",
+          "Enespa",
+          "Ranjan Prasad Singh",
+          "Pankaj Kumar Arora"
+        ],
+        "abstract": "Lipases are very versatile enzymes, and produced the attention of the several industrial processes. Lipase can be achieved from several sources, animal, vegetable, and microbiological. The uses of microbial lipase market is estimated to be USD 425.0 Million in 2018 and it is projected to reach USD 590.2 Million by 2023, growing at a CAGR of 6.8% from 2018. Microbial lipases (EC 3.1.1.3) catalyze the hydrolysis of long chain triglycerides. The microbial origins of lipase enzymes are logically dynamic and proficient also have an extensive range of industrial uses with the manufacturing of altered molecules. The unique lipase (triacylglycerol acyl hydrolase) enzymes catalyzed the hydrolysis, esterification and alcoholysis reactions. Immobilization has made the use of microbial lipases accomplish its best performance and hence suitable for several reactions and need to enhance aroma to the immobilization processes. Immobilized enzymes depend on the immobilization technique and the carrier "
+      },
+      "second_tier_references": [
+        {
+          "title": "An Introduction to Natural Products Isolation",
+          "year": 2012,
+          "doi": "https://doi.org/10.1007/978-1-61779-624-1_1",
+          "authors": [
+            "Satyajit Dey Sarker",
+            "Lutfun Nahar"
+          ],
+          "abstract": "Natural products, well known for unique chemical diversity and bioactivity, have continued to offer templates for the development of novel scaffolds of drugs. With the remarkable developments in the areas of separation science, spectroscopic techniques, microplate-based ultrasensitive in vitro assays and high-throughput screening (HTS) technologies, natural products research has gained momentum in recent years. The pre-isolation analyses of crude extracts or fraction from different natural matri"
+        },
+        {
+          "title": "Yarrowia lipolytica in Biotechnological Applications",
+          "year": 2014,
+          "doi": "https://doi.org/10.1007/978-3-319-06437-6_2",
+          "authors": [
+            "Farshad Darvishi"
+          ],
+          "abstract": ""
+        },
+        {
+          "title": "Lipolytic activity of cheese related microorganisms and its impact on cheese flavour",
+          "year": 1995,
+          "doi": "https://doi.org/10.1016/s0167-4501(06)80267-0",
+          "authors": [
+            "M. El Soda",
+            "Jean Law",
+            "Effie Tsakalidou"
+          ],
+          "abstract": ""
+        },
+        {
+          "title": "Ageing on lees ( sur lies ) and the use of speciality inactive yeasts during wine fermentation",
+          "year": 2010,
+          "doi": "https://doi.org/10.1533/9781845699987.1.164",
+          "authors": [
+            "C. Charpentier"
+          ],
+          "abstract": ""
+        },
+        {
+          "title": "Asymmetric Hydrolysis of Phenylglycidate Ester by Esterase from Serratia marcescens",
+          "year": 1992,
+          "doi": "https://doi.org/10.1007/978-4-431-68180-9_22",
+          "authors": [
+            "Takeji Shibatani",
+            "Hiroaki Matsumae",
+            "Tetsuya Tosa"
+          ],
+          "abstract": ""
+        }
+      ]
+    }
+  ]
+}

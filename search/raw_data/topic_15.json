@@ -1,0 +1,350 @@
+{
+  "topic_num": "15",
+  "query": "flight simulation telemetry data logging CSV JSON",
+  "candidates": [
+    {
+      "primary_paper": {
+        "title": "A Review on Internet of Things for Defense and Public Safety",
+        "year": 2016,
+        "doi": "https://doi.org/10.3390/s16101644",
+        "cited_by_count": 242,
+        "authors": [
+          "Paula Fraga‐Lamas",
+          "Tiago M. Fernández‐Caramés",
+          "Manuel Suárez-Albela",
+          "Luis Castedo",
+          "M. González-López"
+        ],
+        "abstract": "The Internet of Things (IoT) is undeniably transforming the way that organizations communicate and organize everyday businesses and industrial procedures. Its adoption has proven well suited for sectors that manage a large number of assets and coordinate complex and distributed processes. This survey analyzes the great potential for applying IoT technologies (i.e., data-driven applications or embedded automation and intelligent adaptive systems) to revolutionize modern warfare and provide beneﬁts similar to those in industry. It identiﬁes scenarios where Defense and Public Safety (PS) could leverage better commercial IoT capabilities to deliver greater survivability to the warﬁghter or ﬁrst responders, while reducing costs and increasing operation efﬁciency and effectiveness. This article reviews the main tactical requirements and the architecture, examining gaps and shortcomings in existing IoT systems across the military ﬁeld and mission-critical scenarios. The review characterizes t"
+      },
+      "second_tier_references": [
+        {
+          "title": "Unique Radio Innovation for the 21st Century",
+          "year": 2010,
+          "doi": "https://doi.org/10.1007/978-3-642-03462-6",
+          "authors": [
+            "Damith Chinthana Ranasinghe",
+            "Sherali Zeadally",
+            "Quan Z. Sheng"
+          ],
+          "abstract": ""
+        },
+        {
+          "title": "Display and Control Concepts for Multi-UAV Applications",
+          "year": 2014,
+          "doi": "https://doi.org/10.1007/978-90-481-9707-1_88",
+          "authors": [
+            "Gloria L. Calhoun",
+            "Mark H. Draper"
+          ],
+          "abstract": ""
+        },
+        {
+          "title": "Network coding in military wireless ad hoc and sensor networks: Experimentation with GardiNet",
+          "year": 2015,
+          "doi": "https://doi.org/10.1109/icmcis.2015.7158701",
+          "authors": [
+            "Ichrak Amdouni",
+            "Cédric Adjih",
+            "Thierry Plesse"
+          ],
+          "abstract": "Network coding is a communication paradigm that allows intermediate nodes to mix packets instead of simply relaying them. Motivated by applications in military tactical networks, this paper explores the use of the network coding. It has been proved that network coding has many benefits in wireless communications such as optimal capacity achievement and packet loss recovery. In this paper, we present a generic architecture for network coding for broadcast in wireless networks called GardiNet. Gar"
+        },
+        {
+          "title": "Constructing Green Software Services: From Service Models to Cloud-Based Architecture",
+          "year": 2015,
+          "doi": "https://doi.org/10.1007/978-3-319-08581-4_4",
+          "authors": [
+            "Fei Li",
+            "Soheil Qanbari",
+            "Michael Vögler"
+          ],
+          "abstract": ""
+        }
+      ]
+    },
+    {
+      "primary_paper": {
+        "title": "The Rise of Agentic AI: A Review of Definitions, Frameworks, Architectures, Applications, Evaluation Metrics, and Challenges",
+        "year": 2025,
+        "doi": "https://doi.org/10.3390/fi17090404",
+        "cited_by_count": 195,
+        "authors": [
+          "Ajay Bandi",
+          "Bhavani Kongari",
+          "Roshini Naguru",
+          "Sahitya Pasnoor",
+          "Sri Vidya Vilipala"
+        ],
+        "abstract": "Agentic AI systems are a recently emerged and important approach that goes beyond traditional AI, generative AI, and autonomous systems by focusing on autonomy, adaptability, and goal-driven reasoning. This study provides a clear review of agentic AI systems by bringing together their definitions, frameworks, and architectures, and by comparing them with related areas like generative AI, autonomic computing, and multi-agent systems. To do this, we reviewed 143 primary studies on current LLM-based and non-LLM-driven agentic systems and examined how they support planning, memory, reflection, and goal pursuit. Furthermore, we classified architectural models, input–output mechanisms, and applications based on their task domains where agentic AI is applied, supported using tabular summaries that highlight real-world case studies. Evaluation metrics were classified as qualitative and quantitative measures, along with available testing methods of agentic AI systems to check the system’s perfo"
+      },
+      "second_tier_references": [
+        {
+          "title": "MASON: A Multiagent Simulation Environment",
+          "year": 2005,
+          "doi": "https://doi.org/10.1177/0037549705058073",
+          "authors": [
+            "Sean Luke",
+            "Claudio A. Cioffi‐Revilla",
+            "Liviu Panait"
+          ],
+          "abstract": "MASON is a fast, easily extensible, discrete-event multi-agent simulation toolkit in Java, designed to serve as the basis for a wide range of multi-agent simulation tasks ranging from swarm robotics to machine learning to social complexity environments. MASON carefully delineates between model and visualization, allowing models to be dynamically detached from or attached to visualizers, and to change platforms mid-run. This paper describes the MASON system, its motivation, and its basic architec"
+        },
+        {
+          "title": "Agent-Based Modeling of the Immune System: NetLogo, a Promising Framework",
+          "year": 2014,
+          "doi": "https://doi.org/10.1155/2014/907171",
+          "authors": [
+            "Ferdınando Chıacchıo",
+            "Marzio Alfio Pennisi",
+            "Giulia Lo Russo"
+          ],
+          "abstract": "Several components that interact with each other to evolve a complex, and, in some cases, unexpected behavior, represents one of the main and fascinating features of the mammalian immune system. Agent-based modeling and cellular automata belong to a class of discrete mathematical approaches in which entities (agents) sense local information and undertake actions over time according to predefined rules. The strength of this approach is characterized by the appearance of a global behavior that eme"
+        },
+        {
+          "title": "Optimized Multi-Agent Routing in Guidepath Networks",
+          "year": 2017,
+          "doi": "https://doi.org/10.1016/j.ifacol.2017.08.2050",
+          "authors": [
+            "Greyson Daugherty",
+            "Spyros A. Reveliotis",
+            "Greg Mohler"
+          ],
+          "abstract": "This paper describes a heuristic algorithm for minimizing the makespan required to route a set of agents inhabiting a shared guidepath network from their initial locations to their respective destinations. The work is motivated by the operations taking place in the context of some unit-load material handling systems, like the zone-controlled AGV systems, and in quantum computers. This document presents a description of the considered problem and of the inner workings of the proposed algorithm, a"
+        },
+        {
+          "title": "Multiagent AI implementations an emerging software engineering trend",
+          "year": 1999,
+          "doi": "https://doi.org/10.1016/s0952-1976(98)00042-6",
+          "authors": [
+            "Cyrus F. Nourani"
+          ],
+          "abstract": ""
+        },
+        {
+          "title": "Limits to Verification and Validation of Agentic Behavior",
+          "year": 2018,
+          "doi": "https://doi.org/10.1201/9781351251389-16",
+          "authors": [
+            "David J. Jilk"
+          ],
+          "abstract": "This chapter questions the appropriateness of using language of certainty when discussing safety considerations of general artificial intelligence. Verification and validation of agentic behavior have been suggested as important research priorities. The chapter assembles in one place some classic and novel arguments, contextualized for agentic behavior, that these methods have fundamental limitations. It begins by establishing a very general formalism to characterize agentic behavior and to desc"
+        }
+      ]
+    },
+    {
+      "primary_paper": {
+        "title": "Analyzing the enhancement of CNN-YOLO and transformer based architectures for real-time animal detection in complex ecological environments",
+        "year": 2025,
+        "doi": "https://doi.org/10.1038/s41598-025-26645-2",
+        "cited_by_count": 37,
+        "authors": [
+          "Ali Raza",
+          "Fareeha Hanif",
+          "Heba Abdelgader Mohammed"
+        ],
+        "abstract": "Automatic animal detection has become a critical capability in ecology, conservation, agriculture, and public safety, driven by the rapid growth of visual data collected through camera traps, UAVs, and remote sensors. The necessity of this study arises from the increasing demand to understand and apply these underlying detection techniques in practical domains such as animal husbandry, farming, and livestock management, where timely and accurate animal identification directly impacts productivity, welfare, and safety. Traditional convolutional neural networks (CNNs) have demonstrated strong accuracy in static or controlled environments but often face limitations in computational cost and inference speed. In contrast, the You Only Look Once (YOLO) family of one-stage detectors has revolutionized animal detection by achieving real-time performance while maintaining competitive accuracy across challenging geospatial environments. This review provides a chronological synthesis of detection"
+      },
+      "second_tier_references": [
+        {
+          "title": "Faster R-CNN: Towards Real-Time Object Detection with Region Proposal Networks",
+          "year": 2016,
+          "doi": "https://doi.org/10.1109/tpami.2016.2577031",
+          "authors": [
+            "Shaoqing Ren",
+            "Kaiming He",
+            "Ross Girshick"
+          ],
+          "abstract": "State-of-the-art object detection networks depend on region proposal algorithms to hypothesize object locations. Advances like SPPnet [1] and Fast R-CNN [2] have reduced the running time of these detection networks, exposing region proposal computation as a bottleneck. In this work, we introduce a Region Proposal Network (RPN) that shares full-image convolutional features with the detection network, thus enabling nearly cost-free region proposals. An RPN is a fully convolutional network that sim"
+        },
+        {
+          "title": "You Only Look Once: Unified, Real-Time Object Detection",
+          "year": 2016,
+          "doi": "https://doi.org/10.1109/cvpr.2016.91",
+          "authors": [
+            "Joseph Redmon",
+            "Santosh Divvala",
+            "Ross Girshick"
+          ],
+          "abstract": "We present YOLO, a new approach to object detection. Prior work on object detection repurposes classifiers to perform detection. Instead, we frame object detection as a regression problem to spatially separated bounding boxes and associated class probabilities. A single neural network predicts bounding boxes and class probabilities directly from full images in one evaluation. Since the whole detection pipeline is a single network, it can be optimized end-to-end directly on detection performance."
+        },
+        {
+          "title": "Microsoft COCO: Common Objects in Context",
+          "year": 2014,
+          "doi": "https://doi.org/10.1007/978-3-319-10602-1_48",
+          "authors": [
+            "Tsung-Yi Lin",
+            "Michael Maire",
+            "Serge Belongie"
+          ],
+          "abstract": ""
+        },
+        {
+          "title": "The Pascal Visual Object Classes (VOC) Challenge",
+          "year": 2009,
+          "doi": "https://doi.org/10.1007/s11263-009-0275-4",
+          "authors": [
+            "Mark Everingham",
+            "Luc Van Gool",
+            "Christopher K. I. Williams"
+          ],
+          "abstract": ""
+        },
+        {
+          "title": "The Precision-Recall Plot Is More Informative than the ROC Plot When Evaluating Binary Classifiers on Imbalanced Datasets",
+          "year": 2015,
+          "doi": "https://doi.org/10.1371/journal.pone.0118432",
+          "authors": [
+            "Takaya Saito",
+            "Marc Rehmsmeier"
+          ],
+          "abstract": "Binary classifiers are routinely evaluated with performance measures such as sensitivity and specificity, and performance is frequently illustrated with Receiver Operating Characteristics (ROC) plots. Alternative measures such as positive predictive value (PPV) and the associated Precision/Recall (PRC) plots are used less frequently. Many bioinformatics studies develop and evaluate classifiers that are to be applied to strongly imbalanced datasets in which the number of negatives outweighs the n"
+        }
+      ]
+    },
+    {
+      "primary_paper": {
+        "title": "Observations of the thermodynamic and kinematic state of the atmospheric boundary layer over the San Luis Valley, CO, using the CopterSonde 2 remotely piloted aircraft system in support of the LAPSE-RATE field campaign",
+        "year": 2021,
+        "doi": "https://doi.org/10.5194/essd-13-269-2021",
+        "cited_by_count": 35,
+        "authors": [
+          "Elizabeth Ann Pillar-Little",
+          "Brian Greene",
+          "Francesca M. Lappin",
+          "Tyler Bell",
+          "Antonio R. Segales"
+        ],
+        "abstract": "Abstract. In July 2018, the University of Oklahoma deployed three CopterSonde 2 remotely piloted aircraft systems (RPAS) to take measurements of the evolving thermodynamic and kinematic state of the atmospheric boundary layer (ABL) over complex terrain in the San Luis Valley, Colorado. A total of 180 flights were completed over five days, with teams operating simultaneously at two different sites in the northern half of the valley. Two days of operations focused on convection initiation studies, one day focused on ABL diurnal transition studies, one day focused on internal comparison flights, and the last day of operations focused on cold air drainage flows. The data from these coordinated flights provides insight into the horizontal heterogeneity of the atmospheric state over complex terrain as well as the expected horizontal footprint of RPAS profiles. This dataset, along with others collected by other universities and institutions as a part of the LAPSE-RATE campaign, have been subm"
+      },
+      "second_tier_references": [
+        {
+          "title": "Overview of Small Fixed-Wing Unmanned Aircraft for Meteorological Sampling",
+          "year": 2014,
+          "doi": "https://doi.org/10.1175/jtech-d-13-00236.1",
+          "authors": [
+            "Jack S. Elston",
+            "Brian Argrow",
+            "Maciej Z. Stachura"
+          ],
+          "abstract": "Abstract Sampling the atmospheric boundary layer with small unmanned aircraft is a difficult task requiring informed selection of sensors and algorithms that are suited to the particular platform and mission. Many factors must be considered during the design process to ensure the desired measurement accuracy and resolution is achieved, as is demonstrated through an examination of previous and current efforts. A taxonomy is developed from these approaches and is used to guide a review of the syst"
+        },
+        {
+          "title": "On the Use of Rotary-Wing Aircraft to Sample Near-Surface Thermodynamic Fields: Results from Recent Field Campaigns",
+          "year": 2018,
+          "doi": "https://doi.org/10.3390/s19010010",
+          "authors": [
+            "Temple R. Lee",
+            "Michael Buban",
+            "Edward J. Dumas"
+          ],
+          "abstract": "Rotary-wing small unmanned aircraft systems (sUAS) are increasingly being used for sampling thermodynamic and chemical properties of the Earth's atmospheric boundary layer (ABL) because of their ability to measure at high spatial and temporal resolutions. Therefore, they have the potential to be used for long-term quasi-continuous monitoring of the ABL, which is critical for improving ABL parameterizations and improving numerical weather prediction (NWP) models through data assimilation. Before "
+        },
+        {
+          "title": "Thermodynamic and Turbulence Characteristics of the Southern Great Plains Nocturnal Boundary Layer Under Differing Turbulent Regimes",
+          "year": 2015,
+          "doi": "https://doi.org/10.1007/s10546-015-0072-2",
+          "authors": [
+            "Timothy A. Bonin",
+            "William Gregory Blumberg",
+            "Petra M. Klein"
+          ],
+          "abstract": ""
+        },
+        {
+          "title": "Use of the Parcel Buoyancy Minimum (Bmin) to Diagnose Simulated Thermodynamic Destabilization. Part I: Methodology and Case Studies of MCS Initiation Environments",
+          "year": 2013,
+          "doi": "https://doi.org/10.1175/mwr-d-13-00272.1",
+          "authors": [
+            "Stanley B. Trier",
+            "Christopher A. Davis",
+            "David A. Ahijevych"
+          ],
+          "abstract": "Abstract A method based on parcel theory is developed to quantify mesoscale physical processes responsible for the removal of inhibition energy for convection initiation (CI). Convection-permitting simulations of three mesoscale convective systems (MCSs) initiating in differing environments are then used to demonstrate the method and gain insights on different ways that mesoscale thermodynamic destabilization can occur. Central to the method is a thermodynamic quantity Bmin, which is the buoyanc"
+        },
+        {
+          "title": "Comparison and application of wind retrieval algorithms for small unmanned aerial systems",
+          "year": 2013,
+          "doi": "https://doi.org/10.5194/gi-2-177-2013",
+          "authors": [
+            "Timothy A. Bonin",
+            "Phillip B. Chilson",
+            "B. S. Zielke"
+          ],
+          "abstract": "Abstract. Recently, there has been an increase in use of Unmanned Aerial Systems (UASs) as platforms for conducting fundamental and applied research in the lower atmosphere due to their relatively low cost and ability to collect samples with high spatial and temporal resolution. Concurrent with this development comes the need for accurate instrumentation and measurement methods suitable for small meteorological UASs. Moreover, the instrumentation to be integrated into such platforms must be smal"
+        }
+      ]
+    },
+    {
+      "primary_paper": {
+        "title": "Industrial digital twins in offshore wind farms",
+        "year": 2024,
+        "doi": "https://doi.org/10.1186/s42162-024-00306-6",
+        "cited_by_count": 20,
+        "authors": [
+          "Evi Elisa Ambarita",
+          "Anniken Karlsen",
+          "Francesco Scibilia",
+          "Agus Hasan"
+        ],
+        "abstract": "Abstract Digital twin technology, aligned with Industry 4.0 standard, has witnessed widespread adoption in various industries, notably in manufacturing. Meanwhile, the concept of digital twin itself is yet to be clearly defined in wind farm sector. Our primary contribution lies in investigating the potential for transferring knowledge of industrial digital twins for the wind farm industry. Through a comprehensive literature study, we explored the digital twin concept within the context of wind farm applications. Also, we conducted a comparative analysis of digital twin frameworks employed in wind farm and manufacturing sectors. We aim to identify commonalities and differences between these frameworks and to determine how they could be adapted to the unique requirements of the offshore wind sector. A case study is presented, wherein the Industry 4.0 standard framework, Asset Administration Shell (AAS), is conceptually applied to the wind farm sector. Additionally, we briefly explored th"
+      },
+      "second_tier_references": [
+        {
+          "title": "Functional Mockup Interface 2.0: The Standard for Tool independent Exchange of Simulation Models",
+          "year": 2012,
+          "doi": "https://doi.org/10.3384/ecp12076173",
+          "authors": [
+            "Torsten Blockwitz",
+            "Martin Otter",
+            "Johan Åkesson"
+          ],
+          "abstract": "The Functional Mockup Interface (FMI) is a tool independent standard for the exchange of dynamic models and for Co-Simulation.The first version, FMI 1.0, was published in 2010.Already more than 30 tools support FMI 1.0.In this paper an overview about the upcoming version 2.0 of FMI is given that combines the formerly separated interfaces for Model Exchange and Co-Simulation in one standard.Based on the experience on using FMI 1.0, many small details have been improved and new features introduced"
+        },
+        {
+          "title": "Integrated Data Model and Structure for the Asset Administration Shell in Industrie 4.0",
+          "year": 2017,
+          "doi": "https://doi.org/10.1016/j.procir.2017.01.048",
+          "authors": [
+            "Erdal Tantik",
+            "Reiner Anderl"
+          ],
+          "abstract": "The increasing demand for highly customized products in connection with shortened product life cycles requires the manufacturing industry to be eminently flexible, whereas low production costs are crucial to persist in the competition of the global markets. To meet this requirements, cyber-physical systems (CPS) are applied into the production process, aiming for interconnected and self-managing smart factories, which can incorporate external and internal conditions for the autonomous adaptation"
+        },
+        {
+          "title": "Model transformation between OPC UA and UML",
+          "year": 2016,
+          "doi": "https://doi.org/10.1016/j.csi.2016.09.004",
+          "authors": [
+            "Byung‐Hun Lee",
+            "Dae‐Kyoo Kim",
+            "Hyo-Sik Yang"
+          ],
+          "abstract": ""
+        },
+        {
+          "title": "Towards Industrie 4.0 compliant configuration of condition monitoring services",
+          "year": 2017,
+          "doi": "https://doi.org/10.1109/indin.2017.8104783",
+          "authors": [
+            "Florian Pethig",
+            "Oliver Niggemann",
+            "Armin Walter"
+          ],
+          "abstract": "One of the many opportunities Industrie 4.0 (I4.0) offers, is to reduce (re-)configuration effort. Today, a variety of vendor-specific information models prevents an efficient configuration of Condition Monitoring (CM) for adaptable Cyber-Physical Production Systems (CPPS). The manual configuration of signals that should be monitored is a tedious and error-prone task. Standardization efforts for I4.0 focus on a generic interface called Asset Administration Shell (AAS), which could increase confi"
+        },
+        {
+          "title": "Strength of Shear Web With Circular Hole in Wind Turbine Blades and Using Digital Twining Concept to Reduce Material Testing",
+          "year": 2017,
+          "doi": "https://doi.org/10.1115/gtindia2017-4603",
+          "authors": [
+            "Anil Kumar Sahoo",
+            "Utsa Majumder",
+            "Michael Wenani Nielsen"
+          ],
+          "abstract": "This research work summarizes the study of the structural analysis of shear webs (present in wind turbine blades, sometimes also called as spars) with holes. The webs are sandwich composite structures which are supposed to carry the shear loads coming from the wind pressure and the holes are necessary for non-structural requirements of the wind turbine. The shear webs are strong structures and it is tough to test them to failure in the lab. Hence a structural representative component with lesser"
+        }
+      ]
+    }
+  ]
+}

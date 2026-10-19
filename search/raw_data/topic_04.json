@@ -1,0 +1,174 @@
+{
+  "topic_num": "04",
+  "query": "delta wing slender wing vortex lift Polhamus suction",
+  "candidates": [
+    {
+      "primary_paper": {
+        "title": "Unsteady aerodynamics of nonslender delta wings",
+        "year": 2005,
+        "doi": "https://doi.org/10.1016/j.paerosci.2005.09.002",
+        "cited_by_count": 329,
+        "authors": [
+          "Ismet Gursul",
+          "Raymond E. Gordnier",
+          "Miguel R. Visbal"
+        ],
+        "abstract": ""
+      },
+      "second_tier_references": [
+        {
+          "title": "Experimental Investigation of Influence of Edge Shape on the Aerodynamic Characteristics of Low Aspect Ratio Wings at Low Speeds",
+          "year": 1955,
+          "doi": "https://doi.org/10.2514/8.3391",
+          "authors": [
+            "G. E. BARTLETT",
+            "ROBERT J. VIDAL"
+          ],
+          "abstract": ""
+        },
+        {
+          "title": "Recent developments in delta wing aerodynamics",
+          "year": 2004,
+          "doi": "https://doi.org/10.1017/s0001924000000269",
+          "authors": [
+            "Ismet Gursul"
+          ],
+          "abstract": "Abstract Recent developments in delta wing aerodynamics are reviewed. For slender delta wings, recent investigations shed more light on the unsteady aspects of shear-layer structure, vortex core, breakdown and its instabilities. For nonslender delta wings, substantial differences in the structure of vortical flow and breakdown may exist. Vortex interactions are generic to both slender and nonslender wings. Various unsteady flow phenomena may cause buffeting of wings and fins, however, vortex bre"
+        },
+        {
+          "title": "Aerodynamic characteristics of lambda wings",
+          "year": 2000,
+          "doi": "https://doi.org/10.1017/s0001924000028062",
+          "authors": [
+            "M. I. Woods",
+            "Norman J. Wood"
+          ],
+          "abstract": "Abstract The results of wind tunnel tests carried out on a semi-span ‘lambda’ planform model with leading and trailing edges swept at 40° are presented. The planform investigated has been specified as having features likely to be encountered on future ‘ow observable’ aircraft. Balance data has been acquired to angles of attack beyond stall for both forward and reverse flow orientations. Dynamic calibration of surface pressure tappings has allowed both time-averaged and unsteady pressures to be m"
+        }
+      ]
+    },
+    {
+      "primary_paper": {
+        "title": "Applications of the unsteady vortex-lattice method in aircraft aeroelasticity and flight dynamics",
+        "year": 2012,
+        "doi": "https://doi.org/10.1016/j.paerosci.2012.06.001",
+        "cited_by_count": 308,
+        "authors": [
+          "Joseba Murua",
+          "Rafael Palacios",
+          "J. M. R. Graham"
+        ],
+        "abstract": ""
+      },
+      "second_tier_references": [
+        {
+          "title": "Low-Speed Aerodynamics",
+          "year": 2001,
+          "doi": "https://doi.org/10.1017/cbo9780511810329",
+          "authors": [
+            "Joseph Katz",
+            "Allen Plotkin"
+          ],
+          "abstract": "Low-speed aerodynamics is important in the design and operation of aircraft flying at low Mach number, and ground and marine vehicles. This 2001 book offers a modern treatment of the subject, both the theory of inviscid, incompressible, and irrotational aerodynamics and the computational techniques now available to solve complex problems. A unique feature of the text is that the computational approach (from a single vortex element to a three-dimensional panel formulation) is interwoven throughou"
+        },
+        {
+          "title": "An Improved Vortex Lattice Method for Nonstationary Problems",
+          "year": 2001,
+          "doi": "https://doi.org/10.1023/a:1011325112413",
+          "authors": [
+            "S. A. Dovgii",
+            "A. V. Shekhovtsov"
+          ],
+          "abstract": ""
+        },
+        {
+          "title": "Progress in Computational Flow-Structure Interaction",
+          "year": 2003,
+          "doi": "https://doi.org/10.1007/978-3-540-45489-2",
+          "authors": [
+            "George N. Barakos",
+            "Dimitris Drikakis"
+          ],
+          "abstract": ""
+        },
+        {
+          "title": "A Compilation of the Mathematics Leading to the Doublet Lattice Method",
+          "year": 1992,
+          "doi": "https://doi.org/10.21236/ada256304",
+          "authors": [
+            "Maxwell Blair"
+          ],
+          "abstract": "This report provides a theoretical development of the doublet lattice method, the method of choice for most subsonic unsteady aerodynamic modelling for over twenty years. This is a tutorial based on many-key mathematical developments provided in the References section. An example source code is provided in the Appendix."
+        }
+      ]
+    },
+    {
+      "primary_paper": {
+        "title": "Calculation of supersonic viscous flow over delta wings with sharp subsonic leading edges",
+        "year": 1978,
+        "doi": "https://doi.org/10.31274/rtd-180813-2450",
+        "cited_by_count": 205,
+        "authors": [
+          "Yvon Clovis Vigneron"
+        ],
+        "abstract": "Two complementary procedures were developed to calculate the viscous supersonic flow over conical shapes at large angles of attack, with application to cones and delta wings. In the first approach the flow is assumed to be conical and the governing equations are solved at a given Reynolds number with a time-marching explicit finite-difference algorithm. In the second method the parabolized Navier-Stokes equations are solved with a space-marching implicit noniterative finite-difference algorithm. This latter approach is not restricted to conical shapes and provides a large improvement in computational efficiency over published methods. Results from the two procedures agree very well with each other and with available experimental data."
+      },
+      "second_tier_references": [
+        {
+          "title": "Hypersonic flow over a yawed circular cone",
+          "year": 1964,
+          "doi": "https://doi.org/10.7907/rmwt-th67.",
+          "authors": [
+            "Richard Tracy"
+          ],
+          "abstract": "A 10° semi-apex, circular cone is tested in air at Mach 8 and at 0 yaw angles to 24°; surface pressure, heat transfer, and pitot-pressure throughout the flow field are presented. The nominal surface temperature \\nis 40\" of the free stream stagnation temperature, and the \\nReynolds nunber, based on cone generator length, is varied from 0.5 x 10^5 to 4.2 x 10^5 . Heat transfer is measured at higher surface temperature ratios (up to 56%) and Reynolds nunbers (up to 7.3 x 10^5) by reducing the free "
+        },
+        {
+          "title": "Flat slender delta wings in supersonic stream at small angles of attack",
+          "year": 2005,
+          "doi": "https://doi.org/10.1007/bfb0019731",
+          "authors": [
+            "A. P. Bazzhin"
+          ],
+          "abstract": ""
+        }
+      ]
+    },
+    {
+      "primary_paper": {
+        "title": "Review of flow control mechanisms of leading-edge vortices",
+        "year": 2007,
+        "doi": "https://doi.org/10.1016/j.paerosci.2007.08.001",
+        "cited_by_count": 169,
+        "authors": [
+          "Ismet Gursul",
+          "Zhijin Wang",
+          "Eleni Vardaki"
+        ],
+        "abstract": ""
+      },
+      "second_tier_references": [
+        {
+          "title": "Water-Tunnel Studies of Leading-Edge Vortices",
+          "year": 1982,
+          "doi": "https://doi.org/10.2514/3.57414",
+          "authors": [
+            "Gary E. Erickson"
+          ],
+          "abstract": "Flow visualization studies have been made at Northrop in a hydrodynamic facility of leading-edge vortex flows. Vortex core trajectory and stability characteristics have been obtained on wing planforms suitable for subsonic-transonic and supersonic cruise fighter designs. The applicability of results obtained at low Reynolds number in water to higher Reynolds number vortex flow phenomena in air is addressed. Comparisons of watertunnel vortex positions and burst locations are made with flow visual"
+        },
+        {
+          "title": "Control of Vortex Breakdown over a Delta Wing Using Forebody Spanwise Slot Blowing",
+          "year": 2006,
+          "doi": "https://doi.org/10.2514/1.22575",
+          "authors": [
+            "Yongdong Cui",
+            "T. T. Lim",
+            "H. M. Tsai"
+          ],
+          "abstract": "10.2514/1.22575"
+        }
+      ]
+    }
+  ]
+}
