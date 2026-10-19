@@ -1037,13 +1037,20 @@ def test_velocity_components_is_the_numpy_reference_path():
     reference = wind.velocity_components(points, env, 1.0, "numpy")
     assert reference.shape == (3, 3)
     assert np.array_equal(reference, wind.wind_velocity(points, env, 1.0))
-    # An unavailable GPU request degrades instead of raising.
-    for requested in ("cupy", "torch", "auto"):
-        assert np.array_equal(
-            wind.velocity_components(points, env, 1.0, requested), reference
+    # For available backends (e.g. cupy, auto), velocity components match reference
+    if wind.active_backend() in ("cupy", "torch"):
+        assert np.allclose(
+            wind.velocity_components(points, env, 1.0, wind.active_backend()),
+            reference,
+            atol=1.0e-6,
         )
+    # Unavailable GPU backend must raise RuntimeError fail-fast without silent degradation
+    unavailable = "torch" if wind.active_backend() != "torch" else "cupy"
+    with pytest.raises(RuntimeError, match="Hardware acceleration \\(CUDA GPU\\) is required"):
+        wind.velocity_components(points, env, 1.0, unavailable)
     with pytest.raises(ValueError):
         wind.velocity_components(points, env, 1.0, "metal")
+
 
 
 def test_single_point_grid_and_empty_inputs():

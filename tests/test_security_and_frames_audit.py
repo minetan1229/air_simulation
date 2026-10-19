@@ -91,18 +91,16 @@ def test_wind_coordinate_transform_updraft_and_downdraft():
 # Issue #34: 予期しない例外で内部トレースバックをクライアントへ返さない検証
 # ==============================================================================
 
-def test_api_unhandled_exception_no_traceback_leak():
+def test_api_unhandled_exception_no_traceback_leak(monkeypatch):
+
     """Verify unhandled exceptions do not return file paths, stack traces, or source snippets."""
     app = create_app()
     app.config["TESTING"] = True
 
-    # Register a temporary fault-inducing route
-    @app.route("/api/v1/test/fault")
-    def trigger_internal_fault():
-        raise RuntimeError("Simulated internal secret crash at /sensitive/source/path.py:99")
-
     client = app.test_client()
-    resp = client.get("/api/v1/test/fault")
+    monkeypatch.setenv("TESTING", "1")
+    resp = client.get("/api/v1/meta/test-fault")
+
 
     assert resp.status_code == 500
     data = json.loads(resp.get_data(as_text=True))

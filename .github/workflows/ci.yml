@@ -40,6 +40,9 @@ jobs:
     name: Test (${{ matrix.os }} - Python ${{ matrix.python-version }})
     needs: lint-and-typecheck
     runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
     strategy:
       fail-fast: false
       matrix:
