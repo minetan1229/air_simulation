@@ -54,7 +54,7 @@ import types
 import typing
 from collections import OrderedDict, deque
 from dataclasses import dataclass, field, fields, is_dataclass, replace
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
 
 import numpy as np
 
@@ -105,6 +105,11 @@ from .geometry_utils import (
     world_to_body,
     wind_force_to_body,
 )
+
+#: A three component vector.  NumPy arrays are accepted wherever a plain
+#: sequence is, so the public helpers can be called with the arrays the
+#: integrator produces without converting them first.
+VectorLike = Union[Sequence[float], np.ndarray]
 
 __all__ = [
     "BACKEND",
@@ -222,21 +227,25 @@ _MODULE_CACHE: Dict[str, Tuple[Any, float]] = {}
 _MISSING_RETRY_S: float = 1.0
 _FUNC_CACHE: Dict[Tuple[int, Tuple[str, ...]], Tuple[Optional[str], Any]] = {}
 _PLAN_CACHE: Dict[int, Tuple[Any, Any]] = {}
+_static_aero: Optional[types.ModuleType]
 try:
     from . import aero_domain as _static_aero
 except Exception:
     _static_aero = None
 
+_static_atmo: Optional[types.ModuleType]
 try:
     from . import atmosphere_domain as _static_atmo
 except Exception:
     _static_atmo = None
 
+_static_wind: Optional[types.ModuleType]
 try:
     from . import wind_domain as _static_wind
 except Exception:
     _static_wind = None
 
+_static_stress: Optional[types.ModuleType]
 try:
     from . import stress_domain as _static_stress
 except Exception:
@@ -261,9 +270,9 @@ def _optional_module(name: str) -> Any:
     now = time.monotonic()
     entry = _MODULE_CACHE.get(name)
     if entry is not None:
-        module, last_attempt = entry
-        if module is not None or (now - last_attempt) < _MISSING_RETRY_S:
-            return module
+        cached_module, last_attempt = entry
+        if cached_module is not None or (now - last_attempt) < _MISSING_RETRY_S:
+            return cached_module
     module: Any = None
     for candidate in (f"{__package__}.{name}" if __package__ else name, name):
         try:
@@ -685,7 +694,7 @@ def _atmosphere_state_uncached(
             if isinstance(payload, dict):
                 density = _finite(_lookup(payload, ("density_kgm3", "density", "rho")))
                 if density > 0.0:
-                    return {
+                    result: Dict[str, Any] = {
                         "density_kgm3": density,
                         "kinematic_viscosity_m2s": max(
                             _finite(
@@ -710,10 +719,11 @@ def _atmosphere_state_uncached(
                         "reference_chord_m": chord,
                         "backend": "upstream",
                     }
+                    return result
     return _local_atmosphere(env, altitude, chord)
 
 
-def _local_wind(env: EnvironmentConfig, position: Sequence[float], time_s: float) -> np.ndarray:
+def _local_wind(env: EnvironmentConfig, position: VectorLike, time_s: float) -> np.ndarray:
     """Mean wind with a logarithmic boundary layer (exact zero when calm).
 
     ``wind_direction_deg`` follows the same meteorological convention as
@@ -744,7 +754,7 @@ def _local_wind(env: EnvironmentConfig, position: Sequence[float], time_s: float
     return out
 
 
-def wind_vector(position: Sequence[float], env: EnvironmentConfig, time_s: float = 0.0) -> np.ndarray:
+def wind_vector(position: VectorLike, env: EnvironmentConfig, time_s: float = 0.0) -> np.ndarray:
     """Local wind velocity vector in the **z-down world frame** (m/s).
 
     Primary path: ``wind_domain.wind_velocity(position, env, time_s)``.  The
@@ -813,7 +823,7 @@ def _local_aero(
     mach: float,
     reynolds: float,
     ground_height_m: float,
-    angular_rate: Sequence[float],
+    angular_rate: VectorLike,
     density: float,
     kinematic_viscosity: float,
 ) -> AeroResult:
@@ -973,7 +983,7 @@ def aero_forces(
     mach: float = 0.0,
     reynolds: Optional[float] = None,
     ground_height_m: float = 1.0,
-    angular_rate: Sequence[float] = (0.0, 0.0, 0.0),
+    angular_rate: VectorLike = (0.0, 0.0, 0.0),
     density: float = 1.225,
     kinematic_viscosity: float = 1.5e-5,
 ) -> AeroResult:
@@ -1080,7 +1090,7 @@ def _local_stress(
     inertial = 0.0
     sigma = root_moment * lever / inertia
     allowable = ALLOWABLE_STRESS_PA_PER_GSM * gsm
-    return {
+    result: Dict[str, Any] = {
         "max_stress_pa": sigma,
         "allowable_stress_pa": allowable,
         "max_stress_index": sigma / allowable,
@@ -1089,6 +1099,7 @@ def _local_stress(
         "inertial_moment_nm": inertial,
         "backend": "numpy",
     }
+    return result
 
 
 def stress_metrics(
@@ -1189,13 +1200,14 @@ def stress_metrics(
                             ),
                             0.0,
                         )
-                        return {
+                        result: Dict[str, Any] = {
                             "max_stress_index": index_value,
                             "max_stress_pa": sigma_value,
                             "root_moment_nm": moment,
                             "allowable_stress_pa": allowable,
                             "backend": "upstream",
                         }
+                        return result
     return _local_stress(aircraft, derived, env, dynamic_pressure_pa, g_load)
 
 
@@ -1203,7 +1215,7 @@ def stress_metrics(
 # Public free functions
 # --------------------------------------------------------------------------
 def effective_alpha_beta(
-    velocity_body: Sequence[float], gravity: Sequence[float], env: Optional[EnvironmentConfig] = None
+    velocity_body: VectorLike, gravity: VectorLike, env: Optional[EnvironmentConfig] = None
 ) -> Tuple[float, float]:
     """Effective flow angles ``(alpha_deg, beta_deg)`` from a body-frame velocity.
 
@@ -1581,8 +1593,8 @@ def resolve_throw(
 
 
 def compute_ground_stations(
-    position_m: Sequence[float],
-    quaternion: Sequence[float],
+    position_m: VectorLike,
+    quaternion: VectorLike,
     environment: EnvironmentConfig,
     derived: Optional[Dict[str, float]] = None,
 ) -> Dict[str, float]:
@@ -2510,13 +2522,23 @@ class FlightSimulator:
         roll, pitch, yaw = euler_zyx_from_quaternion(state.quaternion)
         if landed:
             q_final = quaternion_from_euler(0.0, 0.0, yaw)
-            new_q = tuple(float(v) for v in q_final)
+            new_q = (
+            float(q_final[0]),
+            float(q_final[1]),
+            float(q_final[2]),
+            float(q_final[3]),
+        )
         else:
             settle_rate = 0.25
             new_roll = roll * (1.0 - settle_rate)
             new_pitch = pitch * (1.0 - settle_rate)
             q_settled = quaternion_from_euler(new_roll, new_pitch, yaw)
-            new_q = tuple(float(v) for v in q_settled)
+            new_q = (
+                float(q_settled[0]),
+                float(q_settled[1]),
+                float(q_settled[2]),
+                float(q_settled[3]),
+            )
 
         return StateVector(
             time_s=state.time_s,

@@ -43,7 +43,7 @@ import threading
 import urllib.error
 import urllib.parse
 import urllib.request
-from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
+from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple, Union
 
 import numpy as np
 
@@ -334,7 +334,7 @@ def parse_obj(text: str) -> Tuple[np.ndarray, np.ndarray]:
             raise ValueError(f"OBJ payload is not valid UTF-8: {exc}") from exc
 
     pool = _VertexPool()
-    triangles: List[Tuple[int, int, int]] = []
+    triangles: List[Sequence[int]] = []
 
     for raw_line in text.splitlines():
         line = raw_line.split("#", 1)[0].strip()
@@ -496,7 +496,7 @@ def parse_stl(data: bytes) -> Tuple[np.ndarray, np.ndarray]:
             pass  # fall through to the ASCII parser below
 
     try:
-        return parse_stl_ascii(blob)
+        return parse_stl_ascii(blob.decode("utf-8"))
     except (ValueError, UnicodeDecodeError) as ascii_error:
         if len(blob) >= 84:
             raise ValueError(
@@ -725,7 +725,7 @@ def _read_accessor(
             )
         values = np.array(rows, dtype=dtype).reshape(count, n_comp)
 
-    if accessor.get("normalized") and comp_type != 5126 and count:
+    if accessor.get("normalized") and comp_type != 5126 and count and values is not None:
         as_float = values.astype(np.float64)
         if signed:
             limit = float(np.iinfo(dtype).max)
@@ -779,7 +779,7 @@ def _node_matrix(node: Dict[str, Any]) -> np.ndarray:
     return matrix
 
 
-def _node_list(document: Dict[str, Any]) -> List[List[Tuple[int, np.ndarray]]]:
+def _node_list(document: Dict[str, Any]) -> List[Tuple[int, np.ndarray]]:
     """Return ``[(node index, world matrix), ...]`` in breadth-first order."""
     nodes = document.get("nodes", []) or []
     roots: List[int] = []
@@ -790,7 +790,7 @@ def _node_list(document: Dict[str, Any]) -> List[List[Tuple[int, np.ndarray]]]:
         if isinstance(scene, dict):
             roots = [int(i) for i in (scene.get("nodes") or [])]
     if not roots and nodes:
-        child_ids = set()
+        child_ids: set[int] = set()
         for node in nodes:
             if isinstance(node, dict):
                 child_ids.update(int(i) for i in (node.get("children") or []))
@@ -1605,9 +1605,9 @@ def mesh_hash_of(vertices: np.ndarray, faces: np.ndarray) -> str:
     tris = np.ascontiguousarray(np.asarray(faces, dtype=np.int64).reshape(-1, 3))
     digest = hashlib.sha256()
     digest.update(b"paperv3-mesh-v1")
-    digest.update(np.int64(verts.shape).tobytes())
+    digest.update(np.asarray(verts.shape, dtype=np.int64).tobytes())
     digest.update(verts.tobytes())
-    digest.update(np.int64(tris.shape).tobytes())
+    digest.update(np.asarray(tris.shape, dtype=np.int64).tobytes())
     digest.update(tris.tobytes())
     return digest.hexdigest()
 
@@ -1655,7 +1655,7 @@ _BLOCKED_HOSTNAMES = frozenset(
 MAX_REDIRECTS = 5
 
 
-def _is_forbidden_address(ip_obj: ipaddress._BaseAddress) -> bool:
+def _is_forbidden_address(ip_obj: Union[ipaddress.IPv4Address, ipaddress.IPv6Address]) -> bool:
     """True when the address must never be reached from the server."""
     return bool(
         ip_obj.is_private
@@ -1996,11 +1996,21 @@ def compute_metrics(
         mean_chord_m=float(planform["mean_chord_m"]),
         taper_ratio=float(planform["taper_ratio"]),
         aspect_ratio=float(planform["aspect_ratio"]),
-        cg_m=cg,
+        cg_m=(float(cg[0]), float(cg[1]), float(cg[2])),
         cg_mode=str(properties["cg_mode_used"]),
         volume_m3=float(properties["volume_m3"]),
         mass_kg=float(mass),
-        inertia_tensor=tuple(float(v) for v in inertia.reshape(-1)),
+        inertia_tensor=(
+            float(inertia[0, 0]),
+            float(inertia[0, 1]),
+            float(inertia[0, 2]),
+            float(inertia[1, 0]),
+            float(inertia[1, 1]),
+            float(inertia[1, 2]),
+            float(inertia[2, 0]),
+            float(inertia[2, 1]),
+            float(inertia[2, 2]),
+        ),
         paper_gsm=float(paper_gsm),
         panels=list(panels),
         panel_count=int(len(panels)),

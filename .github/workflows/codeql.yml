@@ -13,6 +13,9 @@ jobs:
     name: Analyze (${{ matrix.language }})
     runs-on: ubuntu-latest
     timeout-minutes: 360
+    defaults:
+      run:
+        shell: bash
     permissions:
       actions: read
       contents: read

@@ -44,12 +44,19 @@ else
 fi
 
 echo "[SETUP] Verifying CUDA GPU acceleration..."
-"$VENV_PYTHON" -c "
+# The GPU backend is optional: a CPU-only machine must still complete the
+# setup, because every domain has a NumPy fallback (SPECIFICATION 2.1).
+if "$VENV_PYTHON" -c "
 import cupy as cp
 dev = cp.cuda.runtime.getDevice()
 props = cp.cuda.runtime.getDeviceProperties(dev)
 name = props['name'].decode('utf-8') if isinstance(props['name'], bytes) else str(props['name'])
 print(f'[SUCCESS] GPU Device {dev} detected: {name}')
-"
+" 2>/dev/null; then
+    echo "[SETUP] GPU acceleration available."
+else
+    echo "[SETUP] WARNING: no usable CUDA device detected."
+    echo "[SETUP]          The simulator will run on the CPU fallback backend."
+fi
 
 echo "[SETUP] Environment setup complete."

@@ -11,6 +11,9 @@ jobs:
   dependency-review:
     name: Review dependency changes
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: bash
     steps:
       - name: リポジトリのコードを取得
         uses: actions/checkout@v4

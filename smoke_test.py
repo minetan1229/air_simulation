@@ -850,7 +850,7 @@ def main() -> int:
 
     started = time.perf_counter()
     for name, fn in selected:
-        runner.stage(name, lambda fn=fn: fn(runner))
+        runner.stage(name, lambda fn=fn: fn(runner))  # type: ignore[misc]
     total = time.perf_counter() - started
 
     passed = sum(1 for _n, ok, _m, _e in runner.results if ok)
