@@ -221,3 +221,12 @@ python -m pytest tests -q
 python smoke_test.py
 ```
 
+### GitHub Actions および Git 運用
+1. 作業開始前に必ず専用トピックブランチを作成する (`git checkout -b <type>/<description>`)。
+2. 変更・修正後はローカル環境で上記全テストの通過を確認する。
+3. コミット後、ブランチを push し、master にマージする。
+4. master 統合後、リモートリポジトリへ自動プッシュ (`git push`) を実行する。
+5. GitHub Actions (Ubuntu/Windows × Python 3.10/3.11/3.12, CodeQL, pip-audit) の全ジョブがグリーンであることを確認する（`tools/check_runs.py`）。
+6. GitHub Issue（`tools/check_issues.py` / `tools/read_issues.py`）を確認し、残存課題の修正・解決および自動クローズ（`tools/close_resolved_issue.py`）を行って自律ループを正常終了（HALT）する。
+
+

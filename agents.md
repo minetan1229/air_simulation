@@ -29,7 +29,10 @@
    - 致命的制約は `.agents/Knowledge-important.md` へ昇格（50行以内）。
    - Loop State を更新。コンテキスト肥大時は `skills/loop-handover.md` 実行、余裕があれば Phase 1 へ。
 6. **[Finalize & Terminate]**:
-   - 全マイルストーン達成を確認し、コミット/マージして自律ループを正常終了（HALT）。
+   - 全マイルストーン達成を確認し、ローカル検証（構文・静的解析・テスト全件）を通過させる。
+   - トピックブランチから master へ統合後、リモートへ自動プッシュ (`git push`) を実行。
+   - GitHub Actions CI/CD の実行結果を監視（`tools/check_runs.py`）し、全ジョブグリーンを確認。
+   - GitHub Issue（`tools/check_issues.py` / `tools/read_issues.py`）を確認し、残存課題の修正・解決およびクローズ（`tools/close_resolved_issue.py`）を行って自律ループを正常終了（HALT）。
 
 ## 4. Meta-Control & Protocol Governance (プロトコル改定 #17)
 - `AGENTS.md` 改変はユーザー明示要求または監査合意時のみ行い、無断での改変を禁止する。

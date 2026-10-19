@@ -30,8 +30,9 @@ python smoke_test.py
   - `docs(scope): message` : ドキュメント
   - `test(scope): message` : テスト追加・更新
   - `chore(scope): message` : 雑務・設定
-- **マージ & プッシュ**: ローカル検証を全て通過した実動コードのみを master にマージし push する。
-- **CI/CD確認**: GitHub Actions の実行状況を点検し、グリーンを確認する。
+- **マージ & プッシュ**: ローカル検証を全て通過した実動コードのみを master にマージし、リモートへプッシュ (`git push`) する。
+- **CI/CD確認**: `tools/check_runs.py` で GitHub Actions の実行状況を点検し、全ジョブグリーンを確認する。
+- **Issue確認・修整**: `tools/check_issues.py` および `tools/read_issues.py` でオープンな課題を点検し、修正実施後に `tools/close_resolved_issue.py` で自動クローズする。
 
 ## Verification Criteria (事前合否基準の型)
 - 成功条件: 構文エラーなし、Ruff/Mypy 指摘 0 件、pytest 全パス、smoke_test.py 正常終了（Exit code 0）。
