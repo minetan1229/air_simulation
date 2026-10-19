@@ -1,148 +1,169 @@
 {
   "topic_num": "01",
-  "query": "aerodynamics of paper airplanes",
+  "query": "paper airplane aerodynamics low Reynolds glider",
   "candidates": [
     {
       "primary_paper": {
-        "title": "The interdisciplinary study of coordination",
-        "year": 1994,
-        "doi": "https://doi.org/10.1145/174666.174668",
-        "cited_by_count": 3497,
+        "title": "The 2020 motile active matter roadmap",
+        "year": 2020,
+        "doi": "https://doi.org/10.1088/1361-648x/ab6348",
+        "cited_by_count": 469,
         "authors": [
-          "Thomas W. Malone",
-          "Kevin Crowston"
+          "Gerhard Gompper",
+          "Roland G. Winkler",
+          "Thomas Speck",
+          "Alexandre P. Solon",
+          "Cesare Nardini"
         ],
-        "abstract": "This survey characterizes an emerging research area, sometimes called coordination theory , that focuses on the interdisciplinary study of coordination. Research in this area uses and extends ideas about coordination from disciplines such as computer science, organization theory, operations research, economics, linguistics, and psychology. A key insight of the framework presented here is that coordination can be seen as the process of managing dependencies among activities. Further progress, therefore, should be possible by characterizing different kinds of dependencies and identifying the coordination processes that can be used to manage them. A variety of processes are analyzed from this perspective, and commonalities across disciplines are identified. Processes analyzed include those for managing shared resources, producer/consumer relationships, simultaneity constraints , and task/subtask dependencies . Section 3 summarizes ways of applying a coordination perspective in three diffe"
+        "abstract": "Activity and autonomous motion are fundamental in living and engineering systems. This has stimulated the new field of 'active matter' in recent years, which focuses on the physical aspects of propulsion mechanisms, and on motility-induced emergent collective behavior of a larger number of identical agents. The scale of agents ranges from nanomotors and microswimmers, to cells, fish, birds, and people. Inspired by biological microswimmers, various designs of autonomous synthetic nano- and micromachines have been proposed. Such machines provide the basis for multifunctional, highly responsive, intelligent (artificial) active materials, which exhibit emergent behavior and the ability to perform tasks in response to external stimuli. A major challenge for understanding and designing active matter is their inherent nonequilibrium nature due to persistent energy consumption, which invalidates equilibrium concepts such as free energy, detailed balance, and time-reversal symmetry. Unraveling,"
       },
       "second_tier_references": [
         {
-          "title": "The Structuring of Organizations",
-          "year": 1989,
-          "doi": "https://doi.org/10.1007/978-1-349-20317-8_23",
+          "title": "Active brownian particles and run-and-tumble particles: A comparative study",
+          "year": 2015,
+          "doi": "https://doi.org/10.1140/epjst/e2015-02457-0",
           "authors": [
-            "Henry Mintzberg"
+            "Alexandre P. Solon",
+            "Michael E. Cates",
+            "Julien Tailleur"
           ],
-          "abstract": "This [reading] argues that […] spans of control, types of formalization and decentralization, planning systems, and matrix structures should not be picked and chosen independently, the way a shopper picks vegetables at the market or a diner a meal at a buffet table. Rather, these and other parameters of organizational design should logically configure into internally consistent groupings. Like most phenomena — atoms, ants, and stars — characteristics of organizations appear to fall into natural "
+          "abstract": ""
         },
         {
-          "title": "Information technology puts power in control systems",
-          "year": 1987,
-          "doi": "https://doi.org/10.5555/29526.29527",
+          "title": "Negative Interfacial Tension in Phase-Separated Active Brownian Particles",
+          "year": 2015,
+          "doi": "https://doi.org/10.1103/physrevlett.115.098301",
           "authors": [
-            "William J. Bruns",
-            "F. Warren McFarlan"
+            "Julian Bialké",
+            "Jonathan Tammo Siebert",
+            "Hartmut Löwen"
           ],
-          "abstract": "A new regulation takes effect: some companies respond quickly; others can't. Budget guidelines are changed: some companies distribute them immediately; others can't. The difference is information technology. Applied imaginatively, it can transform the way businesses collect and use data."
+          "abstract": "We study numerically a model for active suspensions of self-propelled repulsive particles, for which a stable phase separation into a dilute and a dense phase is observed. We exploit the fact that for nonsquare boxes a stable \"slab\" configuration is reached, in which interfaces align with the shorter box edge. Evaluating a recent proposal for an intensive active swimming pressure, we demonstrate that the excess stress within the interface separating both phases is negative. The occurrence of a n"
+        },
+        {
+          "title": "Escherichia coli as a model active colloid: A practical introduction",
+          "year": 2015,
+          "doi": "https://doi.org/10.1016/j.colsurfb.2015.07.048",
+          "authors": [
+            "Jana Schwarz‐Linek",
+            "Jochen Arlt",
+            "Alys Jepson"
+          ],
+          "abstract": ""
+        },
+        {
+          "title": "Self-propelled rods exhibit a novel phase-separated state characterized by the presence of active stresses and the ejection of polar clusters",
+          "year": 2015,
+          "doi": "https://doi.org/10.48550/arxiv.1507.00948",
+          "authors": [
+            "Sébastian Weitz",
+            "Andreas Deutsch",
+            "Fernando Peruani"
+          ],
+          "abstract": "We study collections of self-propelled rods (SPR) moving in two dimensions for packing fractions less than or equal to 0.3. We find that in the thermodynamical limit the SPR undergo a phase transition between a disordered gas and a novel phase-separated system state. Interestingly, (global) orientational order patterns -- contrary to what has been suggested -- vanish in this limit. In the found novel state, the SPR self-organize into a highly dynamical, high-density, compact region - which we ca"
         }
       ]
     },
     {
       "primary_paper": {
-        "title": "Unmanned aerial systems for photogrammetry and remote sensing: A review",
-        "year": 2014,
-        "doi": "https://doi.org/10.1016/j.isprsjprs.2014.02.013",
-        "cited_by_count": 2960,
+        "title": "Design of the ARES Mars Airplane and Mission Architecture",
+        "year": 2006,
+        "doi": "https://doi.org/10.2514/1.17956",
+        "cited_by_count": 118,
         "authors": [
-          "I. Colomina",
-          "Pere Molina"
+          "Robert D. Braun",
+          "H. Stephen Wright",
+          "Mark A. Croom",
+          "Joel S. Levine",
+          "David A. Spencer"
         ],
-        "abstract": "We discuss the evolution and state-of-the-art of the use of Unmanned Aerial Systems (UAS) in the field of Photogrammetry and Remote Sensing (PaRS). UAS, Remotely-Piloted Aerial Systems, Unmanned Aerial Vehicles or simply, drones are a hot topic comprising a diverse array of aspects including technology, privacy rights, safety and regulations, and even war and peace. Modern photogrammetry and remote sensing identified the potential of UAS-sourced imagery more than thirty years ago. In the last five years, these two sister disciplines have developed technology and methods that challenge the current aeronautical regulatory framework and their own traditional acquisition and processing methods. Navety and ingenuity have combined off-the-shelf, low-cost equipment with sophisticated computer vision, robotics and geomatic engineering. The results are cm-level resolution and accuracy products that can be generated even with cameras costing a few-hundred euros. In this review article, following"
+        "abstract": "Covers advancements in spacecraft and tactical and strategic missile systems, including subsystem design and application, mission design and analysis, materials and structures, developments in space sciences, space processing and manufacturing, space operations, and applications of space technologies to other fields."
       },
       "second_tier_references": [
         {
-          "title": "BRIEF: Binary Robust Independent Elementary Features",
-          "year": 2010,
-          "doi": "https://doi.org/10.1007/978-3-642-15561-1_56",
+          "title": "Evolution of a Mars Airplane Concept for the ARES Mars Scout Mission",
+          "year": 2003,
+          "doi": "https://doi.org/10.2514/6.2003-6578",
           "authors": [
-            "Michael Calonder",
-            "Vincent Lepetit",
-            "Christoph Strecha"
+            "Mark D. Guynn",
+            "Mark A. Croom",
+            "Stephen Smith"
           ],
-          "abstract": ""
+          "abstract": "ARES (Aerial Regional-scale Environmental Survey of Mars) is a proposed Mars Scout mission using an airplane to provide high-value science measurements in the areas of atmospheric chemistry, surface geology and mineralogy, and crustal magnetism. The use of an airplane for robotic exploration of Mars has been studied for over 25 years. There are, however, significant challenges associated with getting an airplane to Mars and flying through the thin, carbon dioxide Martian atmosphere. The traditio"
         },
         {
-          "title": "Visual SLAM: Why filter?",
-          "year": 2012,
-          "doi": "https://doi.org/10.1016/j.imavis.2012.02.009",
+          "title": "Simulating The ARES Aircraft In The Mars Environment",
+          "year": 2003,
+          "doi": "https://doi.org/10.2514/6.2003-6579",
           "authors": [
-            "Hauke Strasdat",
-            "J. M. M. Montiel",
-            "Andrew J. Davison"
+            "Patrick S. Kenney",
+            "Mark A. Croom"
           ],
-          "abstract": ""
+          "abstract": "NASA Langley proposed the Aerial Regional-scale Environmental Survey (ARES) of Mars science mission in response to the NASA Office of Space Science 2002 Mars Scout Opportunity. The science-driven mission proposal began with trade studies and determined that a rocket powered aircraft was the best suited platform to complete the ARES science objectives. A high fidelity six degree of freedom flight simulation was required to provide credible evidence that the aircraft design fulfilled mission objec"
         },
         {
-          "title": "Low-Cost and Open-Source Solutions for Automated Image Orientation – A Critical Overview",
-          "year": 2012,
-          "doi": "https://doi.org/10.1007/978-3-642-34234-9_5",
+          "title": "Preliminary Design and Analysis of the ARES Atmospheric Flight Vehicle Thermal Control System",
+          "year": 2003,
+          "doi": "https://doi.org/10.4271/2003-01-2686",
           "authors": [
-            "Fabio Remondino A",
-            "Silvio Del Pizzo",
-            "Thomas P. Kersten"
+            "Joseph F. Gasbarre",
+            "Robert A. Dillman"
           ],
-          "abstract": ""
-        },
-        {
-          "title": "Error analysis and attitude observability of a monocular GPS/visual odometry integrated navigation filter",
-          "year": 2012,
-          "doi": "https://doi.org/10.1177/0278364911433777",
-          "authors": [
-            "Damien Dusha",
-            "Luis Mejías"
-          ],
-          "abstract": "In this paper, we present a method for the recovery of position and absolute attitude (including pitch, roll and yaw) using a novel fusion of monocular visual odometry and GPS measurements in a similar manner to a classic loosely coupled GPS/INS error state navigation filter. The proposed filter does not require additional restrictions or assumptions such as platform-specific dynamics, map matching, feature tracking, visual loop closing, gravity vector or additional sensors such as an inertial m"
+          "abstract": "The Aerial Regional-scale Environmental Survey (ARES) is a proposed 2007 Mars Scout Mission that will be the first mission to deploy an atmospheric flight vehicle (AFV) on another planet. This paper will describe the preliminary design and analysis of the AFV thermal control system for its flight through the Martian atmosphere and also present other analyses broadening the scope of that design to include other phases of the ARES mission. Initial analyses are discussed and results of trade studie"
         }
       ]
     },
     {
       "primary_paper": {
-        "title": "Aerodynamic design via control theory",
-        "year": 1988,
-        "doi": "https://doi.org/10.1007/bf01061285",
-        "cited_by_count": 1943,
+        "title": "Aerodynamic force generation, performance and control of body orientation during gliding in sugar gliders ( Petaurus breviceps )",
+        "year": 2007,
+        "doi": "https://doi.org/10.1242/jeb.002071",
+        "cited_by_count": 57,
         "authors": [
-          "Antony Jameson B"
+          "Kristin L. Bishop"
         ],
-        "abstract": ""
+        "abstract": "Gliding has often been discussed in the literature as a possible precursor to powered flight in vertebrates, but few studies exist on the mechanics of gliding in living animals. In this study I analyzed the 3D kinematics of sugar gliders (Petaurus breviceps) during short glides in an enclosed space. Short segments of the glide were captured on video, and the positions of marked anatomical landmarks were used to compute linear distances and angles, as well as whole body velocities and accelerations. From the whole body accelerations I estimated the aerodynamic forces generated by the animals. I computed the correlations between movements of the limbs and body rotations to examine the control of orientation during flight. Finally, I compared these results to those of my earlier study on the similarly sized and distantly related southern flying squirrel (Glaucomys volans). The sugar gliders in this study accelerated downward slightly (1.0+/-0.5 m s(-2)), and also accelerated forward (2.1+"
       },
       "second_tier_references": [
         {
-          "title": "Wing Design by Numerical Optimization",
-          "year": 1978,
-          "doi": "https://doi.org/10.2514/3.58379",
-          "authors": [
-            "Raymond M. Hicks",
-            "Preston A. Henne"
-          ],
-          "abstract": "A study was conducted to assess the feasibility of performing computerized wing design by numerical optimization. The design program combined a full potential, inviscid aerodynamics code with a conjugate gradient optimization algorithm. Three design problems were selected to demonstrate the design technique. The first involved modifying the upper surface of the inboard 50% of a swept wing to reduce the shock drag subject to a constraint on wing volume. The second involved modifying the entire up"
+          "title": "Fixed and Flapping Wing Aerodynamics for Micro Air Vehicle Applications",
+          "year": 2001,
+          "doi": "https://doi.org/10.2514/4.866654",
+          "authors": [],
+          "abstract": "Recently, there has been a serious effort to design aircraft that are as small as possible for special, limited-duration missions. These vehicles may carry visual, acoustic, chemical, or biological sensors for such missions as traffic management, hostage situation surveillance, rescue operations, etc. The goal is to develop aircraft systems that weigh less than 90 grams, with a 15-centimetre wingspan. Since it is not possible to meet all of the design requirements of a micro air vehicle with cur"
         },
         {
-          "title": "Calculation of Inviscid Transonic Flow over a Complete Aircraft",
-          "year": 1986,
-          "doi": "https://doi.org/10.2514/6.1986-103",
-          "authors": [
-            "Antony Jameson B",
-            "Timothy Baker",
-            "Nigel P. Weatherill"
-          ],
-          "abstract": "U.S.A. We present preliminary results for the calculation of inviscid transonic \\now over a complete aircraft. These results have been obtained by a novel approach that combines a new procedure for mesh generation with a new nite element method for solving the Euler equations."
-        },
-        {
-          "title": "Iterative solution of transonic flows over airfoils and wings, including flows at mach 1",
-          "year": 1974,
-          "doi": "https://doi.org/10.1002/cpa.3160270302",
-          "authors": [
-            "Antony Jameson B"
-          ],
+          "title": "Vertebrate Flight: Mechanics, Physiology, Morphology, Ecology and Evolution",
+          "year": 1990,
+          "doi": "https://doi.org/10.1016/0300-9629(90)90674-h",
+          "authors": [],
           "abstract": ""
         },
         {
-          "title": "Computational Fluid Dynamics of Airfoils and Wings",
-          "year": 1982,
-          "doi": "https://doi.org/10.1016/b978-0-12-493280-7.50006-1",
+          "title": "The Cost of Living Large: Comparative Gliding Performance in Flying Lizards (Agamidae:Draco)",
+          "year": 2005,
+          "doi": "https://doi.org/10.1086/430725",
           "authors": [
-            "Paul R. Garabedian",
-            "Geoffrey B. McFadden"
+            "Jimmy A. McGuire",
+            "Robert Dudley"
+          ],
+          "abstract": "Despite exhibiting considerable interspecific variation in body mass, flying lizards of the genus Draco are isometric in their area-mass scaling relationships and exhibit no significant compensatory variation in wing aspect ratio. Thus, larger species are expected to be relatively poor gliders, in lieu of behavioral or physiological compensation, when compared with smaller congeners. Here we tested this hypothesis by conducting gliding performance trials for 11 Draco species spanning virtually t"
+        },
+        {
+          "title": "AERODYNAMIC STABILITY AND MANEUVERABILITY OF THE GLIDING FROGPOLYPEDATES DENNYSI",
+          "year": 2001,
+          "doi": "https://doi.org/10.1242/jeb.204.16.2817",
+          "authors": [
+            "Michael G. McCay"
+          ],
+          "abstract": "Gliding has evolved independently in two families of tree frog. Tree frogs glide to descend rapidly to mating sites over temporary pools on the forest floor or to escape predators. The physical mechanisms used by frogs to glide and maneuver were investigated using a combination of observations of live frogs (Polypedates dennysi) gliding in a tilted wind-tunnel and aerodynamic forces and torques measured from physical models of tree frogs in a wind-tunnel. Tree frogs maneuvered in the tilted wind"
+        },
+        {
+          "title": "Comments on Flight and the Evolution of Bats",
+          "year": 1977,
+          "doi": "https://doi.org/10.1007/978-1-4684-8851-7_15",
+          "authors": [
+            "James Dale Smith"
           ],
           "abstract": ""
         }
