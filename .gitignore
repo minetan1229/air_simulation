@@ -8,6 +8,10 @@ venv/
 node_modules/
 package-lock.json
 
+# Kilo Code local MCP runtime artefacts
+.kilo/mcp/memory.jsonl
+.kilo/mcp/playwright/
+
 # Imported 3D assets and cached models
 models/
 *.glb

@@ -7,6 +7,8 @@ exclude = [
     "__pycache__",
     ".pytest_cache",
     "models",
+    # Scratch diagnostics kept in the working tree are not part of the product.
+    "tmp_*.py",
 ]
 
 [lint]

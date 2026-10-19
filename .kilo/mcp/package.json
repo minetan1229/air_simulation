@@ -1,0 +1,14 @@
+{
+  "name": "paper-airplane-mcp-servers",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Local MCP server runtime for Kilo Code (no external API keys required).",
+  "type": "module",
+  "dependencies": {
+    "@modelcontextprotocol/server-memory": "^2.0.0",
+    "@modelcontextprotocol/server-sequential-thinking": "^2.0.0",
+    "@modelcontextprotocol/sdk": "^1.32.1",
+    "@playwright/mcp": "^0.0.83",
+    "@upstash/context7-mcp": "^4.4.3"
+  }
+}
