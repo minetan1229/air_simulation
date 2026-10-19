@@ -2394,7 +2394,13 @@ class FlightSimulator:
         new_vz = vz
 
         # Check wingtip strikes before main body contact (altitude_cg > 0 but wingtip below ground)
-        if altitude_cg > 0.0 and (alt_ltip <= 0.0 or alt_rtip <= 0.0):
+        wingtip_contact = altitude_cg > 0.0 and (alt_ltip <= 0.0 or alt_rtip <= 0.0)
+        if wingtip_contact:
+            m = float(self.aircraft.mass_kg)
+            v_pre = np.array([vx, vy, vz], dtype=np.float64)
+            w_pre = np.asarray(omega, dtype=np.float64)
+            e_pre = 0.5 * m * float(np.dot(v_pre, v_pre)) + 0.5 * float(w_pre @ self._inertia @ w_pre)
+
             # Asymmetric wingtip strike introduces ground cartwheel torque & damping
             omega[0] *= damping * 0.4
             omega[2] *= damping * 0.4
@@ -2410,6 +2416,31 @@ class FlightSimulator:
             vy *= damping
             if vz > 0.0:
                 new_vz = -clamp(_finite(self.settings.restitution, 0.0), 0.0, 0.5) * vz
+                self._bounce_count += 1
+                if vz > CRASH_IMPACT_SPEED_MPS:
+                    crashed = True
+
+            # Inelastic collision dissipation limit: total mechanical energy cannot increase,
+            # and is bounded by E_pre * max(restitution^2, 0.5^2).
+            rest_val = clamp(_finite(self.settings.restitution, 0.0), 0.0, 1.0)
+            max_ratio = max(rest_val * rest_val, 0.25)
+            e_limit = e_pre * max_ratio
+
+            v_post = np.array([vx, vy, new_vz], dtype=np.float64)
+            w_post = np.asarray(omega, dtype=np.float64)
+            e_post = 0.5 * m * float(np.dot(v_post, v_post)) + 0.5 * float(w_post @ self._inertia @ w_post)
+
+            if e_post > e_limit and e_post > 1.0e-15:
+                scale = math.sqrt(e_limit / e_post)
+                vx *= scale
+                vy *= scale
+                new_vz *= scale
+                omega = [val * scale for val in omega]
+            elif e_pre <= 1.0e-15:
+                vx = 0.0
+                vy = 0.0
+                new_vz = 0.0
+                omega = [0.0, 0.0, 0.0]
 
         # Nose strike at high impact speed (crumple deceleration)
         if alt_nose <= 0.0 and vx > 5.0:
@@ -2419,7 +2450,7 @@ class FlightSimulator:
             vy *= damping
             omega[1] *= damping * 0.3
 
-        if vz > 0.0:
+        if vz > 0.0 and not wingtip_contact:
             impact = vz
             grav = max(abs(_finite(self.environment.gravity)), 1.0e-9)
             # Deceleration over ground contact crumple time (~0.08s)
