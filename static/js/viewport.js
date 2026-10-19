@@ -24,6 +24,10 @@ import {
 } from "./airframe.js";
 import { WindParticles } from "./flowfield.js";
 import { heatColour } from "./lib.js";
+import {
+  createOrigamiMaterial,
+  setOrigamiAeroelastic,
+} from "./origami.js";
 
 const SIM_TO_THREE = new THREE.Quaternion().setFromAxisAngle(
   new THREE.Vector3(1, 0, 0),
@@ -364,6 +368,12 @@ export class Viewport {
     this.edgeLines = null;
     this.panelLines = null;
 
+    // Procedural origami model (folded crease pattern).  It replaces the
+    // analytic airframe surface while it is loaded.
+    this.origamiMaterial = createOrigamiMaterial();
+    this.origamiMesh = null;
+    this.origamiSemispan = 0.1;
+
     this.meshHolder = new THREE.Group();
     this.meshHolder.name = "imported";
     this.airframeGroup.add(this.meshHolder);
@@ -433,6 +443,55 @@ export class Viewport {
     this.panelLines = new THREE.LineSegments(buildPanelLines(cfg), createPanelMaterial());
     this.panelLines.visible = Boolean(this.showPanels);
     this.airframeGroup.add(this.panelLines);
+  }
+
+  /**
+   * Show a folded origami mesh instead of the analytic airframe surface.
+   *
+   * @param {THREE.BufferGeometry} geometry folded crease pattern geometry
+   * @param {number} semispan half span of the model in metres
+   */
+  setOrigamiGeometry(geometry, semispan) {
+    if (this.origamiMesh) {
+      this.origamiMesh.geometry.dispose();
+      this.airframeGroup.remove(this.origamiMesh);
+    }
+    this.origamiMesh = new THREE.Mesh(geometry, this.origamiMaterial);
+    this.origamiMesh.castShadow = true;
+    this.origamiMesh.receiveShadow = true;
+    this.origamiMesh.visible = !this.meshObject;
+    this.airframeGroup.add(this.origamiMesh);
+    this.origamiSemispan = Math.max(Number(semispan) || 0.1, 1e-3);
+    if (this.airframeMesh) this.airframeMesh.visible = false;
+    if (this.edgeLines) this.edgeLines.visible = false;
+    if (this.creaseLines) this.creaseLines.visible = false;
+    if (this.panelLines) this.panelLines.visible = false;
+  }
+
+  /** Remove the origami mesh and show the analytic airframe again. */
+  clearOrigamiGeometry() {
+    if (this.origamiMesh) {
+      this.origamiMesh.geometry.dispose();
+      this.airframeGroup.remove(this.origamiMesh);
+      this.origamiMesh = null;
+    }
+    if (this.airframeMesh) this.airframeMesh.visible = !this.meshObject;
+    if (this.edgeLines) this.edgeLines.visible = true;
+    if (this.creaseLines) this.creaseLines.visible = true;
+    if (this.panelLines) this.panelLines.visible = Boolean(this.showPanels);
+  }
+
+  /**
+   * Feed the passive aero-elastic state of the flight into the paper
+   * shader: the wing bends with the load and the tip twists.
+   */
+  setOrigamiAeroelastic(bendDeg, twistDeg) {
+    setOrigamiAeroelastic(
+      this.origamiMaterial,
+      bendDeg,
+      twistDeg,
+      this.origamiSemispan
+    );
   }
 
   _buildTracks() {

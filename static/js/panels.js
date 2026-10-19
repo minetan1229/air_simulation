@@ -28,6 +28,21 @@ const FIELD_TABLE = {
     { key: "aeroelastic_flex", label: "翼しなり係数", unit: "", min: 0, max: 2.0, step: 0.02, digits: 2 },
     { key: "aeroelastic_twist", label: "翼端ねじれ係数", unit: "", min: 0, max: 2.0, step: 0.02, digits: 2 },
   ],
+  origami: [
+    { key: "enabled", kind: "toggle", label: "折り紙モデルを使用", section: "origami" },
+    {
+      key: "archetype",
+      kind: "select",
+      label: "機体タイプ",
+      section: "origami",
+      options: [
+        ["classic_dart", "Classic Dart / やり飛行機"],
+        ["nakamura_lock", "Nakamura Lock / へそ飛行機"],
+        ["sky_king", "Sky King / 競技用グライダー"],
+      ],
+    },
+    { key: "progression", label: "折り工程 α", unit: "%", scale: 100, min: 0, max: 100, step: 1, digits: 0, section: "origami" },
+  ],
   fold: [
     { key: "fold_leading_deg", label: "前縁折り角", unit: DEG, min: 0, max: 90, step: 0.5, digits: 1 },
     { key: "fold_trailing_deg", label: "後縁折り角", unit: DEG, min: -45, max: 45, step: 0.5, digits: 1 },
@@ -121,6 +136,7 @@ const FIELD_TABLE = {
 
 const HOST_SECTION = {
   airframe: "aircraft",
+  origami: "origami",
   fold: "aircraft",
   throw: "launch",
   atmosphere: "environment",

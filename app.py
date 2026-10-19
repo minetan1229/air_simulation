@@ -29,10 +29,12 @@ from api.routes import (
     jobs_bp,
     mesh_bp,
     meta_bp,
+    origami_bp,
     physics_bp,
     records_bp,
     sim_bp,
 )
+from tools.branch_guard import BranchViolation, assert_branch_allowed, describe_status
 
 logging.basicConfig(
     level=logging.INFO,
@@ -255,6 +257,7 @@ def healthz_ready():
 # Blueprint Registration
 # ---------------------------------------------------------------------------
 app.register_blueprint(meta_bp)
+app.register_blueprint(origami_bp)
 app.register_blueprint(physics_bp)
 app.register_blueprint(sim_bp)
 app.register_blueprint(mesh_bp)
@@ -274,7 +277,22 @@ def main() -> None:
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=5000)
     parser.add_argument("--debug", action="store_true")
+    parser.add_argument(
+        "--allow-protected-branch",
+        action="store_true",
+        help="run even when the checked-out branch is master/main",
+    )
     args = parser.parse_args()
+
+    # Branch guard: the genetic-project phase is isolated from master.  The
+    # server must not be started from a protected branch unless the operator
+    # explicitly overrides it.
+    try:
+        status = assert_branch_allowed(allow_protected=bool(args.allow_protected_branch))
+    except BranchViolation as exc:
+        log.error("branch guard: %s", exc)
+        raise SystemExit(2) from exc
+    log.info("branch guard: %s", describe_status(status))
 
     try:
         parallel = domain("parallel_engine")
