@@ -28,12 +28,12 @@ from .config_schema import (
     derived_properties,
     safe_div,
 )
+from .aero_domain import helmbold_cl_alpha
 from .geometry_utils import cross, normalize, vec3
 
 __all__ = [
     "SPAN_LOADING_FACTOR",
     "KAPPA_SIGMA",
-    "INDEX_REFERENCE_PA",
     "PAPER_THICKNESS_DENOMINATOR",
     "ALLOWABLE_BASE_PA",
     "ALLOWABLE_GSM_EXPONENT",
@@ -63,6 +63,11 @@ __all__ = [
     "failure_index",
     "status_for_failure_index",
     "normalise_heatmap",
+    "root_bending_moment_batch",
+    "section_modulus_batch",
+    "peak_root_stress_pa",
+    "root_chord_batch",
+    "te_fold_chord_scale",
     "heatmap_colour",
     "active_backend",
     "critical_point_body",
@@ -85,7 +90,17 @@ KAPPA_SIGMA: float = 9.0e-6
 #: this constant maps peak stress onto the heat-map saturation point.  Ten
 #: times the reference allowable so that "ok" and "high_load" flights stay
 #: visibly sub-saturated and a gsm / stiffness sweep is legible in the index.
-INDEX_REFERENCE_PA: float = 2.5e4
+#:
+#: **Retired (2026-10-19).**  The heat map used to be normalised against this
+#: fixed 25 kPa reference while the failure criterion used the airframe's own
+#: :func:`paper_allowable_stress` (2.2 kPa for the default stock) and the GPU
+#: batch path used yet a third value (120 kPa).  The three scales made
+#: ``max_stress_index`` mean three different things in one payload -- a
+#: 1261x spread between the 6-DoF and the GPU path.  The single reference is
+#: now :func:`paper_allowable_stress`; ``stress_index`` is the utilisation
+#: ``sigma / sigma_allow`` (0 = safe, 1 = failure limit) and the min-max
+#: pattern lives in the separate ``stress_shape`` channel.
+INDEX_REFERENCE_PA: float = 2.5e4  # noqa: F401 - retained for import compatibility only
 
 #: Uncreped paper bulk density in kg/m^3, so ``t = gsm / 800`` is the sheet
 #: thickness in **millimetres** for a grammage in g/m^2 (i.e. 100 g/m^2 ->
@@ -163,6 +178,90 @@ def _root_chord(area: float, span: float, taper: float) -> float:
 
 
 # --------------------------------------------------------------------------
+# Vectorised structural model (shared with the GPU batch path)
+# --------------------------------------------------------------------------
+def root_bending_moment_batch(
+    xp: Any,
+    load_factor: Any,
+    mass_kg: Any,
+    gravity: float,
+    span_m: Any,
+    taper_ratio: Any,
+) -> Any:
+    """Half-wing root bending moment of a batch of airframes.
+
+    Vectorised twin of :func:`wing_root_bending_moment`: the root carries the
+    largest moment of the half wing, ``M = F b (1 + 2 lambda) / (12 (1 +
+    lambda))`` with ``F = m g |nz|`` the aircraft weight times the load
+    factor.
+    """
+    nz = xp.abs(load_factor)
+    force = mass_kg * gravity * nz
+    taper = xp.clip(taper_ratio, 0.05, 1.0)
+    return force * span_m * (1.0 + 2.0 * taper) / (12.0 * (1.0 + taper))
+
+
+def section_modulus_batch(
+    xp: Any, chord_m: Any, thickness_m: Any, z_gain: Any
+) -> Any:
+    """Section modulus ``Z = b t^2 / 6`` of the folded root section."""
+    return xp.maximum(chord_m * thickness_m * thickness_m * z_gain / 6.0, 1.0e-30)
+
+
+def peak_root_stress_pa(
+    xp: Any,
+    load_factor: Any,
+    mass_kg: Any,
+    gravity: float,
+    span_m: Any,
+    taper_ratio: Any,
+    root_chord_m: Any,
+    thickness_m: Any,
+    z_gain: Any,
+    chord_scale: Any = 1.0,
+    tip_factor: Any = 0.0,
+) -> Any:
+    """Peak wing-root bending stress of a batch of airframes, in pascals.
+
+    This is the *scalar reduction* of :func:`stress_field`: the root section
+    carries the largest bending moment and the leading edge the largest
+    chordwise shape factor, so the peak of the stress field is the root
+    section evaluated at the leading edge.
+
+    The GPU batch path evaluates this function instead of an inline formula
+    of its own.  That inline formula used a *span* based section modulus and
+    a completely different load path, which is why the GPU path reported
+    355 388 Pa where the 6-DoF path reported 281.8 Pa for the same flight --
+    a factor of 1261 in the very quantity that decides whether the airframe
+    is considered to have failed.
+    """
+    moment = root_bending_moment_batch(
+        xp, load_factor, mass_kg, gravity, span_m, taper_ratio
+    )
+    # A folded winglet raises the moment carried by the root section.
+    moment = moment * (1.0 + TIP_MOMENT_GAIN * xp.clip(tip_factor, 0.0, 1.0))
+    modulus = section_modulus_batch(xp, root_chord_m * chord_scale, thickness_m, z_gain)
+    return KAPPA_SIGMA * moment / modulus
+
+
+def root_chord_batch(xp: Any, area_m2: Any, span_m: Any, taper_ratio: Any) -> Any:
+    """Root chord ``c_root = 2 S / (b (1 + lambda))`` of a batch of airframes."""
+    taper = xp.clip(taper_ratio, 0.05, 1.0)
+    return 2.0 * area_m2 / xp.maximum(span_m * (1.0 + taper), _EPS)
+
+
+def te_fold_chord_scale(xp: Any, fold_trailing_deg: Any) -> Any:
+    """Effective-chord reduction caused by the trailing-edge fold."""
+    fold = xp.abs(xp.sin(_rad_batch(xp, fold_trailing_deg)))
+    return 1.0 - TE_FOLD_CHORD_REDUCTION * xp.clip(fold, 0.0, 1.0)
+
+
+def _rad_batch(xp: Any, value: Any) -> Any:
+    """Degrees to radians for a batch (NumPy or CuPy)."""
+    return xp.asarray(value, dtype=xp.float64) * (math.pi / 180.0)
+
+
+# --------------------------------------------------------------------------
 # Scalar building blocks
 # --------------------------------------------------------------------------
 def dynamic_pressure(density_kgm3: float, speed_mps: float) -> float:
@@ -206,7 +305,11 @@ def lift_curve_slope(cfg: AircraftConfig, derived: Optional[Dict[str, float]] = 
     """Return ``CL_alpha`` per radian (Helmbold for a triangular wing).
 
     Uses ``cfg.cLalpha_per_rad`` when it is positive, otherwise the Helmbold
-    estimate ``2 pi AR / (2 + sqrt(AR^2 (1 + lambda) + 4 AR / pi))``.
+    estimate ``2 pi AR / (2 + sqrt(AR^2 (1 + lambda) + 4 AR / pi))`` taken from
+    the single implementation of :func:`physics.aero_domain.helmbold_cl_alpha`.
+    The audit found four different copies of this expression in the project
+    (reference path, two GPU paths and the specification text), which made the
+    structural and the aerodynamic lift slope differ by up to 11 %.
     """
     if derived is None:
         derived = derived_properties(cfg)
@@ -214,10 +317,8 @@ def lift_curve_slope(cfg: AircraftConfig, derived: Optional[Dict[str, float]] = 
     if explicit > 0.0:
         return explicit
     ar = max(_finite_or(float(derived["aspect_ratio"]), 1.0e-3), 1.0e-3)
-    taper = clamp(_finite_or(float(derived["taper_ratio"]), 0.7), 0.05, 1.0)
-    root = ar * ar * (1.0 + taper) + 4.0 * ar / math.pi
-    slope = 2.0 * math.pi * ar / (2.0 + math.sqrt(max(root, _EPS)))
-    return max(slope, 1.0e-3)
+    taper = _finite_or(float(derived["taper_ratio"]), 0.7)
+    return max(helmbold_cl_alpha(ar, taper), 1.0e-3)
 
 
 def _elevon_pitching_increment(cfg: AircraftConfig) -> float:
@@ -732,10 +833,16 @@ def stress_field(
     mean_stress = float(stress_np.mean())
 
     # --- heat-map index ----------------------------------------------------
+    # Single reference scale: the airframe's own allowable fold stress.  The
+    # index is the *utilisation* ``sigma / sigma_allow`` (0 = safe, 1 = the
+    # failure limit), so "1.0" finally means the same thing in the heat map,
+    # in ``failure_index`` and in the GPU batch path.  The min-max pattern of
+    # the load path is published separately as ``stress_shape`` so the shape
+    # stays visible without redefining what 1.0 means.
+    allowable = paper_allowable_stress(gsm, stiffness)
+    fi = failure_index(max_stress, allowable)
     shape_index = normalise_heatmap(stress_np)
-    head = clamp(max_stress / INDEX_REFERENCE_PA, 0.0, 1.0)
-    index_grid = shape_index * head
-    index_grid = np.clip(np.nan_to_num(index_grid, nan=0.0), 0.0, 1.0)
+    index_grid = np.clip(np.nan_to_num(stress_np / max(allowable, _EPS), nan=0.0), 0.0, 1.0)
 
     # argmax: axis 0 walks the span, axis 1 the chord
     i_arg = int(np.argmax(index_grid.max(axis=0)))
@@ -743,9 +850,6 @@ def stress_field(
     critical_span = clamp(abs(i_arg - centre) / half_index, 0.0, 1.0)
     critical_chord = clamp(j_arg / max(nc - 1, 1), 0.0, 1.0)
 
-
-    allowable = paper_allowable_stress(gsm, stiffness)
-    fi = failure_index(max_stress, allowable)
     status = status_for_failure_index(fi)
 
     colours = [
@@ -756,10 +860,11 @@ def stress_field(
         "backend": actual_backend,
         "material_model_validated": False,
         "stress_index": [[float(v) for v in row] for row in index_grid],
+        "stress_shape": [[float(v) for v in row] for row in shape_index],
         "stress_pa": [[float(v) for v in row] for row in stress_np],
         "spanwise": ns,
         "chordwise": nc,
-        "max_stress_index": float(index_grid.max()),
+        "max_stress_index": float(fi),
         "min_stress_index": float(index_grid.min()),
         "max_stress_pa": max_stress,
         "mean_stress_pa": mean_stress,

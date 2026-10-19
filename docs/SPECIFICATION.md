@@ -13,8 +13,10 @@
   $$L = \frac{1}{2} \rho v^2 S C_L(\alpha), \quad D = \frac{1}{2} \rho v^2 S C_D(\alpha)$$
 - **揚力傾斜と三角翼ボルテックスリフト (Helmbold & Polhamus)**:
   低アスペクト比（$AR \le 4$）の紙飛行機に対し、線形付着流揚力に前縁剥離渦（Leading-edge vortex）による非線形吸い出し揚力を重畳:
-  $$C_{L\alpha} = \frac{2\pi AR}{2 + \sqrt{AR^2 (1 + \tan^2 \Lambda_{c/2}) + 4}}$$
+  $$C_{L\alpha} = \frac{2\pi AR}{2 + \sqrt{AR^2 (1 + \lambda) + 4AR/\pi}}$$
+  （Helmbold 1942 の三角翼式をテーパ翼へ拡張した形。**本式が単一の実装**（`physics.aero_domain.helmbold_cl_alpha`）であり、6DoF 経路・GPU アンサンブル経路・GPU 最適化バッチ経路・構造モジュールの揚力傾斜はすべてこの値を参照する。$4AR/\pi$ を定数 $4$ に置換した旧 GPU 式（+11.3 %）は廃止済み。）
   $$C_L(\alpha) = K_p \sin\alpha \cos^2\alpha + K_v \sin^2\alpha \cos\alpha$$
+  （Polhamus 1966/1971 の公開式。$K_p$ を明示指定する場合は `polhamus_kp`、未指定（既定 0）の場合は機体自身の 3 次元 Helmbold 傾斜が $K_p$ を担い、$K_v$ の渦吸い出し増分のみ叠加される。）
 - **高迎角・失速後遷移 (Viterna-Corrigan Method)**:
   失速迎角 $\alpha_{stall}$ を超える深失速・逆流領域において、平板の剥離流極限（$C_{D,\max} \approx 1.8 \sim 2.0$）へと滑らかに接続。
 - **誘導抗力と地面効果 (Ground Effect, Wieselsberger)**:
@@ -38,11 +40,75 @@
 ### 1.3 構造応力モデル (Structural Stress)
 - 動圧 $q$、迎角 $\alpha$、および作用加速度（Gフォース）から翼根曲げモーメントを算出。
 - 翼面各頂点に対する動的応力評価値（0.0: 安全 〜 1.0: 破断限界）を算出し、3D ヒートマップとして可視化。
+- **応力インデックスの正規化尺度は単一**: `stress_index = sigma / sigma_allow` であり、分母は機体固有の許容折り応力 `paper_allowable_stress(gsm, stiffness)`（既定 100 g/m²・剛性 0.35 で 2.2 kPa）である。6DoF 経路・ヒートマップ・GPU 最適化バッチ・構造破壊判定はすべてこの尺度を共有する（旧来の 25 kPa / 120 kPa / 2.0e4·gsm の 3 系統は廃止）。荷重分布の min-max 形状は `stress_shape` チャンネルで別途公開する。
 
 ### 1.4 6DoF 運動方程式積分 (Flight Dynamics Engine)
 - 四元数（Quaternion）表現による特異点フリーの機体姿勢更新。
 - 4次ルンゲ＝クッタ法 (RK4) による数値積分。
 - 急激な挙動変化に対応する可変時間刻み適応サブステッピング（Adaptive Sub-stepping）および固定刻み解析の系統的収束性保証（Issue #31 収束性検証済み）。
+
+### 1.5 折り紙ジオメトリモデル (Procedural Origami Geometry)
+`physics/origami_domain.py` は A4 用紙（縦横比 1:√2, 210 × 297 mm）から紙飛行機の
+3D モデルを**折り工程そのもののシミュレーション**として生成する。解析的な板ポリゴン
+の拼合せではなく、展開図（Crease Pattern）を切り折りして得られる多層ソリッドである。
+
+**座標系**: 平面は正規化単位正方形 `(u, v)`（`u` = 短辺方向、`v` = 長辺方向、機首は `v = 1`）。
+三次元への写像は `x = (v - 0.5) * L`（前後、+x が機首）、`y = 0`（上）、`z = (u - 0.5) * W`
+（左右、+z が右翼）。この枠は右手系であり NED シミュレーション枠とは異成因
+（描画側は `static/js/viewport.js` の `Rx(+90°)` で変換する）。
+
+**折り工程（ヒンジ列）**:
+1. `body`: 中央縦の基線（対称折り、$\pm(180°-3°)/2$）。左右_body_ は約 177° 開いた
+   V 字のキール（中心线に微小な V ギャップ `keel_beta_deg`）を形成する。
+2. `corner_l/r`: 左右上角を中央線へ 45° で折り下げる谷折り（機首第 1 層の重なり）。
+   折り目は実寸の紙面（長辺 297 mm / 短辺 210 mm）上で定義するため、角は必ず中央線へ
+   正確に着地する。
+3. `collar_l/r`: 折れ上がった角の斜辺と中央線の二等分線に沿った折り目。前縁の厚い
+   折り返しと鋭い機首（嘴）を作り、機首は片側 3 層・両側最大 6 層に重なる。
+4. `wing_l/r`: 胴体キールを残して主翼を水平（微小上反角付き）に折り下げる。
+5. `winglet_l/r`, `elevon_l/r`, `trailing`: 翼端のウイングレットと後縁のエレボン反り。
+
+折り目の順序は物理的な折り順と一致し、各折り目は**その時の創位置（現在位置）**を軸に
+回転する（`T' = F ∘ T`）。同一折り目が跨ぐ層は同一の三次元直線を共有するため、
+折り目还是在重なりとして連続して折れる。
+
+**レイヤーオフセット（Z-Fighting 完全排除の証明）**:
+- 紙厚 $t$ = `VISUAL_THICKNESS_M` = 0.30 mm（実紙 0.10 mm の 3 倍の視覚強調）。
+- 空気隙 `LAYER_AIR_GAP_M` = 0.12 mm、レイヤーピッチ `LAYER_PITCH_M` = $t$ + gap = 0.42 mm。
+- 互いに平行かつ投影が重なる面のみを同一**スタック**に集群化し、スタック法線方向の
+  符号付き深さ `d` で順序付け、**重なり関係 DAG の最長路**を層インデックス $k_f$ とする。
+- 重なっている任意の 2 面の層差 satisfies $k_B \ge k_A + 1$（最長路の定義より）であり、
+  変位後の中間面間隔は $\ge (k_B - k_A) \cdot \mathrm{PITCH} \ge \mathrm{PITCH} > t$。
+  厚さは各面が中間面の $\pm t/2$ しか占有しないため、**2 つの層は交わらず同一面にも
+  ならない**（Z-Fighting は構造的に発生し得ない）。機首では片側 3 層・両側合計
+  5〜6 層が接触する（実装上の最深部スタック層インデックスは 8）。
+- オフセット量は折り工程 $\alpha$ に比例して 0 → 1 で増加し、
+  $\alpha = 0$（平たい用紙）では全層が同一面になる。
+
+**ソリッド生成**: 各面は上スキム・下スキム・側壁（カットエッジ）の**閉じたスラブ**として
+出力され、紙の断面は面積を持つ矩形になる。折り目は**ロール折り**（3 次ベジエ）で
+閉じられ、接線連続な normals 勾配（折れ目のハイライトとキャビティ陰影）を与える。
+折り目は 2 分割され、`crease_weight` 属性として頂点に焼き込まれる。
+
+**頂点属性**（`BufferGeometry` カスタム属性）:
+| 属性 | 意味 |
+|---|---|
+| `aLayer` | その位置の紙層数（1 = 単層、4〜6 = 機首パケット） |
+| `aCrease` | 折り目への近接度 0..1（キャビティ陰影・ハイライト） |
+| `aElastic` | 翼端方向の重み（受動空力弾性曲げ用、胴体キールは 0） |
+| `aTwist` | 翼弦方向の重み（受動空力弾性ねじれ用） |
+| `aSide` | 表示面が表(+1)/裏(-1) のどちらか（透過光減衰に使用） |
+
+**受動空力弾性**: 飛行中、`aeroelastic_dihedral_deg` / `aeroelastic_twist_deg` を
+uniform として紙シェーダに渡し、翼端で $\mathrm{elastic}^2$ に比例した曲げと
+`aTwist` に比例したねじれを頂点変位として与える（キールは剛体）。
+
+**3 機体アーキタイプ**:
+| key | 名称 | 特徴 |
+|---|---|---|
+| `classic_dart` | Classic Dart / やり飛行機 | 細長いデルタ翼、機首 4〜6 層、鋭い嘴 |
+| `nakamura_lock` | Nakamura Lock / へそ飛行機 | 機首を内側に折り込む belly 折り込み、前縁が厚い、翼面積が広い |
+| `sky_king` | Sky King / 競技用滞空機 | 鈍頭ノーズ（水平な折り返し）、明確なウイングレット、高アスペクト比 |
 
 ---
 
@@ -51,11 +117,15 @@
 ### 2.1 バックエンド並列・GPU加速
 - **CuPy / CUDA による一括並列シミュレーション**:
   - 3D 風場グリッド配列の一括ベクトル計算。
-  - 複数飛行ケース（モンテカルロ解析、感度解析、最適化母集団）の一括並列 RK4 積分。
+  - 複数飛行ケース（モンテカルロ解析、感度解析、最適化母集団）の一括並列評価。
   - **ケース別 duration_s の個別反映**: バッチシミュレーション内においてケースごとに異なる打ち切り時間上限 `duration_s` を正確に保持・判定し、タイムアウトと着地時刻を個別算出（Issue #28 解決済み）。
 - **安全な CPU / NumPy フォールバック**:
   - GPU 非搭載環境や CUDA 初期化不可環境では、NumPy および `concurrent.futures` / `multiprocessing` による CPU 並列計算へ自動移行。
-  - CPU 経路と GPU 経路で出力 JSON スキーマ（`landed`, `crashed`, `status`, `horizontal_range_m` 等）および物理計算結果が完全一致することを保証（Issue #35 整合性検証済み）。
+  - **返却スキーマの一致**（`landed`, `crashed`, `status`, `horizontal_range_m` 等）は保証する。
+  - **経路ごとの `model` タグで物理モデルの違いを明示する**（Issue #35 の「完全一致」は過大主張であった）:
+    - `model = "rigid_body_6dof"` … 正規 6DoF RK4 経路、および **同一の 13 状態剛体モデル（同じ空力カーネル・同じ風場・同じ構造モデル・同じ RK4 スキーム）をベクトル化して GPU 上で積分する GPU 最適化バッチ経路**（`model_detail = "gpu_batch_rk4"`）。両者の整合は `tools/check_gpu_parity.py` と `tests/test_gpu_kernel_parity.py` で定量検証する（実測: 最大応力・G ロードは完全一致、飛距離は 0.1〜0.9 % の差）。
+    - `model = "reduced_surrogate"` … 縮小モデル。具体的には **GPU モンテカルロ・アンサンブル経路**（3 自由度の縮約積分、`model_detail = "gpu_ensemble_3dof"`）と **解析的滑翔サーロゲート**（姿勢動力学を持たない閉形式解、`model_detail = "analytical_glide_surrogate"`）。これらの `approximate = true` / `physics_verification_eligible = false` であり、6DoF 再検証の対象外である。
+    - 旧実装の GPU パス（3 自由度点質量・陽的オイラー・姿勢クランプ）は 6DoF 経路と最大応力で 1261 倍、飛行 `status` すら相違した（`flying` と `crashed`）。この過大主張は撤去済み。
 
 ### 2.2 フロントエンド GPU レンダリング
 - Three.js Custom Vertex & Fragment Shaders による翼面動的応力ヒートマップ描画。
@@ -109,6 +179,19 @@
 - `POST /api/v1/data/import`: 外部設定・パラメータのインポート
 - `GET /api/v1/records/errors`: サーバー内部エラー履歴の取得
 
+### 3.7 Origami API (`api/routes/origami.py`)
+- `GET /api/v1/origami/archetypes`: 対応する 3 機体アーキタイプ（key / label / shape_flag）と
+  紙厚・レイヤーピッチ等の物理定数を返す。
+- `POST /api/v1/origami/mesh`: 折り畳まれた機体メッシュを返す。
+  - 入力: `archetype`（`classic_dart` / `nakamura_lock` / `sky_king`）、`alpha`（折り工程 0..1）、
+    `wingspan_m`（翼幅に合わせて等スケール）、`keel_beta_deg` / `dihedral_deg` /
+    `elevon_deg` / `fold_tip_deg` / `fold_trailing_deg` / `fold_leading_deg`。
+  - 出力: `positions` / `normals` / `uvs` / `indices`（フラット配列）と
+    `layer_counts` / `crease_weights` / `elastic_weights` / `twist_weights` / `paper_sides`、
+    `paper_thickness_m` / `layer_pitch_m` / `max_layers` / `bounds` / `stats`。
+  - ビューアは同一生成器（`physics/origami_domain.py`）を使用するため、
+    描画結果とユニットテストのジオメトリは常に一致する。
+
 ---
 
 ## 4. セキュリティと堅牢性設計 (Security & Robustness Standards)
@@ -151,7 +234,7 @@
 | **#32** | Aerodynamics | 空力係数の理論・文献出典の独立検証と公開 | `/api/v1/meta/physics-references` エンドポイントを新設し学術引用レジストリを公開。単体テスト検証合格。 |
 | **#33** | Wind Model | 3D風場の有界発散・空間相関・時間連続性の検証 | 乱流場の発散有界性、空間距離に応じた相関減衰、および時間連続性を数値評価。`tests/test_advanced_physics_audit.py` で検証合格。 |
 | **#34** | Security | 予期しない例外時の内部トレースバック漏洩防止 | `api_error()` を改修し、本番環境で `error_id` のみを返却。`tests/test_security_and_frames_audit.py` で検証合格。 |
-| **#35** | GPU | CPU版とGPU版の計算結果・返却スキーマの完全一致 | `gpu_batch_evaluate_cases` の CPU フォールバックを統一スキーマ化。CPU/GPU 一致テストで検証合格。 |
+| **#35** | GPU | CPU版とGPU版の計算結果・返却スキーマの完全一致 | `gpu_batch_evaluate_cases` の CPU フォールバックを統一スキーマ化。**返却スキーマの一致とフォールバックの動作は検証済み**。「物理計算結果の完全一致」は過大主張であったため撤去し、代わりに GPU 最適化バッチ経路を **正規経路と同一の 13 状態 RK4 モデル**に書き換えて `tools/check_gpu_parity.py` / `tests/test_gpu_kernel_parity.py` で定量検証する運用に変更（§2.1 参照）。残存する縮約経路は `model` タグ（`rigid_body_6dof` / `reduced_surrogate`）と `model_detail` で明示する。 |
 | **#36** | Mesh | パネル法のメッシュ解像度依存性と揚力整合性の検証 | パネル細分化に伴う揚力・抗力・モーメントの漸近収束を実証。`tests/test_advanced_physics_audit.py` で検証合格。 |
 | **#37** | Security | 3Dメッシュインポート時の SSRF 防止機構 | プライベートIP・ループバック・クラウドメタデータ・非標準ポートを遮断。`tests/test_security_and_frames_audit.py` で検証合格。 |
 

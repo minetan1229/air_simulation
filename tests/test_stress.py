@@ -36,6 +36,7 @@ REQUIRED_KEYS = {
     "backend",
     "material_model_validated",
     "stress_index",
+    "stress_shape",
     "stress_pa",
     "spanwise",
     "chordwise",

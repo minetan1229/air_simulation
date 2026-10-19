@@ -789,15 +789,21 @@ def test_step_payload_is_complete_and_self_consistent():
 
 
 def test_g_load_is_one_in_a_level_trimmed_glide():
-    # At trim the specific force along the body z axis balances the weight, so
-    # the accelerometer relation a_specific = a_inertial - g gives exactly 1 g.
+    # The load factor is the *resultant* specific force divided by g, i.e. the
+    # accelerometer reading.  Only the wing-normal component would miss the
+    # drag deceleration (and the lateral component in a turn), and the
+    # structural model has to carry the complete load.
     simulator = glider_simulator()
     simulator.simulate(duration_s=0.05, record=False)
     packet = simulator.step(dt=0.01)
     body_velocity = world_to_body(packet["quaternion"], np.array(packet["velocity_mps"]) - np.array(packet["wind_velocity_mps"]))
-    lift_load = flight_sim.wind_force_to_body(body_velocity, packet["drag_n"], packet["side_n"], packet["lift_n"])[2]
+    specific_force = flight_sim.wind_force_to_body(
+        body_velocity, packet["drag_n"], packet["side_n"], packet["lift_n"]
+    )
     weight = derived_properties(simulator.aircraft)["mass_kg"] * simulator.environment.gravity
-    assert packet["g_load"] == pytest.approx(abs(lift_load) / weight, rel=1e-9)
+    assert packet["g_load"] == pytest.approx(
+        float(np.linalg.norm(specific_force)) / weight, rel=1e-9
+    )
     assert 0.0 < packet["g_load"] < 5.0
 
 

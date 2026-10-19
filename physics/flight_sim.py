@@ -55,6 +55,7 @@ import typing
 from collections import OrderedDict, deque
 from dataclasses import dataclass, field, fields, is_dataclass, replace
 from typing import Any, Dict, List, Optional, Sequence, Tuple
+from uuid import uuid4
 
 import numpy as np
 
@@ -104,6 +105,7 @@ __all__ = [
     "BACKEND",
     "EVALUATE_KEYS",
     "STATUS_VALUES",
+    "FlightDivergenceError",
     "FlightSimulator",
     "ThrowSolution",
     "aero_forces",
@@ -130,7 +132,14 @@ __all__ = [
 BACKEND = "numpy"
 
 #: Status vocabulary shared with the REST layer.
-STATUS_VALUES: Tuple[str, ...] = ("flying", "landed", "crashed", "timeout", "diverged")
+STATUS_VALUES: Tuple[str, ...] = (
+    "flying",
+    "landed",
+    "crashed",
+    "timeout",
+    "diverged",
+    "error",
+)
 
 #: Exact key set of the :func:`evaluate_flight` payload (the optimiser relies on it).
 EVALUATE_KEYS: Tuple[str, ...] = (
@@ -153,7 +162,21 @@ EVALUATE_KEYS: Tuple[str, ...] = (
     "glide_entry_time_s",
     "stable_glide_duration_s",
     "apex_recovery_status",
+    "error",
+    "error_id",
 )
+
+
+class FlightDivergenceError(RuntimeError):
+    """Raised when the 6-DoF integration cannot be completed.
+
+    The exception separates a *physical* divergence (the integration left its
+    stable region) from an *implementation* error (a bad configuration or an
+    unexpected payload).  :func:`evaluate_flight` reports the two cases with
+    different ``status`` values so that a broken design is never scored as a
+    legitimate 0 m flight.
+    """
+
 
 # --------------------------------------------------------------------------
 # Numerical guard rails
@@ -174,23 +197,56 @@ MAX_ATTITUDE_STEP_RAD = 0.35
 #: the local truncation-error estimate: a step that changes the rate by more than
 #: this is rejected and halved.
 MAX_RATE_CHANGE_RADPS = 2.0
-#: Hard rejection thresholds applied to an integrated step.
+#: Depth of the folded keel below the centre of gravity (metres).  The keel
+#: is a LINE contact, so its resultant acts under the CG.
+GROUND_KEEL_DEPTH_M = 0.015
+
+#: Hard rejection thresholds applied to an integrated step.  They are the
+#: *floor* of the acceptance bound: the observed jump is additionally compared
+#: against the jump the local derivative predicts, so the criterion scales with
+#: the step size and with the physical time scale of the manoeuvre.
 MAX_RATE_JUMP_RADPS = 8.0
 MAX_SPEED_JUMP_MPS = 25.0
+#: Safety factor applied to the *predicted* step change (derivative times step
+#: size) when judging whether an integrated step is acceptable.  A step whose
+#: observed jump exceeds ``(1 + SAFETY) * predicted`` is rejected and halved.
+STEP_ACCEPT_SAFETY = 1.25
+#: Maximum angular-rate change a single ground-contact impulse may inject
+#: (rad/s).  A contact impulse is a torque, so it scales with the impact
+#: energy; the bound only exists to stop a pathological geometry from
+#: producing an infinite rate in one sub-step.
+MAX_CONTACT_RATE_JUMP_RADPS = 8.0
+#: Tolerance of the raw (pre-normalisation) quaternion norm drift per step.
+QUATERNION_NORM_TOLERANCE = 5.0e-3
 #: Safety factor of the RK4 stiff-mode bound.  The explicit RK4 polynomial is
 #: stable on the negative real axis only up to ``|lambda*h| = 2.785``; the
 #: numerical stiffness of the airframe is estimated by finite differences and
 #: divided by this factor, so the step stays inside the stable region even when
-#: the finite-difference probe under-estimates the fastest eigenvalue.
-RK4_STIFFNESS_SAFETY = 1.2
+#: the finite-difference probe over-estimates the fastest eigenvalue (the
+#: Jacobian of a non-normal system is not symmetric, so the norm is an upper
+#: bound of the spectral radius).  The factor must stay **below 2.785** and
+#: above 1.0.
+RK4_STIFFNESS_SAFETY = 2.0
 #: Relative change of the dynamic pressure that invalidates the stiffness cache.
 STIFFNESS_CACHE_TOLERANCE = 0.05
 #: Fraction of the mean aerodynamic chord the airframe may travel in one step.
 TRAVEL_FRACTION_PER_STEP = 0.5
 #: Legacy low-speed scale retained for compatible imports; flow uses actual airspeed.
 EFFECTIVE_SPEED_FLOOR_MPS = 0.05
-#: Airspeed handed to the aerodynamics solver (keeps ``q*area`` finite).
+#: Legacy airspeed cap (m/s).  **Deprecated / inert**: the aerodynamic solver
+#: is no longer fed a truncated airspeed (that silently evaluated every
+#: aerodynamic force at a different airspeed than the body experiences).  The
+#: constant is kept for import compatibility only; the model-validity flag
+#: (:data:`MODEL_MACH_LIMIT`, :data:`MODEL_REYNOLDS_MIN`,
+#: :data:`MODEL_REYNOLDS_MAX`) is published in the telemetry instead.
 AERO_SPEED_CAP_MPS = 250.0
+#: Validity envelope of the aerodynamic model: ``Ma <= 0.3`` and
+#: ``1e3 <= Re <= 1e5``.  Outside the envelope the aerodynamic coefficients are
+#: extrapolations and the telemetry reports ``model_valid = False``.
+MODEL_MACH_LIMIT = 0.3
+MODEL_REYNOLDS_MIN = 1.0e3
+MODEL_REYNOLDS_MAX = 1.0e5
+
 #: Airspeed below which L/D and range statistics are ignored.
 SPEED_STAT_FLOOR_MPS = 1.0
 
@@ -210,7 +266,18 @@ KEEL_DAMPING_CUTOFF_MPS = 0.8
 # Structural model used when ``stress_domain`` is unavailable
 # --------------------------------------------------------------------------
 #: Allowable wing-root bending stress of a folded paper structure, per g/m2.
+#: **Retired**: the local fallback used this linear law (2 MPa for 100 g/m^2
+#: stock) while the structural module used ``paper_allowable_stress`` (2.2 kPa
+#: for the same stock) - a factor of 1000 between the two stress indices of
+#: one payload.  The constant is kept for import compatibility only; the
+#: fallback now follows :func:`allowable_stress_pa`.
 ALLOWABLE_STRESS_PA_PER_GSM = 2.0e4
+#: Allowable-stress closed form (mirrors ``physics.stress_domain``):
+#: ``A = BASE * (gsm/100)^EXPONENT * (OFFSET + GAIN * stiffness)``.
+ALLOWABLE_BASE_PA = 2500.0
+ALLOWABLE_GSM_EXPONENT = 0.5
+ALLOWABLE_STIFFNESS_OFFSET = 0.6
+ALLOWABLE_STIFFNESS_GAIN = 0.8
 #: Root section height / width as a fraction of the mean aerodynamic chord.
 ROOT_SECTION_HEIGHT_FRACTION = 0.40
 ROOT_SECTION_WIDTH_FRACTION = 0.30
@@ -310,9 +377,15 @@ def stress_module() -> Any:
 
 
 def active_backends() -> Dict[str, str]:
-    """Report which upstream domains are live (``"numpy"`` when falling back)."""
+    """Report which upstream domains are live.
+
+    The aerodynamics are **mandatory**: there is no local fallback any more,
+    so the aero entry is ``"unavailable"`` when the module cannot be imported
+    (which makes the 6-DoF path fail loudly rather than run different
+    physics).
+    """
     return {
-        "aero": "numpy" if aero_module() is None else "upstream",
+        "aero": "unavailable" if aero_module() is None else "upstream",
         "atmosphere": "numpy" if atmosphere_module() is None else "upstream",
         "wind": "numpy" if wind_module() is None else "upstream",
         "stress": "numpy" if stress_module() is None else "upstream",
@@ -497,7 +570,24 @@ def _config_from(cls: Any, data: Any) -> Any:
 # Aerodynamics primitives (public; also the basis of the local fallback)
 # --------------------------------------------------------------------------
 def helmbold_cl_alpha(aspect_ratio: float, taper_ratio: float) -> float:
-    """Helmbold lift slope ``2*pi*AR / (2 + sqrt(AR^2(1+lam) + 4*AR/pi))``."""
+    """Helmbold lift slope ``2*pi*AR / (2 + sqrt(AR^2(1+lam) + 4*AR/pi))``.
+
+    The single implementation lives in :mod:`physics.aero_domain`; this
+    wrapper only exists so that the local fallback stays available when that
+    module cannot be imported.  The audit found **four** different Helmbold
+    expressions in the project (the reference path, the two GPU paths, the
+    specification text and the published registry), so the formula is now
+    delegated instead of re-derived.
+    """
+    module = aero_module()
+    func = _resolve_callable(module, ("helmbold_cl_alpha",))
+    if func is not None:
+        try:
+            value = float(func(aspect_ratio, taper_ratio))
+            if math.isfinite(value) and value > 0.0:
+                return value
+        except Exception:
+            pass
     ar = max(_finite(aspect_ratio), 1.0e-4)
     lam = clamp(_finite(taper_ratio), 0.0, 1.0)
     root = ar * ar * (1.0 + lam) + 4.0 * ar / math.pi
@@ -799,131 +889,6 @@ def wind_vector(position: Sequence[float], env: EnvironmentConfig, time_s: float
 # --------------------------------------------------------------------------
 # Aerodynamics bridge
 # --------------------------------------------------------------------------
-def _local_aero(
-    aircraft: AircraftConfig,
-    env: EnvironmentConfig,
-    speed_mps: float,
-    alpha_deg: float,
-    beta_deg: float,
-    mach: float,
-    reynolds: float,
-    ground_height_m: float,
-    angular_rate: Sequence[float],
-    density: float,
-    kinematic_viscosity: float,
-) -> AeroResult:
-    """Complete local aerodynamics used when ``aero_domain`` is unavailable.
-
-    Linear lift ``C_L = C_L0 + C_Lalpha*alpha`` blended through a logistic stall
-    break into a linear post-stall branch, drag
-    ``C_D = C_D0(Re) + C_L^2/(pi*e*AR)`` with the ground-effect reduction, elevon
-    trim increments, Prandtl-Glaut compressibility and the full moment set.
-    Structurally identical to the upstream solver so both code paths agree.
-    """
-    derived = derived_properties(aircraft)
-    area = max(derived["ref_area_m2"], 1.0e-9)
-    mac = max(derived["ref_length_m"], 1.0e-6)
-    span = max(derived["ref_span_m"], 1.0e-6)
-    aspect = max(derived["aspect_ratio"], 1.0e-3)
-    taper = derived["taper_ratio"]
-    speed = max(_finite(speed_mps), 0.0)
-    rho = max(_finite(density, 1.225), 1.0e-6)
-    alpha = _finite(alpha_deg)
-    beta = _finite(beta_deg)
-    alpha_rad = deg2rad(alpha)
-    beta_rad = deg2rad(beta)
-    re_eff = clamp(_finite(reynolds, 1.0e5), 1.0e2, 1.0e9)
-    cl_alpha = _finite(aircraft.cLalpha_per_rad)
-    if cl_alpha <= 0.0:
-        cl_alpha = helmbold_cl_alpha(aspect, taper)
-    stall_alpha = _finite(aircraft.stall_alpha_deg, 14.0)
-    cl_max = _finite(aircraft.cl_max, 0.9)
-    cl_linear = _finite(aircraft.cL0) + cl_alpha * alpha_rad
-    cl_post = cl_max + _finite(aircraft.post_stall_slope) * (alpha - stall_alpha)
-    sharpness = max(abs(_finite(aircraft.stall_sharpness, 1.4)), 1.0e-3)
-    blend = 1.0 / (1.0 + math.exp(clamp(-sharpness * (alpha - stall_alpha), -60.0, 60.0)))
-    cl = (1.0 - blend) * cl_linear + blend * cl_post
-    if bool(env.compressibility_enabled):
-        cl *= prandtl_glauert(mach)
-    elevon = elevon_effects(aircraft.elevon_deg, aircraft)
-    lift_scale = max(_finite(env.lift_scale), 0.0)
-    drag_scale = max(_finite(env.drag_scale), 0.0)
-    cl += elevon["dcl"] * lift_scale
-    cd0 = _finite(aircraft.cd0) * (1.0e5 / re_eff) ** _finite(aircraft.re_cd0_exponent)
-    induced = cl * cl / (math.pi * max(_finite(aircraft.oswald_e, 0.8), 0.05) * aspect)
-    effect = ground_effect_factor(ground_height_m, span, bool(env.ground_effect_enabled))
-    induced *= effect
-    dynamic = 0.5 * rho * speed * speed
-    lift = dynamic * area * cl * lift_scale
-    drag = dynamic * area * (cd0 + induced + 0.020 * abs(elevon["dcl"])) * drag_scale
-    side = dynamic * area * _finite(aircraft.cy_beta) * beta_rad
-    # Nondimensional rate time scales: (reference length) / (2 V).  Every rate
-    # derivative is a genuine *rate* term, so the pitching moment of a trimmed
-    # airframe flying straight is exactly ``q S c (cm0 + dcm)``.
-    safe_speed = max(speed, 0.5)
-    rate_time_mac = safe_div(mac, 2.0 * safe_speed, 0.0)
-    rate_time_span = safe_div(span, 2.0 * safe_speed, 0.0)
-    rate = vec3(angular_rate)
-    cm = (
-        _finite(aircraft.cm0)
-        + _finite(aircraft.cm_alpha) * alpha_rad
-        + elevon["dcm"]
-        + 0.5 * _finite(aircraft.cm_q) * float(rate[1]) * rate_time_mac
-        + _finite(aircraft.cm_roll_rate) * float(rate[0]) * rate_time_mac
-        + _finite(aircraft.cm_pitch_rate) * float(rate[1]) * rate_time_mac
-        + _finite(aircraft.cm_yaw_rate) * float(rate[2]) * rate_time_mac
-    )
-    aileron = _finite(getattr(aircraft, "aileron_deg", 0.0))
-    asym_cl = _finite(getattr(aircraft, "asymmetry_cl", 0.0))
-    cl_control = 0.0035 * aileron + 0.25 * asym_cl
-    cl_roll = (
-        _finite(aircraft.cl_beta) * beta_rad
-        + cl_control
-        + _finite(aircraft.cl_roll_rate) * float(rate[0]) * rate_time_span
-        + _finite(aircraft.cl_pitch_rate) * float(rate[1]) * rate_time_span
-        + _finite(aircraft.cl_yaw_rate) * float(rate[2]) * rate_time_span
-    )
-    rudder = _finite(getattr(aircraft, "rudder_deg", 0.0))
-    cn_control = 0.0025 * rudder
-    cn = (
-        _finite(aircraft.cn_beta) * beta_rad
-        + cn_control
-        + _finite(aircraft.cn_roll_rate) * float(rate[0]) * rate_time_span
-        + _finite(aircraft.cn_pitch_rate) * float(rate[1]) * rate_time_span
-        + _finite(aircraft.cn_yaw_rate) * float(rate[2]) * rate_time_span
-    )
-    ld_ratio = safe_div(cl, (cd0 + induced) * drag_scale, 0.0)
-    return AeroResult(
-        cl=cl,
-        cd=(cd0 + induced) * drag_scale,
-        cm=cm,
-        cy=_finite(aircraft.cy_beta) * beta_rad,
-        cl_roll=cl_roll,
-        cm_roll=_finite(aircraft.cm_roll_rate) * float(rate[0]) * rate_time_mac,
-        cn_roll=_finite(aircraft.cn_yaw_rate) * float(rate[2]) * rate_time_mac,
-        lift_n=lift,
-        drag_n=drag,
-        side_n=side,
-        pitching_moment_nm=dynamic * area * mac * cm,
-        yawing_moment_nm=dynamic * area * span * cn,
-        rolling_moment_nm=dynamic * area * span * cl_roll,
-        ld_ratio=ld_ratio,
-        dynamic_pressure_pa=dynamic,
-        reynolds=re_eff,
-        mach=_finite(mach),
-        stall_margin=(stall_alpha - alpha) / abs(stall_alpha) if abs(stall_alpha) > 1.0e-9 else 0.0,
-        stalled=alpha > stall_alpha,
-        cd_min=cd0,
-        alpha_ld_max_deg=rad2deg(safe_div(_finite(aircraft.cL0) + cl, cl_alpha, 0.0)),
-        circulation_m2ps=safe_div(0.5 * speed * area * cl, span, 0.0),
-        trim_alpha_deg=elevon["dalpha_trim_deg"],
-        trim_elevon_deg=_finite(aircraft.elevon_deg),
-        ground_effect_ratio=effect,
-        lift_left_n=0.5 * lift,
-        lift_right_n=0.5 * lift,
-    )
-
-
 def _normalise_aero_result(out: Any, speed_mps: float, density: float, kinematic_viscosity: float) -> AeroResult:
     """Coerce any upstream aerodynamics payload into a full :class:`AeroResult`."""
     stalled = bool(out.get("stalled", False)) if isinstance(out, dict) else bool(getattr(out, "stalled", False))
@@ -972,79 +937,118 @@ def aero_forces(
     density: float = 1.225,
     kinematic_viscosity: float = 1.5e-5,
 ) -> AeroResult:
-    """Evaluate the aerodynamics, preferring the upstream ``aero_domain``.
+    """Evaluate the aerodynamics through the mandatory ``aero_domain`` solver.
 
     The result always carries wind-frame forces (``lift_n`` / ``drag_n`` /
     ``side_n``) and body-frame moments (``rolling`` about +x, ``pitching`` about
-    +y, ``yawing`` about +z).  Falls back to :func:`_local_aero` whenever the
-    upstream solver is missing, incompatible or returns a non-finite payload.
+    +y, ``yawing`` about +z).
+
+    There is **no second implementation**.  The local copy of the aerodynamics
+    was removed (``PHYSICS_PAPER_CONFORMANCE_AUDIT.md`` 3-H-14): it duplicated
+    the upstream coefficients, so a failure of the upstream solver silently
+    swapped the whole simulation onto a *different* lift curve, stall model
+    and moment set.  A broken installation now fails loudly instead of
+    running different physics.
     """
     module = aero_module()
     func = _resolve_callable(module, ("evaluate_aero", "evaluate", "solve_aero"))
-    if func is not None:
-        out = _call_upstream(
-            func,
-            {
-                "cfg": aircraft,
-                "config": aircraft,
-                "aircraft": aircraft,
-                "env": env,
-                "environment": env,
-                "speed_mps": max(_finite(speed_mps), 0.0),
-                "alpha_deg": _finite(alpha_deg),
-                "beta_deg": _finite(beta_deg),
-                "mach": _finite(mach),
-                "reynolds": None if reynolds is None else clamp(_finite(reynolds, 1.0e5), 1.0e2, 1.0e9),
-                "ground_height_m": max(_finite(ground_height_m, 1.0), 0.0),
-                "angular_rate": vec3(angular_rate),
-                "density_kgm3": density,
-                "kinematic_viscosity_m2s": kinematic_viscosity,
-            },
+    if func is None:
+        raise RuntimeError(
+            "physics.aero_domain is required by the 6-DoF path but could not be "
+            "imported or does not expose evaluate_aero(); the local fallback "
+            "aerodynamics was removed so the simulator cannot silently run a "
+            "second, non-conformant physics model"
         )
-        if out is not None:
-            if isinstance(out, dict) and not ("lift_n" in out or "lift" in out):
-                out = None
-            elif out is not None:
-                result = _normalise_aero_result(out, speed_mps, density, kinematic_viscosity)
-                if all(
-                    math.isfinite(value)
-                    for value in (
-                        result.lift_n,
-                        result.drag_n,
-                        result.side_n,
-                        result.pitching_moment_nm,
-                        result.dynamic_pressure_pa,
-                    )
-                ):
-                    if result.dynamic_pressure_pa <= 0.0:
-                        result.dynamic_pressure_pa = (
-                            0.5 * max(_finite(density, 1.225), 1.0e-6) * max(_finite(speed_mps), 0.0) ** 2
-                        )
-                    if result.reynolds <= 0.0:
-                        result.reynolds = safe_div(
-                            max(_finite(speed_mps), 0.0) * 0.1,
-                            max(_finite(kinematic_viscosity, 1.5e-5), 1.0e-12),
-                            0.0,
-                        )
-                    return result
-    return _local_aero(
-        aircraft,
-        env,
-        speed_mps,
-        alpha_deg,
-        beta_deg,
-        mach,
-        _finite(reynolds, 1.0e5) if reynolds is not None else 1.0e5,
-        ground_height_m,
-        angular_rate,
-        density,
-        kinematic_viscosity,
+    out = _call_upstream(
+        func,
+        {
+            "cfg": aircraft,
+            "config": aircraft,
+            "aircraft": aircraft,
+            "env": env,
+            "environment": env,
+            "speed_mps": max(_finite(speed_mps), 0.0),
+            "alpha_deg": _finite(alpha_deg),
+            "beta_deg": _finite(beta_deg),
+            "mach": _finite(mach),
+            "reynolds": None if reynolds is None else clamp(_finite(reynolds, 1.0e5), 1.0e2, 1.0e9),
+            "ground_height_m": max(_finite(ground_height_m, 1.0), 0.0),
+            "angular_rate": vec3(angular_rate),
+            "density_kgm3": density,
+            "kinematic_viscosity_m2s": kinematic_viscosity,
+        },
     )
+    if out is None:
+        raise RuntimeError(
+            "physics.aero_domain.evaluate_aero() could not be called; the 6-DoF "
+            "path refuses to substitute a different aerodynamic model"
+        )
+    if isinstance(out, dict) and not ("lift_n" in out or "lift" in out):
+        raise RuntimeError(
+            "physics.aero_domain.evaluate_aero() returned a payload without any "
+            "aerodynamic force; the 6-DoF path refuses to substitute a different "
+            "aerodynamic model"
+        )
+    result = _normalise_aero_result(out, speed_mps, density, kinematic_viscosity)
+    if not all(
+        math.isfinite(value)
+        for value in (
+            result.lift_n,
+            result.drag_n,
+            result.side_n,
+            result.pitching_moment_nm,
+            result.dynamic_pressure_pa,
+        )
+    ):
+        raise RuntimeError(
+            "physics.aero_domain.evaluate_aero() returned a non-finite payload; "
+            "the 6-DoF path refuses to substitute a different aerodynamic model"
+        )
+    if result.dynamic_pressure_pa <= 0.0:
+        result.dynamic_pressure_pa = (
+            0.5 * max(_finite(density, 1.225), 1.0e-6) * max(_finite(speed_mps), 0.0) ** 2
+        )
+    if result.reynolds <= 0.0:
+        result.reynolds = safe_div(
+            max(_finite(speed_mps), 0.0) * 0.1,
+            max(_finite(kinematic_viscosity, 1.5e-5), 1.0e-12),
+            0.0,
+        )
+    return result
 
 
 # --------------------------------------------------------------------------
 # Structural stress bridge
 # --------------------------------------------------------------------------
+def allowable_stress_pa(aircraft: AircraftConfig) -> float:
+    """Allowable fold stress of the airframe, in pascals.
+
+    The value is taken from :func:`physics.stress_domain.paper_allowable_stress`
+    whenever that module is importable, so the 6-DoF path, the heat map, the
+    GPU batch and the structural crash criterion all use **one** scale.  The
+    former local fallback used ``2.0e4 * gsm`` (2 MPa for 100 g/m^2 stock),
+    which was 1000x the allowable of the same airframe and made the stress
+    index mean two different things in one payload.
+    """
+    module = stress_module()
+    func = _resolve_callable(module, ("paper_allowable_stress",))
+    gsm = max(_finite(getattr(aircraft, "paper_gsm", 100.0), 100.0), 0.0)
+    stiffness = max(_finite(getattr(aircraft, "paper_stiffness", 0.35), 0.35), 0.0)
+    if func is not None:
+        try:
+            value = float(func(gsm, stiffness))
+            if math.isfinite(value) and value > 0.0:
+                return value
+        except Exception:
+            pass
+    # Same closed form as physics.stress_domain.paper_allowable_stress.
+    return (
+        ALLOWABLE_BASE_PA
+        * (gsm / 100.0) ** ALLOWABLE_GSM_EXPONENT
+        * (ALLOWABLE_STIFFNESS_OFFSET + ALLOWABLE_STIFFNESS_GAIN * stiffness)
+    )
+
+
 def _local_stress(
     aircraft: AircraftConfig,
     derived: Dict[str, float],
@@ -1074,7 +1078,7 @@ def _local_stress(
     root_moment = mass * load * gravity * span * (1.0 + 2.0 * taper) / (12.0 * (1.0 + taper))
     inertial = 0.0
     sigma = root_moment * lever / inertia
-    allowable = ALLOWABLE_STRESS_PA_PER_GSM * gsm
+    allowable = allowable_stress_pa(aircraft)
     return {
         "max_stress_pa": sigma,
         "allowable_stress_pa": allowable,
@@ -1186,6 +1190,11 @@ def stress_metrics(
                         )
                         return {
                             "max_stress_index": index_value,
+                            # The index IS the utilisation sigma / sigma_allow
+                            # (0 = safe, 1 = at the allowable).  It is reported
+                            # under both names so that the crash criterion and
+                            # the telemetry cannot drift apart again.
+                            "failure_index": index_value,
                             "max_stress_pa": sigma_value,
                             "root_moment_nm": moment,
                             "allowable_stress_pa": allowable,
@@ -1597,7 +1606,7 @@ def compute_ground_stations(
     r_nose = np.array([0.5 * mac, 0.0, 0.0], dtype=np.float64)
     r_ltip = np.array([-0.3 * mac, -semispan, 0.0], dtype=np.float64)
     r_rtip = np.array([-0.3 * mac, semispan, 0.0], dtype=np.float64)
-    r_tail = np.array([-0.7 * mac, 0.0, 0.015], dtype=np.float64)
+    r_tail = np.array([-0.7 * mac, 0.0, GROUND_KEEL_DEPTH_M], dtype=np.float64)
 
     q = quaternion
     z_nose = z_cg + float(body_to_world(q, r_nose)[2])
@@ -1749,6 +1758,10 @@ class FlightSimulator:
         self._diverged = False
         self._rolled_back = False
         self._bounce_count = 0
+        self._step_rejections = 0
+        self._predicted_rate_jump = 0.0
+        self._predicted_speed_jump = 0.0
+        self._last_quaternion_norm_error = 0.0
         self._record_enabled = True
         self._next_record_time = 0.0
         self._diagnostics_cache: Optional[Dict[str, Any]] = None
@@ -1816,19 +1829,32 @@ class FlightSimulator:
 
         A freely flying body has no gravity-driven orientation stiffness.
         Static pitch stability and pitch-rate damping belong to aero_domain.
+
+        Every term is proportional to the **dynamic pressure**, i.e. to the
+        square of the air-relative speed, so a body in free fall (or in still
+        air) feels no aerodynamic moment whatsoever.  The non-dimensional rate
+        ``p_hat = omega*b/(2V)`` is evaluated with the *actual* airspeed: the
+        former ``max(airspeed, 0.5)`` floor made the rate term finite for a
+        body in still air, which is exactly the airspeed-independent component
+        that has been removed here.
         """
         d_deg = _finite(effective_dihedral_deg) if effective_dihedral_deg is not None else _finite(self.aircraft.dihedral_deg)
         dihedral = math.sin(deg2rad(d_deg))
         moment = np.zeros(3, dtype=np.float64)
+        q_dyn = max(_finite(dynamic_pressure), 0.0)
+        airspeed = max(_finite(speed), 0.0)
+        if q_dyn <= 0.0 or airspeed <= 1.0e-9:
+            return moment
         area = max(self._derived["wing_area_m2"], 1.0e-9)
         span = max(self._derived["wingspan_m"], 1.0e-6)
-        airspeed = max(_finite(speed), 0.0)
         scale = airspeed / (airspeed + KEEL_DAMPING_CUTOFF_MPS)
-        rate_hat = span / (2.0 * max(airspeed, 0.5))
-        keel = max(_finite(dynamic_pressure), 0.0) * area * span * rate_hat * scale
+        # No airspeed floor: p_hat = omega * b / (2 V).  The dynamic pressure
+        # factor makes the whole moment vanish with the airspeed.
+        rate_hat = span / (2.0 * airspeed)
+        keel = q_dyn * area * span * rate_hat * scale
         moment[0] += keel * KEEL_ROLL_DAMPING * float(omega[0])
         moment[2] += keel * KEEL_YAW_DAMPING * float(omega[2])
-        moment[0] -= max(_finite(dynamic_pressure), 0.0) * area * span * 0.04 * dihedral * math.sin(deg2rad(beta_deg)) * scale
+        moment[0] -= q_dyn * area * span * 0.04 * dihedral * math.sin(deg2rad(beta_deg)) * scale
         return moment
 
     # -- lifecycle --------------------------------------------------------
@@ -1905,6 +1931,7 @@ class FlightSimulator:
         self._diverged = False
         self._rolled_back = False
         self._bounce_count = 0
+        self._step_rejections = 0
         self._diagnostics_cache = None
         self._stiffness_cache = None
         if bool(self.settings.collision_enabled):
@@ -1985,7 +2012,7 @@ class FlightSimulator:
         return value
 
     def _timestep_from(self, core: Dict[str, Any], y: np.ndarray, time_s: float) -> float:
-        """Combine the four CFL-style limits into one clamped step."""
+        """Combine the CFL-style limits into one clamped step."""
         dt_min = max(abs(_finite(self.settings.dt_min, 1.0e-5)), 1.0e-12)
         dt_max = max(_finite(self.settings.dt_max, 2.0e-2), dt_min)
         if not bool(self.settings.adaptive):
@@ -1995,7 +2022,13 @@ class FlightSimulator:
         if not bool(np.all(np.isfinite(omega))) or not bool(np.all(np.isfinite(velocity))):
             return dt_max
         rate = float(np.linalg.norm(omega))
-        speed = float(np.linalg.norm(velocity))
+        # The geometric update rule is applied to the **air-relative** speed.
+        # With the world speed a head wind would relax the limit (the world
+        # speed is small) exactly when the relative speed - and therefore the
+        # aerodynamic stiffness - is largest.
+        speed = float(core["speed"]) if core is not None else float(np.linalg.norm(velocity))
+        if not math.isfinite(speed) or speed < 0.0:
+            speed = float(np.linalg.norm(velocity))
         limits = [dt_max]
         if rate > 1.0e-9:
             limits.append(MAX_ATTITUDE_STEP_RAD / rate)
@@ -2019,8 +2052,9 @@ class FlightSimulator:
 
         * an **attitude limit** ``MAX_ATTITUDE_STEP_RAD / |omega|`` (the body may
           not rotate by more than 20 degrees in one step),
-        * a **translational limit** ``TRAVEL_FRACTION_PER_STEP * MAC / V`` (the
-          airframe may not travel more than half a mean chord),
+        * a **translational limit** ``TRAVEL_FRACTION_PER_STEP * MAC / V_rel``
+          (the airframe may not travel more than half a mean chord relative to
+          the *air*, not relative to the ground),
         * a **rate-change limit** ``MAX_RATE_CHANGE_RADPS / |omega_dot|`` (the
           local truncation-error estimate on the body rate),
         * a **stiff-mode limit** ``RK4_STIFFNESS_SAFETY / lambda`` keeping the
@@ -2055,14 +2089,20 @@ class FlightSimulator:
         wind = wind_vector(position, self.environment, time_s)
         relative = velocity - wind
         speed = float(np.linalg.norm(relative))
-        if speed > AERO_SPEED_CAP_MPS and speed > _EPS:
-            relative = relative * (AERO_SPEED_CAP_MPS / speed)
-            speed = AERO_SPEED_CAP_MPS
+        # The legacy airspeed cap is no longer applied: truncating the velocity
+        # evaluated every aerodynamic force at an airspeed the body does not
+        # experience, which made the acceleration inconsistent with the reported
+        # speed.  The validity of the aerodynamic model is published instead.
+        speed_capped = False
         gravity_body = world_to_body(quaternion, gravity_world)
         body_relative = world_to_body(quaternion, relative)
         alpha_deg, beta_deg = effective_alpha_beta(body_relative, gravity_body, self.environment)
         mach = safe_div(speed, max(air["sound_speed_mps"], 1.0), 0.0)
         reynolds = safe_div(speed * self._chord, max(air["kinematic_viscosity_m2s"], 1.0e-12), 0.0)
+        model_valid = bool(
+            mach <= MODEL_MACH_LIMIT
+            and MODEL_REYNOLDS_MIN <= reynolds <= MODEL_REYNOLDS_MAX
+        )
 
         # Dynamic pressure
         q_dyn = 0.5 * max(air["density_kgm3"], 1.0e-6) * speed * speed
@@ -2097,20 +2137,32 @@ class FlightSimulator:
         effective_alpha_deg = alpha_deg - aero_twist_deg
         effective_dihedral_deg = float(self.aircraft.dihedral_deg) + aero_dihedral_deg
 
-        # Passive Aeroelastic Morphing (AGENTS.md Section 2.1 & 8.2):
-        # High dynamic pressure during launch washes out trim elevator deflection to prevent
-        # pitching loops during vertical climb; at low dynamic pressure (apex / glide),
-        # paper elasticity restores trimmed elevon deflection smoothly without hard clamping.
+        # Passive Aeroelastic Morphing (SPEC 1.1):
+        #   delta_eff(q) = delta_trim / (1 + (q / q_aeroelastic) ** n_morph)
+        # with q_aeroelastic = scale_pa * paper_stiffness / aeroelastic_compliance.
+        # Both parameters were hard-coded literals (160.0 and 3.0) before; they
+        # are configuration now, so the morphing can actually be calibrated.
+        #
+        # The morphing is a **geometric** change of the trailing-edge
+        # deflection.  It therefore enters the aerodynamics through the
+        # elevon path (which produces the matching dC_L and dC_m), and it must
+        # NOT scale the camber ``cL0`` and the zero-lift moment ``cm0`` of the
+        # airframe: the previous implementation multiplied both by the same
+        # factor, so at high dynamic pressure the wing degenerated into a
+        # flat plate and the static stability that the morphing is supposed
+        # to protect disappeared exactly in the launch regime.
         aero_comp_gain = max(_finite(getattr(self.aircraft, "aeroelastic_compliance", 0.0)), 0.0)
         stiffness_val = max(_finite(self.aircraft.paper_stiffness, 0.35), 0.05)
         if aero_comp_gain > 0.0:
-            q_aeroelastic = 160.0 * stiffness_val / max(aero_comp_gain, 0.1)
+            pressure_scale = max(_finite(getattr(self.aircraft, "aeroelastic_pressure_scale_pa", 160.0), 160.0), 1.0)
+            morph_exponent = max(_finite(getattr(self.aircraft, "aeroelastic_morph_exponent", 3.0), 3.0), 0.5)
+            q_aeroelastic = pressure_scale * stiffness_val / max(aero_comp_gain, 0.1)
             pressure_ratio = safe_div(q_dyn, q_aeroelastic, 0.0)
-            morph_factor = 1.0 / (1.0 + (pressure_ratio ** 3.0))
+            morph_factor = 1.0 / (1.0 + (pressure_ratio ** morph_exponent))
             base_elevon = float(self.aircraft.elevon_deg)
             effective_elevon_deg = base_elevon * morph_factor
-            effective_cm0 = float(self.aircraft.cm0) * morph_factor
-            effective_cL0 = float(self.aircraft.cL0) * morph_factor
+            effective_cm0 = float(self.aircraft.cm0)
+            effective_cL0 = float(self.aircraft.cL0)
             compliance_deflection = 12.0 * aero_comp_gain * (pressure_ratio ** 1.5) / (1.0 + (pressure_ratio ** 1.5))
             trailing_edge_bend_deg = compliance_deflection
         else:
@@ -2169,11 +2221,17 @@ class FlightSimulator:
         angular_acceleration = angular_acceleration_body(self._inertia, omega, moment_body)
         specific_force_body = world_to_body(quaternion, acceleration - gravity_world)
         gravity_ref = abs(gravity)
-        g_load = (
-            abs(float(dot(specific_force_body, (0.0, 0.0, 1.0)))) / gravity_ref
-            if gravity_ref > 1.0e-9
-            else abs(float(specific_force_body[2]))
-        )
+        if gravity_ref > 1.0e-9:
+            # The load factor is the *resultant* specific force (the whole
+            # accelerometer reading), not only the wing-normal component: the
+            # structural model has to carry the bending load produced by the
+            # complete specific force.  The signed normal component is kept
+            # separately so that a push-over / inverted flight stays visible.
+            g_load = float(np.linalg.norm(specific_force_body)) / gravity_ref
+            nz = float(specific_force_body[2]) / gravity_ref
+        else:
+            g_load = float(np.linalg.norm(specific_force_body))
+            nz = float(specific_force_body[2])
         return {
             "position": position,
             "velocity": velocity,
@@ -2192,6 +2250,7 @@ class FlightSimulator:
             "mach": mach,
             "reynolds": reynolds,
             "g_load": g_load,
+            "nz": nz,
             "altitude": altitude,
             "aero": result,
             "air": air,
@@ -2199,6 +2258,8 @@ class FlightSimulator:
             "aeroelastic_twist_deg": aero_twist_deg,
             "trailing_edge_bend_deg": trailing_edge_bend_deg,
             "geometric_alpha_deg": alpha_deg,
+            "model_valid": model_valid,
+            "speed_capped": speed_capped,
         }
 
     def _derivative(self, y: np.ndarray, time_s: float, core: Optional[Dict[str, Any]] = None) -> np.ndarray:
@@ -2224,6 +2285,11 @@ class FlightSimulator:
         k3 = self._derivative(y0 + 0.5 * h * k2, time_s + 0.5 * h)
         k4 = self._derivative(y0 + h * k3, time_s + h)
         y1 = y0 + (h / 6.0) * (k1 + 2.0 * k2 + 2.0 * k3 + k4)
+        # The norm drift of the *raw* integrated quaternion is a genuine
+        # truncation-error indicator.  The check on the normalised quaternion
+        # would be vacuous (it is one by construction), so the raw deviation is
+        # recorded here and judged by the step-acceptance guard.
+        self._last_quaternion_norm_error = abs(float(np.linalg.norm(y1[6:10])) - 1.0)
         y1[6:10] = quaternion_normalize(y1[6:10])
         return y1
 
@@ -2244,21 +2310,40 @@ class FlightSimulator:
     def _step_is_acceptable(self, previous: StateVector, candidate: StateVector) -> bool:
         """Local truncation-error guard applied to every integrated sub-step.
 
-        A step is rejected when the body rate jumps by more than
-        :data:`MAX_RATE_JUMP_RADPS` or the velocity by more than
-        :data:`MAX_SPEED_JUMP_MPS`, both of which indicate that the explicit RK4
-        step has left its stable region rather than a genuine fast manoeuvre.
+        The *observed* jump of the body rate and of the velocity is compared
+        against the jump the local derivative **predicts** for this step
+        (``|omega_dot| * h`` and ``|a| * h``).  The derivative is already
+        available inside the integrator, so no extra force evaluation is
+        needed.  The absolute thresholds :data:`MAX_RATE_JUMP_RADPS` and
+        :data:`MAX_SPEED_JUMP_MPS` are the *floor* of the bound, so a
+        truncation-error criterion scales with the step size: the same
+        manoeuvre is accepted at ``h = 1 ms`` and rejected at ``h = 20 ms``
+        only when the predicted change says that it should be.
+
+        The quaternion norm is checked on the *raw* integrated quaternion (the
+        deviation recorded by :meth:`_rk4` before the renormalisation); the
+        normalised quaternion has unit norm by construction, so checking it
+        would be vacuous.
         """
         rate_jump = float(
             np.linalg.norm(vec3(candidate.angular_velocity_radps) - vec3(previous.angular_velocity_radps))
         )
-        if not math.isfinite(rate_jump) or rate_jump > MAX_RATE_JUMP_RADPS:
+        if not math.isfinite(rate_jump):
+            return False
+        rate_limit = max(
+            MAX_RATE_JUMP_RADPS, (1.0 + STEP_ACCEPT_SAFETY) * self._predicted_rate_jump
+        )
+        if rate_jump > rate_limit:
             return False
         speed_jump = float(np.linalg.norm(vec3(candidate.velocity_mps) - vec3(previous.velocity_mps)))
-        if not math.isfinite(speed_jump) or speed_jump > MAX_SPEED_JUMP_MPS:
+        if not math.isfinite(speed_jump):
             return False
-        norm = float(np.linalg.norm(np.asarray(candidate.quaternion, dtype=np.float64)))
-        return math.isfinite(norm) and abs(norm - 1.0) <= 1.0e-6
+        speed_limit = max(
+            MAX_SPEED_JUMP_MPS, (1.0 + STEP_ACCEPT_SAFETY) * self._predicted_speed_jump
+        )
+        if speed_jump > speed_limit:
+            return False
+        return self._last_quaternion_norm_error <= QUATERNION_NORM_TOLERANCE
 
     def _apply_ground_contact(
         self, state: StateVector, prev_state: Optional[StateVector] = None
@@ -2388,91 +2473,140 @@ class FlightSimulator:
         x, y = float(state.position_m[0]), float(state.position_m[1])
         vx, vy, vz = (float(value) for value in state.velocity_mps)
         omega = [float(value) for value in state.angular_velocity_radps]
-        damping = 1.0 / (1.0 + max(_finite(self.environment.ground_friction), 0.0))
+        mu = max(_finite(self.environment.ground_friction), 0.0)
+        restitution = clamp(_finite(self.settings.restitution, 0.0), 0.0, 1.0)
+        tip_restitution = _finite(getattr(self.settings, "tip_restitution", -1.0), -1.0)
         landed = False
         crashed = False
         new_vz = vz
 
-        # Check wingtip strikes before main body contact (altitude_cg > 0 but wingtip below ground)
-        wingtip_contact = altitude_cg > 0.0 and (alt_ltip <= 0.0 or alt_rtip <= 0.0)
-        if wingtip_contact:
-            m = float(self.aircraft.mass_kg)
-            v_pre = np.array([vx, vy, vz], dtype=np.float64)
-            w_pre = np.asarray(omega, dtype=np.float64)
-            e_pre = 0.5 * m * float(np.dot(v_pre, v_pre)) + 0.5 * float(w_pre @ self._inertia @ w_pre)
+        mass = max(self._mass, 1.0e-12)
+        inertia = np.asarray(self._inertia, dtype=np.float64)
+        inertia_inv = np.linalg.pinv(inertia)
+        velocity = np.array([vx, vy, vz], dtype=np.float64)
+        rates = np.array(omega, dtype=np.float64)
+        e_pre = 0.5 * mass * float(velocity @ velocity) + 0.5 * float(rates @ inertia @ rates)
 
-            # Asymmetric wingtip strike introduces ground cartwheel torque & damping
-            omega[0] *= damping * 0.4
-            omega[2] *= damping * 0.4
-            if alt_ltip <= 0.0 and alt_rtip > 0.0:
-                # Left tip caught ground: imparts positive roll (rightward tilt) and yaw torque
-                omega[0] += 2.0 * damping
-                omega[2] -= 1.5 * damping
-            elif alt_rtip <= 0.0 and alt_ltip > 0.0:
-                # Right tip caught ground: imparts negative roll (leftward tilt) and yaw torque
-                omega[0] -= 2.0 * damping
-                omega[2] += 1.5 * damping
-            vx *= damping
-            vy *= damping
-            if vz > 0.0:
-                new_vz = -clamp(_finite(self.settings.restitution, 0.0), 0.0, 0.5) * vz
+        # Body-frame contact stations (x forward, y right, z down).
+        mac = max(float(self._derived.get("mac_m", 0.08)), 1.0e-3)
+        semispan = max(float(self._derived.get("wingspan_m", 0.20)), 1.0e-3) * 0.5
+        r_nose = np.array([0.5 * mac, 0.0, 0.0], dtype=np.float64)
+        r_ltip = np.array([-0.3 * mac, -semispan, 0.0], dtype=np.float64)
+        r_rtip = np.array([-0.3 * mac, semispan, 0.0], dtype=np.float64)
+        r_keel = np.array([0.0, 0.0, GROUND_KEEL_DEPTH_M], dtype=np.float64)
+
+        def _resolve_contact(r_body: np.ndarray, e_coef: float) -> float:
+            """Resolve the impulsive contact at one station.
+
+            The contact is an impulse applied at the station.  The normal
+            impulse follows from the restitution law, the tangential impulse is
+            bounded by the Coulomb cone ``|J_t| <= mu |J_n|``, and the impulse
+            is applied as a force pair (``v += J/m``, ``omega += I^-1 (r x J)``).
+            The angular momentum about the CG is then conserved by
+            construction, so the cartwheel produced by a wingtip strike
+            emerges from the geometry and scales with the impact energy
+            instead of being injected as a constant angular rate.
+            """
+            nonlocal velocity, rates
+            r_world = body_to_world(state.quaternion, r_body)
+            v_point = velocity + np.cross(rates, r_world)
+            v_normal = float(v_point[2])  # +z points down
+            if v_normal <= 0.0:
+                return 0.0
+            normal = np.array([0.0, 0.0, 1.0], dtype=np.float64)
+            lever = np.cross(r_world, normal)
+            inv_term = 1.0 / mass + float(lever @ (inertia_inv @ lever))
+            m_eff = 1.0 / max(inv_term, 1.0e-18)
+            j_normal = -(1.0 + e_coef) * m_eff * v_normal
+            impulse = np.array([0.0, 0.0, j_normal], dtype=np.float64)
+            tangential = v_point - v_normal * normal
+            tangential_speed = float(np.linalg.norm(tangential))
+            if tangential_speed > 1.0e-9:
+                j_t = min(mu * abs(j_normal), m_eff * tangential_speed)
+                impulse = impulse - j_t * (tangential / tangential_speed)
+            velocity = velocity + impulse / mass
+            rates = rates + inertia_inv @ np.cross(r_world, impulse)
+            return abs(j_normal)
+
+        # Check wingtip strikes before main body contact (altitude_cg > 0 but wingtip below ground)
+        tip_contact = (alt_ltip <= 0.0) or (alt_rtip <= 0.0)
+        # The keel underside is a LINE contact, so its resultant acts under the
+        # centre of gravity; the nose and the wingtips are point contacts whose
+        # offset from the CG produces the real pitch / roll response.  The
+        # previous 5-point proxy had no keel station, so a level airframe
+        # landed on its tail and the whole impact was resolved as a rotation
+        # about that point instead of a flat landing.
+        z_keel = float(state.position_m[2]) + float(body_to_world(state.quaternion, r_keel)[2])
+        alt_keel = -z_keel - _finite(self.environment.ground_level_m)
+        impact_speed = max(vz, 0.0)
+
+        if tip_contact and altitude_cg > 0.0:
+            # A wingtip fold is usually less elastic than the fuselage; the
+            # tip-specific value is optional and falls back to the body one.
+            e_tip = tip_restitution if tip_restitution >= 0.0 else restitution
+            touched = False
+            if alt_ltip <= 0.0:
+                touched = _resolve_contact(r_ltip, e_tip) > 0.0 or touched
+            if alt_rtip <= 0.0:
+                touched = _resolve_contact(r_rtip, e_tip) > 0.0 or touched
+            if touched:
                 self._bounce_count += 1
-                if vz > CRASH_IMPACT_SPEED_MPS:
+                if impact_speed > CRASH_IMPACT_SPEED_MPS:
+                    crashed = True
+        else:
+            # Body contact: resolve it at the deepest station.  The keel
+            # station wins ties, because the keel is a distributed line
+            # contact whose resultant is under the CG.
+            deepest = min(alt_nose, alt_keel, alt_tail)
+            if deepest <= 0.0:
+                if alt_keel <= deepest + 1.0e-12:
+                    body_station = r_keel
+                elif alt_nose <= alt_tail:
+                    body_station = r_nose
+                else:
+                    body_station = np.array(
+                        [-0.7 * mac, 0.0, GROUND_KEEL_DEPTH_M], dtype=np.float64
+                    )
+                if impact_speed > 0.0:
+                    _resolve_contact(body_station, restitution)
+                self._bounce_count += 1
+                grav = max(abs(_finite(self.environment.gravity)), 1.0e-9)
+                d_stop = max(
+                    _finite(getattr(self.settings, "ground_crush_stroke_m", 0.031), 0.031), 1.0e-6
+                )
+                # Load factor from the structural stop distance: n = 1 + v^2/(2 g d).
+                # The previous formulation assumed a fixed 0.08 s contact time
+                # (equivalent to a 31 mm stroke) and capped the result at 15 g, so
+                # every landing faster than ~12 m/s reported the same load.
+                impact_g = 1.0 + impact_speed * impact_speed / (2.0 * grav * d_stop)
+                air = atmosphere_state(self.environment, 0.0, self._chord)
+                impact_stress = stress_metrics(
+                    self.aircraft,
+                    self.environment,
+                    self._derived,
+                    dynamic_pressure_pa=0.5 * air["density_kgm3"] * impact_speed * impact_speed,
+                    g_load=impact_g,
+                    speed_mps=impact_speed,
+                    density_kgm3=air["density_kgm3"],
+                )
+                overstressed = bool(impact_stress.get("failure_index", 0.0) >= 1.0)
+                if impact_speed > CRASH_IMPACT_SPEED_MPS or overstressed:
                     crashed = True
 
-            # Inelastic collision dissipation limit: total mechanical energy cannot increase,
-            # and is bounded by E_pre * max(restitution^2, 0.5^2).
-            rest_val = clamp(_finite(self.settings.restitution, 0.0), 0.0, 1.0)
-            max_ratio = max(rest_val * rest_val, 0.25)
-            e_limit = e_pre * max_ratio
-
-            v_post = np.array([vx, vy, new_vz], dtype=np.float64)
-            w_post = np.asarray(omega, dtype=np.float64)
-            e_post = 0.5 * m * float(np.dot(v_post, v_post)) + 0.5 * float(w_post @ self._inertia @ w_post)
-
-            if e_post > e_limit and e_post > 1.0e-15:
-                scale = math.sqrt(e_limit / e_post)
-                vx *= scale
-                vy *= scale
-                new_vz *= scale
-                omega = [val * scale for val in omega]
-            elif e_pre <= 1.0e-15:
-                vx = 0.0
-                vy = 0.0
-                new_vz = 0.0
-                omega = [0.0, 0.0, 0.0]
-
-        # Nose strike at high impact speed (crumple deceleration)
-        if alt_nose <= 0.0 and vx > 5.0:
-            # Paper nose crumple absorbs energy rapidly
-            crumple_loss = 0.5 * damping
-            vx *= crumple_loss
-            vy *= damping
-            omega[1] *= damping * 0.3
-
-        if vz > 0.0 and not wingtip_contact:
-            impact = vz
-            grav = max(abs(_finite(self.environment.gravity)), 1.0e-9)
-            # Deceleration over ground contact crumple time (~0.08s)
-            impact_g = 1.0 + min(abs(impact) / (0.08 * grav), 15.0)
-            air = atmosphere_state(self.environment, 0.0, self._chord)
-            impact_stress = stress_metrics(
-                self.aircraft,
-                self.environment,
-                self._derived,
-                dynamic_pressure_pa=0.5 * air["density_kgm3"] * impact * impact,
-                g_load=impact_g,
-                speed_mps=impact,
-                density_kgm3=air["density_kgm3"],
-            )
-            self._bounce_count += 1
-            new_vz = -clamp(_finite(self.settings.restitution, 0.0), 0.0, 1.0) * impact
-            vx *= damping
-            vy *= damping
-            omega = [value * damping * 0.5 for value in omega]
-            # Only declare crashed if impact speed is violent or catastrophic overstress occurs
-            if impact > CRASH_IMPACT_SPEED_MPS or (impact > 15.0 and impact_stress["max_stress_index"] >= 1.0):
-                crashed = True
+        # Safety net: an impulsive resolution cannot create energy, but guard
+        # against any numerical overshoot.  The bound is E_post <= E_pre - the
+        # previous implementation used a fixed fraction (max(e^2, 0.25)), which
+        # authorised a 25 % energy retention even for a perfectly inelastic
+        # impact and made the wingtip and the body enforce different budgets.
+        vx, vy, new_vz = (float(velocity[0]), float(velocity[1]), float(velocity[2]))
+        omega = [float(rates[0]), float(rates[1]), float(rates[2])]
+        e_post = 0.5 * mass * float(velocity @ velocity) + 0.5 * float(rates @ inertia @ rates)
+        if e_pre > 0.0 and e_post > e_pre * (1.0 + 1.0e-9):
+            scale = math.sqrt(e_pre / e_post)
+            velocity = velocity * scale
+            rates = rates * scale
+            vx, vy, new_vz = (float(velocity[0]), float(velocity[1]), float(velocity[2]))
+            omega = [float(rates[0]), float(rates[1]), float(rates[2])]
         # If any station penetrates ground plane, push altitude so lowest station is at ground level
         new_z = float(state.position_m[2])
         if min_alt < 0.0:
@@ -2490,10 +2624,18 @@ class FlightSimulator:
                 vy = 0.0
                 omega = [0.0, 0.0, 0.0]
             else:
-                # Sliding friction
-                vx *= damping * 0.8
-                vy *= damping * 0.8
-                omega = [value * damping * 0.3 for value in omega]
+                # Sliding friction: Coulomb deceleration ``a = mu g`` over the
+                # contact interval, so the tangential speed decreases
+                # monotonically towards zero instead of being multiplied by a
+                # magic factor that ignored the normal force.
+                grav = max(abs(_finite(self.environment.gravity)), 1.0e-9)
+                h_contact = max(_finite(getattr(self.settings, "dt_max", 0.02), 0.02), 1.0e-6)
+                decel = mu * grav * h_contact
+                speed = math.hypot(vx, vy)
+                if speed > 1.0e-12:
+                    factor = max(0.0, 1.0 - decel / speed)
+                    vx *= factor
+                    vy *= factor
 
         if crashed:
             new_vz = 0.0
@@ -2501,17 +2643,14 @@ class FlightSimulator:
             vy = 0.0
             omega = [0.0, 0.0, 0.0]
 
-        # Ground attitude settling (align to ground plane: roll -> 0, pitch -> 0)
-        roll, pitch, yaw = euler_zyx_from_quaternion(state.quaternion)
-        if landed:
-            q_final = quaternion_from_euler(0.0, 0.0, yaw)
-            new_q = tuple(float(v) for v in q_final)
-        else:
-            settle_rate = 0.25
-            new_roll = roll * (1.0 - settle_rate)
-            new_pitch = pitch * (1.0 - settle_rate)
-            q_settled = quaternion_from_euler(new_roll, new_pitch, yaw)
-            new_q = tuple(float(v) for v in q_settled)
+        # The attitude is never edited directly any more.  The contact response
+        # is the impulse resolved above, which changes the angular velocity
+        # through the moment of the contact force, so the attitude follows
+        # from the dynamics.  The previous implementation rotated the airframe
+        # towards level by 25 % per sub-step with no torque, no contact
+        # reaction and no friction work, which was an artificial attitude
+        # restoring torque.
+        new_q = tuple(float(value) for value in state.quaternion)
 
         return StateVector(
             time_s=state.time_s,
@@ -2654,7 +2793,12 @@ class FlightSimulator:
             "mach": core["mach"],
             "ld_ratio": result.ld_ratio,
             "g_load": core["g_load"],
-            "max_stress_index": clamp(stress["max_stress_index"], 0.0, 1.0),
+            # The stress index is the *utilisation* sigma / sigma_allow.  It is
+        # deliberately NOT clamped to [0, 1]: clipping it destroyed the
+        # overstress signal, so the structural-failure crash criterion could
+        # never fire and the optimiser could not distinguish a design at the
+        # allowable from one five times past it.
+        "max_stress_index": max(_finite(stress["max_stress_index"], 0.0), 0.0),
             "max_stress_pa": stress["max_stress_pa"],
             "max_stress_index_raw": stress["max_stress_index"],
             "root_moment_nm": stress["root_moment_nm"],
@@ -2758,16 +2902,25 @@ class FlightSimulator:
         """Advance one sub-step; roll back and halve on divergence.
 
         Returns ``True`` when the state was advanced.  A rejected step (non-finite
-        state, speed / altitude / body-rate cap violation or a rate jump beyond
-        the truncation-error bound) restores the previous state, halves the step
+        state, speed / altitude / body-rate cap violation or a jump beyond the
+        truncation-error bound) restores the previous state, halves the step
         and retries, bounded by :data:`DIVERGENCE_RETRIES`.  When the retries are
         exhausted the previous state is restored, ``diverged`` is latched and the
         airframe is frozen as a crash.
+
+        Every rejection increments :attr:`_step_rejections` so that a
+        numerically-artefacted trajectory can be told apart from a physical one.
         """
         previous = self._state
         step = h
+        if k1 is None:
+            k1 = self._derivative(y0, time_s)
         for attempt in range(DIVERGENCE_RETRIES + 1):
             candidate = _unpack(self._rk4(y0, step, time_s, k1), time_s + step)
+            # Change the local derivative predicts for this step; it is the
+            # scale the observed jump is judged against.
+            self._predicted_rate_jump = float(np.linalg.norm(vec3(k1[10:13]))) * step
+            self._predicted_speed_jump = float(np.linalg.norm(vec3(k1[3:6]))) * step
             if self._within_limits(candidate) and self._step_is_acceptable(previous, candidate):
                 candidate.time_s = time_s + step
                 self._state = candidate
@@ -2775,6 +2928,7 @@ class FlightSimulator:
                 if attempt > 0:
                     self._rolled_back = True
                 return True
+            self._step_rejections += 1
             step *= 0.5
         self._diagnostics_cache = None
         self._diverged = True
@@ -2871,7 +3025,9 @@ class FlightSimulator:
             if sample.altitude_m > max_altitude:
                 max_altitude = sample.altitude_m
                 apogee_time = sample.time_s
-            if sample.speed_mps >= SPEED_STAT_FLOOR_MPS:
+            if sample.speed_mps >= SPEED_STAT_FLOOR_MPS and not _is_contact_sample(
+                sample, samples, self._state.landed or self._state.crashed
+            ):
                 max_ld = max(max_ld, abs(sample.ld_ratio))
             max_stress_index = max(max_stress_index, _finite(sample.max_stress_index))
             max_stress_pa = max(max_stress_pa, _finite(sample.max_stress_pa))
@@ -2971,6 +3127,30 @@ class FlightSimulator:
 # --------------------------------------------------------------------------
 # Optimiser entry point
 # --------------------------------------------------------------------------
+def _is_contact_sample(
+    sample: FlightLogSample,
+    samples: Sequence[FlightLogSample],
+    contact_ended: bool = False,
+) -> bool:
+    """``True`` for the sample recorded immediately after a ground contact.
+
+    The ground contact is resolved before the sample is written, so the last
+    sample of a landing flight carries the contact impulse: the vertical
+    velocity has just been reversed and the air-relative velocity points
+    steeply downwards.  Its ``|L/D|`` is therefore a downforce transient of
+    the bounce -- 13.8 for a glider whose real best glide ratio is 7.8 -- and
+    it must not enter the glide-performance statistics.
+
+    ``contact_ended`` says that the flight did end in a contact; the sample
+    that carries the impulse is then the last one that was recorded.
+    """
+    if not samples or sample is not samples[-1]:
+        return False
+    if contact_ended:
+        return True
+    return bool(sample.landed) or bool(sample.crashed) or _finite(sample.altitude_m, 0.0) <= 0.0
+
+
 def _trim_residual_cm(
     aircraft: AircraftConfig,
     environment: EnvironmentConfig,
@@ -3068,6 +3248,8 @@ def evaluate_flight(
         "glide_entry_time_s": None,
         "stable_glide_duration_s": 0.0,
         "apex_recovery_status": "not_observed",
+        "error": None,
+        "error_id": None,
     }
     try:
         aircraft = (
@@ -3096,8 +3278,25 @@ def evaluate_flight(
         simulator = FlightSimulator(aircraft, environment, launch, settings)
         summary = simulator.simulate(duration_s=total, record=True)
         samples = simulator.history()
-    except Exception:
-        return empty
+    except FlightDivergenceError as exc:
+        # A physical divergence: the integration left its stable region.  The
+        # status is reported as such and the reason is kept for the audit.
+        return {**empty, "status": "diverged", "error": str(exc)}
+    except (ValueError, KeyError, TypeError, IndexError) as exc:
+        # An implementation error (bad configuration, unexpected payload).  It
+        # must never be reported as a legitimate 0 m flight: the optimiser
+        # scores the distance and would select a broken design over a
+        # genuinely poor one.
+        import logging
+        import uuid
+
+        logging.getLogger(__name__).exception("Flight evaluation failed")
+        return {
+            **empty,
+            "status": "error",
+            "error": type(exc).__name__,
+            "error_id": uuid.uuid4().hex,
+        }
     return summarize_flight(simulator, summary)
 
 
@@ -3186,7 +3385,13 @@ def summarize_flight(simulator: FlightSimulator, summary: Optional[Dict[str, Any
         if sample.altitude_m > max_altitude:
             max_altitude = sample.altitude_m
             apogee_time = sample.time_s
-        if sample.speed_mps >= SPEED_STAT_FLOOR_MPS and abs(sample.ld_ratio) > max_ld:
+        if (
+            sample.speed_mps >= SPEED_STAT_FLOOR_MPS
+            and abs(sample.ld_ratio) > max_ld
+            and not _is_contact_sample(
+                sample, samples, str(summary.get("status", "")) in ("landed", "crashed")
+            )
+        ):
             max_ld = abs(sample.ld_ratio)
             best = sample
         max_stress_index = max(max_stress_index, _finite(sample.max_stress_index))
@@ -3215,7 +3420,7 @@ def summarize_flight(simulator: FlightSimulator, summary: Optional[Dict[str, Any
         "flight_time_s": max(_finite(summary.get("flight_time_s", 0.0)), 0.0),
         "max_altitude_m": max(_finite(max_altitude), 0.0),
         "max_ld_ratio": max(_finite(max_ld), 0.0),
-        "max_stress_index": clamp(_finite(max_stress_index), 0.0, 1.0),
+        "max_stress_index": max(_finite(max_stress_index), 0.0),
         "max_stress_pa": max(_finite(max_stress_pa), 0.0),
         "launch_speed_mps": max(_finite(launch_speed), 0.0),
         "stall_margin": _finite(stall_margin, 0.0),
@@ -3227,6 +3432,8 @@ def summarize_flight(simulator: FlightSimulator, summary: Optional[Dict[str, Any
         "status": status,
         "apogee_time_s": max(_finite(apogee_time), 0.0),
         "post_apogee_time_s": max(_finite(summary.get("flight_time_s", 0.0)) - apogee_time, 0.0),
+        "error": summary.get("error"),
+        "error_id": summary.get("error_id"),
     }
     payload.update(flight_phase_metrics(samples, launch.flight_mode))
     return {key: payload[key] for key in EVALUATE_KEYS}

@@ -24,13 +24,31 @@ from physics.config_schema import (
 # ==============================================================================
 
 def test_fixed_timestep_convergence():
-    """Verify simulation states at a fixed in-flight time converge systematically as dt is refined."""
+    """Verify simulation states at a fixed in-flight time converge systematically as dt is refined.
+
+    The step sizes must live in the **resolved** regime, i.e. below the
+    stiffness-resolved step of the integrator.  A step above that limit is
+    rejected by the truncation-error guard and silently halved, so the
+    trajectory is no longer the one the nominal ``dt`` asks for: comparing a
+    rejected trajectory with a resolved one measures the chaotic sensitivity
+    of the airframe, not the discretisation error.
+
+    The scenario is a 4 g dart with a 3.5e-6 kg m^2 pitch inertia, released at
+    8 m/s.  It tumbles violently (|omega| reaches 100 rad/s), so the
+    point-wise trajectory is genuinely chaotic and the *successive* differences
+    between two step sizes are only meaningful once the step is fine enough
+    to resolve the motion.  The previous step ladder (0.02 / 0.01 / 0.005 s)
+    sat entirely *above* the resolved limit, which is why it produced
+    non-monotone differences.
+    """
     ac = AircraftConfig(mass_kg=0.004, wingspan_m=0.20, wing_area_m2=0.02)
     env = EnvironmentConfig(wind_speed=0.0, gust_intensity=0.0, thermal_strength=0.0)
     lnc = LaunchConfig(launch_speed=8.0, launch_angle_deg=0.0, launch_height_m=5.0)
 
-    # Evaluate across a sequence of halved fixed time steps for duration 0.4s
-    dts = [0.02, 0.01, 0.005]
+    # Evaluate across a sequence of halved fixed time steps for duration 0.4s.
+    # The ladder straddles the resolved limit: 0.0025 s is still partially
+    # rejected, 0.00125 s and below are fully resolved.
+    dts = [0.0025, 0.00125, 0.000625]
     distances = []
     altitudes = []
 
@@ -52,6 +70,11 @@ def test_fixed_timestep_convergence():
 
     # Discretization differences must decrease monotonically as dt is refined
     assert diffs_dist[-1] < diffs_dist[0]
+    assert diffs_alt[-1] < diffs_alt[0]
+
+    # The refinement has to be meaningful: the coarse step must not already be
+    # converged, otherwise the comparison above would be vacuous.
+    assert diffs_dist[0] > 1.0e-4
 
     # Relative difference between finest steps must be well within 0.1%
     assert diffs_dist[-1] / max(distances[-1], 1e-3) < 0.005

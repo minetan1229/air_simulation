@@ -97,7 +97,11 @@ def test_separated_pressure_drag_uses_projected_area(cfg, env, alpha):
 
 
 def test_pressure_drag_transition_is_continuous_and_preserves_attached_polar(cfg):
-    for threshold in (cfg.stall_alpha_deg, -max(cfg.stall_alpha_deg + 15.0, 30.0)):
+    # The separated drag starts at the stall angle.  The airframe is
+    # symmetric, so the same angle applies in both directions: the previous
+    # implementation used a wider negative threshold (max(stall+15, 30)),
+    # which made the drag build up 16 deg later on the negative side.
+    for threshold in (cfg.stall_alpha_deg, -cfg.stall_alpha_deg):
         values = [aero_domain.separated_pressure_drag_coefficient(threshold + offset, cfg)
                   for offset in (-1e-5, 0.0, 1e-5)]
         assert max(values) < 1e-10
@@ -106,7 +110,9 @@ def test_pressure_drag_transition_is_continuous_and_preserves_attached_polar(cfg
 
 
 def test_negative_stall_flag_and_margin_use_same_threshold(cfg, env):
-    threshold = max(cfg.stall_alpha_deg + 15.0, 30.0)
+    # The airframe is symmetric, so the stall flag and the stall margin use
+    # the same threshold in both directions.
+    threshold = cfg.stall_alpha_deg
     boundary = evaluate_aero(cfg, env, 6.0, -threshold)
     beyond = evaluate_aero(cfg, env, 6.0, -threshold - 1.0)
     assert boundary.stall_margin == pytest.approx(0.0, abs=1e-12)
@@ -608,7 +614,17 @@ def test_evaluate_aero_forces_match_their_definitions(cfg: AircraftConfig, env: 
     assert dynamic == pytest.approx(0.5 * density_of(env) * speed * speed, rel=1e-12)
     assert result.lift_n == pytest.approx(dynamic * area * result.cl, rel=1e-12)
     assert result.drag_n == pytest.approx(dynamic * area * result.cd, rel=1e-12)
-    assert result.side_n == pytest.approx(dynamic * area * cfg.cy_beta * deg2rad(beta), rel=1e-12)
+    # The side force follows the linear side-force derivative in attached flow
+    # and is bounded by the flat-plate limit in broadside flow (a body
+    # broadside to the flow carries a BOUNDED side force, not an unbounded
+    # linear function of beta).
+    beta_rad = deg2rad(beta)
+    flat_side = 2.0 * math.sin(beta_rad) * math.cos(beta_rad) ** 2
+    cy_linear = cfg.cy_beta * beta_rad
+    expected_cy = (
+        cy_linear if abs(cy_linear) <= abs(flat_side) else math.copysign(abs(flat_side), cy_linear)
+    )
+    assert result.side_n == pytest.approx(dynamic * area * expected_cy, rel=1e-12)
     assert result.pitching_moment_nm == pytest.approx(dynamic * area * chord * result.cm, rel=1e-12)
 
     p_hat = rates[0] * span / (2.0 * speed)

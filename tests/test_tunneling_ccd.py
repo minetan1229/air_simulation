@@ -76,11 +76,18 @@ def test_high_speed_penetration_ccd_clamps_to_ground_and_interpolates_time():
 
 
 def test_ccd_prevents_false_penetration_crash_and_preserves_rebound():
-    """Verify that a moderate descent speed (e.g. vz = 8 m/s) that penetrates past
+    """Verify that a survivable descent that penetrates past the tolerance
 
-    tolerance (min_alt < -0.05) in a single large step is resolved at the ground surface
-    by CCD, preserving the restitution bounce instead of falsely triggering a deep
-    penetration immediate crash.
+    (min_alt < -0.05) in a single large step is resolved at the ground surface by
+    CCD, preserving the restitution bounce instead of falsely triggering the
+    deep penetration immediate crash.
+
+    The impact speed is 3 m/s: the structural criterion of the repaired ground
+    contact (wing-root stress against the airframe's own allowable stress) is
+    evaluated with the *same* scale as the stress telemetry, and an 8 m/s
+    vertical impact exceeds that limit.  The structural failure of a hard
+    impact is covered by
+    :func:`test_hard_vertical_impact_is_a_structural_failure_not_a_penetration_crash`.
     """
     aircraft = AircraftConfig(name="bounce_plane")
     env = EnvironmentConfig(ground_level_m=0.0)
@@ -91,7 +98,7 @@ def test_ccd_prevents_false_penetration_crash_and_preserves_rebound():
     prev_state = StateVector(
         time_s=0.0,
         position_m=(0.0, 0.0, -0.035),
-        velocity_mps=(0.0, 0.0, 8.0),
+        velocity_mps=(0.0, 0.0, 3.0),
         quaternion=(1.0, 0.0, 0.0, 0.0),
         angular_velocity_radps=(0.0, 0.0, 0.0),
         landed=False,
@@ -101,7 +108,7 @@ def test_ccd_prevents_false_penetration_crash_and_preserves_rebound():
     curr_state = StateVector(
         time_s=0.01,
         position_m=(0.0, 0.0, 0.045),
-        velocity_mps=(0.0, 0.0, 8.0),
+        velocity_mps=(0.0, 0.0, 3.0),
         quaternion=(1.0, 0.0, 0.0, 0.0),
         angular_velocity_radps=(0.0, 0.0, 0.0),
         landed=False,
@@ -119,12 +126,55 @@ def test_ccd_prevents_false_penetration_crash_and_preserves_rebound():
 
     # Must clamp to ground surface
     assert abs(st_contact["min_alt"]) <= 0.005, f"Expected min_alt ~ 0, got {st_contact['min_alt']}"
-    # Must NOT be crashed because impact speed (8 m/s) is within structural survivability
-    assert contact_state.crashed is False, "Moderate impact must rebound, not crash"
+    # Must NOT be crashed because the impact is within structural survivability
+    assert contact_state.crashed is False, "Survivable impact must rebound, not crash"
     # vz must rebound upward (negative in NED world frame)
     assert contact_state.velocity_mps[2] < 0.0, (
         f"Expected rebound vz < 0, got {contact_state.velocity_mps[2]}"
     )
+
+
+def test_hard_vertical_impact_is_a_structural_failure_not_a_penetration_crash():
+    """A hard 8 m/s vertical impact must be reported as a structural failure.
+
+    The failure has to come from the *structural* criterion (the wing-root
+    stress against the airframe's own allowable stress, the same scale the
+    telemetry uses), and not from the deep-penetration guardrail: the contact
+    is still resolved at the ground surface by the CCD.
+    """
+    aircraft = AircraftConfig(name="bounce_plane")
+    env = EnvironmentConfig(ground_level_m=0.0)
+    settings = SimulationSettings(collision_enabled=True, restitution=0.5)
+    sim = FlightSimulator(aircraft, env, settings=settings)
+
+    prev_state = StateVector(
+        time_s=0.0,
+        position_m=(0.0, 0.0, -0.035),
+        velocity_mps=(0.0, 0.0, 8.0),
+        quaternion=(1.0, 0.0, 0.0, 0.0),
+        angular_velocity_radps=(0.0, 0.0, 0.0),
+        landed=False,
+        crashed=False,
+    )
+    curr_state = StateVector(
+        time_s=0.01,
+        position_m=(0.0, 0.0, 0.045),
+        velocity_mps=(0.0, 0.0, 8.0),
+        quaternion=(1.0, 0.0, 0.0, 0.0),
+        angular_velocity_radps=(0.0, 0.0, 0.0),
+        landed=False,
+        crashed=False,
+    )
+
+    contact_state = sim._apply_ground_contact(curr_state, prev_state)
+    st_contact = compute_ground_stations(contact_state.position_m, contact_state.quaternion, env, sim._derived)
+
+    assert contact_state.crashed is True, "An 8 m/s vertical impact must fail structurally"
+    # The contact was resolved on the surface: the deep-penetration guardrail
+    # would have left the airframe 6 cm below the ground.
+    assert abs(st_contact["min_alt"]) <= 0.005, f"Expected min_alt ~ 0, got {st_contact['min_alt']}"
+    # The impact instant is interpolated, not the end of the step.
+    assert 0.0 < contact_state.time_s < curr_state.time_s
 
 
 def test_ccd_does_not_affect_genuine_underground_spawn():

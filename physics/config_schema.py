@@ -248,7 +248,7 @@ class AircraftConfig:
     mass_kg: float = 0.0050
     paper_gsm: float = 100.0
     paper_stiffness: float = 0.35  # 0..1 normalised bending stiffness
-    sheet_area_m2: float = 0.0200  # unfolded sheet area
+    sheet_area_m2: float = 0.0500  # unfolded sheet area (0.05 m2 x 100 g/m2 = 5 g == mass_kg)
 
     # --- planform --------------------------------------------------------
     wing_area_m2: float = 0.0150
@@ -286,6 +286,11 @@ class AircraftConfig:
     # the next ~30 deg, i.e. a slope of order -0.03 /deg.  A much steeper value
     # (e.g. -0.35) drives |C_L| past 7 by 40 deg past stall, which is not
     # physical and lets a tumbling airframe generate multi-weight forces.
+    # NOTE: the post-stall lift branch is now anchored on the published
+    # Hoerner flat-plate limit (2 sin(a) cos^2(a)) through a monotone
+    # transition, so this slope no longer sets the shape of the deep-stall
+    # curve (the linear ramp was the source of the lift-free notch between
+    # 41 and 45 deg).  The field is kept for API compatibility.
     post_stall_slope: float = -0.03
     re_cd0_exponent: float = 0.15
 
@@ -314,11 +319,27 @@ class AircraftConfig:
 
     # --- advanced physics: aeroelasticity & low-Re thin plate -------------
     polhamus_kv: float = 0.0  # leading-edge vortex suction gain (0 -> standard thin wing)
+    # Potential (two-dimensional) lift slope K_p of the Polhamus suction
+    # analogy.  The published relation is
+    #   C_L = K_p sin(a) cos^2(a) + K_v sin^2(a) cos(a).
+    # 0 keeps the airframe's own three-dimensional Helmbold slope (the default,
+    # and the physically correct slope for a low aspect ratio wing); a
+    # positive value switches the attached-flow branch onto the published
+    # Polhamus form with that explicit K_p.
+    polhamus_kp: float = 0.0
     step_trip_ratio: float = 0.0  # fold step height to chord ratio (turbulator effect, 0..0.02)
     cp_shift_gain: float = 0.0  # dynamic center of pressure shift with alpha (0..1.0)
     aeroelastic_flex: float = 0.0  # dynamic dihedral flex gain with dynamic pressure (0..1.0)
     aeroelastic_twist: float = 0.0  # wingtip washout twist gain with dynamic pressure (0..1.0)
     aeroelastic_compliance: float = 0.0  # dynamic camber compliance gain under launch pressure (0..5.0)
+    # Passive aeroelastic morphing (SPEC 1.1): the trailing-edge trim deflection
+    # washes out with dynamic pressure,
+    #   delta_eff(q) = delta_trim / (1 + (q / q_aeroelastic) ** n_morph)
+    # with q_aeroelastic = scale_pa * paper_stiffness / aeroelastic_compliance.
+    # Both parameters were previously hard-coded literals (160.0 and 3.0) and
+    # could not be calibrated; they are configuration now.
+    aeroelastic_morph_exponent: float = 3.0  # n_morph (dimensionless)
+    aeroelastic_pressure_scale_pa: float = 160.0  # q_aeroelastic scale (Pa)
     paper_grain_angle_deg: float = 0.0  # paper fiber angle: 0 = MD (longitudinal), 90 = CD (transverse)
     paper_anisotropy_ratio: float = 1.8  # E_MD / E_CD ratio (typical paper 1.5..2.2)
     added_mass_enabled: bool = False  # apparent mass tensor for lightweight bodies
@@ -400,11 +421,14 @@ class AircraftConfig:
             static_margin=clamp(self.static_margin, -1.0, 1.0),
             cg_offset_x=clamp(self.cg_offset_x, -1.0, 1.0),
             polhamus_kv=clamp(self.polhamus_kv, 0.0, 5.0),
+            polhamus_kp=clamp(self.polhamus_kp, 0.0, 12.0),
             step_trip_ratio=clamp(self.step_trip_ratio, 0.0, 0.05),
             cp_shift_gain=clamp(self.cp_shift_gain, 0.0, 2.0),
             aeroelastic_flex=clamp(self.aeroelastic_flex, 0.0, 5.0),
             aeroelastic_twist=clamp(self.aeroelastic_twist, 0.0, 5.0),
             aeroelastic_compliance=clamp(self.aeroelastic_compliance, 0.0, 5.0),
+            aeroelastic_morph_exponent=clamp(self.aeroelastic_morph_exponent, 0.5, 12.0),
+            aeroelastic_pressure_scale_pa=clamp(self.aeroelastic_pressure_scale_pa, 1.0, 1.0e4),
             paper_grain_angle_deg=clamp(self.paper_grain_angle_deg, -90.0, 90.0),
             paper_anisotropy_ratio=clamp(self.paper_anisotropy_ratio, 1.0, 5.0),
             added_mass_enabled=bool(self.added_mass_enabled),
@@ -478,6 +502,14 @@ class EnvironmentConfig:
     wind_tunnel_speed: float = 12.0
     wind_tunnel_alpha_deg: float = 4.0  # Angle of attack on test bench (degrees)
     wind_tunnel_beta_deg: float = 0.0   # Sideslip angle on test bench (degrees)
+    # Tunnel geometry and flow quality.  These were previously hard-coded
+    # literals inside wind_domain; they are configuration now so that the
+    # tunnel boundary correction can actually be reached from the API.
+    wind_tunnel_blockage: float = 1.035  # velocity ratio in the contracted section
+    wind_tunnel_turbulence_intensity: float = 0.005  # free-stream TI
+    wind_tunnel_radius_m: float = 2.5  # test-section radius
+    wind_tunnel_wall_thickness_m: float = 0.15  # wall boundary-layer thickness
+    wind_tunnel_boundary_correction: bool = False  # apply the wall boundary layer
 
     def clamp_ranges(self) -> "EnvironmentConfig":
         """Return a copy with every scalar forced inside its legal range."""
@@ -509,6 +541,11 @@ class EnvironmentConfig:
             wind_tunnel_enabled=bool(self.wind_tunnel_enabled),
             wind_tunnel_speed=clamp(self.wind_tunnel_speed, 0.0, 200.0),
             wind_tunnel_alpha_deg=clamp(self.wind_tunnel_alpha_deg, -90.0, 90.0),
+            wind_tunnel_blockage=clamp(self.wind_tunnel_blockage, 0.5, 2.0),
+            wind_tunnel_turbulence_intensity=clamp(self.wind_tunnel_turbulence_intensity, 0.0, 0.5),
+            wind_tunnel_radius_m=clamp(self.wind_tunnel_radius_m, 0.1, 50.0),
+            wind_tunnel_wall_thickness_m=clamp(self.wind_tunnel_wall_thickness_m, 1.0e-3, 5.0),
+            wind_tunnel_boundary_correction=bool(self.wind_tunnel_boundary_correction),
             wind_tunnel_beta_deg=clamp(self.wind_tunnel_beta_deg, -90.0, 90.0),
         )
 
@@ -934,6 +971,14 @@ class SimulationSettings:
     adaptive: bool = True
     collision_enabled: bool = True
     restitution: float = 0.15
+    # Coefficient of restitution for a wingtip strike.  Negative means "use
+    # the body value"; a positive value overrides it (a wingtip fold is
+    # usually less elastic than the fuselage).
+    tip_restitution: float = -1.0
+    # Structural stop distance used to convert an impact speed into a load
+    # factor: n = 1 + v^2 / (2 g d).  31 mm is the crumple stroke of a
+    # folded paper keel; it replaces the previous hard-coded 0.08 s time.
+    ground_crush_stroke_m: float = 0.031
 
     def clamp_ranges(self) -> "SimulationSettings":
         """Return a copy with simulation parameters constrained to safe numerical limits."""
@@ -953,6 +998,8 @@ class SimulationSettings:
             adaptive=bool(self.adaptive),
             collision_enabled=bool(self.collision_enabled),
             restitution=clamp(self.restitution, 0.0, 1.0),
+            tip_restitution=clamp(self.tip_restitution, -1.0, 1.0),
+            ground_crush_stroke_m=clamp(self.ground_crush_stroke_m, 1.0e-4, 1.0),
         )
 
 
@@ -1324,11 +1371,31 @@ def derived_properties(cfg: AircraftConfig) -> Dict[str, float]:
     mac = (2.0 / 3.0) * root_chord * (1.0 + taper + taper * taper) / (1.0 + taper)
     sheet_area = max(float(cfg.sheet_area_m2), 1.0e-9)
     mass = max(float(cfg.mass_kg), 1.0e-9)
-    # Uniform, chord-centred trapezoidal sheet. Integrate c(y)*y^2 and
-    # c(y)^3/12 across the span; a rectangular sheet recovers m*b^2/12
-    # and m*c^2/12. Imported meshes can supply the full body-frame tensor.
-    second_y = span * span * (1.0 + 3.0 * taper) / (24.0 * (1.0 + taper))
-    second_x = root_chord * root_chord * (1.0 + taper + taper**2 + taper**3) / (24.0 * (1.0 + taper))
+    # Uniform, chord-centred trapezoidal sheet.  The second moments below are
+    # taken about the **sheet's own centre of mass**, i.e. the parallel-axis
+    # term is included, because the roll/pitch inertia enters Euler's equation
+    # about the CG.  For a linearly tapered sheet with root chord ``c_root``,
+    # span ``b`` and taper ``lambda`` (c(y) = c_root (1 - (1-L) 2y/b)):
+    #
+    #   y_cg = b (1 + 2L) / (3 (1 + L))            spanwise, measured from the root
+    #   x_cg = c_root (1 + L + L^2) / (3 (1 + L))  chordwise, measured from the LE
+    #   E[(y - y_cg)^2] = b^2 [ (1+3L)/(6(1+L)) - (1+2L)^2/(9(1+L)^2) ]
+    #
+    # The bracket reduces to 1/12 for a rectangular sheet (b^2/12) and to 1/18
+    # for a triangular one (b^2/18) - the textbook values.  The previous
+    # expression b^2 (1+3L)/(24(1+L)) was exact only for a rectangle (it
+    # omitted the parallel-axis shift), understating the triangular-wing
+    # inertia by 25 %.
+    second_y = span * span * (
+        (1.0 + 3.0 * taper) / (6.0 * (1.0 + taper))
+        - (1.0 + 2.0 * taper) ** 2 / (9.0 * (1.0 + taper) ** 2)
+    )
+    second_x = root_chord * root_chord * (
+        (1.0 + taper + taper ** 2 + taper ** 3) / (6.0 * (1.0 + taper))
+        - (1.0 + taper + taper ** 2) ** 2 / (9.0 * (1.0 + taper) ** 2)
+    )
+    second_y = max(second_y, 1.0e-12)
+    second_x = max(second_x, 1.0e-12)
     thickness = max(float(cfg.paper_gsm), 0.0) * 1.0e-3 / 800.0
     second_z = thickness * thickness / 12.0
     inertia_roll = mass * (second_y + second_z)
@@ -1343,6 +1410,10 @@ def derived_properties(cfg: AircraftConfig) -> Dict[str, float]:
         "taper_ratio": taper,
         "sheet_area_m2": sheet_area,
         "mass_kg": mass,
+        # Mass implied by the sheet material (m = gsm * A / 1000).  It is
+        # reported so that a mismatch against ``mass_kg`` (extra nose weight,
+        # a thicker stock, ...) is visible instead of silent.
+        "implied_mass_kg": max(float(cfg.paper_gsm), 0.0) * sheet_area / 1000.0,
         "ref_area_m2": float(cfg.ref_area_m2) if cfg.ref_area_m2 > 0.0 else area,
         # The aerodynamic reference length is the mean aerodynamic chord, the
         # length the moment / rate derivatives are referred to.  For the

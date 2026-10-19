@@ -357,7 +357,7 @@ def test_algorithm_payload_is_complete_and_finite(surrogate_path: bool, algorith
 
     assert result["pareto_front"]
     for member in result["pareto_front"]:
-        assert set(member) == {"objectives", "vector", "params", "physics"}
+        assert set(member) == {"objectives", "vector", "params", "physics", "verified"}
         assert set(member["objectives"]) == set(cfg.objectives)
         assert len(member["vector"]) == len(FAST_VARIABLES)
         assert all(finite(value) for value in member["vector"])
@@ -686,7 +686,8 @@ def test_optimiser_module_has_no_placeholder_tokens() -> None:
 
 def test_flight_evaluator_exposes_model_fidelity(surrogate_path):
     result = parallel_engine.evaluate_case({"aircraft": {}, "environment": {}, "launch": {}, "duration_s": .1})
-    assert result["model"] == "analytical_glide_surrogate"
+    assert result["model"] == "reduced_surrogate"
+    assert result["model_detail"] == "analytical_glide_surrogate"
     assert result["approximate"] is True
     assert result["physics_verification_eligible"] is False
 
@@ -697,7 +698,7 @@ def test_gpu_optimizer_batch_identifies_approximate_model():
         pytest.skip("CuPy CUDA device unavailable")
     rows = parallel_engine.gpu_batch_evaluate_cases([{"aircraft": {}, "environment": {}, "launch": {}, "duration_s": .1}]*2)
     assert len(rows) == 2
-    assert all(row["backend"] == "cupy" and row["model"] == "translational_ensemble" and row["approximate"] and not row["physics_verification_eligible"] for row in rows)
+    assert all(row["backend"] == "cupy" and row["model"] == "rigid_body_6dof" and row["model_detail"] == "rigid_body_6dof_batch" and not row["approximate"] and row["physics_verification_eligible"] for row in rows)
 
 
 def test_real_evaluator_metadata_does_not_claim_reduced_model(monkeypatch):

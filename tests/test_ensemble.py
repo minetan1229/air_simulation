@@ -111,7 +111,8 @@ def test_api_simulation_ensemble_endpoint():
 def test_ensemble_identifies_approximate_physics_even_on_gpu(force_cpu):
     from physics.parallel_engine import get_gpu_info
     result = gpu_ensemble_simulation(n_trajectories=8, settings={"duration_s":.2}, force_cpu=force_cpu)
-    assert result["model"] == "translational_ensemble"
+    assert result["model"] == "reduced_surrogate"
+    assert result["model_detail"] == "gpu_ensemble_3dof"
     assert result["approximate"] is True
     assert result["physics_verification_eligible"] is False
     assert any("apex" in limitation for limitation in result["limitations"])

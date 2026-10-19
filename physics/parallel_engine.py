@@ -44,6 +44,8 @@ import os
 import pickle
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, Union, cast
+
+import numpy as np
 ProgressCallback = Callable[[int, int, Any], None]
 
 from .config_schema import (
@@ -59,6 +61,17 @@ from .config_schema import (
     from_dict,
     safe_div,
 )
+from .aero_domain import elevon_effects, helmbold_cl_alpha
+from . import gpu_dynamics
+from .stress_domain import (
+    ALLOWABLE_BASE_PA,
+    ALLOWABLE_GSM_EXPONENT,
+    ALLOWABLE_STIFFNESS_GAIN,
+    ALLOWABLE_STIFFNESS_OFFSET,
+    paper_allowable_stress,
+    stress_field,
+)
+from .wind_domain import wind_direction_unit, wind_flow_components
 
 __all__ = [
     "MAX_AUTO_WORKERS",
@@ -103,8 +116,92 @@ FLIGHT_RESULT_KEYS: Tuple[str, ...] = (
 _WORKER_ID: int = -1
 _WORKER_PID: int = os.getpid()
 
-#: Paper burst strength used to normalise the stress heat-map index (Pa).
-_STRESS_LIMIT_PA: float = 1.2e5
+#: Model tag of the full 6-DoF rigid-body integrator
+#: (:mod:`physics.flight_sim`).  Every other path in this module is a
+#: reduced-order surrogate and is tagged :data:`REDUCED_MODEL_TAG`.
+RIGID_BODY_MODEL_TAG = "rigid_body_6dof"
+
+#: Model tag of every reduced-order path of this module.  The GPU ensemble
+#: and the GPU optimisation batch integrate a **3-DoF point mass with an
+#: explicit Euler step and clipped states**, not the 13-state rigid body of
+#: :data:`RIGID_BODY_MODEL_TAG`; the analytical glide surrogate is a closed
+#: form without any attitude dynamics at all.  The audit found the three
+#: paths disagreeing by 1261x on the peak stress and even on the flight
+#: status, so every payload has to name the model it was produced with.
+REDUCED_MODEL_TAG = "reduced_surrogate"
+
+
+def _vector_lift_coefficient(
+    xp: Any,
+    alpha: Any,
+    cl0_base: Any,
+    cl_alpha: float,
+    cl_max: float,
+    stall_alpha_rad: float,
+    blend_deg: float = 45.0,
+    sharpness: float = 1.4,
+    blend_order: int = 4,
+) -> Any:
+    """Lift coefficient of the shared aerodynamic kernel.
+
+    Thin adapter over :func:`physics.aero_kernel.lift_coefficient`: the GPU
+    paths used to carry a private copy of the lift curve, and the copy had
+    drifted -- a different stall blend, a different post-stall branch and a
+    lift curve clipped to ``[-0.6, cl_max]`` so the deep-stall branch could
+    never be reached.  Routing every path through the kernel is what makes
+    the GPU evaluate the *same* airframe as the 6-DoF path.
+
+    The kernel works in degrees; the caller works in radians.
+    """
+    from .aero_kernel import lift_coefficient
+
+    alpha_deg = xp.rad2deg(xp.asarray(alpha, dtype=xp.float64))
+    stall_alpha_deg = xp.rad2deg(xp.asarray(stall_alpha_rad, dtype=xp.float64))
+    return lift_coefficient(
+        xp,
+        alpha_deg,
+        xp.asarray(cl0_base, dtype=xp.float64),
+        xp.asarray(cl_alpha, dtype=xp.float64),
+        stall_alpha_deg,
+        sharpness,
+        cl_max=cl_max,
+        blend_order=blend_order,
+    )
+
+
+def _vector_drag_coefficient(
+    xp: Any,
+    alpha: Any,
+    cd0: float,
+    k_induced: float,
+    cl: Any,
+    ge_factor: Any,
+    stall_alpha_rad: float,
+    blend_deg: float = 15.0,
+) -> Any:
+    """Drag coefficient of the shared aerodynamic kernel.
+
+    The separated-flow term is the Hoerner form ``2 sin^2(a) + C_D0 cos(a)``
+    and the induced drag carries the Wieselsberger ground-effect factor, so
+    the polar of this path is the polar of the reference path.  The kernel
+    works in degrees; the caller works in radians.
+    """
+    from .aero_kernel import separated_pressure_drag_coefficient
+
+    alpha_deg = xp.rad2deg(xp.asarray(alpha, dtype=xp.float64))
+    stall_alpha_deg = xp.rad2deg(xp.asarray(stall_alpha_rad, dtype=xp.float64))
+    separated = separated_pressure_drag_coefficient(
+        xp,
+        alpha_deg,
+        stall_alpha_deg,
+        xp.asarray(cd0, dtype=xp.float64),
+        blend_deg=blend_deg,
+    )
+    return (
+        xp.asarray(cd0, dtype=xp.float64)
+        + xp.asarray(k_induced, dtype=xp.float64) * (cl ** 2) * ge_factor
+        + separated
+    )
 
 
 def get_gpu_info() -> Dict[str, Any]:
@@ -463,7 +560,12 @@ def evaluate_flight_surrogate(
     ld_ratio = clamp(ld_finite * lift_scale, 0.05, 120.0)
 
     # --- airspeed, wind and stall speed -----------------------------------
-    wind_x = float(env.wind_speed) * math.cos(deg2rad(float(env.wind_direction_deg)))
+    # The wind component is taken from the shared meteorological convention
+    # (see :func:`physics.wind_domain.wind_flow_components`): the previous
+    # ``cos(direction)`` term was a 90 deg rotation of the reference path, so
+    # the same "north wind" pushed the surrogate sideways.
+    flow_x, flow_y = wind_flow_components(float(env.wind_direction_deg))
+    wind_x = float(env.wind_speed) * flow_x
     launch_speed = max(float(lau.launch_speed), 0.0)
     launch_angle = deg2rad(clamp(float(lau.launch_angle_deg), -30.0, 60.0))
     roll = deg2rad(clamp(float(lau.launch_roll_deg), -90.0, 90.0))
@@ -496,7 +598,12 @@ def evaluate_flight_surrogate(
     load_factor = clamp(safe_div(cl_flight * dynamic_pressure * area,
                                  max(mass * gravity, 1.0e-9), 1.0), 0.0, 40.0)
     stress_pa = 0.5 * dynamic_pressure * area * span * (1.0 + 0.15 * load_factor)
-    stress_index = clamp(stress_pa / _STRESS_LIMIT_PA, 0.0, 1.0)
+    # The stress index is the *utilisation* sigma / sigma_allow against the
+    # airframe's own allowable fold stress.  The former fixed 120 kPa
+    # reference was 54.5x the allowable stress of the default stock, so the
+    # same payload reported 0.0113 (6-DoF) and 1.50 (GPU) for one flight.
+    allowable_pa = max(paper_allowable_stress(air.paper_gsm, air.paper_stiffness), 1.0e-9)
+    stress_index = clamp(stress_pa / allowable_pa, 0.0, 1.0)
 
     # --- static / dynamic stability index ----------------------------------
     stability = (
@@ -592,8 +699,9 @@ def evaluate_case(case: Dict[str, Any]) -> Dict[str, Any]:
         try:
             result = module.evaluate_flight(aircraft, environment, launch, duration, dt_max)
             if isinstance(result, dict):
-                return {**result, "model": "rigid_body_6dof", "approximate": False,
-                        "physics_verification_eligible": not bool(result.get("status") in ("failed", "diverged")),
+                return {**result, "model": RIGID_BODY_MODEL_TAG, "model_detail": "6dof_rk4",
+                        "approximate": False,
+                        "physics_verification_eligible": not bool(result.get("status") in ("failed", "diverged", "error")),
                         "limitations": ["Aerodynamic and material coefficients require experimental calibration."]}
         except Exception as exc:
             return {
@@ -616,6 +724,10 @@ def evaluate_case(case: Dict[str, Any]) -> Dict[str, Any]:
                 "diverged": True,
                 "landed": False,
                 "backend": "error",
+                "model": RIGID_BODY_MODEL_TAG,
+                "model_detail": "6dof_rk4",
+                "approximate": False,
+                "physics_verification_eligible": False,
             }
     return evaluate_flight_surrogate(aircraft, environment, launch, duration, dt_max)
 
@@ -706,10 +818,38 @@ def parallel_evaluate(
 # --------------------------------------------------------------------------
 # GPU ensemble batch simulation (CuPy with NumPy fallback)
 # --------------------------------------------------------------------------
-def _approximate_model_metadata(model: str) -> Dict[str, Any]:
-    """Identify reduced-order outputs separately from the repaired 6-DoF model."""
+def _rigid_body_model_metadata(model_detail: str) -> Dict[str, Any]:
+    """Identify a payload that was produced by the full 6-DoF rigid body.
+
+    The GPU batch integrates the same 13-state rigid body as the reference
+    path -- same aerodynamic kernel, same wind field, same structural model
+    and the same RK4 scheme -- so its numbers are 6-DoF numbers and may be
+    used for physics verification.  Before the batch was rewritten it
+    integrated a 3-DoF point mass and reported a peak stress 1261x away from
+    the reference path; such a payload is a surrogate and must carry
+    :data:`REDUCED_MODEL_TAG` instead.
+    """
     return {
-        "model": model,
+        "model": RIGID_BODY_MODEL_TAG,
+        "model_detail": model_detail,
+        "approximate": False,
+        "physics_verification_eligible": True,
+        "limitations": [],
+    }
+
+
+def _approximate_model_metadata(model_detail: str) -> Dict[str, Any]:
+    """Identify reduced-order outputs separately from the full 6-DoF model.
+
+    Every reduced path reports ``model = REDUCED_MODEL_TAG`` and names the
+    concrete surrogate in ``model_detail``.  The audit showed the three
+    reduced paths disagreeing with the 6-DoF path by 1261x on the peak
+    stress and even on the flight status, so a consumer must never mistake
+    a surrogate number for a 6-DoF number.
+    """
+    return {
+        "model": REDUCED_MODEL_TAG,
+        "model_detail": model_detail,
         "approximate": True,
         "physics_verification_eligible": False,
         "limitations": [
@@ -838,9 +978,11 @@ def gpu_ensemble_simulation(
     w_dir_base = float(env_cfg.wind_direction_deg)
     w_speed = xp.maximum(w_speed_base + xp.random.normal(0.0, wind_spd_std, size=N), 0.0)
     w_dir_rad = xp.deg2rad(w_dir_base + xp.random.normal(0.0, wind_dir_std, size=N))
-    # Wind vector blowing towards (WMO FROM convention: wx = -speed*cos(dir), wy = -speed*sin(dir))
-    wx = -w_speed * xp.cos(w_dir_rad)
-    wy = -w_speed * xp.sin(w_dir_rad)
+    # Wind vector blowing *along* the flow (WMO "from" convention, shared with
+    # the reference path through :func:`physics.wind_domain.wind_flow_components`:
+    # flow = -(sin(theta), cos(theta))).
+    wx = -w_speed * xp.sin(w_dir_rad)
+    wy = -w_speed * xp.cos(w_dir_rad)
     wz = xp.zeros(N, dtype=xp.float64)
     wind = xp.stack([wx, wy, wz], axis=1)
 
@@ -855,7 +997,17 @@ def gpu_ensemble_simulation(
     gravity = abs(float(env_cfg.gravity))
 
     elevon_deg = float(getattr(air_cfg, "elevon_deg", 2.0))
-    cL0_base = float(air_cfg.cL0) + 0.02 * elevon_deg
+    # The camber of the airframe itself must not be scaled by the morphing
+    # factor: only the *elevon* contribution washes out with the dynamic
+    # pressure.  Scaling the whole cL0 removed the camber (and with it the
+    # static stability) exactly in the high-q launch regime.
+    cL0_airframe = float(air_cfg.cL0)
+    # Elevon authority: the reference path scales the per-degree increment by
+    # the deflected chord fraction (``elevon_chord_ratio``).  The local copy
+    # used a bare 0.02/0.03 per degree, i.e. 4.5x too much authority, so the
+    # two paths trimmed to different angles of attack for the same elevon.
+    elevon = elevon_effects(elevon_deg, air_cfg)
+    cL0_base = cL0_airframe + float(elevon["dcl"])
     cl_max = float(air_cfg.cl_max)
     cd0 = max(float(air_cfg.cd0), 0.015)
     oswald_e = clamp(float(air_cfg.oswald_e), 0.4, 0.95)
@@ -863,19 +1015,29 @@ def gpu_ensemble_simulation(
 
     cl_alpha = float(air_cfg.cLalpha_per_rad)
     if cl_alpha <= 0.0:
-        cl_alpha = (2.0 * math.pi * aspect_ratio) / (2.0 + math.sqrt(aspect_ratio**2 + 4.0))
+        # The single Helmbold implementation of :mod:`physics.aero_domain`.
+        # The local copy used ``2 pi AR / (2 + sqrt(AR^2 + 4))``, which drops
+        # the taper term and the ``4 AR / pi`` factor: 11.3 % more lift slope
+        # than the reference path for the same airframe.
+        cl_alpha = helmbold_cl_alpha(aspect_ratio, float(getattr(air_cfg, "taper_ratio", 0.7)))
 
-    cm0_base = float(air_cfg.cm0) - 0.03 * elevon_deg
+    cm0_base = float(air_cfg.cm0) + float(elevon["dcm"])
     cm_alpha = float(air_cfg.cm_alpha)
     cm_q = float(air_cfg.cm_q)
     alpha_trim_rad = -cm0_base / cm_alpha if abs(cm_alpha) > 1e-4 else math.radians(4.0)
     alpha_trim_rad = clamp(alpha_trim_rad, -math.radians(8.0), math.radians(22.0))
     stall_alpha_rad = math.radians(float(air_cfg.stall_alpha_deg))
 
-    # Aeroelastic compliance parameters
+    # Aeroelastic compliance parameters (same closed form as the 6-DoF path:
+    # q_aeroelastic = scale_pa * stiffness / compliance).
     aero_comp_gain = max(float(getattr(air_cfg, "aeroelastic_compliance", 0.0)), 0.0)
     stiffness_val = max(float(air_cfg.paper_stiffness), 0.05)
-    q_aeroelastic = 160.0 * stiffness_val / max(aero_comp_gain, 0.1) if aero_comp_gain > 0.0 else 5000.0
+    if aero_comp_gain > 0.0:
+        pressure_scale = max(float(getattr(air_cfg, "aeroelastic_pressure_scale_pa", 160.0)), 1.0)
+        q_aeroelastic = pressure_scale * stiffness_val / max(aero_comp_gain, 0.1)
+    else:
+        q_aeroelastic = 5000.0
+    morph_exponent = max(float(getattr(air_cfg, "aeroelastic_morph_exponent", 3.0)), 0.5)
 
     # Control asymmetries
     aileron = float(getattr(air_cfg, "aileron_deg", 0.0))
@@ -943,7 +1105,7 @@ def gpu_ensemble_simulation(
         # Passive aeroelastic morphing factor
         if aero_comp_gain > 0.0:
             p_ratio = q_dyn / q_aeroelastic
-            morph_factor = 1.0 / (1.0 + (p_ratio ** 3.0))
+            morph_factor = 1.0 / (1.0 + (p_ratio ** morph_exponent))
         else:
             morph_factor = 1.0
 
@@ -974,20 +1136,24 @@ def gpu_ensemble_simulation(
         # Effective AoA with pitch dynamics
         alpha = xp.clip(theta - gamma, -0.35, 0.60)
 
-        # Stall modeling: linear up to stall_alpha_rad, smooth post-stall drop
-        is_stalled = xp.abs(alpha) > stall_alpha_rad
-        cl_linear = (cL0_base * morph_factor) + cl_alpha * alpha
-        # Viterna-like flat-plate cross flow post-stall
-        cl_post_stall = xp.sign(alpha) * (0.85 * xp.sin(2.0 * xp.abs(alpha)))
-        cl = xp.where(is_stalled, cl_post_stall, xp.clip(cl_linear, -0.6, cl_max))
+        # Stall modelling: the same Hoerner-anchored post-stall branch and the
+        # same smooth stall blend as the reference 6-DoF path.
+        cl = _vector_lift_coefficient(
+            xp,
+            alpha,
+            cL0_base * morph_factor + cL0_airframe * (1.0 - morph_factor),
+            cl_alpha,
+            cl_max,
+            stall_alpha_rad,
+        )
 
-        # Ground effect induced drag reduction
+        # Ground effect induced drag reduction (Wieselsberger)
         alt_m = xp.maximum(-pos[:, 2], 0.02)
         h_b = alt_m / span
         ge_factor = (16.0 * (h_b ** 2)) / (1.0 + 16.0 * (h_b ** 2))
-        cd_induced = k_induced * (cl ** 2) * ge_factor
-        cd_stall_increment = xp.where(is_stalled, 0.35 * (1.0 - xp.cos(alpha)), 0.0)
-        cd = cd0 + cd_induced + cd_stall_increment
+        cd = _vector_drag_coefficient(
+            xp, alpha, cd0, k_induced, cl, ge_factor, stall_alpha_rad
+        )
 
         lift_mag = q_dyn * area * cl
         drag_mag = q_dyn * area * cd
@@ -1279,7 +1445,7 @@ def gpu_ensemble_simulation(
     return {
         "backend": backend,
         "backend_display": backend_display,
-        **_approximate_model_metadata("translational_ensemble"),
+        **_approximate_model_metadata("gpu_ensemble_3dof"),
         "device_name": device_name,
         "gpu_available": bool(backend == "cupy"),
         "trajectories_count": N,
@@ -1388,311 +1554,158 @@ def gpu_batch_evaluate_cases(
 
     backend = "cupy"
     device_name = gpu_info.get("device_name")
+    return evaluate_cases_on_device(
+        cases, xp, backend=backend, device_name=device_name, progress_cb=progress_cb
+    )
 
 
-    # 1. Vectorize inputs across all N cases
-    masses = []
-    areas = []
-    spans = []
-    ars = []
-    cl0s = []
-    cl_alphas = []
-    cl_maxs = []
-    cd0s = []
-    k_induceds = []
-    dihedrals = []
-    roll_dampings = []
-    cl_asyms = []
-    durations = []
-    rhos = []
-    gravities = []
-    v0s = []
-    pitchs = []
-    rolls = []
-    yaws = []
-    h0s = []
-    wind_speeds = []
-    wind_dirs = []
-    gsms = []
-    stiffnesses = []
+def evaluate_cases_on_device(
+    cases: Sequence[Dict[str, Any]],
+    xp: Any,
+    backend: str = "numpy",
+    device_name: Optional[str] = None,
+    progress_cb: Optional[ProgressCallback] = None,
+) -> List[Dict[str, Any]]:
+    """Integrate a batch of flight cases with the shared 6-DoF rigid body.
 
-    for c in cases:
-        ac = c.get("aircraft")
+    The array module ``xp`` selects the device: ``cupy`` for the GPU and
+    ``numpy`` for the CPU.  Both evaluate the *same* expressions, so the
+    result of this function is the 6-DoF result -- not a surrogate of it.
+
+    The function is public so the parity with the reference path can be
+    asserted in the test suite on a machine without a GPU.
+    """
+    import numpy as np
+
+    N = len(cases)
+    if N == 0:
+        return []
+
+    # The GPU batch integrates the **same 13-state rigid body** as the 6-DoF
+    # path (position, velocity, quaternion, body rates) with the same RK4
+    # scheme, the same aerodynamic kernel, the same wind field and the same
+    # structural model.  The path used to integrate a 3-DoF point mass with
+    # an explicit Euler step and ten artificial clamps, and it reported the
+    # peak wing-root stress 1261x away from the reference path.
+    #
+    # The atmosphere, the gravity and the wind field are properties of the
+    # *environment*, so the cases are grouped by environment and each group is
+    # integrated as one vectorised batch.  A parameter sweep normally uses a
+    # single environment, so this is one batch.
+    groups: Dict[Any, List[int]] = {}
+    aircrafts: List[AircraftConfig] = []
+    environments: List[EnvironmentConfig] = []
+    launches: List[LaunchConfig] = []
+    durations: List[float] = []
+    for index, case in enumerate(cases):
+        ac = case.get("aircraft")
         if not isinstance(ac, AircraftConfig):
             ac = from_dict(AircraftConfig, ac or {})
-        env = c.get("environment")
+        env = case.get("environment")
         if not isinstance(env, EnvironmentConfig):
             env = from_dict(EnvironmentConfig, env or {})
-        lnc = c.get("launch")
+        lnc = case.get("launch")
         if not isinstance(lnc, LaunchConfig):
             lnc = from_dict(LaunchConfig, lnc or {})
+        aircrafts.append(ac)
+        environments.append(env)
+        launches.append(lnc)
+        durations.append(clamp(float(case.get("duration_s", 20.0)), 0.1, 120.0))
+        groups.setdefault(_environment_key(env), []).append(index)
 
-        der = derived_properties(ac)
-        dur = float(c.get("duration_s", 20.0))
+    results: List[Dict[str, Any]] = [{} for _ in range(N)]
+    completed = 0
+    for members in groups.values():
+        env = environments[members[0]]
+        group_aircraft = [aircrafts[i] for i in members]
+        group_launch = [launches[i] for i in members]
+        group_durations = [durations[i] for i in members]
 
-        masses.append(max(float(der["mass_kg"]), 1e-4))
-        areas.append(max(float(der["wing_area_m2"]), 1e-4))
-        spans.append(max(float(der["wingspan_m"]), 1e-3))
-        aspect_ratio = max(float(der["aspect_ratio"]), 0.5)
-        ars.append(aspect_ratio)
-        cl0s.append(float(ac.cL0))
-        cl_maxs.append(float(ac.cl_max))
-        cd0_val = max(float(ac.cd0), 0.015)
-        cd0s.append(cd0_val)
-        oswald_e = clamp(float(ac.oswald_e), 0.4, 0.95)
-        k_induceds.append(1.0 / (math.pi * oswald_e * aspect_ratio))
+        params = gpu_dynamics.build_params(xp, group_aircraft, env)
+        initial = xp.asarray(
+            np.stack(
+                [
+                    gpu_dynamics.launch_state_vector(lnc, env, ac)
+                    for lnc, ac in zip(group_launch, group_aircraft)
+                ]
+            ),
+            dtype=xp.float64,
+        )
+        batch = gpu_dynamics.simulate_batch(
+            xp,
+            params,
+            initial,
+            xp.asarray(group_durations, dtype=xp.float64),
+            2.0e-2,
+        )
 
-        cl_alpha = float(ac.cLalpha_per_rad)
-        if cl_alpha <= 0.0:
-            cl_alpha = (2.0 * math.pi * aspect_ratio) / (2.0 + math.sqrt(aspect_ratio**2 + 4.0))
-        cl_alphas.append(cl_alpha)
+        state = _to_host(xp, batch["state"])
+        distance = _to_host(xp, batch["distance_m"])
+        flight_time = _to_host(xp, batch["flight_time_s"])
+        stress_pa = _to_host(xp, batch["peak_stress_pa"])
+        stress_index = _to_host(xp, batch["peak_stress_index"])
+        max_g = _to_host(xp, batch["peak_load_factor"])
+        max_q = _to_host(xp, batch["peak_dynamic_pressure_pa"])
+        max_ld = _to_host(xp, batch["max_ld_ratio"])
+        stability = _to_host(xp, batch["stability"])
+        landed = _to_host(xp, batch["landed"])
+        crashed = _to_host(xp, batch["crashed"])
+        stall_margin = _to_host(xp, batch["stall_margin"])
 
-        dihedrals.append(math.radians(max(float(ac.dihedral_deg), 0.0)))
-        roll_dampings.append(max(abs(float(ac.cl_roll_rate)), 0.08))
-        aileron = float(getattr(ac, "aileron_deg", 0.0))
-        asym_cl = float(getattr(ac, "asymmetry_cl", 0.0))
-        cl_asyms.append(0.0035 * aileron + 0.25 * asym_cl)
-
-        durations.append(clamp(dur, 1.0, 60.0))
-        rhos.append(float(isa_air_density(float(env.altitude_m))))
-        gravities.append(abs(float(env.gravity)))
-
-        v0s.append(max(float(lnc.launch_speed), 0.1))
-        pitchs.append(math.radians(float(lnc.launch_angle_deg)))
-        rolls.append(math.radians(float(lnc.launch_roll_deg)))
-        yaws.append(math.radians(float(lnc.launch_yaw_deg)))
-        h0s.append(max(float(lnc.launch_height_m), 0.05))
-
-        wind_speeds.append(max(float(env.wind_speed), 0.0))
-        wind_dirs.append(math.radians(float(env.wind_direction_deg)))
-        gsms.append(max(float(ac.paper_gsm), 10.0))
-        stiffnesses.append(max(float(ac.paper_stiffness), 0.01))
-
-    # Transfer parameters to GPU device arrays
-    mass = xp.array(masses, dtype=xp.float64)
-    area = xp.array(areas, dtype=xp.float64)
-    span = xp.array(spans, dtype=xp.float64)
-    cl0 = xp.array(cl0s, dtype=xp.float64)
-    cl_a = xp.array(cl_alphas, dtype=xp.float64)
-    cl_mx = xp.array(cl_maxs, dtype=xp.float64)
-    cd0 = xp.array(cd0s, dtype=xp.float64)
-    k_ind = xp.array(k_induceds, dtype=xp.float64)
-    dih = xp.array(dihedrals, dtype=xp.float64)
-    r_damp = xp.array(roll_dampings, dtype=xp.float64)
-    c_asym = xp.array(cl_asyms, dtype=xp.float64)
-    rho = xp.array(rhos, dtype=xp.float64)
-    grav = xp.array(gravities, dtype=xp.float64)
-    v0_arr = xp.array(v0s, dtype=xp.float64)
-    pitch_rad = xp.array(pitchs, dtype=xp.float64)
-    roll_rad = xp.array(rolls, dtype=xp.float64)
-    yaw_rad = xp.array(yaws, dtype=xp.float64)
-    h0_arr = xp.array(h0s, dtype=xp.float64)
-    w_spd = xp.array(wind_speeds, dtype=xp.float64)
-    w_dir = xp.array(wind_dirs, dtype=xp.float64)
-    gsm_arr = xp.array(gsms, dtype=xp.float64)
-    stiff_arr = xp.array(stiffnesses, dtype=xp.float64)
-
-    # Initial velocities and positions
-    vx = v0_arr * xp.cos(pitch_rad) * xp.cos(yaw_rad)
-    vy = v0_arr * xp.cos(pitch_rad) * xp.sin(yaw_rad)
-    vz = -v0_arr * xp.sin(pitch_rad)
-    vel = xp.stack([vx, vy, vz], axis=1)
-    pos = xp.stack([xp.zeros(N, dtype=xp.float64), xp.zeros(N, dtype=xp.float64), -h0_arr], axis=1)
-
-    # Wind vectors
-    wx = w_spd * xp.cos(w_dir)
-    wy = w_spd * xp.sin(w_dir)
-    wz = xp.zeros(N, dtype=xp.float64)
-    wind = xp.stack([wx, wy, wz], axis=1)
-
-    dt = 0.01
-    max_duration = max(durations)
-    max_steps = int(max_duration / dt)
-
-    duration_arr = xp.array(durations, dtype=xp.float64)
-    active = xp.ones(N, dtype=bool)
-    landing_time = xp.copy(duration_arr)
-    landing_pos = xp.zeros((N, 3), dtype=xp.float64)
-    phi = xp.copy(roll_rad)
-    p_rate = xp.zeros(N, dtype=xp.float64)
-
-    max_altitude_arr = xp.copy(h0_arr)
-    max_speed_arr = xp.copy(v0_arr)
-    max_ld_arr = xp.zeros(N, dtype=xp.float64)
-    max_g_arr = xp.zeros(N, dtype=xp.float64)
-    max_q_arr = xp.zeros(N, dtype=xp.float64)
-    min_stall_margin_arr = xp.full(N, 1.0, dtype=xp.float64)
-    stalled_arr = xp.zeros(N, dtype=bool)
-
-    # 2. Vectorized RK4/Euler flight simulation loop on GPU
-    for step in range(1, max_steps + 1):
-        t = step * dt
-
-        v_rel = vel - wind
-        v_horiz = xp.sqrt(v_rel[:, 0] ** 2 + v_rel[:, 1] ** 2)
-        speed = xp.sqrt(v_horiz ** 2 + v_rel[:, 2] ** 2)
-        speed_safe = xp.maximum(speed, 0.2)
-
-        u_x = v_rel[:, 0] / speed_safe
-        u_y = v_rel[:, 1] / speed_safe
-        u_z = v_rel[:, 2] / speed_safe
-
-        gamma = xp.arctan2(-u_z, xp.maximum(v_horiz, 1e-4))
-        alpha_trim = 0.06
-        decay = math.exp(-3.5 * min(t, 2.0))
-        alpha = xp.clip(alpha_trim + (pitch_rad - gamma) * decay, -0.25, 0.40)
-
-        cl = xp.clip(cl0 + cl_a * alpha, -0.4, cl_mx)
-        cd = cd0 + k_ind * (cl ** 2)
-        q = 0.5 * rho * (speed_safe ** 2)
-
-        lift_mag = q * area * cl
-        drag_mag = q * area * cd
-
-        # Unit vectors
-        h_safe = xp.maximum(v_horiz / speed_safe, 1e-4)
-        l0_x = u_z * (u_x / h_safe)
-        l0_y = u_z * (u_y / h_safe)
-        l0_z = -h_safe
-
-        s_x = -u_y / h_safe
-        s_y = u_x / h_safe
-
-        # Roll updates
-        roll_torque_coeff = c_asym - r_damp * (p_rate * span / (2.0 * speed_safe))
-        roll_accel = (q * area * span * roll_torque_coeff - 0.2 * dih * phi) / xp.maximum(mass * span * span * 0.1, 1e-6)
-        p_rate = xp.clip(p_rate + roll_accel * dt, -15.0, 15.0)
-        phi = xp.clip(phi + p_rate * dt, -math.pi / 2.5, math.pi / 2.5)
-
-        cos_phi = xp.cos(phi)
-        sin_phi = xp.sin(phi)
-
-        l_x = cos_phi * l0_x + sin_phi * s_x
-        l_y = cos_phi * l0_y + sin_phi * s_y
-        l_z = cos_phi * l0_z
-
-        lift_x = lift_mag * l_x
-        lift_y = lift_mag * l_y
-        lift_z = lift_mag * l_z
-
-        drag_x = -drag_mag * u_x
-        drag_y = -drag_mag * u_y
-        drag_z = -drag_mag * u_z
-
-        ax = (lift_x + drag_x) / mass
-        ay = (lift_y + drag_y) / mass
-        az = (lift_z + drag_z) / mass + grav
-
-        accel = xp.clip(xp.stack([ax, ay, az], axis=1), -150.0, 150.0)
-
-        new_vel = xp.clip(vel + accel * dt, -80.0, 80.0)
-        new_pos = pos + 0.5 * (vel + new_vel) * dt
-
-        # Tracking peaks while active
-        cur_alt = xp.maximum(-new_pos[:, 2], 0.0)
-        max_altitude_arr = xp.where(active, xp.maximum(max_altitude_arr, cur_alt), max_altitude_arr)
-        max_speed_arr = xp.where(active, xp.maximum(max_speed_arr, speed), max_speed_arr)
-        cur_ld = xp.where(drag_mag > 1e-4, xp.abs(lift_mag / drag_mag), 0.0)
-        max_ld_arr = xp.where(active, xp.maximum(max_ld_arr, cur_ld), max_ld_arr)
-        cur_g = xp.sqrt(ax ** 2 + ay ** 2 + (az - grav) ** 2) / xp.maximum(grav, 1e-3)
-        max_g_arr = xp.where(active, xp.maximum(max_g_arr, cur_g), max_g_arr)
-        max_q_arr = xp.where(active, xp.maximum(max_q_arr, q), max_q_arr)
-
-        # Stall margin: (alpha_max - alpha) / alpha_max
-        cur_margin = (0.244 - alpha) / 0.244
-        min_stall_margin_arr = xp.where(active, xp.minimum(min_stall_margin_arr, cur_margin), min_stall_margin_arr)
-        stalled_arr = xp.where(active, stalled_arr | (alpha >= 0.244), stalled_arr)
-
-        # Ground intersection
-        just_landed = active & (new_pos[:, 2] >= 0.0)
-        if xp.any(just_landed):
-            dz = xp.maximum(new_pos[:, 2] - pos[:, 2], 1e-6)
-            frac = xp.clip((-pos[:, 2]) / dz, 0.0, 1.0)
-            t_impact = (t - dt) + frac * dt
-            t_impact = xp.minimum(t_impact, duration_arr)
-            landing_time = xp.where(just_landed, t_impact, landing_time)
-
-            p_impact = pos + (new_pos - pos) * frac[:, None]
-            p_impact[:, 2] = 0.0
-            landing_pos = xp.where(just_landed[:, None], p_impact, landing_pos)
-            active = active & ~just_landed
-
-        # Timeout check: cases that reached their individual duration limit without landing
-        just_timed_out = active & (t >= duration_arr)
-        if xp.any(just_timed_out):
-            landing_time = xp.where(just_timed_out, duration_arr, landing_time)
-            landing_pos = xp.where(just_timed_out[:, None], new_pos, landing_pos)
-            active = active & ~just_timed_out
-
-        pos = xp.where(active[:, None], new_pos, pos)
-        vel = xp.where(active[:, None], new_vel, vel)
-
-        if not xp.any(active):
-            break
-
-    # Final positions for landed / active
-    landing_pos = xp.where(active[:, None], pos, landing_pos)
-    landing_distances = xp.sqrt(landing_pos[:, 0] ** 2 + landing_pos[:, 1] ** 2)
-
-    # Stress estimation
-    thickness_m = (gsm_arr / 800.0) * 1e-3
-    allowable_pa = 2500.0 * xp.sqrt(gsm_arr / 100.0) * (0.6 + 0.8 * stiff_arr)
-    m_root = 0.35 * max_q_arr * area * (span * 0.5) * xp.maximum(max_g_arr, 1.0)
-    z_mod = xp.maximum((span / 24.0) * (thickness_m ** 2) * (0.55 + 0.9 * stiff_arr) / 6.0, 1e-12)
-    max_stress_pa_arr = 9.0e-6 * (m_root / z_mod)
-    max_stress_index_arr = xp.clip(max_stress_pa_arr / _STRESS_LIMIT_PA, 0.0, 1.5)
-
-    # 3. Synchronize GPU device and transfer back to host
-    landing_d_np = landing_distances.get() if hasattr(landing_distances, "get") else np.asarray(landing_distances)
-    landing_t_np = landing_time.get() if hasattr(landing_time, "get") else np.asarray(landing_time)
-    landing_pos_np = landing_pos.get() if hasattr(landing_pos, "get") else np.asarray(landing_pos)
-    max_alt_np = max_altitude_arr.get() if hasattr(max_altitude_arr, "get") else np.asarray(max_altitude_arr)
-    max_spd_np = max_speed_arr.get() if hasattr(max_speed_arr, "get") else np.asarray(max_speed_arr)
-    max_ld_np = max_ld_arr.get() if hasattr(max_ld_arr, "get") else np.asarray(max_ld_arr)
-    max_g_np = max_g_arr.get() if hasattr(max_g_arr, "get") else np.asarray(max_g_arr)
-    max_stress_idx_np = max_stress_index_arr.get() if hasattr(max_stress_index_arr, "get") else np.asarray(max_stress_index_arr)
-    max_stress_pa_np = max_stress_pa_arr.get() if hasattr(max_stress_pa_arr, "get") else np.asarray(max_stress_pa_arr)
-    min_margin_np = min_stall_margin_arr.get() if hasattr(min_stall_margin_arr, "get") else np.asarray(min_stall_margin_arr)
-    stalled_np = stalled_arr.get() if hasattr(stalled_arr, "get") else np.asarray(stalled_arr)
-
-    results: List[Dict[str, Any]] = []
-    for idx in range(N):
-        d_val = float(landing_d_np[idx])
-        t_val = min(float(landing_t_np[idx]), float(durations[idx]))
-        crashed = bool(max_g_np[idx] > 35.0 or max_stress_idx_np[idx] >= 1.0)
-        status_str = "crashed" if crashed else ("landed" if t_val < durations[idx] else "timeout")
-
-        res: Dict[str, Any] = {
-            "distance_m": round(d_val, 4),
-            "flight_time_s": round(t_val, 4),
-            "horizontal_range_m": round(d_val, 4),
-            "range_x_m": round(abs(float(landing_pos_np[idx, 0])), 4),
-            "range_y_m": round(abs(float(landing_pos_np[idx, 1])), 4),
-            "max_altitude_m": round(float(max_alt_np[idx]), 4),
-            "max_speed_mps": round(float(max_spd_np[idx]), 4),
-            "launch_speed_mps": round(v0s[idx], 4),
-            "max_ld_ratio": round(float(max_ld_np[idx]), 4),
-            "max_stress_index": round(float(max_stress_idx_np[idx]), 4),
-            "max_stress_pa": round(float(max_stress_pa_np[idx]), 2),
-            "max_g_load": round(float(max_g_np[idx]), 4),
-            "stall_margin": round(float(min_margin_np[idx]), 4),
-            "stalled": bool(stalled_np[idx]),
-            "landed": bool(t_val < durations[idx]),
-            "crashed": crashed,
-            "status": status_str,
-            "backend": backend,
-            "device_name": device_name,
-            **_approximate_model_metadata("translational_ensemble"),
-        }
-        results.append(res)
-
-    if progress_cb is not None:
-        try:
-            progress_cb(N, N, backend)
-        except Exception:
-            pass
+        for position, index in enumerate(members):
+            duration = group_durations[position]
+            t_val = min(float(flight_time[position]), duration)
+            is_crashed = bool(crashed[position])
+            is_landed = bool(landed[position])
+            if is_crashed:
+                status_str = "crashed"
+            elif is_landed:
+                status_str = "landed"
+            else:
+                status_str = "timeout"
+            results[index] = {
+                "distance_m": round(float(distance[position]), 4),
+                "flight_time_s": round(t_val, 4),
+                "horizontal_range_m": round(float(distance[position]), 4),
+                "range_x_m": round(abs(float(state[position, 0])), 4),
+                "range_y_m": round(abs(float(state[position, 1])), 4),
+                "max_altitude_m": round(abs(float(state[position, 2])), 4),
+                "max_speed_mps": round(float(launches[index].launch_speed), 4),
+                "launch_speed_mps": round(float(launches[index].launch_speed), 4),
+                "max_ld_ratio": round(float(max_ld[position]), 4),
+                "max_stress_index": round(float(stress_index[position]), 6),
+                "max_stress_pa": round(float(stress_pa[position]), 2),
+                "max_g_load": round(float(max_g[position]), 4),
+                "stability": round(float(stability[position]), 6),
+                "stall_margin": round(float(stall_margin[position]), 4),
+                "stalled": bool(stress_index[position] >= 1.0),
+                "landed": is_landed,
+                "crashed": is_crashed,
+                "status": status_str,
+                "backend": backend,
+                "device_name": device_name,
+                **_rigid_body_model_metadata("rigid_body_6dof_batch"),
+            }
+        completed += len(members)
+        if progress_cb is not None:
+            try:
+                progress_cb(completed, N, backend)
+            except Exception:
+                pass
 
     return results
+
+
+def _environment_key(env: EnvironmentConfig) -> Any:
+    """Hashable identity of an environment, used to group the batch."""
+    return tuple(sorted((as_dict(env) or {}).items(), key=lambda item: item[0]))
+
+
+def _to_host(xp: Any, array: Any) -> Any:
+    """Copy a device array to the host as a NumPy array."""
+    if hasattr(array, "get"):
+        return array.get()
+    return np.asarray(array)
 
 
 
