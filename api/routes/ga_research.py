@@ -277,7 +277,15 @@ def ga_research_status(run_id: str):
 
 @ga_research_bp.get(f"{API_PREFIX}/result/<run_id>")
 def ga_research_result(run_id: str):
-    """The result of the best individual of a research run."""
+    """The result of the best individual of a research run.
+
+    The payload carries the **provenance** of the published flight: the
+    model that produced it, whether that model is an approximation, whether
+    the numbers may be used for a physics verification and the limitations
+    of the result (``docs/SPECIFICATION.md`` §2.1).  A run without a
+    publishable candidate reports the conservative values: an unknown model
+    is an approximation and is never verification eligible.
+    """
     state = _state(run_id)
     with state.lock:
         summary = state.summary
@@ -298,6 +306,13 @@ def ga_research_result(run_id: str):
                     "failure_rate": 0.0,
                 },
                 "fitness": None,
+                "metric": None,
+                "tier": 0,
+                "model": "unknown",
+                "approximate": True,
+                "physics_verification_eligible": False,
+                "limitations": [],
+                "artifacts": {},
             }
         )
     result = dict(summary.get("result") or {})
@@ -323,6 +338,14 @@ def ga_research_result(run_id: str):
             },
             "fitness": result.get("fitness"),
             "metric": result.get("metric"),
+            "tier": result.get("tier", 0),
+            "model": result.get("model", "unknown"),
+            "approximate": bool(result.get("approximate", True)),
+            "physics_verification_eligible": bool(
+                result.get("physics_verification_eligible", False)
+            ),
+            "limitations": list(result.get("limitations") or []),
+            "flight_result": result.get("flight_result") or {},
             "artifacts": summary.get("artifacts") or {},
         }
     )

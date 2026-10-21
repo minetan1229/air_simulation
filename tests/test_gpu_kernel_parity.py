@@ -413,6 +413,75 @@ def test_trailing_edge_fold_changes_the_batch_flight():
     )
 
 
+# --------------------------------------------------------------------------
+# 3c. The NaN / Inf defence of the shared kernel
+# --------------------------------------------------------------------------
+def test_a_non_finite_configuration_value_cannot_poison_the_batch_coefficients():
+    """A NaN / inf in a configuration field must be replaced by its default.
+
+    ``39bb795`` removed the per-parameter guards of
+    :func:`physics.aero_kernel.evaluate_coefficients` and left the guarantee
+    to the parameter bundle alone.  The bundle is the single construction
+    point of every path, so the guarantee itself is complete -- but a defence
+    without a test is a defence that can be removed again, which is exactly
+    what ``39bb795`` did to the per-parameter guards.
+
+    The failure mode is severe: a single NaN makes every comparison of the
+    batch ``False``, so a broken design would be scored as a normal one by the
+    optimiser instead of being reported as infeasible.
+    """
+    env = EnvironmentConfig()
+    cfg = AircraftConfig(cm0=float("nan"), cd0=float("inf"), cL0=float("nan"))
+
+    # The configuration object keeps the raw values; the *kernel* is the
+    # layer that has to sanitise them.
+    assert math.isnan(cfg.cm0)
+    assert math.isinf(cfg.cd0)
+
+    params = aero_kernel.params_from_aircraft(cfg)
+    assert params.cm0 == 0.0
+    assert params.cL0 == 0.0
+    assert params.cd0 == pytest.approx(0.02)
+
+    bundle = gpu_dynamics.build_params(np, [cfg], env)
+    assert np.all(np.isfinite(np.asarray(bundle.aero.cm0)))
+    assert np.all(np.isfinite(np.asarray(bundle.aero.cd0)))
+    assert np.all(np.isfinite(np.asarray(bundle.aero.cL0)))
+
+    out = aero_kernel.evaluate_coefficients(
+        np, bundle.aero, alpha_deg=4.0, speed=10.0
+    )
+    for key in (
+        "cl",
+        "cd",
+        "cm",
+        "cy",
+        "lift_n",
+        "drag_n",
+        "side_n",
+        "pitching_nm",
+        "rolling_nm",
+        "yawing_nm",
+    ):
+        assert math.isfinite(float(np.asarray(out[key])[0])), key
+
+
+def test_a_non_finite_environment_scale_cannot_poison_the_batch_coefficients():
+    """The environment factors are sanitised on the same path as the airframe.
+
+    A NaN in ``lift_scale`` / ``drag_scale`` used to reach the coefficients of
+    every case of the batch, because only the reference path replaced it.
+    """
+    env = EnvironmentConfig(lift_scale=float("nan"), drag_scale=float("inf"))
+    lift_scale, drag_scale = aero_kernel.environment_scales(env)
+    assert lift_scale == 1.0
+    assert drag_scale == 1.0
+
+    bundle = gpu_dynamics.build_params(np, [AircraftConfig()], env)
+    assert np.all(np.isfinite(np.asarray(bundle.aero.lift_scale)))
+    assert np.all(np.isfinite(np.asarray(bundle.aero.drag_scale)))
+
+
 def test_a_failed_evaluation_keeps_its_failure_status_in_the_batch_fallback():
     """A broken evaluation must not be relabelled as a benign timeout.
 

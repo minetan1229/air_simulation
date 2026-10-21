@@ -42,6 +42,7 @@ import math
 import multiprocessing
 import os
 import pickle
+import atexit
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, Union, cast
 
@@ -318,6 +319,55 @@ def worker_id() -> int:
 def worker_pid() -> int:
     """Process id of this worker (``os.getpid()`` in the parent process)."""
     return _WORKER_PID
+
+
+# --------------------------------------------------------------------------
+# Cached process pool (reused across :func:`parallel_evaluate` calls)
+# --------------------------------------------------------------------------
+#: The cached spawn pool and the worker count it was created with.  A pool is
+#: created once and reused across optimiser generations instead of being
+#: spawned and torn down for every generation.  It is released at interpreter
+#: exit through :func:`_release_cached_pool` so no child processes linger.
+_CACHED_POOL: Any = None
+_CACHED_POOL_WORKERS: int = 0
+
+
+def _release_cached_pool() -> None:
+    """Close and join the cached pool, if any (called at interpreter exit)."""
+    global _CACHED_POOL, _CACHED_POOL_WORKERS
+    pool = _CACHED_POOL
+    _CACHED_POOL = None
+    _CACHED_POOL_WORKERS = 0
+    if pool is None:
+        return
+    try:
+        pool.close()
+    except Exception:
+        pass
+    try:
+        pool.join()
+    except Exception:
+        pass
+
+
+atexit.register(_release_cached_pool)
+
+
+def _get_cached_pool(workers: int) -> Any:
+    """Return the cached spawn pool, creating or recreating it as needed.
+
+    A pool whose worker count differs from the request is released and
+    rebuilt so every caller gets exactly the concurrency it asked for.
+    """
+    global _CACHED_POOL, _CACHED_POOL_WORKERS
+    if _CACHED_POOL is not None and _CACHED_POOL_WORKERS == workers:
+        return _CACHED_POOL
+    _release_cached_pool()
+    context = multiprocessing.get_context("spawn")
+    pool = context.Pool(processes=workers, initializer=_pool_init, initargs=(-1,))
+    _CACHED_POOL = pool
+    _CACHED_POOL_WORKERS = workers
+    return pool
 
 
 # --------------------------------------------------------------------------
@@ -778,32 +828,34 @@ def parallel_evaluate(
     results: List[Dict[str, Any]] = []
     best_seen = float("-inf")
 
-    def emit() -> None:
+    def consider(item: Dict[str, Any]) -> None:
         nonlocal best_seen
+        s = item.get("score")
+        if s is None:
+            s = item.get("distance_m", 0.0)
+        try:
+            s_val = float(s)
+            if math.isfinite(s_val) and s_val > best_seen:
+                best_seen = s_val
+        except (ValueError, TypeError):
+            pass
+
+    def emit() -> None:
         if progress_cb is not None:
-            for r in results:
-                s = r.get("score")
-                if s is None:
-                    s = r.get("distance_m", 0.0)
-                try:
-                    s_val = float(s)
-                    if math.isfinite(s_val) and s_val > best_seen:
-                        best_seen = s_val
-                except (ValueError, TypeError):
-                    pass
             progress_cb(len(results), total, best_seen if math.isfinite(best_seen) else 0.0)
 
     if workers == 1:
         for item in materialised:
             if cancel_cb is not None and bool(cancel_cb()):
                 return results
-            results.append(evaluate_case(item))
+            result = evaluate_case(item)
+            results.append(result)
+            consider(result)
             emit()
         return results
 
     tasks = [(evaluate_case, [materialised[index] for index in chunk]) for chunk in plan]
-    context = multiprocessing.get_context("spawn")
-    pool = context.Pool(processes=workers, initializer=_pool_init, initargs=(-1,))
+    pool = _get_cached_pool(workers)
     cancelled = False
     try:
         iterator = pool.imap(_pool_worker, tasks)
@@ -816,13 +868,15 @@ def parallel_evaluate(
             except StopIteration:
                 break
             results.extend(chunk_result)
+            for result in chunk_result:
+                consider(result)
             emit()
     finally:
-        if cancelled:
-            pool.terminate()
-        else:
-            pool.close()
-        pool.join()
+        # The pool is cached and reused across optimiser generations instead
+        # of being torn down per call.  It is released once at interpreter
+        # exit through ``atexit`` (_release_cached_pool) so no child
+        # processes linger.
+        pass
     if cancelled:
         return results
     emit()
@@ -1570,14 +1624,25 @@ def gpu_batch_evaluate_cases(
                 status_str = "landed"
             else:
                 status_str = "timeout"
-            d_val = float(item.get("landing_distance_m", item.get("distance_m", 0.0)))
+            # ``distance_m`` is the **distance flown**: the accumulated
+            # horizontal path of the flight.  The CPU fallback used to publish
+            # the straight-line range to the touchdown point
+            # (``landing_distance_m``) under the name ``distance_m``, so a
+            # curving flight reported a different distance from the 6-DoF
+            # path and from the device path - both of which publish the
+            # accumulated path - and the GA engine, which ranks on
+            # ``distance_m``, optimised the range instead of the distance.
+            d_val = float(item.get("distance_m", 0.0))
+            range_val = float(item.get("horizontal_range_m", d_val))
+            landing_val = float(item.get("landing_distance_m", range_val))
             r_entry = dict(item)
             r_entry.update({
-                "distance_m": round(d_val, 4),
+                "distance_m": d_val,
                 "flight_time_s": round(t_val, 4),
-                "horizontal_range_m": round(d_val, 4),
-                "range_x_m": round(d_val, 4),
-                "range_y_m": 0.0,
+                "horizontal_range_m": range_val,
+                "landing_distance_m": landing_val,
+                "range_x_m": float(item.get("range_x_m", 0.0)),
+                "range_y_m": float(item.get("range_y_m", 0.0)),
                 "landed": landed,
                 "crashed": crashed,
                 "diverged": diverged,
@@ -1724,13 +1789,26 @@ def evaluate_cases_on_device(
             # (``tests/test_gpu_kernel_parity.py``).  A rounded payload
             # cannot carry the contract it advertises, so only the echoed
             # request fields keep their fixed-point form.
+            # The range fields describe the **straight-line** distance from
+            # the release point to the final point, the way the 6-DoF path
+            # reports them (``horizontal_range_m`` is the hypotenuse of the
+            # range, ``landing_distance_m`` its published alias).  The
+            # device path used to publish the accumulated path under those
+            # names, so the same field meant two different things depending
+            # on the backend.
+            range_x = abs(float(state[position, 0]) - float(initial[position, 0]))
+            range_y = abs(float(state[position, 1]) - float(initial[position, 1]))
+            horizontal_range = math.hypot(
+                float(state[position, 0]) - float(initial[position, 0]),
+                float(state[position, 1]) - float(initial[position, 1]),
+            )
             entry = {
                 "distance_m": float(distance[position]),
                 "flight_time_s": float(t_val),
-                "horizontal_range_m": float(distance[position]),
-                "landing_distance_m": float(distance[position]),
-                "range_x_m": abs(float(state[position, 0])),
-                "range_y_m": abs(float(state[position, 1])),
+                "horizontal_range_m": horizontal_range,
+                "landing_distance_m": horizontal_range,
+                "range_x_m": range_x,
+                "range_y_m": range_y,
                 "max_altitude_m": abs(float(state[position, 2])),
                 "max_speed_mps": round(float(launches[index].launch_speed), 4),
                 "launch_speed_mps": round(float(launches[index].launch_speed), 4),

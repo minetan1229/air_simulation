@@ -23,6 +23,9 @@ import {
   createPanelMaterial,
 } from "./airframe.js";
 import { WindParticles } from "./flowfield.js";
+
+const _root = typeof document !== "undefined" ? getComputedStyle(document.documentElement) : null;
+const _cssColor = (name, fallback) => (_root ? (_root.getPropertyValue(name).trim() || fallback) : fallback);
 import { heatColour } from "./lib.js";
 import {
   createOrigamiMaterial,
@@ -1099,15 +1102,42 @@ export class Viewport {
   setStress(grid) {
     const target = this.meshObject || this.airframeMesh;
     if (!target || !grid) return;
-    applyStressColors(target.geometry, grid, heatColour);
-    if (target.material) target.material.vertexColors = this.heatVisible;
+    if (target.isMesh && target.geometry) {
+      applyStressColors(target.geometry, grid, heatColour);
+      if (target.material) target.material.vertexColors = this.heatVisible;
+    } else {
+      let applied = false;
+      target.traverse((child) => {
+        if (child.isMesh && child.geometry) {
+          applyStressColors(child.geometry, grid, heatColour);
+          if (child.material) child.material.vertexColors = this.heatVisible;
+          applied = true;
+        }
+      });
+      if (!applied) {
+        console.warn("[Viewport] インポートメッシュに頂点ジオメトリが見つからず、応力ヒートマップをスキップしました");
+      }
+    }
   }
 
   setHeatVisible(visible) {
     this.heatVisible = Boolean(visible);
+    const target = this.meshObject || this.airframeMesh;
+    if (target && target.isMesh) {
+      if (target.material) {
+        target.material.vertexColors = this.heatVisible;
+        target.material.color.set(this.heatVisible ? 0xffffff : 0xf7f2e8);
+        target.material.needsUpdate = true;
+      }
+    } else if (target) {
+      target.traverse((child) => {
+        if (child.isMesh && child.material) {
+          child.material.vertexColors = this.heatVisible;
+          child.material.needsUpdate = true;
+        }
+      });
+    }
     if (!this.airframeMaterial) return;
-    // With the heat map off the vertex colours are ignored entirely, so the
-    // airframe renders as plain paper regardless of the last stress field.
     this.airframeMaterial.vertexColors = this.heatVisible;
     this.airframeMaterial.color.set(this.heatVisible ? 0xffffff : 0xf7f2e8);
     this.airframeMaterial.needsUpdate = true;
@@ -1402,21 +1432,21 @@ export class Viewport {
       let linewidth = 1;
 
       if (isRank1) {
-        col = new THREE.Color(0xffb300); // 1st Gold (最高値)
+        col = new THREE.Color(_cssColor("--color-traj-rank1", "#ffb300")); // 1st Gold (最高値)
         opacity = 0.95;
         linewidth = 2;
       } else if (isWorst) {
-        col = new THREE.Color(0xe53935); // Worst Red (最低値)
+        col = new THREE.Color(_cssColor("--color-traj-worst", "#e53935")); // Worst Red (最低値)
         opacity = 0.70;
         linewidth = 1;
       } else if (isRank2) {
-        col = new THREE.Color(0xb0bec5); // 2nd Silver
+        col = new THREE.Color(_cssColor("--color-traj-rank2", "#b0bec5")); // 2nd Silver
         opacity = 0.70;
       } else if (isRank3) {
-        col = new THREE.Color(0xcd7f32); // 3rd Bronze
+        col = new THREE.Color(_cssColor("--color-traj-rank3", "#cd7f32")); // 3rd Bronze
         opacity = 0.65;
       } else {
-        col = palette[idx % palette.length];
+        col = new THREE.Color(_cssColor("--color-traj-mid", palette[idx % palette.length].toString()));
       }
 
       const mat = new THREE.LineBasicMaterial({
@@ -1440,7 +1470,7 @@ export class Viewport {
           const innerGeom = new THREE.CircleGeometry(0.35, 24);
           innerGeom.rotateX(-Math.PI / 2);
           const innerMat = new THREE.MeshBasicMaterial({
-            color: 0xffb300,
+            color: new THREE.Color(_cssColor("--color-traj-rank1", "#ffb300")),
             transparent: true,
             opacity: 0.90,
             side: THREE.DoubleSide,
@@ -1453,7 +1483,7 @@ export class Viewport {
           const innerGeom = new THREE.CircleGeometry(0.24, 16);
           innerGeom.rotateX(-Math.PI / 2);
           const innerMat = new THREE.MeshBasicMaterial({
-            color: 0xd32f2f,
+            color: new THREE.Color(_cssColor("--color-traj-worst", "#e53935")),
             transparent: true,
             opacity: 0.75,
             side: THREE.DoubleSide,
@@ -1471,9 +1501,9 @@ export class Viewport {
       const midGeom = new THREE.BufferGeometry();
       midGeom.setAttribute("position", new THREE.Float32BufferAttribute(midPositions, 3));
       const midMat = new THREE.LineBasicMaterial({
-        color: 0x5c9eff,
+        color: new THREE.Color(_cssColor("--color-traj-mid", "#5c9eff")),
         transparent: true,
-        opacity: 0.22, // Translucent to prevent visual clutter
+        opacity: 0.22,
         linewidth: 1,
       });
       const midSegments = new THREE.LineSegments(midGeom, midMat);
@@ -1506,7 +1536,7 @@ export class Viewport {
       const meanGeom = new THREE.BufferGeometry();
       meanGeom.setAttribute("position", new THREE.Float32BufferAttribute(meanPositions, 3));
       const meanMat = new THREE.LineBasicMaterial({
-        color: 0x00e5ff, // Vivid cyan for outstanding prominence
+        color: new THREE.Color(_cssColor("--color-traj-mean", "#00e5ff")),
         transparent: true,
         opacity: 1.0,
         linewidth: 4,
@@ -1524,7 +1554,7 @@ export class Viewport {
         const meanRingGeom = new THREE.RingGeometry(0.35, 0.55, 32);
         meanRingGeom.rotateX(-Math.PI / 2);
         const meanRingMat = new THREE.MeshBasicMaterial({
-          color: 0x00e5ff,
+          color: new THREE.Color(_cssColor("--color-traj-mean", "#00e5ff")),
           transparent: true,
           opacity: 0.95,
           side: THREE.DoubleSide,

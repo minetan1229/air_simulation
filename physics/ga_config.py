@@ -46,7 +46,6 @@ __all__ = [
     "DEFAULT_FOLD_FLIP_RATE",
     "DEFAULT_SYMMETRY_CHANGE_RATE",
     "DEFAULT_BROKEN_GENOME_PENALTY",
-    "DEFAULT_GRIP_PENALTY_WEIGHT",
     "DEFAULT_STAT_ELITE_MAX_FRACTION",
     "DEFAULT_PROGRESS_HISTORY_LIMIT",
     "DEFAULT_CMA_SIGMA0",
@@ -127,10 +126,6 @@ DEFAULT_SYMMETRY_CHANGE_RATE: float = 0.08
 #: The grip penalty of a genome that could not be folded at all.  It is large
 #: enough to keep such a candidate out of every ranking.
 DEFAULT_BROKEN_GENOME_PENALTY: float = 1.0e6
-
-#: The weight of the grip penalty in the fitness of a design that did not
-#: pass the geometric filter.
-DEFAULT_GRIP_PENALTY_WEIGHT: float = 0.01
 
 #: The largest share of a population the elite block of the selected
 #: population statistic may take.  The block is what the statistic keeps
@@ -467,8 +462,6 @@ class GAConfig:
     # --- fitness ------------------------------------------------------------
     #: The grip penalty of a genome that could not be folded at all.
     broken_genome_penalty: float = DEFAULT_BROKEN_GENOME_PENALTY
-    #: The weight of the grip penalty in the fitness of an infeasible design.
-    grip_penalty_weight: float = DEFAULT_GRIP_PENALTY_WEIGHT
     #: The largest share of a population the elite block of the selected
     #: population statistic may take (the rest of the population is new
     #: blood, so the search can never freeze).
@@ -491,8 +484,6 @@ class GAConfig:
     stagnation_generations: int = 10
     migration_interval: int = 2
     migration_elites: int = 2
-    max_secondary_weight: float = 0.25
-    sensitivity_threshold: float = 0.25
     micro_flaps: bool = False
 
     # --- CMA-ES ------------------------------------------------------------
@@ -617,8 +608,6 @@ class GAConfig:
             raise ValueError("'mutation_crease_shift' must not be negative")
         if self.broken_genome_penalty <= 0.0:
             raise ValueError("'broken_genome_penalty' must be positive")
-        if self.grip_penalty_weight < 0.0:
-            raise ValueError("'grip_penalty_weight' must not be negative")
         if not (0.0 < self.stat_elite_max_fraction <= 1.0):
             raise ValueError("'stat_elite_max_fraction' must be within (0, 1]")
         if self.progress_history_limit < 1:

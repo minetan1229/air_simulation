@@ -117,8 +117,14 @@ def test_cupy_backend_emits_the_full_contract():
     payloads = parallel_engine.gpu_batch_evaluate_cases([_case(), _case()])
     assert payloads
     for payload in payloads:
+        # Compared with the **pinned literal** set, not only with the
+        # contract module: a key that left the contract together with the
+        # backend would still satisfy a self-referential comparison.
+        assert set(payload) == EXPECTED_CONTRACT_KEYS
         assert set(payload) == set(PAYLOAD_KEYS)
         assert payload["model"] in ("translational_ensemble", parallel_engine.RIGID_BODY_MODEL_TAG)
+        # The failure-reporting keys are present on the GPU path as well.
+        assert "error" in payload and "error_id" in payload
 
 
 def test_the_contract_key_set_is_pinned():
@@ -134,7 +140,9 @@ def test_every_backend_reports_the_same_key_set():
 
     The three backends are compared **with each other** as well as with the
     pinned set, so a key that is missing from one of them cannot hide behind
-    the contract module.
+    the contract module.  The CuPy backend is checked against the same pinned
+    set in ``test_cupy_backend_emits_the_full_contract`` (it is a separate
+    evaluation because a CUDA batch costs minutes on a WDDM host).
     """
     reference = flight_sim.evaluate_flight(AIRCRAFT, ENVIRONMENT, LAUNCH, 3.0, 0.02)
     cpu_case = parallel_engine.evaluate_case(_case())

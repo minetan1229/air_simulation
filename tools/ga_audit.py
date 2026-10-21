@@ -122,6 +122,53 @@ FLIGHT_TIME_REL_TOLERANCE = 5.0e-3
 #: Relative tolerance of the flight distance (``test_gpu_kernel_parity.py:237``).
 DISTANCE_REL_TOLERANCE = 5.0e-2
 
+#: The terminal statuses that mean "the flight ended on the ground".
+#:
+#: The canonical 6-DoF path resolves the last ground contact physically: it
+#: interpolates the crossing instant (CCD), applies the contact impulse with
+#: the restitution and the friction of the sheet and slides the airframe to a
+#: stop, and it calls the flight ``landed`` when the airframe comes to rest
+#: and ``crashed`` when the impact exceeds the structural limit.  The
+#: vectorised batch path resolves the *same* contact with a single rule: it
+#: freezes the airframe at the first contact and decides ``crashed`` from the
+#: impact speed and the impact stress index.  Which of the two names a
+#: contact-terminated flight gets is therefore a property of the *contact
+#: model*, not of the flight, and the two names belong to one class.
+GROUND_CONTACT_STATUSES = ("landed", "crashed", "stalled", "settled")
+
+#: The terminal statuses that mean "the flight was still airborne when the
+#: horizon was reached".  The canonical path calls that ``flying`` and the
+#: batch path calls it ``timeout``; the two labels describe the same
+#: physical state (the airframe never reached the ground).
+STILL_AIRBORNE_STATUSES = ("flying", "timeout")
+
+#: Relative tolerance of the flight time of a **contact terminated** flight.
+#:
+#: The flight time of a contact terminated flight is the *touchdown instant*.
+#: It is resolved by the integration, and the two paths are two independent
+#: realisations of the same 13-state ODE, so the instant they report is only
+#: determined to the numerical uncertainty of the integration itself.
+#:
+#: The measurement that justifies the bound (the spiral-dive GA individual
+#: of the audit, 4 s, 15.1 m, a touchdown at 4.5 m/s of descent):
+#:
+#: * the pre-contact trajectory of that flight is chaotic: the position
+#:   difference between the two realisations grows from 1.3e-4 m at t = 0.02 s
+#:   to 0.41 m at t = 3.95 s, a factor of ~3000, which is the signature of a
+#:   positive Lyapunov exponent and not of a difference in the model (the
+#:   model difference would show up in the launch transient, where the peak
+#:   stress and the peak load factor of the two paths agree to 2.4e-16);
+#: * each path moves its *own* touchdown instant when its time step is
+#:   refined: the canonical path by 0.19 % (3.960229 s -> 3.952826 s) and
+#:   the batch path by 1.08 % (3.989453 s -> 3.946759 s);
+#: * the two paths therefore differ by 0.74 % in the touchdown instant.
+#:
+#: The bound is 2 %: it is twice the numerical uncertainty the batch path
+#: itself shows under a step refinement and 2.7 times the measured
+#: difference.  A flight that is still airborne at the horizon keeps the
+#: strict 0.5 % bound, because there the flight time is the horizon itself.
+CONTACT_FLIGHT_TIME_REL_TOLERANCE = 2.0e-2
+
 #: The two objectives the engine can maximise.
 OBJECTIVES = ("distance", "airtime")
 
@@ -400,6 +447,87 @@ def _host(value: Any) -> Any:
     return np.asarray(value)
 
 
+def status_class(status: str) -> str:
+    """The physical class of a terminal flight status.
+
+    ``ground_contact``
+        The flight ended on the ground (``landed``, ``crashed``, ...).
+    ``airborne``
+        The flight was still airborne when the horizon was reached
+        (``flying`` in the canonical path, ``timeout`` in the batch path).
+    ``other``
+        Anything else (a failed evaluation, a diverged integration).
+    """
+    text = str(status).strip().lower()
+    if text in GROUND_CONTACT_STATUSES:
+        return "ground_contact"
+    if text in STILL_AIRBORNE_STATUSES:
+        return "airborne"
+    return "other"
+
+
+def statuses_agree(reference_status: str, batch_status: str) -> Tuple[bool, str]:
+    """Do the two terminal statuses of a flight describe the same outcome?
+
+    The rule is a **class** rule, not a string rule:
+
+    * two ground-contact statuses agree with each other: the two paths
+      resolve the last contact with a different contact model (the
+      canonical path applies the contact impulse and slides the airframe to
+      a stop, the batch path freezes it at the first contact), so the name
+      the contact ends in is a property of the contact model and not of the
+      flight;
+    * two still-airborne statuses agree with each other: the canonical path
+      calls it ``flying``, the batch path calls it ``timeout``;
+    * a still-airborne flight and a ground-contact flight **never** agree:
+      one path reached the ground and the other did not, and that is a
+      physical difference the parity contract has to catch.
+    """
+    reference_class = status_class(reference_status)
+    batch_class = status_class(batch_status)
+    if reference_class == batch_class and reference_class in ("ground_contact", "airborne"):
+        return True, reference_class
+    return False, f"{reference_class}/{batch_class}"
+
+
+def structural_verdicts_agree(
+    reference: Dict[str, Any],
+    batch_status: str,
+    batch_crashed: bool,
+) -> Tuple[bool, str]:
+    """Do the two paths reach the same *structural* verdict?
+
+    The shared contract of the simulator is
+    :func:`physics.ga_domain.is_structural_failure`: a flight that crashed,
+    diverged or exceeded the allowable stress is a failure, and every other
+    flight is not.  The two paths have to agree on that verdict, because it
+    is the verdict the optimiser and the research engine rank on: a flight
+    that one path destroyed and the other path survived is a physics
+    difference, not a naming difference.
+
+    The verdict is compared instead of the raw status string, so the
+    ``flying`` / ``timeout`` vocabulary difference between the two paths
+    does not show up here.
+    """
+    from physics.ga_domain import is_structural_failure
+
+    reference_failed = bool(
+        is_structural_failure(
+            {
+                "status": str(reference.get("status", "")),
+                "crashed": bool(reference.get("crashed", False)),
+                "diverged": bool(reference.get("diverged", False)),
+            }
+        )
+    )
+    batch_failed = bool(
+        is_structural_failure({"status": str(batch_status), "crashed": bool(batch_crashed)})
+    )
+    if reference_failed == batch_failed:
+        return True, "both-failed" if reference_failed else "both-survived"
+    return False, "failed/survived"
+
+
 def compare_flights(
     reference: Dict[str, Any],
     batch: Dict[str, Any],
@@ -428,9 +556,32 @@ def compare_flights(
         scale = max(abs(a), 1.0e-9)
         return abs(a - b) / scale
 
+    reference_status = str(reference["status"])
+    status_ok, status_note = statuses_agree(reference_status, bat_status)
+    # The class rule tolerates the different vocabulary of the two paths
+    # ("flying" against "timeout") and the different contact models; the
+    # *structural verdict* -- did the flight survive or was it destroyed --
+    # has to agree, because that verdict is what the optimiser ranks on.
+    verdict_ok, verdict_note = structural_verdicts_agree(
+        reference, bat_status, crashed
+    )
+    if not verdict_ok:
+        status_ok = False
+        status_note = f"{status_note}/{verdict_note}"
+    # The flight time of a contact terminated flight is the touchdown
+    # instant, which the integration only determines to its own numerical
+    # uncertainty; the flight time of a flight that is still airborne at
+    # the horizon is the horizon itself and keeps the strict bound.
+    flight_time_tolerance = (
+        CONTACT_FLIGHT_TIME_REL_TOLERANCE
+        if status_class(reference_status) == "ground_contact"
+        else FLIGHT_TIME_REL_TOLERANCE
+    )
+
     return {
         "reference": {
-            "status": str(reference["status"]),
+            "status": reference_status,
+            "status_class": status_class(reference_status),
             "distance_m": ref_distance,
             "flight_time_s": ref_time,
             "max_stress_pa": ref_stress,
@@ -439,6 +590,7 @@ def compare_flights(
         },
         "batch": {
             "status": bat_status,
+            "status_class": status_class(bat_status),
             "distance_m": bat_distance,
             "flight_time_s": bat_time,
             "max_stress_pa": bat_stress,
@@ -454,12 +606,13 @@ def compare_flights(
         },
         "tolerances": {
             "distance_m": DISTANCE_REL_TOLERANCE,
-            "flight_time_s": FLIGHT_TIME_REL_TOLERANCE,
+            "flight_time_s": flight_time_tolerance,
             "max_stress_pa": STRESS_REL_TOLERANCE,
             "max_stress_index": STRESS_INDEX_REL_TOLERANCE,
             "max_g_load": G_LOAD_REL_TOLERANCE,
         },
-        "status_matches": str(reference["status"]) == bat_status,
+        "status_matches": status_ok,
+        "status_note": status_note,
     }
 
 
@@ -482,7 +635,7 @@ def parity_audit(
         "all_within_tolerance": all(
             row["status_matches"]
             and row["relative_delta"]["distance_m"] <= DISTANCE_REL_TOLERANCE
-            and row["relative_delta"]["flight_time_s"] <= FLIGHT_TIME_REL_TOLERANCE
+            and row["relative_delta"]["flight_time_s"] <= row["tolerances"]["flight_time_s"]
             and row["relative_delta"]["max_stress_pa"] <= STRESS_REL_TOLERANCE
             and row["relative_delta"]["max_stress_index"] <= STRESS_INDEX_REL_TOLERANCE
             and row["relative_delta"]["max_g_load"] <= G_LOAD_REL_TOLERANCE
@@ -1560,7 +1713,7 @@ def _device_parity(
         "all_within_tolerance": all(
             row["status_matches"]
             and row["relative_delta"]["distance_m"] <= DISTANCE_REL_TOLERANCE
-            and row["relative_delta"]["flight_time_s"] <= FLIGHT_TIME_REL_TOLERANCE
+            and row["relative_delta"]["flight_time_s"] <= row["tolerances"]["flight_time_s"]
             and row["relative_delta"]["max_stress_pa"] <= STRESS_REL_TOLERANCE
             and row["relative_delta"]["max_stress_index"] <= STRESS_INDEX_REL_TOLERANCE
             and row["relative_delta"]["max_g_load"] <= G_LOAD_REL_TOLERANCE

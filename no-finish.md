@@ -13,6 +13,11 @@
 > - 2026-10-20 追記 2: **2026-10-19 マルチエージェントレビュー（13 名 / 374 指摘）**由来の残課題を
 >   **§7（残るもの）** と **§8（あえて解決しないもの）** に追加。統合順序は **§9**。
 >   詳細（全指摘の file:line 付き記録）は `docs/CODE_REVIEW_FINDINGS.md` が正本。
+> - 2026-10-21 追記 3: **2026-10-19 コミット監査（`09aa40e` の劣化分解）と 2026-10-21 の実測スイート走査**で
+>   判明した残課題 4 件（K1-P0-1〜K1-P0-3 / K1-P1）を **§4.7** に追加。統合順序は **§9** に反映。
+> - 2026-10-21 追記 4: **K2 台帳再統合**（`.agents/Knowledge.md` 80 行化 / `.agents/Project.md` 40 行化）に
+>   際して 2026-10-21 に実測した残課題 **P0-1〜P0-9 / P1**（§4.7 の 4 件を統合し、GA エンジンの審査
+>   P0 4 件と未実装 2 件を追加）を **§4.8** に追加。統合順序は **§9** に反映。
 
 ---
 
@@ -340,6 +345,64 @@
 `tests/test_wind_height_parity.py` / `tests/test_gpu_kernel_parity.py`。
 
 
+### 4.7 2026-10-19 コミット監査・2026-10-21 実測で判明した残課題（4 件・K1 台帳）
+
+> 出典: 2026-10-19 のコミット監査（`09aa40e` の劣化分解）と 2026-10-21 の実測スイート走査。
+> **§7.1 / §7.2 の P0-1〜P0-3 / P1 とは別系統**のため、本節の ID は `K1-` 接頭辞で台帳内衝突を避けてある。
+> 事実の正本は `.agents/Knowledge.md`「Commit Audit & Integration Contract」節（§4.7 は残課題のみ）。
+
+| ID | 残課題 | 場所（file:line） | 再現コマンド | 判定・担当 |
+|---|---|---|---|---|
+| **K1-P0-1** | **GPU/バッチ経路と 6DoF 参照経路の数値不一致**。`distance_m` が 5.2577409 対 5.2613846（相対差 6.9e-4）／1.9218516 対 1.9239000（1.1e-3）、`max_stress_pa` 差 1.9e-4 が許容 1e-6 を超過し、reference 側が `status='crashed'` になる | `physics/gpu_dynamics.py:546,705,709`（`altitude = -position[:,2] - params.ground_level_m` による AGL の事前減算）/ `physics/wind_domain.py:852`（`heights_agl = P[:,2] - ground_level_m` での AGL 形成）/ `physics/flight_sim.py:877`（参照経路の `height = -position[2]`） | `python -m pytest "tests/test_optimizer.py::test_map_evaluate_is_order_preserving" "tests/test_optimizer.py::test_parallel_evaluate_matches_serial_and_reports_progress" "tests/test_ga_audit.py::test_the_batch_path_agrees_with_the_canonical_6dof_on_ga_individuals" -q` | 検証済（残存）。**根因候補はバッチ経路の実効 AGL 502 m**（参照経路 2.0 m が真値）→ 担当 **W9** |
+| **K1-P0-2** | **水平 100 km 境界でのクラッシュ判定が働かない**。境界の 0.034 m 手前（`position_m.x = 99999.9657`）でも `crashed=False` のまま | `tests/test_world_bounds.py::test_simulation_crashes_and_freezes_when_crossing_horizontal_boundary` / 水平リミットの判定実装（`physics/flight_sim.py`） | `python -m pytest "tests/test_world_bounds.py::test_simulation_crashes_and_freezes_when_crossing_horizontal_boundary" -q` | 検証済（残存）→ 担当 **W9** |
+| **K1-P0-3** | **GA2 の Stage-0 幾何フィルタが既知設計を偽陽性で不合格にする**。既知設計が `reasons=['paper would tear']` で落ちる | `tests/test_ga2_stages.py::test_the_geometry_filter_accepts_the_known_designs` / `physics/ga2/stage0.py` | `python -m pytest "tests/test_ga2_stages.py::test_the_geometry_filter_accepts_the_known_designs" -q` | 検証済（残存・偽陽性疑い）→ 担当 **W10** |
+| **K1-P1** | **3 ファイルが 120 s を超えており、タイムアウトなのか単に遅いだけかが未確認** | `tests/test_investigate.py` / `tests/test_issue28_gpu_duration.py` / `tests/test_payload_contract.py` | `python -m pytest tests/test_investigate.py tests/test_issue28_gpu_duration.py tests/test_payload_contract.py -q --durations=10` | **未確認**（タイムアウト未確認。長い可能性あり） |
+
+**前提となる事実（2026-10-21）**: HEAD `54d556b` の `tests/test_flight.py` + `tests/test_records.py` は
+**9 failed / 68 passed** だったが、`7639895 fix(physics): restore the fold-integration contract and the payload keys`
+で **82 passed** へ回復済み（`09aa40e` の2劣化＝後縁フォールドの空力接続と `fold_trailing_deg` 既定 15.0 の矛盾、
+`physics/payload_contract.py` の `CORE_KEYS` からの `error`/`error_id` 欠落）。
+検証ベースライン: `python -m ruff check .` 0 件 / `python -m compileall physics api tools app.py smoke_test.py` 0 error /
+`python smoke_test.py` 14/14 ステージ。既知の残失敗は本節の 4 件と P1 の未確認 3 ファイル。
+
+**参照アンカーの注意（Knowledge.md 再構成のため）**: `no-finish.md` §7.0 と `docs/CODE_REVIEW_FINDINGS.md` は
+`.agents/Knowledge.md` を**行番号**（例: `:38-39`、`:41`）で参照しているが、Knowledge.md は 2026-10-21 に
+80行→74行へ再構成（節の統合）されたため**行番号アンカーは失効**している（§7.0 の P1-13 における
+「Knowledge.md が実在しないガードレールを主張」という指摘自体は、節 `[Discord Bridge]` の該当行に実在する）。
+参照は**節名**で行うこと: `[Discord Bridge]` / `[Infeasible Status Forwarding]` / `[GA Research Engine]` /
+`[Wind Altitude Convention / 風高度規約・風洞]` / `[Commit Audit & Integration Contract]` / `[Remaining Work Ledger]`。
+
+
+### 4.8 2026-10-21 実測で確定した残課題（K2 台帳: P0-1〜P0-9 / P1）
+
+> 出典: 2026-10-19 コミット監査の残件（§4.7 と同一系統）＋ 2026-10-21 の K2 実測スイート走査
+> ＋ GA エンジン審査の P0 4 件（Y1 レポート `Y1_ga_engine_review.md` / 修正レポート `Y2_ga_p0_fixes.md`）。
+> **ID は本節が優先 ID**。§7.1 の `P0-1`〜`P0-12`（2026-10-19 レビュー由来）とは別系統のため台帳内衝突を
+> 避けるため `K2-` 接頭辞を付す（**K2-P0-N ≡ 指示の P0-N**）。§4.7 の `K1-P0-1`〜`K1-P0-3` / `K1-P1` と
+> **同一の不具合**であり、本節が 2026-10-21 の実測値と実装状況で優先 ID を再割当したものである。
+> 事実の正本は `.agents/Knowledge.md`「Verified Solutions & Troubleshooting」/「Wind Altitude Convention」/
+> 「Console Control Unification」/「Orchestration Ops」節（残課題のみ本ファイルに二重保管しない）。
+
+| ID | 残課題 | 場所（file:line） | 再現コマンド | 判定・担当 |
+|---|---|---|---|---|
+| **K2-P0-1** | **GPU/バッチ経路と 6DoF 参照経路の数値不一致**。`distance_m` が 5.2577409 対 5.2613846（`tests/test_optimizer.py::test_map_evaluate_is_order_preserving`）および 1.9218516 対 1.9239000（`::test_parallel_evaluate_matches_serial_and_reports_progress`）が許容 1e-6 を超過。`tests/test_ga_audit.py::test_the_batch_path_agrees_with_the_canonical_6dof_on_ga_individuals` は `max_stress_pa` 差 1.9e-4 > 許容 1e-6、reference 側が `status='crashed'` になる | `physics/gpu_dynamics.py:547,705,709`（`altitude = -position[:,2] - params.ground_level_m` の AGL 事前減算）/ `physics/wind_domain.py:852`（`heights_agl = P[:,2] - ground_level_m`）/ `physics/flight_sim.py:877`（参照経路の `height = -position[2]`） | `python -m pytest "tests/test_optimizer.py::test_map_evaluate_is_order_preserving" "tests/test_optimizer.py::test_parallel_evaluate_matches_serial_and_reports_progress" "tests/test_ga_audit.py::test_the_batch_path_agrees_with_the_canonical_6dof_on_ga_individuals" -q` | **検証済（残存）**。根因候補とされた「バッチ経路の実効 AGL 502 m」は、**2026-10-21 実測では再現せず**（`ground_level_m=500`・AGL 2 m で参照 `|v|=8.777626716693877` ≡ バッチ同値、`tests/test_wind_height_parity.py` 3 passed＝風サンプル自体は一致）＝差分箇所の特定が必要 → 担当 **W9** |
+| **K2-P0-2** | **水平 100 km 境界でのクラッシュ判定が働かない**。境界の 0.034 m 手前（`position_m.x = 99999.9657`）でも `crashed=False` のまま | `tests/test_world_bounds.py::test_simulation_crashes_and_freezes_when_crossing_horizontal_boundary` / 水平リミット判定（`physics/flight_sim.py`） | `python -m pytest "tests/test_world_bounds.py::test_simulation_crashes_and_freezes_when_crossing_horizontal_boundary" -q` | **検証済（残存）**（2026-10-21 再実測: `x=99999.9657` で `crashed=False`）→ 担当 **W9** |
+| **K2-P0-3** | **GA2 の Stage-0 幾何フィルタが既知設計を偽陽性で不合格にする**。既知設計が `reasons=['paper would tear']` で落ちる | `tests/test_ga2_stages.py::test_the_geometry_filter_accepts_the_known_designs` / `physics/ga2/stage0.py` | `python -m pytest "tests/test_ga2_stages.py::test_the_geometry_filter_accepts_the_known_designs" -q` | **2026-10-21 再実測: PASS**（他アクターの `physics/ga2/stage0.py` 差分で解消済み）。偽陽性ではなく**真の不合格**の可能性と tear 判定の出典を要確認 → 担当 **W10** |
+| **K2-P0-4** | **GA の適合度式に出典無しの係数が混入**。`grip_penalty_weight=0.01` / `max_secondary_weight=0.25` と基準値 `max_ld_ratio: 8.0` / `max_altitude_m: 10.0`（重み付き加算形。設計正本は grace factor の**積** `1/(1+P_grip)` であり `8.0`/`10.0` に出典なし） | `physics/ga_config.py` / `physics/ga_domain.py`（Y1 の **Y-02**） | `python -c "from physics.ga_config import GAConfig; c=GAConfig(); print(c.grip_penalty_weight, c.max_secondary_weight)"` | **修正済み（Y2 `Y2_ga_p0_fixes.md`・作業ツリー・未コミット）**。ただし**旧重み付き成果物 `artifacts/ga_audit/**` は現行設定と不整合**（Y1 の Y-19）のため引用不可 → 再生成 or 生成時 config ハッシュの埋め込みが要対応 → 担当 **GA 担当** |
+| **K2-P0-5** | **GA の公開 payload に `model` / `approximate` / `physics_verification_eligible` / `limitations` が無い**。`_result_payload` に 4 キーが無く、スカラー filter が `limitations`（非スカラー）を脱落させるため、公開 payload と HTTP 応答のいずれにも経路情報が 1 つも無い | `physics/ga_domain.py::_result_payload` / `api/routes/ga_research.py`（Y1 の **Y-06**） | `python -m pytest tests/test_ga_engine.py -q -k "payload or provenance or limitations"` | **修正済み（Y2・作業ツリー・未コミット）**（`physics/ga_domain.py:525,555` が `limitations` を保持）→ 担当 **GA 担当** |
+| **K2-P0-6** | **代理経路（`reduced_surrogate`）が「最適機体」として公開され得る**。ホール・オブ・ファームがティアを問わずに登録し、`_best_individual` が先頭を無条件公開するため tier-1 個体が「物理検証済みの最適機体」として出る | `physics/ga_domain.py`（Y1 の **Y-21**） | `python -m pytest tests/test_ga_engine.py -q -k "surrogate or publish"` | **修正済み（Y2・作業ツリー・未コミット）**（`physics/ga_domain.py:971-983` が代理経路の公開を遮断）→ 担当 **GA 担当** |
+| **K2-P0-7** | **世代 0 の初期母集団が一度も評価されない**（未評価個体が `feasible` 扱い）。世代ループが offspring だけを tier0→tier3 に通すため初期母集団は `tier=0, metric=0.0, result={}` のままで、`individual_structural_failure` が `result={}` に対し失敗条件を一つも満たさないため `False`（feasible）を返す | `physics/ga_domain.py`（Y1 の **Y-23**） | `python -m pytest tests/test_ga_engine.py -q -k "generation0 or bootstrap or feasible"` | **修正済み（Y2・作業ツリー・未コミット）** → 担当 **GA 担当** |
+| **K2-P0-8** | **風洞ベンチ姿勢の正本関数 `wind_tunnel_bench_quaternion` が未定義**。`7639895` の規約（ベンチは進行方向を向く heading 180°、4° ベンチの α は要求された正の α、旧実装は 180°+α で −176°）は docstring に明文化されているが、その関数を参照する実装が存在しない | `physics/flight_sim.py`（関数**未定義**）/ `physics/wind_domain.py:881,915`（docstring 参照のみ） | `python -c "import physics.flight_sim as f; print(hasattr(f, 'wind_tunnel_bench_quaternion'))"` → `False` | **検証済（未実装）**。§7.1 の P0-3（風洞モードで機体が後ろ向きに吹かれる）と同系統 → 担当 **W1** |
+| **K2-P0-9** | **投入初期条件の出典なき人工係数が残存**。`torque_rate[1] *= 0.10`（"Finger pinch guide effect"）が `physics/flight_sim.py:1512` に残り、pitch 相対誤差が 0.9（解析値 `I⁻¹MΔt` と不一致）。`7639895` の規約は撤去を要求 | `physics/flight_sim.py:1512` | `python -m pytest tests/test_flight.py -q`（現状 82 passed のため**係数除去の回帰固定テストが未整備**。撤去時は pitch 相対誤差 0.0 を固定するテストを新設する必要がある） | **検証済（未実装）**。`AGENTS.md` §1.5・A-1 と同じ「出典なき係数」原則の対象 → 担当 **W1** |
+| **K2-P1** | **3 ファイルが 120 s を超えており、タイムアウトなのか単に遅いだけかが未確認** | `tests/test_investigate.py` / `tests/test_issue28_gpu_duration.py` / `tests/test_payload_contract.py` | `python -m pytest tests/test_investigate.py tests/test_issue28_gpu_duration.py tests/test_payload_contract.py -q --durations=10` | **未確認**（タイムアウト未確認。長い可能性あり）→ 担当 **W6** |
+
+**2026-10-21 実測の検証ベースライン**: `python -m ruff check .` = All checks passed /
+`python -m compileall physics api tools app.py smoke_test.py` = 0 error / `python smoke_test.py` = **14/14 ステージ** /
+`tests/test_flight.py` + `tests/test_records.py` = **82 passed**（`7639895` による復旧を確認）。
+K2-P0-1 / K2-P0-2 は**再現済み（FAILED）**、K2-P0-3 は **PASS**（解消済み）、
+K2-P0-4〜K2-P0-7 は Y2 により作業ツリー上は修正済み（**未コミット**・CI 未確認）、
+K2-P0-8 / K2-P0-9 は**未実装**（コード側対応が要る）である。
+
 
 ## 5. 次のフェーズで着手する順序（推奨）
 
@@ -598,6 +661,22 @@
 | **第12段**（外部露出） | **Discord bridge の無条件許可**と **Knowledge.md の虚偽ガードレール記載**。bridge を他チャンネルへ出す前に**必ず**終える | P1-12, P1-13 |
 | **第13段**（既存フェーズ） | §5 の 1〜5（GPU 融合 / 実材料断面 / アンサンブル6DoF化 or 縮小 / パネル法規約 / 到達不能ガード）と G-1→G-3→G-2 | 既存 §5 |
 | **第14段**（低） | P3 群（死定数・docstring・ignore 方針・正本ずれ・MCP 再構築可否） | P3-1〜P3-11 |
+
+> **2026-10-21 追記**: §4.7 の K1-P0-1（バッチ経路 ⇄ 6DoF 参照経路の数値一致）・K1-P0-2（水平 100 km 境界での
+> クラッシュ判定）・K1-P0-3（GA2 stage-0 幾何フィルタの偽陽性）と K1-P1（3ファイルの未確認タイムアウト）は、
+> 上表の**第1段（物理正本）〜第6段（可視化の正しさ）**と並行して着手する。担当は **W9**（K1-P0-1 / K1-P0-2）と
+> **W10**（K1-P0-3）。K1-P1 は pytest の実測（`--durations`）だけで切り分けられるため、父の優先度判断に任せる。
+>
+> **2026-10-21 追記 2（K2 台帳 §4.8）**: §4.8 の優先 ID は §4.7 を統合したもので、上表の段へ次のように割り当てる。
+> **第0段**に K2-P0-4〜K2-P0-7（GA エンジンの審査 P0 4 件。Y2 が作業ツリー上で修正済みだが**未コミット・CI 未確認**、
+> かつ旧成果物 `artifacts/ga_audit/**` は現行設定と不整合＝再生成が要る）を**第0段〜第1段の間**へ挿入。
+> **第1段（物理正本）**に K2-P0-8（風洞ベンチ姿勢の正本関数 `wind_tunnel_bench_quaternion` が未定義）と
+> K2-P0-9（投入初期条件の出典なき係数 `torque_rate[1] *= 0.10`）を §7.1 の P0-3 と同一段へ追加。
+> **第1段〜第6段**に K2-P0-1（バッチ⇄6DoF 数値不一致。**風高度仮説は 2026-10-21 実測で再現せず**＝差分特定が先）と
+> K2-P0-2（水平 100 km 境界のクラッシュ判定）を追加（担当 **W9**）。
+> **K2-P0-3**（GA2 stage-0 tear フィルタ）は 2026-10-21 実測で **PASS**（解消済み）だが、判定の出典確認は担当 **W10** に残す。
+> **K2-P1**（3 ファイルの未確認タイムアウト）は pytest の実測（`--durations`）だけで切り分けられるため、
+> 父の優先度判断に任せる。
 
 ---
 

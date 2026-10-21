@@ -75,8 +75,6 @@ jitter_yaw_deg: 3.0
 stagnation_generations: 10
 migration_interval: 2
 migration_elites: 2
-max_secondary_weight: 0.25
-sensitivity_threshold: 0.25
 micro_flaps: false
 
 # ---------------------------------------------------------------------------
@@ -126,9 +124,10 @@ symmetry_change_rate: 0.08
 # Fitness of an infeasible design
 # ---------------------------------------------------------------------------
 # The grip penalty of a genome that could not be folded at all.
+# The fitness itself carries no free weight: the grip penalty enters it as
+# the grace factor 1/(1 + P_grip) of the grip contract, and a design that
+# was never evaluated (or whose flight failed) scores INFEASIBLE_SCORE.
 broken_genome_penalty: 1000000.0
-# The weight of the grip penalty in the fitness of an infeasible design.
-grip_penalty_weight: 0.01
 
 # ---------------------------------------------------------------------------
 # Population level selection

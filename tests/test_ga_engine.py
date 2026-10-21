@@ -103,12 +103,19 @@ def _archive_member(index: int, fitness: float, *, status: str = "landed") -> In
     """A candidate with a known fitness, for the hall of fame tests.
 
     The individual carries the flight payload of a **feasible** flight
-    (``status`` ``landed``, no stress above the allowable), so the engine
-    accepts it into the archive.  A different status (``crashed``) makes
-    it a structural failure, which never enters the archive.
+    (``status`` ``landed``, no stress above the allowable) and the
+    provenance of the 6-DoF reference path, so the engine accepts it into
+    the archive.  A different status (``crashed``) makes it a structural
+    failure, which never enters the archive.
     """
     genes = default_genes()
-    result: dict = {"status": status, "max_stress_pa": 0.0}
+    result: dict = {
+        "status": status,
+        "max_stress_pa": 0.0,
+        "model": "rigid_body_6dof",
+        "approximate": False,
+        "physics_verification_eligible": True,
+    }
     if status == "crashed":
         result["crashed"] = True
     return Individual(
@@ -122,6 +129,7 @@ def _archive_member(index: int, fitness: float, *, status: str = "landed") -> In
         feasible=True,
         result=result,
     )
+
 
 
 # ---------------------------------------------------------------------------
@@ -336,26 +344,35 @@ def test_a_real_run_reports_the_metric_of_its_objective(tmp_path: Path) -> None:
 # the multi fidelity pipeline
 # ---------------------------------------------------------------------------
 def test_the_tier_promotion_respects_the_configured_sizes(tmp_path: Path) -> None:
-    """The size of every tier is the configured one."""
+    """The size of every tier is the configured one.
+
+    The tier sizes are the limits of **one evaluation round**, and a run has
+    one round more than it has generations: the seeded population is
+    evaluated before the first generation breeds from it, so the budget of
+    the run pays for those flights as well.
+    """
+    generations = 3
     summary = _run(
         tmp_path,
         tier1_trials=3,
         tier2_trials=2,
         tier3_trials=1,
         max_trials=200,
-        generations=3,
+        generations=generations,
         islands=1,
     )
+    rounds = generations + 1
     counts = summary["tier_counts"]
-    assert counts["tier1"] <= 3 * 3
-    assert counts["tier2"] <= 2 * 3
-    assert counts["tier3"] <= 1 * 3
+    assert counts["tier1"] <= 3 * rounds
+    assert counts["tier2"] <= 2 * rounds
+    assert counts["tier3"] <= 1 * rounds
     assert counts["tier3"] >= 1
     assert counts["tier2"] >= counts["tier3"]
     promotion = summary["promotion"]
     assert promotion["promotion_ratio_tier1"] >= 0.0
     assert promotion["promotion_ratio_tier1"] <= 1.0
     assert promotion["promotion_ratio_tier3"] <= 1.0
+
 
 
 def test_the_geometry_filter_eliminates_the_invalid_individuals(tmp_path: Path) -> None:
@@ -957,7 +974,11 @@ def test_the_api_publishes_the_live_progress_of_a_running_run(tmp_path: Path) ->
 
         live = []
         final = None
-        deadline = time.time() + 120.0
+        # The seeded population is evaluated before the first generation, so
+        # the first snapshot of the curve appears after those flights: the
+        # deadline has to cover them as well.
+        deadline = time.time() + 240.0
+
         while time.time() < deadline:
             payload = client.get(f"/api/ga/research/status/{run_id}").get_json()
             for key in (
@@ -1132,6 +1153,11 @@ def test_a_failed_evaluation_is_infeasible_and_never_published(tmp_path: Path) -
     metric of an aeroplane that flew nowhere.  Scoring it like a legitimate
     flight lets a broken evaluation win every comparison and end up as the
     published best individual.
+
+    Both candidates carry the full fidelity tier and a reference path
+    payload, so the *only* difference between them is the failed
+    evaluation: the archive publishes the legitimate flight and refuses the
+    broken one.
     """
     from physics.ga_domain import INFEASIBLE_SCORE, is_failed_evaluation
     from physics.optimizer_domain import INFEASIBLE_SCORE as SHARED_INFEASIBLE_SCORE
@@ -1147,16 +1173,28 @@ def test_a_failed_evaluation_is_infeasible_and_never_published(tmp_path: Path) -
         genome=genome,
         genes=genes,
         throw=ThrowParams.from_genes(genes),
+        tier=2,
         feasible=True,
-        result={"status": "error", "distance_m": 0.0, "flight_time_s": 0.0},
+        result={
+            "model": "rigid_body_6dof",
+            "status": "error",
+            "distance_m": 0.0,
+            "flight_time_s": 0.0,
+        },
     )
     legitimate = Individual(
         index=2,
         genome=genome,
         genes=genes,
         throw=ThrowParams.from_genes(genes),
+        tier=2,
         feasible=True,
-        result={"status": "landed", "distance_m": 0.0, "flight_time_s": 0.0},
+        result={
+            "model": "rigid_body_6dof",
+            "status": "landed",
+            "distance_m": 0.0,
+            "flight_time_s": 0.0,
+        },
     )
 
     assert is_failed_evaluation(broken.result, run._allowable_pa()) is True
@@ -1202,11 +1240,41 @@ def test_a_failed_evaluation_never_becomes_the_best_of_a_real_run(tmp_path: Path
 def test_the_statistic_mode_drives_the_selection(tmp_path: Path) -> None:
     """``--stat-mode`` changes the search, not only the report.
 
-    The selected population statistic decides the size of the elite block of
-    the next population, so the mean keeps a broadly good population, the
-    median a robust one and the peak a population built around the best
-    individual.
+    The contract (D4) is a **population level** one: the selected
+    population statistic decides which candidates become the *parents* of
+    the next population.  The engine implements it in
+    :meth:`physics.ga_domain.ResearchRun._elite_count`: the elite block is
+    the group of candidates that are at least as good as the selected
+    aggregate, so the mean keeps a broadly good population, the median a
+    robust one and the peak a population built around the best individual.
+    The next population is that elite block plus the best of the new
+    offspring, so the size of the block is also the room the island has
+    left for new blood.
+
+    The test therefore asserts the **search level** effect and not the
+    identity of the published best.  The best individual of a run is a
+    single point of the search: the same individual may well win in two
+    different modes - the generation-0 elite wins in both when the
+    population is still close to the seeds - and that coincidence says
+    nothing about the population the next generation is built from.  The
+    published genes were therefore the wrong proxy for the contract.
+
+    The proof has two halves:
+
+    * a **real run** in each mode: the statistic selects the aggregate the
+      selection is built on, so the two runs build their next populations
+      from different aggregates.  The *size* of the elite block is a
+      property of the data (the mean and the median of a small population
+      can select the same number of candidates), so the size is not the
+      contract -- the selection is, and the controlled population proves
+      it;
+    * a **controlled population** whose fitness spread is known: with the
+      engine's own methods the elite block of every mode is exactly the
+      group of candidates that carries the selected aggregate, so the
+      three modes keep three different sets of parents.  This half is
+      deterministic - it does not depend on a lucky run.
     """
+    from physics.ga_domain import INFEASIBLE_SCORE
     from physics.ga_domain import select_statistic as select
 
     outcomes = {}
@@ -1234,24 +1302,114 @@ def test_the_statistic_mode_drives_the_selection(tmp_path: Path) -> None:
         checkpoint = json.loads(
             (Path(summary["checkpoint"])).read_text(encoding="utf-8")
         )
-        elite_counts = [
-            int(report["elite_count"])
+        reports = [
+            report
             for entry in checkpoint["history"]
             for report in entry["reports"]
         ]
+        elite_counts = [int(report["elite_count"]) for report in reports]
+        aggregates = [float(report["aggregate"]) for report in reports]
         assert elite_counts, "the run must report the size of its elite block"
         outcomes[mode] = {
             "elite_counts": elite_counts,
+            "aggregates": aggregates,
             "genes": summary["result"]["genes"],
             "best": summary["best_fitness"],
         }
 
-    assert outcomes["mean"]["elite_counts"] != outcomes["median"]["elite_counts"], (
-        "the selected statistic must change the population level selection"
+    # The elite block of a real generation is never empty, and the block is
+    # the room the island has left for new blood.
+    for mode, outcome in outcomes.items():
+        assert all(count >= 1 for count in outcome["elite_counts"]), mode
+        assert outcome["best"] is not None, mode
+        assert outcome["best"] > float(INFEASIBLE_SCORE), mode
+    # The aggregate the selection is built on is the statistic itself, so a
+    # different aggregate is a different selection input, not a different
+    # report.
+    assert outcomes["mean"]["aggregates"] != outcomes["median"]["aggregates"], (
+        "the selected statistic must change the aggregate the selection uses"
     )
-    assert outcomes["mean"]["genes"] != outcomes["median"]["genes"], (
-        "the selected statistic must change the search"
+
+    # -- the controlled population -------------------------------------
+    # A population with a known spread: a dense upper half and two poor
+    # candidates, so the mean, the median and the peak select three
+    # different groups.
+    fitness_values = [
+        0.10,
+        0.20,
+        0.30,
+        0.40,
+        0.50,
+        0.60,
+        0.65,
+        0.70,
+        0.80,
+        0.90,
+        0.95,
+        1.00,
+    ]
+    run = ResearchRun(
+        GAConfig()
+        .merged(
+            _overrides(
+                tmp_path,
+                population_size=len(fitness_values),
+                stat_elite_max_fraction=0.9,
+            )
+        )
+        .validate(),
+        {},
     )
+    genes = default_genes()
+    genome = genome_from_archetype("dart")
+    candidates = [
+        Individual(
+            index=index,
+            genome=genome,
+            genes=genes,
+            throw=ThrowParams.from_genes(genes),
+            metric=value,
+            fitness=value,
+        )
+        for index, value in enumerate(fitness_values)
+    ]
+    statistics = compute_population_statistics(
+        fitness_values, fitness_values, [False] * len(fitness_values)
+    )
+
+    blocks = {}
+    for mode in ("mean", "median", "best"):
+        aggregate = select(statistics, mode)
+        count = int(run._elite_count(candidates, aggregate))
+        ranked = sorted(
+            candidates, key=lambda item: (item.fitness, item.index), reverse=True
+        )
+        block = tuple(sorted(item.index for item in ranked[:count]))
+        blocks[mode] = {"aggregate": float(aggregate), "count": count, "block": block}
+        # The block is exactly the group that carries the selected
+        # aggregate: every member is at least as good as the aggregate.
+        assert all(
+            fitness_values[index] >= aggregate for index in block
+        ), (mode, block, aggregate)
+        # The island keeps the block and fills the rest of the population
+        # with new blood, so the block size is the room for new blood.
+        assert count <= len(fitness_values) - 1, (mode, count)
+
+    # The three statistics select three different groups of parents.
+    assert blocks["mean"]["block"] != blocks["median"]["block"], blocks
+    assert blocks["median"]["block"] != blocks["best"]["block"], blocks
+    # The peak keeps the best individual alone: the population is rebuilt
+    # around it.
+    assert blocks["best"]["count"] == 1, blocks
+    assert blocks["best"]["block"] == (
+        max(range(len(fitness_values)), key=lambda index: fitness_values[index]),
+    ), blocks
+    # The mean keeps the broadly good population, the median the robust
+    # one: the median block is a subset of the mean block.
+    assert set(blocks["median"]["block"]) <= set(blocks["mean"]["block"]), blocks
+    # ... and the number of newcomers differs, so the *composition* of the
+    # next population differs as well.
+    assert blocks["mean"]["count"] != blocks["median"]["count"], blocks
 
 
 # ---------------------------------------------------------------------------
@@ -1412,16 +1570,23 @@ def test_the_hall_of_fame_keeps_the_best_of_the_whole_run(tmp_path: Path) -> Non
     first iteration, so a run that found a much better design afterwards
     published the worse one it had found in its first generation.
 
-    The claim is checked against the **state of the run**, never against
-    the outcome of one generation: a run whose best design was found in
-    its first generation and was never beaten is a legitimate run, so the
-    test does not demand that the best archive member is newer than the
-    oldest one.  What it demands is that the archive is the best of the
-    *whole* run: it holds more individuals than the initial population had,
-    it holds individuals the initial population did not contain, and it
-    was updated after the first generation.
+    The archive is a **publication surface**, so it only holds the designs
+    that were evaluated on the 6-DoF reference path and that flew without a
+    structural failure.  A surrogate result and a candidate that was never
+    evaluated are never archived, and the archive may therefore hold fewer
+    than ``top_k`` entries: it holds the *verified* designs, not the number
+    of candidates the run happened to produce.
+
+    The claim is checked against the **state of the run**, never against the
+    outcome of one generation: a run whose best design was found in its
+    first generation and was never beaten is a legitimate run, so the test
+    does not demand that the best archive member is newer than the oldest
+    one.  What it demands is that the archive is the best of the *whole*
+    run: it holds the designs of the whole run, it holds individuals the
+    seeded population did not contain, and it was updated after the first
+    generation.
     """
-    overrides = _overrides(tmp_path, generations=4, islands=1, top_k=5)
+    overrides = _overrides(tmp_path, generations=4, islands=1, top_k=5, max_trials=30)
     config = GAConfig().merged(overrides).validate()
     events: list = []
     run = ResearchRun(config, overrides, progress_callback=events.append)
@@ -1444,6 +1609,15 @@ def test_the_hall_of_fame_keeps_the_best_of_the_whole_run(tmp_path: Path) -> Non
         summary["best_fitness"]
     )
 
+    # Every archived design is a **verified** one: it was evaluated on the
+    # 6-DoF reference path, it is not an approximation and it did not fail.
+    for entry in hall:
+        result = entry.get("result") or {}
+        assert int(entry["tier"]) >= 2, "an archived design must carry a 6-DoF result"
+        assert result.get("model") == "rigid_body_6dof", result.get("model")
+        assert result.get("approximate") is False
+        assert result.get("status") not in ("crashed", "diverged", "failed", "error")
+
     # The published best is at least as good as the best any island ever
     # found.  The island reports carry the best fitness of the population of
     # every generation, and the archive covers the whole run, so the
@@ -1460,7 +1634,7 @@ def test_the_hall_of_fame_keeps_the_best_of_the_whole_run(tmp_path: Path) -> Non
     )
 
     # The archive is the best of the **whole** run, so it is not limited to
-    # the individuals of the initial population.  The initial population is
+    # the individuals of the seeded population.  The initial population is
     # rebuilt with the production bootstrap code, so its index set is the
     # one of the run itself and not an assumption about it.
     probe = ResearchRun(config, overrides)
@@ -1483,7 +1657,7 @@ def test_the_hall_of_fame_keeps_the_best_of_the_whole_run(tmp_path: Path) -> Non
     )
 
     # The archive was updated **after** the first generation: the run
-    # created the individuals of its first generation first (the initial
+    # created the individuals of its first generation first (the seeded
     # population plus the offspring of the first generation, which the
     # report counts as ``candidates``), so an archive member with a larger
     # index was found in a later generation.  The run uses a single island,
@@ -1618,6 +1792,427 @@ def test_the_monte_carlo_ensemble_stays_inside_the_budget(tmp_path: Path) -> Non
         ]
         for report in entry["reports"]
     )
-    assert int(summary["tier_counts"]["tier3"]) == 3 * promoted
+    # The seeded population is evaluated before the first generation, so the
+    # flights of that round belong to the count as well; the journal says
+    # how many they were.
+    initial = [
+        record
+        for record in (
+            json.loads(line)
+            for line in Path(
+                str(summary["config"]["out_dir"]), "research_journal.jsonl"
+            )
+            .read_text(encoding="utf-8")
+            .splitlines()
+            if line.strip()
+        )
+        if record["decision"] == "initial_evaluation"
+    ]
+    assert initial, "the evaluation of the seeded population must be journalled"
+    initial_flights = int(initial[0]["changes"]["tier3_flights"])
+    assert int(summary["tier_counts"]["tier3"]) == 3 * promoted + initial_flights
 
 
+
+# ---------------------------------------------------------------------------
+# P0 (Y-02): the fitness carries no free coefficient
+# ---------------------------------------------------------------------------
+def test_the_fitness_carries_no_free_coefficient(tmp_path: Path) -> None:
+    """The fitness of the engine is dimensionless and free of tuned weights.
+
+    The contract (``AGENTS.md`` §1.5 and the fitness design of the research
+    programme) is that the fitness carries **no** weight without a physical
+    source.  The old formula mixed a weighted sum of secondary terms
+    (``0.25``), a reference value without a source (``8.0``) and an
+    additive grip penalty (``0.01``): every one of them was a free
+    coefficient that moved the search without a physical meaning.
+
+    The test is therefore **structural**: it reads the source of the
+    fitness and checks that the only numeric literals it uses are the two
+    constants of the grace factors (``1`` and ``0``), and it checks that
+    the configuration and the objective carry no weight at all.
+    """
+    import ast
+    import inspect
+    import textwrap
+
+    from physics.ga_domain import ResearchRun
+
+    source = textwrap.dedent(inspect.getsource(ResearchRun._individual_fitness))
+    tree = ast.parse(source)
+    literals = {
+        float(node.value)
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Constant)
+        and isinstance(node.value, (int, float))
+        and not isinstance(node.value, bool)
+    }
+    assert literals <= {0.0, 1.0}, (
+        f"the fitness must not carry a free coefficient: {sorted(literals)}"
+    )
+
+    config = GAConfig()
+    for name in ("grip_penalty_weight", "max_secondary_weight", "sensitivity_threshold"):
+        assert not hasattr(config, name), (
+            f"the configuration must not carry a fitness weight: {name}"
+        )
+
+    spec = objective_spec("distance")
+    assert not hasattr(spec, "secondary_references"), (
+        "the objective must not carry a reference value without a source"
+    )
+    assert not hasattr(spec, "secondary_metric_keys")
+    # The only reference the fitness uses is the world record of the
+    # objective, and that one has a source.
+    assert spec.reference_target == pytest.approx(88.31)
+
+
+def test_the_grip_penalty_enters_the_fitness_as_a_grace_factor(
+    tmp_path: Path,
+) -> None:
+    """The grip penalty scales the merit, it is not a penalty added to it.
+
+    The design of the fitness multiplies the merit with the grace factors
+    of the constraints, so a design that is hard to hold is worth *less in
+    proportion*.  The old formula subtracted ``1 + 0.01 * P_grip`` from the
+    merit, which made a small penalty invisible next to the constant and
+    let a bad design outrank a good one.
+    """
+    from physics.ga_domain import INFEASIBLE_SCORE
+
+    run = ResearchRun(GAConfig().merged(_overrides(tmp_path)).validate(), {})
+
+    def design(metric: float, grip_penalty: float = 0.0) -> Individual:
+        genes = default_genes()
+        return Individual(
+            index=1,
+            genome=genome_from_archetype("dart"),
+            genes=genes,
+            throw=ThrowParams.from_genes(genes),
+            tier=3,
+            metric=metric,
+            feasible=True,
+            grip_penalty=grip_penalty,
+            result={
+                "status": "landed",
+                "max_stress_pa": 0.0,
+                "model": "rigid_body_6dof",
+                "approximate": False,
+            },
+        )
+
+    reference = float(objective_spec("distance").reference_target)
+    # a feasible design is worth exactly its merit: no additive constant
+    assert run._individual_fitness(design(reference)) == pytest.approx(1.0)
+    # the grip penalty is a grace factor: 1/(1 + P_grip)
+    assert run._individual_fitness(design(reference, grip_penalty=1.0)) == pytest.approx(0.5)
+    assert run._individual_fitness(design(reference, grip_penalty=3.0)) == pytest.approx(0.25)
+    # a design that was never evaluated (or whose flight failed) is infeasible
+    unevaluated = design(reference)
+    unevaluated.result = {}
+    assert run._individual_fitness(unevaluated) == pytest.approx(float(INFEASIBLE_SCORE))
+
+
+# ---------------------------------------------------------------------------
+# P0 (Y-06): the published result carries its provenance
+# ---------------------------------------------------------------------------
+def test_the_published_result_carries_its_provenance(tmp_path: Path) -> None:
+    """A published flight says which model produced it.
+
+    The contract of ``docs/SPECIFICATION.md`` §2.1 is that a reader can
+    always tell *which model* produced a number, whether that model is an
+    approximation, whether the number may be used for a physics
+    verification and what the result does not know.  The published payload
+    used to carry none of it, and the scalar filter of the flight result
+    dropped the limitations on the way.
+    """
+    summary = _run(tmp_path, generations=1, islands=1)
+    result = summary["result"]
+    for key in ("model", "approximate", "physics_verification_eligible", "limitations"):
+        assert key in result, key
+    assert result["model"] == "rigid_body_6dof"
+    assert result["approximate"] is False
+    assert result["physics_verification_eligible"] is True
+    assert isinstance(result["limitations"], list)
+
+    flight = result["flight_result"]
+    assert flight["model"] == result["model"]
+    assert flight["approximate"] is False
+    assert flight["physics_verification_eligible"] is True
+    # the limitations are a list of sentences: the scalar filter of the
+    # flight result must not drop them
+    assert isinstance(flight["limitations"], list)
+    assert flight["limitations"] == result["limitations"]
+
+
+def test_the_api_publishes_the_provenance_of_the_result(tmp_path: Path) -> None:
+    """The HTTP answer carries the four provenance keys as well."""
+    import time
+
+    from app import create_app
+
+    app = create_app()
+    app.config["TESTING"] = True
+    with app.test_client() as client:
+        response = client.post(
+            "/api/ga/research/run",
+            json={
+                "objective": "distance",
+                "max_trials": 6,
+                "top_k": 2,
+                "tier1_trials": 2,
+                "tier2_trials": 1,
+                "tier3_trials": 1,
+                "tier2_duration_s": 0.12,
+                "tier3_duration_s": 0.15,
+                "seed": 5,
+                "generations": 1,
+                "islands": 1,
+                "output_dir": str(tmp_path / "api"),
+            },
+        )
+        assert response.status_code == 200
+        run_id = response.get_json()["run_id"]
+
+        # the run executes in the background: the answer of a running job
+        # already carries the provenance keys ...
+        payload = client.get(f"/api/ga/research/result/{run_id}").get_json()
+        for key in (
+            "model",
+            "approximate",
+            "physics_verification_eligible",
+            "limitations",
+        ):
+            assert key in payload, key
+        assert isinstance(payload["approximate"], bool)
+        assert isinstance(payload["physics_verification_eligible"], bool)
+        assert isinstance(payload["limitations"], list)
+
+        # ... and so does the answer of the finished run
+        deadline = time.time() + 300.0
+        while time.time() < deadline:
+            status = client.get(f"/api/ga/research/status/{run_id}").get_json()
+            if status.get("status") in ("completed", "failed", "budget_exhausted"):
+                break
+            time.sleep(0.5)
+        payload = client.get(f"/api/ga/research/result/{run_id}").get_json()
+        for key in (
+            "model",
+            "approximate",
+            "physics_verification_eligible",
+            "limitations",
+        ):
+            assert key in payload, key
+        assert isinstance(payload["approximate"], bool)
+        assert isinstance(payload["physics_verification_eligible"], bool)
+        assert isinstance(payload["limitations"], list)
+        if payload.get("model") == "rigid_body_6dof":
+            # a verified flight is not an approximation and may be used for
+            # a physics verification
+            assert payload["approximate"] is False
+            assert payload["physics_verification_eligible"] is True
+        else:
+            # anything else is an approximation and never verification
+            # eligible
+            assert payload["approximate"] is True
+            assert payload["physics_verification_eligible"] is False
+
+
+
+# ---------------------------------------------------------------------------
+# P0 (Y-21): the published optimum is never a surrogate result
+# ---------------------------------------------------------------------------
+def test_the_published_optimum_is_never_a_surrogate_result(tmp_path: Path) -> None:
+    """A design that was only flown on the reduced path is never published.
+
+    The reduced (surrogate) paths are closed-form approximations without an
+    attitude integration (``docs/SPECIFICATION.md`` §2.1).  They are the
+    cheap screen of the search, but a design that was never flown on the
+    6-DoF reference path must never be published as the optimum of the
+    research programme.
+    """
+    summary = _run(tmp_path, generations=2, islands=1, tier2_trials=0, tier3_trials=0)
+    result = summary["result"]
+    assert int(result["tier"]) != 1, "a surrogate result must never be published"
+    assert result["model"] != "reduced_surrogate"
+    # nothing was published, and the payload says so honestly
+    assert result["model"] == "unknown"
+    assert result["approximate"] is True
+    assert result["physics_verification_eligible"] is False
+    assert result["fitness"] is None
+
+    # the archive of the best individuals is empty as well
+    hall = json.loads(
+        Path(
+            str(summary["config"]["out_dir"]), "checkpoints", "hall_of_fame.json"
+        ).read_text(encoding="utf-8")
+    )
+    assert hall == [], "a surrogate result must never enter the archive"
+
+    # with the 6-DoF tiers enabled the run publishes a verified design
+    verified = _run(tmp_path / "verified", generations=2, islands=1)
+    published = verified["result"]
+    assert published["model"] == "rigid_body_6dof"
+    assert published["approximate"] is False
+    assert int(published["tier"]) >= 2
+
+
+# ---------------------------------------------------------------------------
+# P0 (Y-23): the seeded population is evaluated, not assumed
+# ---------------------------------------------------------------------------
+def test_the_seeded_population_is_evaluated_before_it_is_ranked(
+    tmp_path: Path,
+) -> None:
+    """The initial population of generation 0 is flown before it is ranked.
+
+    The engine used to breed the first generation from a population that
+    had never been evaluated: the seeded designs carried an empty flight
+    result, and the engine could not tell that apart from a legitimate
+    flight.  They were ranked as if they had flown (with a fitness of
+    ``-1.0``, far above the infeasible score of a failed evaluation) and
+    they entered the archive of the best designs.
+    """
+    from physics.ga_domain import INFEASIBLE_SCORE
+
+    config = GAConfig().merged(_overrides(tmp_path)).validate()
+    run = ResearchRun(config, {})
+    run._build_islands()
+    seeded = list(run.islands[0].population)
+    assert seeded, "the run must seed a population"
+    for individual in seeded:
+        # a design that was never flown carries no result at all ...
+        assert not individual.result
+        # ... so it is infeasible and never ranks above a failed evaluation
+        assert run._is_infeasible(individual)
+        assert run._individual_fitness(individual) == pytest.approx(float(INFEASIBLE_SCORE))
+
+    # the run evaluates the seeded population before the first generation
+    # breeds from it, and the decision is journalled
+    summary = _run(tmp_path, generations=1, islands=1)
+    journal = [
+        json.loads(line)
+        for line in Path(str(summary["config"]["out_dir"]), "research_journal.jsonl")
+        .read_text(encoding="utf-8")
+        .splitlines()
+        if line.strip()
+    ]
+    initial = [record for record in journal if record["decision"] == "initial_evaluation"]
+    assert initial, "the evaluation of the seeded population must be journalled"
+    assert int(initial[0]["changes"]["screened"]) >= 4
+    assert int(initial[0]["changes"]["evaluated"]) >= 1
+
+    # the seeded designs are screened in the run as well
+    assert int(summary["tier_counts"]["tier0"]) > int(
+        summary["config"]["population_size"]
+    ), "the seeded population must be screened before the first generation"
+
+    # and the archive holds no design that was never evaluated
+    hall = json.loads(
+        Path(
+            str(summary["config"]["out_dir"]), "checkpoints", "hall_of_fame.json"
+        ).read_text(encoding="utf-8")
+    )
+    for entry in hall:
+        assert entry.get("result"), "an archived design must carry a flight result"
+        assert int(entry["tier"]) >= 2
+
+# ---------------------------------------------------------------------------
+# P1 (Y-03 / Y-05 / Y-12): the determinism conventions of the engine
+# ---------------------------------------------------------------------------
+def test_the_environment_seed_depends_on_the_generation(tmp_path: Path) -> None:
+    """A design is never flown in the same air twice.
+
+    The seed of the environment is derived from the individual **and the
+    generation**, so the turbulence of a design in generation 3 differs
+    from the turbulence of the same design in generation 4.  A seed that
+    ignored the generation would fly every generation in the same gusts.
+    """
+    config = GAConfig().merged(_overrides(tmp_path)).validate()
+    run = ResearchRun(config, {})
+    run._build_islands()
+    individual = run.islands[0].population[0]
+    individual.metric = 1.0
+
+    captured: list = []
+
+    def capture(cases):
+        captured.append([dict(case) for case in cases])
+        return [{} for _ in cases]
+
+    run._evaluate_batch = capture  # type: ignore[method-assign]
+    run.generation = 0
+    run._tier2_reference([individual])
+    run.generation = 1
+    run._tier2_reference([individual])
+
+    first = int(captured[0][0]["environment"]["turbulence_seed"])
+    second = int(captured[1][0]["environment"]["turbulence_seed"])
+    assert first != second, "the seed of the air must depend on the generation"
+
+
+def test_a_short_batch_answer_is_an_error_and_not_a_silent_drop(
+    tmp_path: Path,
+) -> None:
+    """A batch that answers short is refused, not truncated.
+
+    The engine used to zip the cases with the results, so a batch that
+    returned fewer answers than cases dropped the tail of the batch
+    without a word: the design was published as if it had flown.
+    """
+    config = GAConfig().merged(_overrides(tmp_path)).validate()
+    run = ResearchRun(config, {})
+    run._build_islands()
+    individual = run.islands[0].population[0]
+    individual.metric = 1.0
+
+    def short_batch(cases):
+        return [{} for _ in cases[:-1]]
+
+    run._evaluate_batch = short_batch  # type: ignore[method-assign]
+    with pytest.raises(RuntimeError):
+        run._tier2_reference([individual])
+
+    config = GAConfig().merged(_overrides(tmp_path)).validate()
+    run = ResearchRun(config, {})
+    run._build_islands()
+    individual = run.islands[0].population[0]
+    individual.metric = 1.0
+    run._evaluate_batch = short_batch  # type: ignore[method-assign]
+    with pytest.raises(RuntimeError):
+        run._tier3_full([individual])
+
+
+def test_a_tie_is_broken_by_the_identity_of_the_candidate(tmp_path: Path) -> None:
+    """The order of the candidates is total and stable.
+
+    The design orders the candidates by the fitness first and by the
+    identity of the candidate second, and it uses that one order
+    everywhere.  The archive used to break a tie the other way round, so
+    two places of the engine ranked the same two candidates differently.
+    """
+    from physics.ga_domain import _rank_by_fitness
+
+    genes = default_genes()
+    genome = genome_from_archetype("dart")
+    candidates = [
+        Individual(
+            index=index,
+            genome=genome,
+            genes=genes,
+            throw=ThrowParams.from_genes(genes),
+            tier=3,
+            fitness=fitness,
+        )
+        for index, fitness in ((3, 0.5), (1, 0.5), (2, 0.9))
+    ]
+    ranked = _rank_by_fitness(candidates)
+    assert [item.index for item in ranked] == [2, 1, 3], (
+        "the fitness decides, the identity of the candidate breaks the tie"
+    )
+    # the order does not depend on the order in which the candidates were
+    # created
+    assert [item.index for item in _rank_by_fitness(list(reversed(candidates)))] == [
+        2,
+        1,
+        3,
+    ]

@@ -57,7 +57,7 @@ import random
 import time
 import uuid
 from dataclasses import dataclass, field, replace
-from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence, Tuple
 
 import numpy as np
 
@@ -74,7 +74,6 @@ from .ga_config import (
     DEFAULT_CMA_MUTATION_RATE,
     DEFAULT_FOLD_FLIP_RATE,
     DEFAULT_GA_OFFSPRING_FRACTION,
-    DEFAULT_GRIP_PENALTY_WEIGHT,
     DEFAULT_MUTATION_ANGLE_SIGMA_DEG,
     DEFAULT_MUTATION_CREASE_SHIFT,
     DEFAULT_PROGRESS_HISTORY_LIMIT,
@@ -100,7 +99,13 @@ from .origami_genome import (
     random_genome,
 )
 from .optimizer_domain import INFEASIBLE_SCORE, is_infeasible_flight
-from .parallel_engine import evaluate_case, evaluate_flight_surrogate, parallel_evaluate
+from .parallel_engine import (
+    REDUCED_MODEL_TAG,
+    RIGID_BODY_MODEL_TAG,
+    evaluate_case,
+    evaluate_flight_surrogate,
+    parallel_evaluate,
+)
 
 __all__ = [
     "ObjectiveSpec",
@@ -122,6 +127,7 @@ __all__ = [
     "is_structural_failure",
     "is_failed_evaluation",
     "individual_structural_failure",
+    "is_reference_path_evaluation",
     "THROW_SPEED_MIN_MPS",
     "THROW_SPEED_MAX_MPS",
     "RELEASE_ELEVATION_MIN_DEG",
@@ -222,23 +228,11 @@ class ObjectiveSpec:
     reference_target: float
     tier2_duration_s: float
     tier3_duration_s: float
-    secondary_metric_keys: Tuple[str, ...]
-    secondary_references: Dict[str, float]
 
     def extract(self, result: Dict[str, Any]) -> float:
         """The objective value of one flight result."""
         try:
             value = float(result.get(self.metric_key, 0.0))
-        except (TypeError, ValueError):
-            return 0.0
-        if not math.isfinite(value):
-            return 0.0
-        return value
-
-    def secondary_value(self, result: Dict[str, Any], key: str) -> float:
-        """The value of one secondary metric of a flight result."""
-        try:
-            value = float(result.get(key, 0.0))
         except (TypeError, ValueError):
             return 0.0
         if not math.isfinite(value):
@@ -255,10 +249,6 @@ class ObjectiveSpec:
             "reference_target": float(self.reference_target),
             "tier2_duration_s": float(self.tier2_duration_s),
             "tier3_duration_s": float(self.tier3_duration_s),
-            "secondary_metric_keys": list(self.secondary_metric_keys),
-            "secondary_references": {
-                key: float(value) for key, value in self.secondary_references.items()
-            },
         }
 
 
@@ -273,8 +263,6 @@ OBJECTIVE_REGISTRY: Dict[str, ObjectiveSpec] = {
         reference_target=REFERENCE_DISTANCE_M,
         tier2_duration_s=4.0,
         tier3_duration_s=12.0,
-        secondary_metric_keys=("max_ld_ratio", "stability"),
-        secondary_references={"max_ld_ratio": 8.0, "stability": 1.0},
     ),
     OBJECTIVE_AIRTIME: ObjectiveSpec(
         key=OBJECTIVE_AIRTIME,
@@ -285,8 +273,6 @@ OBJECTIVE_REGISTRY: Dict[str, ObjectiveSpec] = {
         reference_target=REFERENCE_AIRTIME_S,
         tier2_duration_s=8.0,
         tier3_duration_s=32.0,
-        secondary_metric_keys=("max_altitude_m", "max_ld_ratio"),
-        secondary_references={"max_altitude_m": 10.0, "max_ld_ratio": 8.0},
     ),
 }
 
@@ -513,6 +499,12 @@ class Individual:
     #: The structural failure flag of every Monte-Carlo sample of the full
     #: fidelity tier (empty when the individual was not evaluated there).
     sample_failures: List[bool] = field(default_factory=list)
+    #: Has the individual been through the evaluation pipeline already?
+    #: The flag is set by the geometric screen (the first stage of the
+    #: pipeline), so an individual that was never screened is also an
+    #: individual that was never evaluated: it carries no flight result and
+    #: must never be ranked, published or archived.
+    screened: bool = False
     #: The folded solid of the genome (cached, never serialised).
     geometry: Any = None
 
@@ -521,6 +513,18 @@ class Individual:
         return f"{self.index:06d}"
 
     def to_dict(self) -> Dict[str, Any]:
+        result: Dict[str, Any] = {
+            key: value
+            for key, value in self.result.items()
+            if isinstance(value, (int, float, str, bool, type(None)))
+        }
+        # The limitations of a flight are a list of sentences, not a scalar:
+        # the scalar filter above would drop them, and a published result
+        # without its limitations is a result that hides what it does not
+        # know (see ``docs/SPECIFICATION.md`` §2.1).
+        result["limitations"] = [
+            str(text) for text in (self.result.get("limitations") or [])
+        ]
         return {
             "index": int(self.index),
             "genome": self.genome.to_dict(),
@@ -535,11 +539,8 @@ class Individual:
             "grip_reasons": list(self.grip_reasons),
             "metrics": {str(k): float(v) for k, v in self.metrics.items()},
             "sample_failures": [bool(flag) for flag in self.sample_failures],
-            "result": {
-                key: value
-                for key, value in self.result.items()
-                if isinstance(value, (int, float, str, bool, type(None)))
-            },
+            "screened": bool(self.screened),
+            "result": result,
         }
 
     @classmethod
@@ -548,6 +549,10 @@ class Individual:
 
         genome = genome_from_dict(dict(payload.get("genome") or {}))
         fitness = payload.get("fitness")
+        result = dict(payload.get("result") or {})
+        limitations = result.get("limitations")
+        if limitations is not None:
+            result["limitations"] = [str(text) for text in limitations or []]
         return cls(
             index=int(payload.get("index", 0)),
             genome=genome,
@@ -562,7 +567,8 @@ class Individual:
             grip_reasons=[str(value) for value in payload.get("grip_reasons") or []],
             metrics={str(k): float(v) for k, v in dict(payload.get("metrics") or {}).items()},
             sample_failures=[bool(flag) for flag in payload.get("sample_failures") or []],
-            result=dict(payload.get("result") or {}),
+            screened=bool(payload.get("screened", False)),
+            result=result,
         )
 
 
@@ -916,6 +922,22 @@ def is_failed_evaluation(result: Dict[str, Any], allowable_pa: Optional[float] =
     return is_structural_failure(result, allowable_pa)
 
 
+def _rank_by_fitness(candidates: Iterable["Individual"]) -> List["Individual"]:
+    """The candidates in the order of the design: fitness first, identity second.
+
+    The order is **total and stable**: the fitness decides, and a tie is
+    broken by the identity (the index) of the candidate, always in the same
+    direction.  Every place of the engine that ranks candidates uses this
+    one order, so a run never depends on the order in which the candidates
+    happened to be created.
+    """
+    return sorted(
+        candidates,
+        key=lambda item: (item.fitness, -int(item.index)),
+        reverse=True,
+    )
+
+
 def individual_structural_failure(
     individual: "Individual",
     allowable_pa: Optional[float] = None,
@@ -926,28 +948,39 @@ def individual_structural_failure(
     (the Monte-Carlo ensemble of the tier); the individual counts as a
     structural failure when **any** of its samples failed, so a design that
     only survives one of its three throws is not published as a robust one.
+
+    An individual **without a flight result** counts as a failure as well:
+    it was never evaluated (or its evaluation never produced a result), so
+    it carries no information at all.  Treating it as a legitimate design
+    would rank an aeroplane that never flew above one that flew and
+    crashed, and it would fill the archive of the best individuals with
+    designs that were never thrown.
     """
     if individual.sample_failures:
         return any(bool(flag) for flag in individual.sample_failures)
+    if not individual.result:
+        return True
     return is_failed_evaluation(individual.result, allowable_pa)
 
 
-def _pearson(xs: Sequence[float], ys: Sequence[float]) -> float:
-    """The Pearson correlation of two equal length sequences."""
-    count = len(xs)
-    if count < 3 or count != len(ys):
-        return 0.0
-    mean_x = sum(xs) / count
-    mean_y = sum(ys) / count
-    sxx = sum((value - mean_x) ** 2 for value in xs)
-    syy = sum((value - mean_y) ** 2 for value in ys)
-    sxy = sum((x - mean_x) * (y - mean_y) for x, y in zip(xs, ys))
-    if sxx <= 0.0 or syy <= 0.0:
-        return 0.0
-    value = sxy / math.sqrt(sxx * syy)
-    if not math.isfinite(value):
-        return 0.0
-    return max(-1.0, min(1.0, value))
+def is_reference_path_evaluation(result: Dict[str, Any]) -> bool:
+    """Was the flight evaluated on the 6-DoF reference path?
+
+    Only the reference 6-DoF model produces a result that may be published
+    as the optimum of a research programme.  The reduced (surrogate) paths
+    carry ``model = "reduced_surrogate"`` with ``approximate = True`` and
+    ``physics_verification_eligible = False``
+    (``docs/SPECIFICATION.md`` §2.1): they are closed-form approximations
+    without an attitude integration, never a verified flight.
+
+    A payload without a model tag cannot be claimed to be a reference path
+    result, so it is treated as an approximation.
+    """
+    if not result:
+        return False
+    if str(result.get("model", "") or "") != RIGID_BODY_MODEL_TAG:
+        return False
+    return not bool(result.get("approximate", False))
 
 
 # --------------------------------------------------------------------------
@@ -1132,10 +1165,13 @@ class ResearchRun:
         self.tier_counts: Dict[str, int] = {"tier0": 0, "tier1": 0, "tier2": 0, "tier3": 0}
         self.overall_values: List[float] = []
         self.generation0_feasible_fraction = 0.0
-        self.secondary_weights: Dict[str, float] = {}
         self.stat_weights: Dict[str, float] = dict(self.config.stat_weights)
         self.generation = 0
         self._individual_counter = 0
+        #: The number of individuals the geometric screen has processed.
+        self.screened_total = 0
+        #: The number of individuals the geometric screen accepted.
+        self.grip_survivor_total = 0
         #: The cached shared allowable stress of the paper stock.
         self._allowable_cache: Optional[float] = None
         #: The listener that receives the live progress of the run.
@@ -1281,6 +1317,53 @@ class ResearchRun:
             island.micro_flaps = bool(self.config.micro_flaps)
             self._bootstrap_island(island)
             self.islands.append(island)
+
+    def _evaluate_initial_population(self) -> Dict[str, Any]:
+        """Evaluate the initial population of every island.
+
+        The seeded population of generation 0 is a **candidate** population:
+        the archetypes are known to be throwable, but a candidate that was
+        never evaluated carries no information at all.  Without this phase
+        the whole initial population entered the run with an empty flight
+        result, which the engine cannot tell apart from a legitimate
+        flight: the individuals were ranked as if they had flown, they
+        entered the archive of the best designs, and the first offspring of
+        the run were bred from fitness values that no flight had ever
+        produced.
+
+        The phase runs the **same** pipeline as a generation (geometric
+        screen, surrogate tier, short 6-DoF tier, full 6-DoF tier), so the
+        seeded designs are ranked by the same numbers as every later
+        candidate and the budget of the run pays for their flights like it
+        pays for every other one.
+        """
+        evaluated = 0
+        before = dict(self.tier_counts)
+        for island in self.islands:
+            # A population that was screened already (a resumed run) is not
+            # evaluated twice.
+            population = [
+                item for item in island.population if not item.screened
+            ]
+            survivors = self._tier0_geometry(population)
+            tier1 = self._tier1_surrogate(survivors)
+            tier2 = self._tier2_reference(tier1)
+            self._tier3_full(tier2)
+            evaluated += len(tier1)
+        self._refresh_fitness(
+            [item for island in self.islands for item in island.population]
+        )
+        after = dict(self.tier_counts)
+        return {
+            "islands": len(self.islands),
+            "screened": int(self.screened_total),
+            "grip_survivors": int(self.grip_survivor_total),
+            "evaluated": int(evaluated),
+            "tier1_flights": int(after["tier1"] - before["tier1"]),
+            "tier2_flights": int(after["tier2"] - before["tier2"]),
+            "tier3_flights": int(after["tier3"] - before["tier3"]),
+            "evaluations": int(self.evaluation_count),
+        }
 
     def _next_index(self) -> int:
         self._individual_counter += 1
@@ -1530,6 +1613,7 @@ class ResearchRun:
         survivors: List[Individual] = []
         for individual in individuals:
             self.tier_counts["tier0"] += 1
+            individual.screened = True
             try:
                 geometry = self._geometry_of(individual)
                 report = evaluate_grip(geometry, thresholds)
@@ -1545,6 +1629,8 @@ class ResearchRun:
             individual.grip_reasons = list(report.reasons)
             if report.valid:
                 survivors.append(individual)
+        self.screened_total += len(individuals)
+        self.grip_survivor_total += len(survivors)
         return survivors
 
     def _tier1_surrogate(self, individuals: Sequence[Individual]) -> List[Individual]:
@@ -1594,7 +1680,9 @@ class ResearchRun:
         cases: List[Dict[str, Any]] = []
         for individual in chosen:
             aircraft = self._aircraft_payload(individual)
-            environment = self._environment(2, seed=individual.index)
+            # The seed of the environment depends on the generation, so the
+            # same design is not flown in the same air twice.
+            environment = self._environment(2, seed=self._jitter_seed(individual, 0))
             launch = self._launch_payload(individual.throw, self.config.launch_height_m)
             cases.append(
                 {
@@ -1606,6 +1694,14 @@ class ResearchRun:
                 }
             )
         results = self._evaluate_batch(cases)
+        if len(results) != len(chosen):
+            # The evaluation of a batch returns one result per case.  A
+            # shorter answer would silently drop the tail of the batch, so
+            # the engine refuses to continue with an incomplete evaluation.
+            raise RuntimeError(
+                "the 6-DoF batch returned "
+                f"{len(results)} results for {len(chosen)} cases"
+            )
         for individual, result in zip(chosen, results):
             individual.result = result
             individual.tier = max(individual.tier, 2)
@@ -1662,11 +1758,18 @@ class ResearchRun:
                     }
                 )
         results = self._evaluate_batch(cases)
+        if len(results) != len(chosen) * samples:
+            # The Monte-Carlo ensemble of an individual is only complete when
+            # every sample of every individual came back.  A shorter answer
+            # would drop the tail of the ensemble without a word, so the
+            # engine refuses to publish a design that was only flown once.
+            raise RuntimeError(
+                "the Monte-Carlo batch returned "
+                f"{len(results)} results for {len(chosen) * samples} samples"
+            )
         allowable = self._allowable_pa()
         for position, individual in enumerate(chosen):
             sample_results = results[position * samples : (position + 1) * samples]
-            if not sample_results:
-                continue
             metrics = [self.objective.extract(result) for result in sample_results]
             individual.result = sample_results[0]
             individual.tier = max(individual.tier, 3)
@@ -1681,11 +1784,12 @@ class ResearchRun:
         return chosen
 
     def _jitter_seed(self, individual: Individual, sample: int = 0) -> int:
-        """The deterministic seed of the Monte-Carlo jitter of one sample.
+        """The deterministic seed of one individual in one generation.
 
         The seed depends on the individual, on the generation and on the
         index of the sample, so every sample of every individual has its own
-        reproducible turbulence and its own reproducible throw jitter.
+        reproducible turbulence and its own reproducible throw jitter, and a
+        design is never flown in the same air twice.
         """
         return int(
             (
@@ -1703,39 +1807,68 @@ class ResearchRun:
     def _individual_fitness(self, individual: Individual) -> float:
         """The fitness of one individual.
 
-        The primary term is the objective metric normalised by the reference
-        target of the active objective.  The meta controller may add
-        secondary terms (derived from the sensitivity analysis); they are
-        weighted explicitly and never replace the primary term.
+        The fitness is **dimensionless** and carries **no free coefficient**::
 
-        A flight that **failed** is infeasible.  Its metric is ``0.0`` --
-        exactly the metric of an aeroplane that flew nowhere -- so scoring it
-        like a legitimate flight would let a broken evaluation win every
-        comparison and end up as the published best individual.  An
-        infeasible individual therefore receives the shared
-        ``INFEASIBLE_SCORE`` of the simulator (:mod:`physics.optimizer_domain`),
-        loses every comparison, never enters the hall of fame and is never
-        selected.
+            F = (metric / reference_target)
+                * 1/(1 + P_grip)
+                * 1/(1 + max(0, sigma_u - 1))
+
+        * ``metric / reference_target`` is the merit of the objective,
+          normalised by the world record the objective is measured against
+          (:data:`REFERENCE_DISTANCE_M` / :data:`REFERENCE_AIRTIME_S`, both
+          taken from the record registry of
+          :mod:`physics.records_domain`).  A fitness of ``1.0`` therefore
+          means "as good as the world record".
+        * ``1/(1 + P_grip)`` is the grace factor of the grip contract
+          (``GripReport.fitness`` of :mod:`physics.origami_genome`): a
+          design that is hard to hold is worth less, in proportion.
+        * ``1/(1 + max(0, sigma_u - 1))`` is the grace factor of the stress
+          utilisation ``sigma_u = sigma_max / sigma_allow``
+          (``docs/SPECIFICATION.md`` §1.3): a design that stays inside the
+          allowable stress of the paper stock is not punished at all
+          (``sigma_u <= 1``), and the excess above it is.
+
+        The three factors are *multiplied*, never added with a weight: a
+        weighted sum of quantities with different units would need an
+        arbitrary scale per term, and such a scale is a free coefficient
+        without a physical source.  The engine therefore carries **no**
+        tunable weight in its fitness.
+
+        A flight that **failed** is infeasible, and so is an individual that
+        was never evaluated at all.  Both receive the shared
+        ``INFEASIBLE_SCORE`` of the simulator
+        (:mod:`physics.optimizer_domain`), lose every comparison, never
+        enter the hall of fame and are never selected.
         """
         if self._is_infeasible(individual):
             return float(INFEASIBLE_SCORE)
         reference = float(self.objective.reference_target) or 1.0
-        fitness = individual.metric / reference
-        for key, weight in self.secondary_weights.items():
-            if weight <= 0.0:
-                continue
-            secondary_reference = float(self.objective.secondary_references.get(key, 1.0)) or 1.0
-            value = individual.metrics.get(key)
-            if value is None:
-                continue
-            fitness += weight * (float(value) / secondary_reference)
-        if not individual.feasible:
-            fitness -= 1.0 + float(self.config.grip_penalty_weight) * float(
-                individual.grip_penalty
-            )
+        merit = float(individual.metric) / reference
+        grip_factor = 1.0 / (1.0 + max(float(individual.grip_penalty), 0.0))
+        stress_factor = 1.0 / (
+            1.0 + max(float(self._stress_utilisation(individual)) - 1.0, 0.0)
+        )
+        fitness = merit * grip_factor * stress_factor
         if not math.isfinite(fitness):
             return float("-inf")
         return fitness
+
+    def _stress_utilisation(self, individual: Individual) -> float:
+        """The stress utilisation of an individual (``sigma_max/sigma_allow``).
+
+        The value is the dimensionless index the flight model publishes
+        (``max_stress_index``); ``1.0`` is the allowable stress of the
+        paper stock, so the value is the fraction of the allowance the
+        design actually uses.  An individual without the index (it was
+        never evaluated) reports ``0.0``.
+        """
+        try:
+            value = float(individual.metrics.get("max_stress_index", 0.0))
+        except (TypeError, ValueError):
+            return 0.0
+        if not math.isfinite(value):
+            return 0.0
+        return max(value, 0.0)
 
     def _refresh_fitness(self, individuals: Sequence[Individual]) -> None:
         for individual in individuals:
@@ -1774,6 +1907,28 @@ class ResearchRun:
                 survivors += 1
         return max(1, min(survivors, ceiling))
 
+    def _is_publishable(self, individual: Individual) -> bool:
+        """May this individual be published as a result of the run?
+
+        The archive of the best individuals, the published best and the
+        published payload are the surfaces a reader (or a paper) sees, so
+        they carry **only** the individuals that were evaluated on the 6-DoF
+        reference path.  A reduced (surrogate) result is an approximation
+        without an attitude integration
+        (``docs/SPECIFICATION.md`` §2.1) and must never be published as the
+        optimum of the research programme; an individual that was never
+        evaluated carries no result at all and must not be published either.
+
+        The surrogate results still take part in the **internal** selection:
+        they are the cheap screen that decides which candidates are worth a
+        6-DoF flight.
+        """
+        if int(individual.tier) < 2:
+            return False
+        if not is_reference_path_evaluation(individual.result):
+            return False
+        return not self._is_infeasible(individual)
+
     def _update_hall_of_fame(self, candidates: Sequence[Individual]) -> None:
         """Merge the candidates into the hall of fame of the whole run.
 
@@ -1785,22 +1940,23 @@ class ResearchRun:
         stayed frozen at the first generation and the run published a much
         worse individual than the one it had actually found.
 
-        A failed evaluation never enters the archive: an individual whose
-        flight could not be evaluated is infeasible and must never be
-        published as the best aeroplane of the research programme.
+        Two kinds of candidates never enter the archive:
+
+        * an individual whose flight could not be evaluated: it is
+          infeasible and must never be published as the best aeroplane of
+          the research programme;
+        * an individual that was not evaluated on the 6-DoF reference path:
+          a surrogate result is an approximation, and an individual without
+          a flight result was never thrown at all.
         """
         merged: Dict[int, Individual] = {
             item.index: item for item in self.hall_of_fame
         }
         for item in candidates:
-            if self._is_infeasible(item):
+            if not self._is_publishable(item):
                 continue
             merged[item.index] = item
-        self.hall_of_fame = sorted(
-            merged.values(),
-            key=lambda item: (item.fitness, -int(item.index)),
-            reverse=True,
-        )[: self.config.top_k]
+        self.hall_of_fame = _rank_by_fitness(merged.values())[: self.config.top_k]
 
     def _run_generation(self, island: Island) -> Dict[str, Any]:
         """Run one generation of one island.
@@ -1847,8 +2003,10 @@ class ResearchRun:
 
         # Selection: the island keeps the elite block the statistic selected
         # and fills the rest of the population with the best of the new
-        # offspring.
-        ranked = sorted(candidates, key=lambda item: (item.fitness, item.index), reverse=True)
+        # offspring.  The order of the population is the one of the design:
+        # the fitness first, the identity of the candidate second, so a tie
+        # is always broken the same way.
+        ranked = _rank_by_fitness(candidates)
         elite_count = self._elite_count(ranked, aggregate_fitness)
         elites = ranked[:elite_count]
         elite_ids = {id(item) for item in elites}
@@ -1942,19 +2100,21 @@ class ResearchRun:
     def _structure_search_shift(self, island: Island) -> Dict[str, Any]:
         """Change the *search* of one island when it stopped improving.
 
-        Three levers are available and every one of them is recorded in the
+        Two levers are available and every one of them is recorded in the
         decision journal:
 
         * more fold steps in the genome,
-        * micro adjustment flaps (winglets) in the genome representation,
-        * a re-weighting of the objective derived from a sensitivity analysis
-          over the full fidelity population.
+        * micro adjustment flaps (winglets) in the genome representation.
 
-        The first two levers belong to the **island** that stagnated: they
-        are stored on the island and read from there when the next
-        generation of that island is built.  They never touch the shared
-        configuration, so a shift that the journal attributes to island 1
-        does not silently change the search of island 0.
+        The levers belong to the **island** that stagnated: they are stored
+        on the island and read from there when the next generation of that
+        island is built.  They never touch the shared configuration, so a
+        shift that the journal attributes to island 1 does not silently
+        change the search of island 0.
+
+        The objective itself is **not** re-weighted here: the fitness of the
+        engine carries no free weight (``AGENTS.md`` §1.5), so a sensitivity
+        analysis may not introduce one.
         """
         trigger = (
             f"stagnation: no fitness improvement for "
@@ -1983,21 +2143,6 @@ class ResearchRun:
                 {"micro_flaps": True},
             )
 
-        weights = self._sensitivity_weights(island)
-        if weights:
-            previous = dict(self.secondary_weights)
-            self.secondary_weights = weights
-            self.journal.record(
-                self.generation,
-                island.id,
-                "objective_reweight",
-                trigger,
-                {"secondary_weights": dict(weights), "previous": previous},
-            )
-            self._refresh_fitness(self.hall_of_fame)
-            for other in self.islands:
-                self._refresh_fitness(other.population)
-
         return {
             "generation": int(self.generation),
             "island": int(island.id),
@@ -2005,44 +2150,7 @@ class ResearchRun:
             "changes": changes,
             "max_fold_steps": int(island.max_fold_steps),
             "micro_flaps": bool(island.micro_flaps),
-            "secondary_weights": dict(self.secondary_weights),
         }
-
-    def _sensitivity_weights(self, island: Island) -> Dict[str, float]:
-        """The objective re-weighting derived from a sensitivity analysis.
-
-        The correlation between the objective metric and every secondary
-        metric of the objective is measured over the full fidelity population
-        of the island.  A secondary metric that correlates with the objective
-        carries information the objective alone does not, so it is given a
-        weight proportional to its correlation.  The total secondary weight
-        is capped by ``max_secondary_weight`` so the primary objective always
-        dominates.
-        """
-        population = [item for item in island.population if item.tier >= 3 and item.metrics]
-        if len(population) < 3:
-            return {}
-        primary = [float(item.metric) for item in population]
-        weights: Dict[str, float] = {}
-        best = 0.0
-        for key in self.objective.secondary_metric_keys:
-            values = []
-            for item in population:
-                value = item.metrics.get(key)
-                if value is None:
-                    break
-                values.append(float(value))
-            if len(values) != len(population):
-                continue
-            correlation = abs(_pearson(primary, values))
-            if correlation < float(self.config.sensitivity_threshold):
-                continue
-            weights[key] = correlation
-            best = max(best, correlation)
-        if not weights or best <= 0.0:
-            return {}
-        cap = float(self.config.max_secondary_weight)
-        return {key: cap * value / best for key, value in weights.items()}
 
     # ------------------------------------------------------------------
     # Migration
@@ -2062,18 +2170,15 @@ class ResearchRun:
         migrated = 0
         for index, island in enumerate(self.islands):
             receiver = self.islands[(index + 1) % len(self.islands)]
-            ranked = sorted(island.population, key=lambda item: item.fitness, reverse=True)
+            ranked = _rank_by_fitness(island.population)
             migrants = ranked[:count]
             if not migrants:
                 continue
-            receiver_ranked = sorted(
-                receiver.population, key=lambda item: item.fitness, reverse=True
-            )
+            receiver_ranked = _rank_by_fitness(receiver.population)
             known = {id(item) for item in receiver_ranked}
             fresh = [migrant for migrant in migrants if id(migrant) not in known]
             kept = receiver_ranked[: max(len(receiver_ranked) - len(fresh), 0)]
-            merged = kept + fresh
-            merged.sort(key=lambda item: (item.fitness, item.index), reverse=True)
+            merged = _rank_by_fitness(kept + fresh)
             receiver.population = merged[: self.config.population_size]
             receiver.diversity = _population_diversity(receiver.population)
             migrated += len(migrants)
@@ -2112,7 +2217,6 @@ class ResearchRun:
             "evaluation_count": int(self.evaluation_count),
             "tier_counts": dict(self.tier_counts),
             "rng_seed": int(self.config.seed),
-            "objective_weights": dict(self.secondary_weights),
             "stat_weights": dict(self.stat_weights),
             "generation0_feasible_fraction": float(self.generation0_feasible_fraction),
             "overall_values": [float(value) for value in self.overall_values],
@@ -2146,10 +2250,6 @@ class ResearchRun:
         self.evaluation_count = int(payload.get("evaluation_count", 0))
         self.tier_counts.update(payload.get("tier_counts") or {})
         self.overall_values = [float(value) for value in payload.get("overall_values") or []]
-        self.secondary_weights = {
-            str(key): float(value)
-            for key, value in (payload.get("objective_weights") or {}).items()
-        }
         self.stat_weights = {
             str(key): float(value)
             for key, value in (payload.get("stat_weights") or {}).items()
@@ -2183,15 +2283,17 @@ class ResearchRun:
 
         The hall of fame is the archive of the best individuals of the whole
         run, so its first entry is the best one.  A failed evaluation is
-        infeasible and never enters the archive, so an infeasible individual
-        can never be published as the best aeroplane of the run.
+        infeasible and never enters the archive, and neither does a result
+        that was not produced by the 6-DoF reference path, so neither an
+        infeasible individual nor a surrogate approximation can be published
+        as the best aeroplane of the run.
         """
         if self.hall_of_fame:
             return self.hall_of_fame[0]
         best: Optional[Individual] = None
         for island in self.islands:
             for individual in island.population:
-                if self._is_infeasible(individual):
+                if not self._is_publishable(individual):
                     continue
                 if best is None or individual.fitness > best.fitness:
                     best = individual
@@ -2273,13 +2375,49 @@ class ResearchRun:
         statistics["reference_target"] = float(self.objective.reference_target)
         return statistics
 
+    def _provenance(self, result: Dict[str, Any]) -> Dict[str, Any]:
+        """The provenance of a flight result.
+
+        The four keys are the contract of ``docs/SPECIFICATION.md`` §2.1: a
+        reader must always be able to tell *which model* produced a number,
+        whether that model is an **approximation** and whether the number
+        may be used for a physics verification.  A reduced (surrogate) path
+        is always an approximation and never verification eligible.
+        """
+        model = str(result.get("model", "") or "unknown")
+        approximate = bool(result.get("approximate", True))
+        eligible = bool(result.get("physics_verification_eligible", False))
+        limitations = [str(text) for text in (result.get("limitations") or [])]
+        if model == REDUCED_MODEL_TAG:
+            # The convention of §2.1 is not negotiable: a surrogate is an
+            # approximation and is out of scope for a physics verification.
+            approximate = True
+            eligible = False
+        return {
+            "model": model,
+            "approximate": approximate,
+            "physics_verification_eligible": eligible,
+            "limitations": limitations,
+        }
+
     def _result_payload(self, best: Optional[Individual]) -> Dict[str, Any]:
         """The complete payload of the best individual."""
         if best is None:
+            # No individual of the run may be published (every candidate
+            # failed or was only evaluated on a reduced path).  The payload
+            # still carries the provenance of the run: an unknown model is
+            # an approximation and never verification eligible.
             return {
                 "run_id": self.run_id,
                 "objective": self.objective.key,
                 "fitness": None,
+                "metric": 0.0,
+                "tier": 0,
+                "model": "unknown",
+                "approximate": True,
+                "physics_verification_eligible": False,
+                "limitations": [],
+                "flight_result": {},
                 "stats": self._final_statistics(),
             }
         from .origami_genome import (
@@ -2290,6 +2428,16 @@ class ResearchRun:
         )
 
         geometry = self._geometry_of(best)
+        provenance = self._provenance(best.result)
+        flight_result: Dict[str, Any] = {
+            key: value
+            for key, value in best.result.items()
+            if isinstance(value, (int, float, str, bool, type(None)))
+        }
+        # The limitations are sentences, not scalars: the filter above drops
+        # them, and a published result that hides its own limitations is a
+        # result that overstates what it knows.
+        flight_result["limitations"] = list(provenance["limitations"])
         return {
             "run_id": self.run_id,
             "objective": self.objective.key,
@@ -2307,11 +2455,11 @@ class ResearchRun:
             "fitness": float(best.fitness) if math.isfinite(best.fitness) else None,
             "metric": float(best.metric),
             "tier": int(best.tier),
-            "flight_result": {
-                key: value
-                for key, value in best.result.items()
-                if isinstance(value, (int, float, str, bool, type(None)))
-            },
+            "model": provenance["model"],
+            "approximate": provenance["approximate"],
+            "physics_verification_eligible": provenance["physics_verification_eligible"],
+            "limitations": list(provenance["limitations"]),
+            "flight_result": flight_result,
         }
 
     # ------------------------------------------------------------------
@@ -2456,6 +2604,17 @@ class ResearchRun:
                     "seed": int(self.config.seed),
                 },
             )
+            # The seeded population is evaluated before the first generation
+            # breeds from it: a candidate that was never flown must not be
+            # ranked, archived or used as a parent.
+            initial = self._evaluate_initial_population()
+            self.journal.record(
+                0,
+                None,
+                "initial_evaluation",
+                "the seeded population is evaluated before the first generation",
+                initial,
+            )
 
         start_generation = self.generation
         status = "completed"
@@ -2468,11 +2627,14 @@ class ResearchRun:
             for island in self.islands:
                 report = self._run_generation(island)
                 reports.append(report)
-                if generation == 0 and island.id == 0:
-                    self.generation0_feasible_fraction = (
-                        float(report["survivors"]) / float(max(report["candidates"], 1))
-                    )
                 self._check_stagnation(island)
+            if generation == 0:
+                # The feasible fraction of generation 0 is a property of the
+                # whole evaluated population of that generation: the seeded
+                # population and the offspring of every island.
+                self.generation0_feasible_fraction = (
+                    float(self.grip_survivor_total) / float(max(self.screened_total, 1))
+                )
             migration = self._migrate()
             self.history.append(
                 {

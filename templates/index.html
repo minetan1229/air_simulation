@@ -249,7 +249,7 @@
 
     <!-- ---------- viewport ---------- -->
     <section class="viewport" aria-label="3D ビュー">
-      <canvas id="view-canvas"></canvas>
+      <canvas id="view-canvas" role="img" aria-label="3D 飛行ビューポート"></canvas>
 
       <!-- Top-Right HUD Stack (表示切替ツールバー & 風洞HUDの自動縦フロー) -->
       <div class="vp-overlay-stack vp-overlay-tr">
@@ -361,7 +361,7 @@
         <div class="vp-hud vp-hud-bl">
           <div class="heat-legend">
             <span class="heat-title">翼面応力インデックス STRESS</span>
-            <div class="heat-bar"><canvas id="heat-ramp" width="180" height="10"></canvas></div>
+            <div class="heat-bar"><canvas id="heat-ramp" width="180" height="10" role="img" aria-label="応力ヒートマップカラーランプ"></canvas></div>
             <div class="heat-scale"><span>0.0</span><span>0.5</span><span>1.0</span></div>
           </div>
           <div class="flow-legend">
@@ -434,7 +434,7 @@
               <span class="rec-legend"><i class="sw sw-aoa"></i>迎角 °</span>
               <span class="rec-legend"><i class="sw sw-sts"></i>応力 Pa</span>
             </div>
-            <canvas id="rec-canvas" class="rec-canvas"></canvas>
+            <canvas id="rec-canvas" class="rec-canvas" role="img" aria-label="飛行記録ストリップチャート"></canvas>
             <div class="rec-foot">
               <span class="num" id="rec-cursor">—</span>
               <button class="btn btn-mini" id="btn-rec-clear" type="button">消去</button>
@@ -448,7 +448,7 @@
             <button class="btn btn-mini" id="btn-polar" type="button">再計算</button>
           </div>
           <div class="group-body">
-            <canvas id="polar-canvas" class="polar-canvas"></canvas>
+            <canvas id="polar-canvas" class="polar-canvas" role="img" aria-label="抗力ポラルチャート"></canvas>
             <div class="kv-line"><span>C_D min / α</span><span class="num" id="polar-cdmin">—</span></div>
             <div class="kv-line"><span>(L/D) max / α</span><span class="num" id="polar-ldmax">—</span></div>
             <div class="kv-line"><span>トリム α / δ<sub>e</sub></span><span class="num" id="polar-trim">—</span></div>
@@ -701,7 +701,7 @@
         <div class="wb-col wb-col-3">
           <h4 class="wb-h">世代別適応度の推移<small>GENERATION TREND</small></h4>
           <div class="chart-wrap">
-            <canvas id="ga-chart"></canvas>
+            <canvas id="ga-chart" role="img" aria-label="世代別適応度チャート"></canvas>
             <p class="chart-empty" id="ga-chart-empty">未実行</p>
           </div>
           <h4 class="wb-h">島ごとの多様性<small>ISLAND DIVERSITY</small></h4>
@@ -1073,7 +1073,7 @@
   </div>
 
   <!-- 飛行結果サマリーモーダル (着地 / 完了時ポップアップ) -->
-  <div class="flight-result-modal" id="flight-result-modal" hidden>
+  <div class="flight-result-modal" id="flight-result-modal" hidden role="dialog" aria-modal="true" aria-label="飛行結果">
     <div class="flight-result-card">
       <div class="flight-result-head">
         <div class="flight-result-title-group">
@@ -1133,7 +1133,7 @@
 
   <div class="toasts" id="toasts" aria-live="polite"></div>
 
-  <div class="modal" id="help" hidden>
+  <div class="modal" id="help" hidden role="dialog" aria-modal="true" aria-label="操作ヘルプ">
     <div class="modal-card">
       <h3>操作</h3>
       <dl class="keys">
@@ -1153,7 +1153,7 @@
     </div>
   </div>
 
-  <div class="modal" id="gpu-modal" hidden>
+  <div class="modal" id="gpu-modal" hidden role="dialog" aria-modal="true" aria-label="GPU 動作ステータス">
     <div class="modal-card gpu-dialog-card">
       <div class="gpu-dialog-header">
         <h3><img src="https://api.iconify.design/material-symbols/electric-bolt.svg?color=%23188038" class="ui-icon" alt=""> GPU 動作ステータス &amp; 切り替えガイド</h3>

@@ -556,10 +556,15 @@ class ConsoleApp {
     for (const rail of document.querySelectorAll(".rail")) {
       const head = rail.querySelector(".rail-head");
       if (!head) continue;
+      const body = rail.querySelector(".rail-body");
+      if (body) body.inert = true;
+      rail.setAttribute("aria-hidden", "true");
       head.addEventListener("click", (event) => {
         if (event.target.closest("button") || event.target.closest(".pill")) return;
         if (window.innerWidth > 900) return;
-        rail.classList.toggle("is-open");
+        const isOpen = rail.classList.toggle("is-open");
+        if (body) body.inert = !isOpen;
+        rail.setAttribute("aria-hidden", String(!isOpen));
       });
     }
   }
@@ -2844,8 +2849,8 @@ class ConsoleApp {
         if (fileInput.files && fileInput.files[0]) {
           const file = fileInput.files[0];
           this.notify(`3Dモデル ${file.name} を読み込み中...`, "info");
-          if (this.meshpanel) {
-            await this.meshpanel.importFile(file);
+          if (this.meshPanel) {
+            await this.meshPanel.importFile(file);
             if (optCustom) {
               optCustom.hidden = false;
               const opt = document.createElement("option");
@@ -3217,7 +3222,7 @@ class ConsoleApp {
 
       if (summary) {
         const modeLabel = this.studioFlightMode === "apex_glide" ? "頂点滑空のみ（上昇時間を含みません）" : "フルフライト（手元から着地まで）";
-        summary.textContent = `${modeLabel}。記録値に対する計算値の比は ${(ratioVal * 100).toFixed(1)}%。機体・投擲条件には再構成値を含み、実機性能の検証は未完了です。`;
+        summary.textContent = `${modeLabel}。【性能未検証 / performance_validated: false】記録値に対する計算値の比は ${(ratioVal * 100).toFixed(1)}%。この比は較正レシピに基づく再現であり、実機性能の検証ではありません。`;
       }
 
       if (list) {
@@ -3259,12 +3264,30 @@ class ConsoleApp {
     await this._guard(async () => {
       const rep = await api.guinnessVerification();
       const rows = rep.rows || [];
-      let summaryText = `【ギネス世界記録 一括検証マトリクス (${rows.length}機体)】\n\n`;
-      for (const r of rows) {
-        const gap = r.gap_percent != null ? `${r.gap_percent > 0 ? "+" : ""}${r.gap_percent.toFixed(1)}%` : "N/A";
-        summaryText += `・${r.name_ja || r.name} (${r.category}): 公認=${r.measured_value} ${r.unit} | シミュ=${r.simulated_value != null ? r.simulated_value.toFixed(1) : "—"} (乖離: ${gap})\n`;
+      const content = document.getElementById("wb-guinness-result-content");
+      const emptyMsg = document.getElementById("wb-guinness-empty-msg");
+      if (emptyMsg) emptyMsg.style.display = "none";
+      if (content) {
+        content.style.display = "block";
+        const validated = rep.performance_validated === true;
+        const evidence = rep.performance_evidence || "";
+        const note = rep.performance_evidence_note || "";
+        const method = rep.method || "";
+        let html = `<div style="margin-bottom:10px;padding:8px;background:#fdf8e2;border:1px solid #f9ab00;border-radius:6px;">`;
+        html += `<div style="font-weight:700;color:#b06000;">性能未検証 (performance_validated: ${String(validated)})</div>`;
+        html += `<div style="font-size:11px;color:#5f6368;margin-top:4px;">証拠レベル: ${escapeHtml(String(evidence))}</div>`;
+        if (note) html += `<div style="font-size:11px;color:#5f6368;margin-top:4px;">${escapeHtml(note)}</div>`;
+        if (method) html += `<div style="font-size:11px;color:#5f6368;margin-top:4px;"><strong>計算方法:</strong> ${escapeHtml(method)}</div>`;
+        html += `</div>`;
+        html += `<table style="width:100%;font-size:11px;border-collapse:collapse;margin-top:6px;"><thead><tr><th style="text-align:left;padding:4px 6px;border-bottom:1px solid #dadce0;">機体</th><th style="text-align:left;padding:4px 6px;border-bottom:1px solid #dadce0;">カテゴリ</th><th style="text-align:right;padding:4px 6px;border-bottom:1px solid #dadce0;">公認値</th><th style="text-align:right;padding:4px 6px;border-bottom:1px solid #dadce0;">シミュ値</th><th style="text-align:right;padding:4px 6px;border-bottom:1px solid #dadce0;">乖離</th><th style="text-align:left;padding:4px 6px;border-bottom:1px solid #dadce0;">検証</th></tr></thead><tbody>`;
+        for (const r of rows) {
+          const gap = r.gap_percent != null ? `${r.gap_percent > 0 ? "+" : ""}${r.gap_percent.toFixed(1)}%` : "N/A";
+          const pv = r.performance_validated === true ? "検証済" : "未検証";
+          html += `<tr><td style="padding:4px 6px;border-bottom:1px solid #eee;">${escapeHtml(r.name_ja || r.name || "")}</td><td style="padding:4px 6px;border-bottom:1px solid #eee;">${escapeHtml(r.category || "")}</td><td style="padding:4px 6px;border-bottom:1px solid #eee;text-align:right;">${r.measured_value != null ? r.measured_value : "—"} ${escapeHtml(r.unit || "")}</td><td style="padding:4px 6px;border-bottom:1px solid #eee;text-align:right;">${r.simulated_value != null ? r.simulated_value.toFixed(1) : "—"}</td><td style="padding:4px 6px;border-bottom:1px solid #eee;text-align:right;">${gap}</td><td style="padding:4px 6px;border-bottom:1px solid #eee;color:${r.performance_validated === true ? "#34a853" : "#d93025"};font-weight:600;">${pv}</td></tr>`;
+        }
+        html += `</tbody></table>`;
+        content.innerHTML = html;
       }
-      alert(summaryText);
     });
   }
 
