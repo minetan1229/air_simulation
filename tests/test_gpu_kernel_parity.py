@@ -143,6 +143,7 @@ def test_vectorised_peak_stress_reproduces_the_stress_field():
                 ),
                 thickness_m=thickness,
                 z_gain=z_gain,
+                dihedral_rad=math.radians(cfg.dihedral_deg),
                 chord_scale=stress_domain.te_fold_chord_scale(np, cfg.fold_trailing_deg),
                 tip_factor=abs(math.sin(math.radians(cfg.fold_tip_deg))),
             )

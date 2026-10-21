@@ -56,6 +56,15 @@ const GEOMETRY_KEYS = [
 /** localStorage key of the last console mode (simulation / research). */
 const MODE_KEY = "paper-airplane-console:mode";
 
+/**
+ * Fold progression quantum of the origami slider.
+ *
+ * The server folds the whole sheet for every request, so a finer quantum only
+ * adds traffic without changing the visible geometry.  Two percent keeps the
+ * drag responsive while the neighbouring angles stay meaningful (§G-6).
+ */
+const ORIGAMI_ALPHA_STEP = 0.02;
+
 /** The workbench tabs of the simulation mode, in the order they appear. */
 const SIMULATION_TABS = ["investigate", "optimizer", "guinness", "model", "data"];
 
@@ -489,6 +498,7 @@ class ConsoleApp {
       "bundle-paste",
       "geom-summary",
     "origami-summary",
+      "origami-shape-warning",
       "vp-flight-status-announcer",
       "status-dot",
       "status-text",
@@ -1322,7 +1332,7 @@ class ConsoleApp {
           return;
         }
 
-        // 投げ方パラメータの正は左レール「投擲・発射設定」だけなので、
+        // 投げ方パラメータの正は左レール「投擲設定」だけなので、
         // ここでもストアへ直接書き込み、同じ範囲補正を適用する。
         const appliedSpeed = this._clampLaunchParam("launch_speed", speed);
         const appliedPitch = this._clampLaunchParam("launch_angle_deg", pitch);
@@ -1801,7 +1811,10 @@ class ConsoleApp {
     const state = this.store.data.origami || {};
     const enabled = Boolean(state.enabled);
     const archetype = String(state.archetype || "classic_dart");
-    const progression = Math.max(0, Math.min(1, Number(state.progression ?? 1)));
+    // Quantise the fold progression so that dragging the slider cannot emit
+    // more distinct fold requests than the geometry actually shows (§G-6).
+    const rawProgression = Math.max(0, Math.min(1, Number(state.progression ?? 1)));
+    const progression = Math.round(rawProgression / ORIGAMI_ALPHA_STEP) * ORIGAMI_ALPHA_STEP;
     const genomeEnabled = Boolean(state.genome_enabled);
     const genomeSeed = Math.round(Number(state.genome_seed ?? 0) || 0);
     const genomeSteps = Math.max(2, Math.round(Number(state.genome_steps ?? 8) || 8));
@@ -1817,6 +1830,19 @@ class ConsoleApp {
           ? `α ${fmt(progression * 100, 0)}% · ${label ? label.key : archetype}`
           : "OFF";
       }
+    }
+    // The analysis airframe (`shape_flag`) and the folded archetype are two
+    // independent selections (§A-17), so a mismatch is legal — but it must be
+    // visible, otherwise the viewer shows a different airframe than the one
+    // the flight model integrates (§G-8).
+    const warning = this.dom["origami-shape-warning"];
+    if (warning) {
+      const shapeFlag = Math.round(Number(this.store.data.aircraft?.shape_flag ?? 1));
+      const archetypeFlag = ORIGAMI_ARCHETYPES.find((a) => a.key === archetype)?.shapeFlag;
+      warning.textContent =
+        enabled && !genomeEnabled && archetypeFlag !== undefined && archetypeFlag !== shapeFlag
+          ? `機体形と折り紙が不一致（解析 ${shapeFlag} / 折り紙 ${archetypeFlag}）`
+          : "";
     }
     if (!enabled) {
       this._origamiAbort = null;
@@ -1907,10 +1933,39 @@ class ConsoleApp {
         1e-3
       );
       this.viewport.setOrigamiGeometry(geometry, semispan);
+      this._prefetchOrigami(archetype, progression, params);
     } catch (error) {
       if (error && error.name === "AbortError") return;
       this.notify(`折り紙モデルの読み込みに失敗しました: ${this._describe(error)}`, "error");
     }
+  }
+
+  /**
+   * Warm the server side fold cache with the neighbouring fold angles.
+   *
+   * Every fold request re-folds the whole sheet, so dragging the slider is
+   * only smooth when the neighbouring angles are already cached.  The
+   * prefetch is bounded (at most the two neighbours, one batch in flight) and
+   * never changes what is displayed.
+   */
+  _prefetchOrigami(archetype, progression, params) {
+    if (this._origamiPrefetch) return;
+    const neighbours = [progression - ORIGAMI_ALPHA_STEP, progression + ORIGAMI_ALPHA_STEP]
+      .map((value) => Math.round(value / ORIGAMI_ALPHA_STEP) * ORIGAMI_ALPHA_STEP)
+      .filter((value) => value >= 0 && value <= 1);
+    if (!neighbours.length) return;
+    this._origamiPrefetch = true;
+    const wingspan = Number(this.store.data.aircraft?.wingspan_m ?? 0.2);
+    (async () => {
+      for (const alpha of neighbours) {
+        try {
+          await requestOrigamiMesh({ archetype, alpha, wingspan, params });
+        } catch (error) {
+          // A failed prefetch is not user visible: the real request reports it.
+        }
+      }
+      this._origamiPrefetch = false;
+    })();
   }
 
   _syncGripPoint() {

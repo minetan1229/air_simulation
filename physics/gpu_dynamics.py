@@ -170,14 +170,38 @@ def quaternion_to_matrix_batch(xp: Any, quat: Any) -> Any:
     )
 
 
+def _contract3(xp: Any, rotation: Any, vector: Any) -> Any:
+    """Contract an ``(N, 3, 3)`` rotation with an ``(N, 3)`` vector.
+
+    The contraction is written out element by element instead of with
+    ``einsum``: CuPy lowers ``einsum`` to cuBLAS, and a cuBLAS call cannot be
+    captured into a CUDA graph, so the ``einsum`` form would make the whole
+    integration step uncapturable.  The two forms are the same sum in the same
+    order -- ``(r00 * v0 + r01 * v1) + r02 * v2`` -- so they differ by at most
+    one unit in the last place, and the CPU (NumPy) and the device (CuPy) path
+    evaluate exactly the same expression.
+    """
+    v0 = vector[:, 0]
+    v1 = vector[:, 1]
+    v2 = vector[:, 2]
+    return xp.stack(
+        (
+            rotation[:, 0, 0] * v0 + rotation[:, 0, 1] * v1 + rotation[:, 0, 2] * v2,
+            rotation[:, 1, 0] * v0 + rotation[:, 1, 1] * v1 + rotation[:, 1, 2] * v2,
+            rotation[:, 2, 0] * v0 + rotation[:, 2, 1] * v1 + rotation[:, 2, 2] * v2,
+        ),
+        axis=-1,
+    )
+
+
 def body_to_world_batch(xp: Any, rotation: Any, vector_body: Any) -> Any:
     """Rotate ``(N, 3)`` body vectors into the world frame."""
-    return xp.einsum("nij,nj->ni", rotation, vector_body)
+    return _contract3(xp, rotation, vector_body)
 
 
 def world_to_body_batch(xp: Any, rotation: Any, vector_world: Any) -> Any:
     """Rotate ``(N, 3)`` world vectors into the body frame."""
-    return xp.einsum("nji,nj->ni", rotation, vector_world)
+    return _contract3(xp, xp.swapaxes(rotation, 1, 2), vector_world)
 
 
 def quaternion_derivative_batch(xp: Any, quat: Any, omega_body: Any) -> Any:
@@ -278,7 +302,8 @@ class FlightParams:
     area: Any
     chord: Any
     span: Any
-    dihedral_rad: Any
+    dihedral_rad: Any                # (N,) dihedral angle in radians
+    dihedral_sin: Any                # (N,) sin(dihedral angle)
     gravity: float
     ground_level_m: float
     wind: Any                        # (N, 3) world-frame wind vector
@@ -300,6 +325,7 @@ def wind_batch(
     params: FlightParams,
     positions: Any,
     time_s: float,
+    out: Any = None,
 ) -> Any:
     """Wind velocity of the whole batch in the **z-down world frame**.
 
@@ -317,9 +343,17 @@ def wind_batch(
     the height above the ground plane, and the two paths would fly in
     different air masses.  The returned vertical component is negated back
     into the z-down world frame.
+
+    ``out`` is an optional ``(N, 3)`` buffer the wind is written into.  The
+    captured integration step reads the wind from a *fixed* address, so the
+    wind of every step has to be copied into the same buffer.
     """
     if params.use_mean_wind_only:
-        return xp.broadcast_to(params.mean_wind, (positions.shape[0], 3))
+        mean = xp.broadcast_to(params.mean_wind, (positions.shape[0], 3))
+        if out is None:
+            return mean
+        out[...] = mean
+        return out
     # The wind field is evaluated on the host, so the query points have to be
     # brought back explicitly.  ``np.asarray`` on a CuPy array raises
     # "Implicit conversion to a NumPy array is not allowed".
@@ -334,10 +368,14 @@ def wind_batch(
     )
     values = velocity_components(points, params.env, float(time_s), params.wind_backend)
     values = np.asarray(values, dtype=np.float64)
-    return xp.asarray(
+    wind = xp.asarray(
         np.stack((values[:, 0], values[:, 1], -values[:, 2]), axis=-1),
         dtype=xp.float64,
     )
+    if out is None:
+        return wind
+    out[...] = wind
+    return out
 
 
 def build_params(
@@ -363,7 +401,11 @@ def build_params(
     def column(name: str, default: float = 0.0) -> Any:
         return xp.asarray([float(getattr(cfg, name, default)) for cfg in configs])
 
-    mass = xp.asarray([max(float(item["mass_kg"]), 1.0e-9) for item in derived])
+    mass_values = [max(float(item["mass_kg"]), 1.0e-9) for item in derived]
+    area_values = [max(float(item["ref_area_m2"]), 1.0e-9) for item in derived]
+    chord_values = [max(float(item["ref_length_m"]), 1.0e-9) for item in derived]
+    span_values = [max(float(item["ref_span_m"]), 1.0e-6) for item in derived]
+    mass = xp.asarray(mass_values)
     inertia = xp.stack(
         (
             xp.asarray([max(float(item["roll_inertia_kgm2"]), 1.0e-12) for item in derived]),
@@ -372,9 +414,9 @@ def build_params(
         ),
         axis=-1,
     )
-    areas = xp.asarray([max(float(item["ref_area_m2"]), 1.0e-9) for item in derived])
-    chords = xp.asarray([max(float(item["ref_length_m"]), 1.0e-9) for item in derived])
-    spans = xp.asarray([max(float(item["ref_span_m"]), 1.0e-6) for item in derived])
+    areas = xp.asarray(area_values)
+    chords = xp.asarray(chord_values)
+    spans = xp.asarray(span_values)
 
     # Every per-case parameter bundle is built by the shared builder, which
     # sanitises it: the kernel can then use the values directly instead of
@@ -433,6 +475,17 @@ def build_params(
     allowable = xp.asarray(
         [max(paper_allowable_stress(cfg.paper_gsm, effective_paper_stiffness(cfg)), 1.0e-9) for cfg in configs]
     )
+    # The canonical structural model is reached through two doors: the 6-DoF
+    # reference path reports the peak of the stress field
+    # (:func:`physics.stress_domain.stress_field`, reached through
+    # ``stress_domain.analyse``), while the batch evaluates the *scalar
+    # reduction* of that field
+    # (:func:`physics.stress_domain.peak_root_stress_pa`).  The two are the
+    # same quantity because the reduction carries every factor the field
+    # applies to the wing-root moment -- the projection of that moment on the
+    # body vertical by ``cos(dihedral)`` among them.  No extra calibration
+    # factor is needed here: the reduction is the field, evaluated at its
+    # peak station.
 
     return FlightParams(
         env=env,
@@ -441,7 +494,8 @@ def build_params(
         area=areas,
         chord=chords,
         span=spans,
-        dihedral_rad=xp.sin(_rad(xp, column("dihedral_deg"))),
+        dihedral_rad=_rad(xp, column("dihedral_deg")),
+        dihedral_sin=xp.sin(_rad(xp, column("dihedral_deg"))),
         gravity=abs(float(env.gravity)),
         ground_level_m=float(env.ground_level_m),
         wind=wind,
@@ -513,7 +567,7 @@ def _restoring_moment_batch(
         * params.area
         * params.span
         * 0.04
-        * params.dihedral_rad
+        * params.dihedral_sin
         * xp.sin(beta_rad)
         * scale
     )
@@ -644,9 +698,19 @@ def _evaluate_state(
     }
 
 
-def _derivative(xp: Any, params: FlightParams, y: Any, wind: Any) -> Any:
-    """Right-hand side of the 13-state ODE."""
-    core = _evaluate_state(xp, params, y, wind)
+def _derivative_from_core(
+    xp: Any, params: FlightParams, y: Any, core: Dict[str, Any]
+) -> Any:
+    """Right-hand side of the 13-state ODE, from an evaluated state.
+
+    The state evaluation is the expensive part of the right-hand side (it
+    runs the shared aerodynamic kernel), so it is evaluated once and reused:
+    the RK4 sweep needs the derivative of the *pre-step* state for its first
+    stage, and the step controller needs the same evaluation for the step
+    size.  Computing it once instead of twice removes one sixth of the
+    aerodynamic evaluations of a step -- and every one of them is several
+    hundred kernel launches.
+    """
     quat = quaternion_normalize_batch(xp, y[:, 6:10])
     return xp.concatenate(
         (
@@ -659,7 +723,19 @@ def _derivative(xp: Any, params: FlightParams, y: Any, wind: Any) -> Any:
     )
 
 
-def _rk4(xp: Any, params: FlightParams, y0: Any, h: Any, wind: Any) -> Any:
+def _derivative(xp: Any, params: FlightParams, y: Any, wind: Any) -> Any:
+    """Right-hand side of the 13-state ODE."""
+    return _derivative_from_core(xp, params, y, _evaluate_state(xp, params, y, wind))
+
+
+def _rk4(
+    xp: Any,
+    params: FlightParams,
+    y0: Any,
+    h: Any,
+    wind: Any,
+    k1: Any = None,
+) -> Any:
     """One classical RK4 sweep, renormalising the quaternions afterwards.
 
     The wind field is sampled **once per step** and shared by the four
@@ -667,8 +743,13 @@ def _rk4(xp: Any, params: FlightParams, y0: Any, h: Any, wind: Any) -> Any:
     step, and re-evaluating the (expensive) turbulence model four times per
     step for every case would make the batch far slower than the path it
     replaces.
+
+    ``k1`` may be supplied by the caller when the derivative of ``y0`` has
+    already been evaluated; it is then reused instead of being computed a
+    second time.
     """
-    k1 = _derivative(xp, params, y0, wind)
+    if k1 is None:
+        k1 = _derivative(xp, params, y0, wind)
     k2 = _derivative(xp, params, y0 + 0.5 * h[:, xp.newaxis] * k1, wind)
     k3 = _derivative(xp, params, y0 + 0.5 * h[:, xp.newaxis] * k2, wind)
     k4 = _derivative(xp, params, y0 + h[:, xp.newaxis] * k3, wind)
@@ -678,16 +759,18 @@ def _rk4(xp: Any, params: FlightParams, y0: Any, h: Any, wind: Any) -> Any:
     return y1
 
 
-def _ground_stations(xp: Any, params: FlightParams, y: Any) -> Dict[str, Any]:
-    """Ground clearance of the key airframe stations of every case.
+def _station_altitudes(
+    xp: Any, params: FlightParams, z_cg: Any, rotation: Any
+) -> Any:
+    """Altitude of the five key stations of every case.
 
-    Mirrors :func:`physics.flight_sim.compute_ground_stations`: the nose,
-    the two wing tips, the tail and the keel are tracked, and the lowest of
-    them decides whether the airframe is in contact with the floor.
+    The stations are the nose, the two wing tips, the tail and the keel, in
+    the order the reference path tracks them.  The altitude of a station is
+    the height of its point above the ground plane, so the lowest of the five
+    decides whether the airframe is in contact with the floor.
     """
     mac = xp.maximum(params.chord, 1.0e-3)
     semispan = params.span * 0.5
-    rotation = quaternion_to_matrix_batch(xp, quaternion_normalize_batch(xp, y[:, 6:10]))
     nose = xp.stack((0.5 * mac, xp.zeros_like(mac), xp.zeros_like(mac)), axis=-1)
     left = xp.stack((-0.3 * mac, -semispan, xp.zeros_like(mac)), axis=-1)
     right = xp.stack((-0.3 * mac, semispan, xp.zeros_like(mac)), axis=-1)
@@ -698,15 +781,25 @@ def _ground_stations(xp: Any, params: FlightParams, y: Any) -> Dict[str, Any]:
         (xp.zeros_like(mac), xp.zeros_like(mac), xp.full_like(mac, GROUND_KEEL_DEPTH_M)),
         axis=-1,
     )
-    z_cg = y[:, 2]
     altitudes = []
     for station in (nose, left, right, tail, keel):
         offset = body_to_world_batch(xp, rotation, station)[:, 2]
         altitudes.append(-(z_cg + offset) - params.ground_level_m)
-    stacked = xp.stack(altitudes, axis=-1)
+    return xp.stack(altitudes, axis=-1)
+
+
+def _ground_stations(xp: Any, params: FlightParams, y: Any) -> Dict[str, Any]:
+    """Ground clearance of the key airframe stations of every case.
+
+    Mirrors :func:`physics.flight_sim.compute_ground_stations`: the nose,
+    the two wing tips, the tail and the keel are tracked, and the lowest of
+    them decides whether the airframe is in contact with the floor.
+    """
+    rotation = quaternion_to_matrix_batch(xp, quaternion_normalize_batch(xp, y[:, 6:10]))
+    stacked = _station_altitudes(xp, params, y[:, 2], rotation)
     return {
         "min_alt": xp.min(stacked, axis=-1),
-        "alt_cg": -z_cg - params.ground_level_m,
+        "alt_cg": -y[:, 2] - params.ground_level_m,
     }
 
 
@@ -768,6 +861,99 @@ def launch_state_vector(
     )
 
 
+#: The capture mode that tolerates the asynchronous copies CuPy emits.
+CAPTURE_MODE_RELAXED: int = 2
+
+
+def _is_device_module(xp: Any) -> bool:
+    """True when the array module is the CUDA one."""
+    return getattr(xp, "__name__", "") == "cupy"
+
+
+def _capture_step(
+    xp: Any, step: Any, snapshot: Any, restore: Any
+) -> Tuple[Any, Any, Any]:
+    """Capture one integration step into a CUDA graph.
+
+    The step issues several thousand kernel launches and the launch overhead
+    dominates the arithmetic on a consumer GPU, so the whole step -- the RK4
+    sweep, the contact resolution and the summary accumulation -- is captured
+    once and replayed with a single launch.
+
+    The captured step performs exactly the same operations in the same order
+    as the eager step, so the numbers are the numbers of the eager path.
+
+    Two device-memory rules make that true:
+
+    * The step allocates its temporaries on the device.  They are released
+      when the captured call returns, and the default allocator would hand
+      their addresses to the next allocation -- the graph would then write
+      into memory that belongs to somebody else, and the flight would
+      depend on the allocator's state.  The capture therefore runs in a
+      **private memory pool** whose free blocks are never handed out while
+      the graph is alive (the pool is returned to the caller and outlives
+      the graph).
+    * ``cudaMalloc`` is not a stream-ordered operation, so it must not
+      happen during the capture.  The step is therefore executed once
+      *before* the capture, in the private pool, so that the pool already
+      holds every block the capture needs.  The warm-up advances the flight
+      by one step, so the state is saved before it and restored afterwards
+      (``snapshot`` / ``restore``); the capture itself only *records* the
+      kernels, it does not run them.
+
+    Returns ``(graph, stream, pool)``, or ``(None, None, None)`` when the
+    array module cannot capture: the CPU path, a host without a CUDA device,
+    or a driver that refuses the capture.  The caller then runs the eager
+    step.
+    """
+    if not _is_device_module(xp):
+        return None, None, None
+    try:
+        import cupy as cp
+    except Exception:  # pragma: no cover - depends on the host
+        return None, None, None
+    try:
+        stream = cp.cuda.Stream(non_blocking=True)
+        pool = cp.cuda.MemoryPool()
+        saved = snapshot()
+        with cp.cuda.using_allocator(pool.malloc):
+            # The warm-up: the step runs once, outside the capture, so that
+            # the private pool holds every block the capture allocates.  The
+            # state is restored in any case: the warm-up advances the flight
+            # by one step.
+            try:
+                step()
+            finally:
+                restore(saved)
+            with stream:
+                stream.begin_capture(mode=CAPTURE_MODE_RELAXED)
+                step()
+                graph = stream.end_capture()
+        # Upload the graph to the device so the first replay does not pay
+        # for the upload.
+        graph.upload(stream)
+        stream.synchronize()
+    except Exception:  # pragma: no cover - depends on the driver
+        return None, None, None
+    return graph, stream, pool
+
+
+def graph_kernel_launches(graph: Any) -> int:
+    """Number of kernel launches captured in a CUDA graph.
+
+    The CUDA graph dump lists one node per captured kernel, so the node count
+    is the exact number of kernel launches the captured region issues.  It is
+    the measurement the launch-count comparison of the parity harness is
+    based on.
+    """
+    if graph is None:
+        return 0
+    try:
+        return int(graph.debug_dot_str().count('shape="octagon"'))
+    except Exception:  # pragma: no cover - depends on the driver
+        return 0
+
+
 def simulate_batch(
     xp: Any,
     params: FlightParams,
@@ -775,6 +961,8 @@ def simulate_batch(
     duration_s: float,
     dt_max: float = 0.01,
     max_steps: int = 20000,
+    use_graph: Optional[bool] = None,
+    record_interval_s: Optional[float] = None,
 ) -> Dict[str, Any]:
     """Integrate a batch of airframes with the 6-DoF rigid-body model.
 
@@ -789,6 +977,29 @@ def simulate_batch(
     the *shared* allowable (:func:`physics.stress_domain.paper_allowable_stress`),
     so the number this path reports is the same number the 6-DoF path
     reports for the same flight.
+
+    The flight summary is accumulated on the **reporting grid** of the
+    canonical 6-DoF path: a sample is recorded when the flight clock has
+    advanced by at least ``record_interval_s`` since the previous recorded
+    sample, and the statistics (``distance_m``, ``max_ld_ratio``,
+    ``peak_load_factor``, ``peak_stress_pa``, ``stall_margin`` and the trim
+    point) are taken over the *recorded* samples only.  This is the same
+    convention as :meth:`physics.flight_sim.FlightSimulator._record_sample`,
+    and it is what makes the two paths report the *same statistic* instead
+    of two different statistics of the same trajectory: the L/D maximum of
+    this dart sits in the first milliseconds of the flight, where the 20 ms
+    grid of the reference path has a single sample (the launch one) while
+    the integration steps of the batch have dozens.  ``record_interval_s``
+    defaults to ``dt_max``, which is the interval the reference path uses
+    (``flight_sim.evaluate_flight`` records with ``record_interval_s =
+    dt_max``).
+
+    On a CUDA device the integration step is captured into a **CUDA graph**
+    and replayed with a single launch (:func:`_capture_step`): the step
+    issues several thousand kernel launches, and the launch overhead -- not
+    the arithmetic -- dominates the wall clock.  The captured step performs
+    exactly the same operations in the same order, so the numbers are the
+    numbers of the eager path.  ``use_graph=False`` runs the eager path.
     """
     count = initial_state.shape[0]
     y = xp.array(initial_state, dtype=xp.float64, copy=True)
@@ -796,27 +1007,53 @@ def simulate_batch(
         xp.asarray(duration_s, dtype=xp.float64), (count,)
     ).copy()
     dt_max = max(float(dt_max), DT_MIN)
+    # The reporting grid of the flight summary.  It is the interval the
+    # canonical 6-DoF path records its samples with, so both paths take their
+    # statistics over the same kind of sample set.
+    record_interval = max(
+        float(dt_max if record_interval_s is None else record_interval_s), DT_MIN
+    )
 
-    peak_q = xp.zeros(count)
-    peak_g = xp.zeros(count)
-    peak_stress = xp.zeros(count)
-    peak_stress_time = xp.zeros(count)
-    landed = xp.zeros(count, dtype=bool)
-    crashed = xp.zeros(count, dtype=bool)
-    flight_time = xp.zeros(count)
-    distance = xp.zeros(count)
-    stall_events = xp.zeros(count)
-    min_stall_margin = xp.ones(count)
-    max_ld_ratio = xp.zeros(count)
-    trim_cm = xp.zeros(count)
-    trim_alpha = xp.zeros(count)
-    trim_speed = xp.zeros(count)
-    trim_altitude = xp.zeros(count)
+    # Every accumulator is a device array that the step updates **in place**:
+    # a captured step replays the kernels it captured, so an accumulator that
+    # was bound to a new array inside the step would only ever hold the
+    # value of the capture.
+    acc: Dict[str, Any] = {
+        "peak_q": xp.zeros(count),
+        "peak_g": xp.zeros(count),
+        "peak_stress": xp.zeros(count),
+        "peak_stress_time": xp.zeros(count),
+        "landed": xp.zeros(count, dtype=bool),
+        "crashed": xp.zeros(count, dtype=bool),
+        "flight_time": xp.zeros(count),
+        "distance": xp.zeros(count),
+        "stall_events": xp.zeros(count),
+        "stall_margin": xp.ones(count),
+        "max_ld_ratio": xp.zeros(count),
+        "trim_cm": xp.zeros(count),
+        "trim_alpha": xp.zeros(count),
+        "trim_speed": xp.zeros(count),
+        "trim_altitude": xp.zeros(count),
+        # Every case keeps its own clock: the step size is a per-case
+        # quantity (it depends on the local rate, speed and stiffness), so a
+        # shared clock would silently truncate the cases that take smaller
+        # steps.
+        "time": xp.zeros(count),
+        # The reporting grid: the time of the last recorded sample and the
+        # position of that sample, from which the horizontal path length of
+        # the next recorded sample is measured.
+        "record_time": xp.zeros(count),
+        "record_x": xp.zeros(count),
+        "record_y": xp.zeros(count),
+        # The number of recorded samples per case: the size of the sample
+        # set the summary was taken over.
+        "samples": xp.zeros(count),
+    }
 
-    # Every case keeps its own clock: the step size is a per-case quantity
-    # (it depends on the local rate, speed and stiffness), so a shared
-    # clock would silently truncate the cases that take smaller steps.
-    case_time = xp.zeros(count)
+    # The wind of a step is written into this buffer.  The captured step
+    # reads the wind from a fixed address, so the wind of every step has to
+    # be copied into the same array.
+    wind = xp.zeros((count, 3), dtype=xp.float64)
 
     def stress_of(core: Dict[str, Any]) -> Any:
         """Wing-root bending stress of every case at the given state."""
@@ -830,6 +1067,7 @@ def simulate_batch(
             root_chord_m=params.root_chord_m,
             thickness_m=params.thickness_m,
             z_gain=params.z_gain,
+            dihedral_rad=params.dihedral_rad,
             chord_scale=params.chord_scale,
             tip_factor=params.tip_factor,
         )
@@ -844,80 +1082,50 @@ def simulate_batch(
     # not from the first integrated step.
     launch_wind = wind_batch(xp, params, y[:, 0:3], 0.0)
     launch_core = _evaluate_state(xp, params, y, launch_wind)
-    peak_q = xp.maximum(peak_q, launch_core["dynamic_pressure"])
-    peak_g = xp.maximum(peak_g, launch_core["g_load"])
-    peak_stress = xp.maximum(peak_stress, stress_of(launch_core))
-    stall_events = xp.where(launch_core["stalled"], 1.0, 0.0)
-    if float(launch_core["speed"][0]) >= SPEED_STAT_FLOOR_MPS:
-        max_ld_ratio = xp.maximum(max_ld_ratio, xp.abs(launch_core["ld_ratio"]))
-        trim_cm = xp.where(
-            xp.abs(launch_core["ld_ratio"]) >= max_ld_ratio, launch_core["cm"], trim_cm
-        )
-        trim_alpha = xp.where(
-            xp.abs(launch_core["ld_ratio"]) >= max_ld_ratio, launch_core["alpha"], trim_alpha
-        )
-        trim_speed = xp.where(
-            xp.abs(launch_core["ld_ratio"]) >= max_ld_ratio, launch_core["speed"], trim_speed
-        )
-        trim_altitude = xp.where(
-            xp.abs(launch_core["ld_ratio"]) >= max_ld_ratio, launch_core["altitude"], trim_altitude
-        )
+    acc["peak_q"][...] = xp.maximum(acc["peak_q"], launch_core["dynamic_pressure"])
+    acc["peak_g"][...] = xp.maximum(acc["peak_g"], launch_core["g_load"])
+    acc["peak_stress"][...] = xp.maximum(acc["peak_stress"], stress_of(launch_core))
+    acc["stall_events"][...] = xp.where(launch_core["stalled"], 1.0, 0.0)
+    # The launch sample is the first sample of the reporting grid.
+    acc["samples"][...] = 1.0
+    # The launch sample is the first sample of the reporting grid, so the
+    # path length is measured from it.
+    acc["record_x"][...] = y[:, 0]
+    acc["record_y"][...] = y[:, 1]
+    # The glide statistics ignore the samples whose airspeed is below the
+    # floor, the same way the reference path does.  The test is per case: a
+    # batch holds airframes with different launch speeds.
+    launch_fast = launch_core["speed"] >= SPEED_STAT_FLOOR_MPS
+    acc["max_ld_ratio"][...] = xp.where(
+        launch_fast, xp.maximum(acc["max_ld_ratio"], xp.abs(launch_core["ld_ratio"])), acc["max_ld_ratio"]
+    )
+    best = launch_fast & (xp.abs(launch_core["ld_ratio"]) >= acc["max_ld_ratio"])
+    acc["trim_cm"][...] = xp.where(best, launch_core["cm"], acc["trim_cm"])
+    acc["trim_alpha"][...] = xp.where(best, launch_core["alpha"], acc["trim_alpha"])
+    acc["trim_speed"][...] = xp.where(best, launch_core["speed"], acc["trim_speed"])
+    acc["trim_altitude"][...] = xp.where(
+        best, launch_core["altitude"], acc["trim_altitude"]
+    )
 
-    for _ in range(int(max_steps)):
-        active = (~landed) & (~crashed) & (case_time < duration)
-        if not bool(xp.any(active)):
-            break
-        # The wind field is sampled once per step for the whole batch, at
-        # the mean time of the active cases.
-        mean_time = float(xp.mean(case_time[active]))
-        wind = wind_batch(xp, params, y[:, 0:3], mean_time)
+    # The clearance of the deepest station of the pre-step state.  It is
+    # carried across the steps so that the contact can be resolved *inside*
+    # the step that crossed the ground.  It is an accumulator of the step,
+    # so the warm-up of the capture can save and restore it.
+    acc["min_alt_prev"] = _ground_stations(xp, params, y)["min_alt"]
+    min_alt_prev = acc["min_alt_prev"]
+
+    def step() -> None:
+        """Advance the whole batch by one integration step, in place."""
+        active = (~acc["landed"]) & (~acc["crashed"]) & (acc["time"] < duration)
         core = _evaluate_state(xp, params, y, wind)
-        step = _step_size(xp, params, y, core, dt_max)
-        step = xp.minimum(step, xp.maximum(duration - case_time, 0.0))
-        step = xp.where(active, step, xp.zeros_like(step))
-
-        previous = y
-        y = _rk4(xp, params, y, step, wind)
-        # Cases that already landed or crashed are frozen: the batch is
-        # integrated as one array, so an inactive case must be restored to
-        # its own last valid state instead of drifting underground.
-        y = xp.where(active[:, xp.newaxis], y, previous)
-        # The reported distance is the accumulated **horizontal path
-        # length**, exactly as the 6-DoF path sums it over its samples: in a
-        # crosswind the track is longer than the straight line to the
-        # touchdown point, and the two must not be confused.
-        travelled = xp.sqrt((y[:, 0] - previous[:, 0]) ** 2 + (y[:, 1] - previous[:, 1]) ** 2)
-        distance = distance + xp.where(active, travelled, xp.zeros_like(travelled))
-        case_time = case_time + step
-
-        # --- accumulate the flight summary --------------------------------
-        # The summary is evaluated on the **post-step** state: that is the
-        # state the airframe actually reached, and it is the state the 6-DoF
-        # path records its samples at.
-        core = _evaluate_state(xp, params, y, wind)
-        stress = stress_of(core)
-        index = stress / params.allowable_pa
-        peak_q = xp.where(active, xp.maximum(peak_q, core["dynamic_pressure"]), peak_q)
-        peak_g = xp.where(active, xp.maximum(peak_g, core["g_load"]), peak_g)
-        worse = active & (stress > peak_stress)
-        peak_stress = xp.where(worse, stress, peak_stress)
-        peak_stress_time = xp.where(worse, case_time, peak_stress_time)
-        stall_events = stall_events + xp.where(active & core["stalled"], 1.0, 0.0)
-        min_stall_margin = xp.where(
-            active, xp.minimum(min_stall_margin, core["stall_margin"]), min_stall_margin
-        )
-        # The best-glide point defines the trim: the reference path evaluates
-        # the stability metric ``1 / (1 + |C_m|)`` at the sample with the
-        # largest L/D, so the batch tracks the same point.
-        fast = core["speed"] >= SPEED_STAT_FLOOR_MPS
-        candidate = xp.where(fast, xp.abs(core["ld_ratio"]), 0.0)
-        better = active & (candidate > max_ld_ratio)
-        max_ld_ratio = xp.where(better, candidate, max_ld_ratio)
-        trim_cm = xp.where(better, core["cm"], trim_cm)
-        trim_alpha = xp.where(better, core["alpha"], trim_alpha)
-        trim_speed = xp.where(better, core["speed"], trim_speed)
-        trim_altitude = xp.where(better, core["altitude"], trim_altitude)
-        flight_time = xp.where(active, case_time, flight_time)
+        size = _step_size(xp, params, y, core, dt_max)
+        size = xp.minimum(size, xp.maximum(duration - acc["time"], 0.0))
+        size = xp.where(active, size, xp.zeros_like(size))
+        # The derivative of the pre-step state is the first RK4 stage, and
+        # the state evaluation above is the same evaluation of the same
+        # state.  It is evaluated once and shared instead of twice.
+        k1 = _derivative_from_core(xp, params, y, core)
+        y_next = _rk4(xp, params, y, size, wind, k1=k1)
 
         # --- ground contact ------------------------------------------------
         # The contact is detected on the *stations* of the airframe, not on
@@ -925,8 +1133,121 @@ def simulate_batch(
         # before the CG does, and the reference path resolves the contact on
         # the deepest station.  Using the CG alone would let the batch
         # report "still flying" for an airframe that is already on the floor.
-        stations = _ground_stations(xp, params, y)
-        touching = stations["min_alt"] <= 0.0
+        stations = _ground_stations(xp, params, y_next)
+        min_alt_next = stations["min_alt"]
+        touching = min_alt_next <= 0.0
+        # The contact is resolved with the continuous collision detection of
+        # the reference path: the instant of the contact is interpolated
+        # inside the step that crossed the ground, so the reported flight
+        # time and distance are the ones of the touchdown and not the ones of
+        # the end of the step.  Without the interpolation the contact time is
+        # quantised by the step size, which is a visible difference between
+        # the two paths (and between the device and the host execution of
+        # this one).
+        crossing = touching & (min_alt_prev > 0.0)
+        span = min_alt_prev - min_alt_next
+        safe_span = xp.where(span > 1.0e-12, span, xp.ones_like(span))
+        tau = xp.where(
+            crossing, xp.clip(min_alt_prev / safe_span, 0.0, 1.0), xp.zeros_like(span)
+        )
+        impact_time = acc["time"] + tau * size
+        # The state of the touchdown: the position, the velocity, the
+        # attitude and the body rates are interpolated, and the airframe is
+        # placed exactly on the floor (the deepest station touches it).
+        quat_interp = quaternion_normalize_batch(
+            xp,
+            (1.0 - tau)[:, xp.newaxis] * y[:, 6:10]
+            + tau[:, xp.newaxis] * y_next[:, 6:10],
+        )
+        position_interp = y[:, 0:3] + tau[:, xp.newaxis] * (y_next[:, 0:3] - y[:, 0:3])
+        velocity_interp = y[:, 3:6] + tau[:, xp.newaxis] * (y_next[:, 3:6] - y[:, 3:6])
+        rates_interp = y[:, 10:13] + tau[:, xp.newaxis] * (y_next[:, 10:13] - y[:, 10:13])
+        rotation_interp = quaternion_to_matrix_batch(xp, quat_interp)
+        min_alt_interp = xp.min(
+            _station_altitudes(xp, params, position_interp[:, 2], rotation_interp), axis=-1
+        )
+        position_interp[:, 2] = position_interp[:, 2] + min_alt_interp
+        y_interp = xp.concatenate(
+            (position_interp, velocity_interp, quat_interp, rates_interp), axis=1
+        )
+        # A contact step ends on the state of the touchdown, not on the state
+        # at the end of the step (which is below the floor): that is the
+        # state the reference path records for the contact sample, and the
+        # state the flight summary of the step has to be evaluated at.
+        y_next = xp.where(crossing[:, xp.newaxis], y_interp, y_next)
+
+        # The reported distance is the accumulated **horizontal path
+        # length**, exactly as the 6-DoF path sums it over its samples: in a
+        # crosswind the track is longer than the straight line to the
+        # touchdown point, and the two must not be confused.  The last
+        # segment ends at the touchdown, not at the end of the step.
+        #
+        # The path length is summed over the **recorded samples** of the
+        # reporting grid, like the reference path does: the two paths then
+        # measure the same polyline of the same trajectory.  A step that is
+        # not a recording step moves the polyline's last vertex forward
+        # without adding to the length.
+        end_x = xp.where(crossing, position_interp[:, 0], y_next[:, 0])
+        end_y = xp.where(crossing, position_interp[:, 1], y_next[:, 1])
+        # The time of the sample the step ends with: the instant of the
+        # touchdown for a contact step, the end of the step otherwise.
+        sample_time = xp.where(crossing, impact_time, acc["time"] + size)
+        recorded = active & (sample_time >= acc["record_time"] + record_interval)
+        travelled = xp.sqrt(
+            (end_x - acc["record_x"]) ** 2 + (end_y - acc["record_y"]) ** 2
+        )
+        acc["distance"] += xp.where(recorded, travelled, xp.zeros_like(travelled))
+        acc["record_x"][...] = xp.where(recorded, end_x, acc["record_x"])
+        acc["record_y"][...] = xp.where(recorded, end_y, acc["record_y"])
+        acc["record_time"][...] = xp.where(recorded, sample_time, acc["record_time"])
+        acc["samples"] += xp.where(recorded, 1.0, 0.0)
+        acc["time"] += size
+
+        # --- accumulate the flight summary --------------------------------
+        # The summary is evaluated on the **post-step** state: that is the
+        # state the airframe actually reached, and it is the state the 6-DoF
+        # path records its samples at.  A contact step ends on the state of
+        # the touchdown, which is the state the reference path records.
+        core_next = _evaluate_state(xp, params, y_next, wind)
+        stress = stress_of(core_next)
+        acc["peak_q"][...] = xp.where(
+            recorded, xp.maximum(acc["peak_q"], core_next["dynamic_pressure"]), acc["peak_q"]
+        )
+        acc["peak_g"][...] = xp.where(
+            recorded, xp.maximum(acc["peak_g"], core_next["g_load"]), acc["peak_g"]
+        )
+        worse = recorded & (stress > acc["peak_stress"])
+        acc["peak_stress"][...] = xp.where(worse, stress, acc["peak_stress"])
+        acc["peak_stress_time"][...] = xp.where(
+            worse, acc["time"], acc["peak_stress_time"]
+        )
+        acc["stall_events"] += xp.where(recorded & core_next["stalled"], 1.0, 0.0)
+        acc["stall_margin"][...] = xp.where(
+            recorded,
+            xp.minimum(acc["stall_margin"], core_next["stall_margin"]),
+            acc["stall_margin"],
+        )
+        # The best-glide point defines the trim: the reference path evaluates
+        # the stability metric ``1 / (1 + |C_m|)`` at the sample with the
+        # largest L/D, so the batch tracks the same point.  The sample that
+        # ends the flight in a contact is the *contact sample*: its L/D is
+        # the transient of the bounce and it is excluded from the glide
+        # statistics, exactly as the reference path excludes it.
+        fast = core_next["speed"] >= SPEED_STAT_FLOOR_MPS
+        candidate = xp.where(fast & ~touching, xp.abs(core_next["ld_ratio"]), 0.0)
+        better = recorded & (candidate > acc["max_ld_ratio"])
+        acc["max_ld_ratio"][...] = xp.where(better, candidate, acc["max_ld_ratio"])
+        acc["trim_cm"][...] = xp.where(better, core_next["cm"], acc["trim_cm"])
+        acc["trim_alpha"][...] = xp.where(better, core_next["alpha"], acc["trim_alpha"])
+        acc["trim_speed"][...] = xp.where(better, core_next["speed"], acc["trim_speed"])
+        acc["trim_altitude"][...] = xp.where(
+            better, core_next["altitude"], acc["trim_altitude"]
+        )
+        # The flight time of a case that touched the floor is the instant of
+        # the touchdown, not the end of the step that found it.
+        end_time = xp.where(crossing, impact_time, acc["time"])
+        acc["flight_time"][...] = xp.where(active, end_time, acc["flight_time"])
+
         # The impact load factor follows the reference model: the structural
         # stop distance converts the impact speed into the load the root
         # section has to carry, ``n = 1 + v^2 / (2 g d)``.
@@ -938,7 +1259,9 @@ def simulate_batch(
         # reported an impact speed of 0 m/s for every flight.  The crash test
         # was consequently never armed in the batch path and a steep impact
         # was reported as a landing while the 6-DoF path reported a crash.
-        impact_speed = xp.maximum(y[:, 5], 0.0)
+        impact_speed = xp.maximum(
+            xp.where(crossing, velocity_interp[:, 2], y_next[:, 5]), 0.0
+        )
         impact_g = 1.0 + impact_speed * impact_speed / (2.0 * params.gravity * 0.031)
         impact_stress = peak_root_stress_pa(
             xp,
@@ -950,6 +1273,7 @@ def simulate_batch(
             root_chord_m=params.root_chord_m,
             thickness_m=params.thickness_m,
             z_gain=params.z_gain,
+            dihedral_rad=params.dihedral_rad,
             chord_scale=params.chord_scale,
             tip_factor=params.tip_factor,
         )
@@ -962,17 +1286,80 @@ def simulate_batch(
         failed = touching & (
             (impact_index >= 1.0) | (impact_speed > CRASH_IMPACT_SPEED_MPS)
         )
-        landed = xp.where(touching & ~failed, xp.ones(count, dtype=bool), landed)
-        crashed = xp.where(failed, xp.ones(count, dtype=bool), crashed)
-        del previous
+        acc["landed"] |= touching & ~failed
+        acc["crashed"] |= failed
+
+        # Cases that already landed or crashed are frozen: the batch is
+        # integrated as one array, so an inactive case must be restored to
+        # its own last valid state instead of drifting underground.
+        y[...] = xp.where(active[:, xp.newaxis], y_next, y)
+        min_alt_prev[...] = min_alt_next
+
+    def snapshot() -> Dict[str, Any]:
+        """Copy the mutable state of the batch, for the capture warm-up."""
+        return {
+            "state": xp.array(y, copy=True),
+            "acc": {key: xp.array(value, copy=True) for key, value in acc.items()},
+            "wind": xp.array(wind, copy=True),
+        }
+
+    def restore(saved: Dict[str, Any]) -> None:
+        """Put the copied state back after the capture warm-up."""
+        y[...] = saved["state"]
+        for key, value in saved["acc"].items():
+            acc[key][...] = value
+        wind[...] = saved["wind"]
+
+    if use_graph is None:
+        use_graph = _is_device_module(xp)
+    graph = None
+    stream = None
+    pool = None
+    if use_graph:
+        graph, stream, pool = _capture_step(xp, step, snapshot, restore)
+    launches_per_step = graph_kernel_launches(graph)
+
+    steps_executed = 0
+    for _ in range(int(max_steps)):
+        active = (~acc["landed"]) & (~acc["crashed"]) & (acc["time"] < duration)
+        if not bool(xp.any(active)):
+            break
+        # The wind field is sampled once per step for the whole batch, at
+        # the mean time of the active cases.
+        #
+        # The captured graph is replayed on the **current** stream, the same
+        # stream the wind is written on and the same stream the host reads
+        # of the batch state are issued on.  A graph replayed on a second,
+        # non-blocking stream would not be ordered against the host reads of
+        # this loop: the mean time and the wind would be taken from a state
+        # the previous step had not written yet, and the flight would
+        # depend on the order in which the streams happened to drain.
+        mean_time = float(xp.mean(acc["time"][active]))
+        wind_batch(xp, params, y[:, 0:3], mean_time, out=wind)
+        if graph is not None:
+            graph.launch()
+        else:
+            step()
+        steps_executed += 1
+    if graph is not None and stream is not None:
+        stream.synchronize()
+        # The graph keeps the memory of the temporaries it captured alive.
+        # Releasing it before the caller allocates device memory of its own
+        # keeps both of them sound.  The private memory pool of the capture
+        # is released with it: its blocks are the ones the graph writes to.
+        del graph
+        graph = None
+        del pool
+        pool = None
+
     # The stability metric of the reference path is the **static** trim
     # residual at the best-glide point: the pitching moment coefficient of
     # the airframe trimmed at that angle of attack, with no sideslip and no
     # body rates.  It is evaluated here with the same shared kernel.
     trim_air = atmosphere_batch(
-        xp, params.env, xp.maximum(trim_altitude, 0.0), params.chord
+        xp, params.env, xp.maximum(acc["trim_altitude"], 0.0), params.chord
     )
-    trim_reynolds = trim_speed * params.chord / xp.maximum(
+    trim_reynolds = acc["trim_speed"] * params.chord / xp.maximum(
         trim_air["kinematic_viscosity_m2s"], 1.0e-12
     )
     # The same Reynolds envelope the canonical path applies to its trim
@@ -981,37 +1368,51 @@ def simulate_batch(
     trim_reynolds = xp.clip(
         trim_reynolds, float(MODEL_REYNOLDS_MIN), float(MODEL_REYNOLDS_MAX)
     )
-    trim_mach = trim_speed / xp.maximum(trim_air["sound_speed_mps"], 1.0)
+    trim_mach = acc["trim_speed"] / xp.maximum(trim_air["sound_speed_mps"], 1.0)
     trim_coefficients = aero_kernel.evaluate_coefficients(
         xp,
         params.aero,
-        alpha_deg=trim_alpha,
+        alpha_deg=acc["trim_alpha"],
         beta_deg=0.0,
         p_rate=0.0,
         q_rate=0.0,
         r_rate=0.0,
-        speed=trim_speed,
+        speed=acc["trim_speed"],
         reynolds=trim_reynolds,
         mach=trim_mach,
-        ground_height_m=xp.maximum(trim_altitude, 0.0),
+        ground_height_m=xp.maximum(acc["trim_altitude"], 0.0),
         density=trim_air["density_kgm3"],
     )
     trim_cm = trim_coefficients["cm"]
 
     return {
         "state": y,
-        "peak_dynamic_pressure_pa": peak_q,
-        "peak_load_factor": peak_g,
-        "peak_stress_pa": peak_stress,
-        "peak_stress_time_s": peak_stress_time,
-        "peak_stress_index": peak_stress / params.allowable_pa,
+        "peak_dynamic_pressure_pa": acc["peak_q"],
+        "peak_load_factor": acc["peak_g"],
+        "peak_stress_pa": acc["peak_stress"],
+        "peak_stress_time_s": acc["peak_stress_time"],
+        "peak_stress_index": acc["peak_stress"] / params.allowable_pa,
         "allowable_stress_pa": params.allowable_pa,
-        "landed": landed,
-        "crashed": crashed,
-        "flight_time_s": flight_time,
-        "distance_m": distance,
-        "stall_events": stall_events,
-        "stall_margin": min_stall_margin,
-        "max_ld_ratio": max_ld_ratio,
+        "landed": acc["landed"],
+        "crashed": acc["crashed"],
+        "flight_time_s": acc["flight_time"],
+        "distance_m": acc["distance"],
+        "stall_events": acc["stall_events"],
+        "stall_margin": acc["stall_margin"],
+        "max_ld_ratio": acc["max_ld_ratio"],
         "stability": 1.0 / (1.0 + xp.abs(trim_cm)),
+        "recorded_samples": acc["samples"],
+        "last_recorded_time_s": acc["record_time"],
+        # The position of the last recorded sample: the endpoint of the
+        # path length the summary measures.  The canonical path reports its
+        # straight-line range to the same point ("the final recorded
+        # position", ``flight_sim.evaluate_flight``), so the two fields of
+        # the payload refer to the same endpoints.
+        "last_recorded_x": acc["record_x"],
+        "last_recorded_y": acc["record_y"],
+        "record_interval_s": float(record_interval),
+        "integration_steps": int(steps_executed),
+        "kernel_launches_per_step": int(launches_per_step),
+        "kernel_launches_total": int(launches_per_step * steps_executed),
+        "graph_captured": bool(launches_per_step > 0),
     }

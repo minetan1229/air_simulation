@@ -17,6 +17,7 @@ from physics.config_schema import (
 from ..core import (
     SESSION,
     SIMULATION_LOCK,
+    SIMULATION_TRAJECTORY_LOCK,
     BadRequest,
     as_float,
     as_int,
@@ -51,19 +52,23 @@ def simulation_step():
     if not (1 <= n_steps <= 240):
         raise BadRequest("'n_steps' must lie within [1, 240]")
 
-    # The shared simulator is mutated by the step itself, so the whole
-    # request runs under the single session mutex.  Holding it here is what
-    # keeps a concurrent /simulation/launch from interleaving its frames into
-    # this trajectory (and vice versa).
-    with SIMULATION_LOCK:
+    # The shared simulator is mutated by the step itself, so a trajectory must
+    # not be interleaved with another trajectory and the airframe
+    # configuration must not change while it runs.  The trajectory lock is
+    # therefore held for the whole request, while the state lock is only held
+    # for the short critical sections, so read-only endpoints keep answering
+    # during a long batch instead of waiting for its full wall time (§P2-2).
+    with SIMULATION_TRAJECTORY_LOCK:
         simulator = SESSION.simulator_for_request(payload)
         if n_steps == 1:
-            result = simulator.step(dt=dt, substeps=substeps)
+            with SIMULATION_LOCK:
+                result = simulator.step(dt=dt, substeps=substeps)
             out = dict(result)
         else:
             steps_list = []
             for _ in range(n_steps):
-                res = simulator.step(dt=dt, substeps=substeps)
+                with SIMULATION_LOCK:
+                    res = simulator.step(dt=dt, substeps=substeps)
                 steps_list.append(res)
                 if res.get("terminated", False):
                     break
@@ -84,10 +89,11 @@ def simulation_step():
 @sim_bp.post("/api/v1/simulation/reset")
 def simulation_reset():
     payload = body()
-    with SIMULATION_LOCK:
-        SESSION.apply_payload(payload)
-        SESSION.simulator = None
-        state = SESSION.reset_state()
+    with SIMULATION_TRAJECTORY_LOCK:
+        with SIMULATION_LOCK:
+            SESSION.apply_payload(payload)
+            SESSION.simulator = None
+            state = SESSION.reset_state()
     return jsonify(
         {
             "state": as_dict(state),
@@ -107,22 +113,23 @@ def simulation_launch():
     try:
         payload = body()
         # The launch integrates the *shared* simulator, so it must hold the
-        # very same mutex that /simulation/step holds.  A concurrent step
-        # would otherwise advance the same state machine in the middle of the
-        # integration loop and mix its frames into the recorded trajectory.
-        with SIMULATION_LOCK:
-            simulator = SESSION.simulator_for_request(payload)
-            simulator.reset(launch=SESSION.launch)
-            duration_s = as_float(payload.get("duration_s", 25.0), "duration_s")
-            if not (0.1 <= duration_s <= 120.0):
-                raise BadRequest("field 'duration_s' must lie within [0.1, 120.0]")
-            aircraft = SESSION.aircraft
-            environment = SESSION.environment
-            launch = SESSION.launch
-            settings = SESSION.settings
+        # very same trajectory mutex that /simulation/step holds.  A concurrent
+        # step would otherwise advance the same state machine in the middle of
+        # the integration loop and mix its frames into the recorded trajectory.
+        with SIMULATION_TRAJECTORY_LOCK:
+            with SIMULATION_LOCK:
+                simulator = SESSION.simulator_for_request(payload)
+                simulator.reset(launch=SESSION.launch)
+                duration_s = as_float(payload.get("duration_s", 25.0), "duration_s")
+                if not (0.1 <= duration_s <= 120.0):
+                    raise BadRequest("field 'duration_s' must lie within [0.1, 120.0]")
+                aircraft = SESSION.aircraft
+                environment = SESSION.environment
+                launch = SESSION.launch
+                settings = SESSION.settings
 
-            summary = simulator.simulate(duration_s=duration_s, record=True)
-            samples = [as_dict(s) for s in simulator.history()]
+                summary = simulator.simulate(duration_s=duration_s, record=True)
+                samples = [as_dict(s) for s in simulator.history()]
 
         parallel = domain("parallel_engine")
         gpu_info = parallel.get_gpu_info()

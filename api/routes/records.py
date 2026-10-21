@@ -15,7 +15,15 @@ from physics.config_schema import (
     from_dict,
 )
 from physics.error_domain import ERROR_LOGGER
-from ..core import SESSION, BadRequest, NotFound, api_error, as_float, body
+from ..core import (
+    SESSION,
+    SIMULATION_TRAJECTORY_LOCK,
+    BadRequest,
+    NotFound,
+    api_error,
+    as_float,
+    body,
+)
 
 log = logging.getLogger("paper_airplane")
 records_bp = Blueprint("records", __name__)
@@ -78,14 +86,17 @@ def data_import():
     except ValueError as exc:
         raise BadRequest(str(exc)) from exc
 
-    with SESSION.lock:
-        SESSION.set_aircraft(from_dict(AircraftConfig, normalised["aircraft"], strict=False))
-        SESSION.set_environment(
-            from_dict(EnvironmentConfig, normalised["environment"], strict=False).clamp_ranges()
-        )
-        SESSION.set_launch(from_dict(LaunchConfig, normalised["launch"], strict=False))
-        SESSION.set_settings(from_dict(SimulationSettings, normalised["simulation"], strict=False))
-        snapshot = SESSION.current_snapshot()
+    # The configuration must not change while a trajectory is running, so the
+    # trajectory lock is taken first and the state lock second (§P2-2).
+    with SIMULATION_TRAJECTORY_LOCK:
+        with SESSION.lock:
+            SESSION.set_aircraft(from_dict(AircraftConfig, normalised["aircraft"], strict=False))
+            SESSION.set_environment(
+                from_dict(EnvironmentConfig, normalised["environment"], strict=False).clamp_ranges()
+            )
+            SESSION.set_launch(from_dict(LaunchConfig, normalised["launch"], strict=False))
+            SESSION.set_settings(from_dict(SimulationSettings, normalised["simulation"], strict=False))
+            snapshot = SESSION.current_snapshot()
     return jsonify({"ok": True, "bundle": snapshot})
 
 
@@ -123,25 +134,26 @@ def apply_record_preset():
     calibrated = bool(payload.get("calibrated", not apply_throw_only))
     flight_mode = payload.get("flight_mode") or "full_flight"
 
-    with SESSION.lock:
-        try:
-            entry = records_domain.preset(key)
-        except KeyError:
-            raise NotFound(f"Unknown preset key: '{key}'")
+    with SIMULATION_TRAJECTORY_LOCK:
+        with SESSION.lock:
+            try:
+                entry = records_domain.preset(key)
+            except KeyError:
+                raise NotFound(f"Unknown preset key: '{key}'")
 
-        try:
-            new_launch = entry.launch_config(SESSION.launch, calibrated=calibrated, flight_mode=flight_mode)
-        except ValueError as exc:
-            raise BadRequest(str(exc))
-        if not apply_throw_only:
-            SESSION.set_aircraft(entry.aircraft_config(SESSION.aircraft))
-        if not apply_aircraft_only:
-            SESSION.set_launch(new_launch)
-            SESSION.set_environment(entry.environment_config(SESSION.environment))
+            try:
+                new_launch = entry.launch_config(SESSION.launch, calibrated=calibrated, flight_mode=flight_mode)
+            except ValueError as exc:
+                raise BadRequest(str(exc))
+            if not apply_throw_only:
+                SESSION.set_aircraft(entry.aircraft_config(SESSION.aircraft))
+            if not apply_aircraft_only:
+                SESSION.set_launch(new_launch)
+                SESSION.set_environment(entry.environment_config(SESSION.environment))
 
-        SESSION.simulator = None
-        state = SESSION.reset()
-        snapshot = SESSION.current_snapshot()
+            SESSION.simulator = None
+            state = SESSION.reset()
+            snapshot = SESSION.current_snapshot()
 
     chosen_throw, selection = entry.flight_selection(calibrated=calibrated, flight_mode=flight_mode)
     return jsonify({

@@ -37,6 +37,8 @@ single scalar airframe and a batch of airframes are handled by the same code.
 
 from __future__ import annotations
 
+import contextlib
+import inspect
 import math
 from dataclasses import dataclass
 from dataclasses import fields as _dataclass_fields
@@ -78,6 +80,7 @@ __all__ = [
     "center_of_pressure_fraction",
     "evaluate_coefficients",
     "effective_stall_alpha_deg",
+    "fused_gpu_state",
     "params_from_config",
 ]
 
@@ -237,6 +240,20 @@ class ScalarMath:
     def power(base: float, exponent: float) -> float:
         return base ** exponent
 
+    @staticmethod
+    def square(value: float) -> float:
+        """The square of a value.
+
+        NumPy and CuPy evaluate ``value ** 2`` as a plain multiplication
+        (their "fast scalar power"), while the scalar backend evaluates it
+        with :func:`math.pow`.  The shared kernel states the square
+        explicitly, because the fused GPU kernel has no fast-power path and
+        would call the libdevice ``pow`` -- which differs from the eager
+        CuPy path in the last bit.  The scalar backend keeps
+        :func:`math.pow`, so the 6-DoF reference path is unchanged.
+        """
+        return math.pow(value, 2)
+
 
 
 # --------------------------------------------------------------------------
@@ -283,27 +300,30 @@ def _sanitize_field(value: Any, default: Any) -> Any:
 def _clamp(xp: Any, value: Any, low: Any, high: Any) -> Any:
     """``clip`` that also accepts plain Python floats.
 
-    The value is converted to an array first: ``cupy.clip`` has no method on
-    a Python float, so a scalar argument would raise ``AttributeError`` on the
-    GPU path while working on the NumPy path.
+    The value is broadcast by the array module itself: ``clip`` accepts a
+    scalar argument, and the fused GPU kernel traces the very same call.
+    (An explicit ``asarray`` would break the fusion, because a traced
+    value cannot be converted on the host.)
     """
-    return xp.clip(xp.asarray(value, dtype=xp.float64), low, high)
+    return xp.clip(value, low, high)
 
 
 def _safe_div(xp: Any, numerator: Any, denominator: Any, default: Any = 0.0) -> Any:
     """``safe_div`` for arrays: zero denominators yield ``default``."""
-    den = xp.asarray(denominator, dtype=xp.float64)
-    num = xp.asarray(numerator, dtype=xp.float64)
-    good = xp.abs(den) > _EPS
-    safe_den = xp.where(good, den, xp.ones_like(den))
-    return xp.where(good, num / safe_den, default)
+    good = xp.abs(denominator) > _EPS
+    safe_denominator = xp.where(good, denominator, 1.0)
+    return xp.where(good, numerator / safe_denominator, default)
 
 
 def _rad(xp: Any, value: Any) -> Any:
-    """Degrees to radians, array aware (``config_schema.deg2rad`` is scalar)."""
-    if isinstance(value, float):
-        return value * (math.pi / 180.0)
-    return xp.asarray(value, dtype=xp.float64) * (math.pi / 180.0)
+    """Degrees to radians, array aware (``config_schema.deg2rad`` is scalar).
+
+    The ``xp`` argument is kept for the uniform signature of the kernel
+    primitives; the conversion itself is a plain multiplication, which the
+    fused GPU kernel can trace and the scalar backend evaluates with the
+    very same double-precision constant.
+    """
+    return value * (math.pi / 180.0)
 
 
 def _logistic(xp: Any, value: Any) -> Any:
@@ -316,7 +336,7 @@ def _logistic(xp: Any, value: Any) -> Any:
     evaluation finite for every input, including the large positive offsets
     the stall blend produces.
     """
-    x = xp.asarray(value, dtype=xp.float64)
+    x = value
     positive = x >= 0.0
     exp_pos = xp.exp(-xp.maximum(x, -700.0))
     exp_neg = xp.exp(xp.minimum(x, 0.0))
@@ -334,12 +354,48 @@ def _finite(xp: Any, value: Any, default: float = 0.0) -> Any:
 
     A plain finite float -- the overwhelmingly common case on the scalar
     6-DoF path -- is returned unchanged, without touching the array module.
+
+    The array branch uses ``where(isfinite(...))`` instead of
+    ``nan_to_num``.  The two agree exactly (every non-finite value becomes
+    ``default`` either way), and the ``where`` form is the one the fused
+    GPU kernel can express: ``nan_to_num`` is not an elementwise operation
+    and cannot be traced into a single kernel.
     """
     if isinstance(value, float):
         if value == value and -1.0e308 < value < 1.0e308:
             return value
-    array = xp.asarray(value, dtype=xp.float64)
-    return xp.nan_to_num(array, nan=default, posinf=default, neginf=default)
+    return xp.where(xp.isfinite(value), value, default)
+
+
+def _flag_array(xp: Any, value: Any) -> Any:
+    """Turn a plain Python flag into an array the array module understands.
+
+    ``cupy.where`` rejects a Python ``bool`` condition, so a flag has to be
+    an array on the GPU path.  Values that already are arrays are passed
+    through unchanged, which keeps the fused kernel free of host-side
+    conversions (``asarray`` of a traced value is not possible).
+    """
+    if isinstance(value, (bool, int, float)):
+        return xp.asarray(value)
+    return value
+
+
+def _f64(xp: Any, value: Any) -> Any:
+    """A constant in double precision.
+
+    The CuPy fusion tracer types a bare Python float as ``float16``: an
+    expression whose dtype is decided by a Python constant alone (the
+    ``where`` branches of the post-stall sign, the stall blend angle, ...)
+    would be evaluated in half precision inside the fused kernel and would
+    no longer reproduce the eager evaluation.  Wrapping the constants in the
+    array module's own ``float64`` keeps the fused kernel in double
+    precision; the values are unchanged.
+    """
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return xp.float64(value)
+    return value
 
 
 # --------------------------------------------------------------------------
@@ -379,10 +435,10 @@ def ground_effect_factor(xp: Any, height_m: Any, span_m: Any, enabled: Any = Tru
     switching the model off restores the free-air polar instead of deleting
     the induced drag.
     """
-    enabled = xp.asarray(enabled)
+    enabled = _flag_array(xp, enabled)
     height = xp.maximum(_finite(xp, height_m, 0.0), 0.0)
     span = xp.maximum(_finite(xp, span_m, 0.2), 1.0e-9)
-    ratio = 16.0 * (height / span) ** 2
+    ratio = 16.0 * xp.square(height / span)
     ratio = xp.where(xp.isfinite(ratio), ratio, 1.0)
     factor = ratio / (1.0 + ratio)
     return xp.where(enabled, factor, 1.0)
@@ -396,7 +452,7 @@ def parasite_drag_coefficient(xp: Any, cd0: Any, reynolds: Any, exponent: Any) -
 
 def wave_drag_coefficient(xp: Any, mach: Any, compressible: Any = True) -> Any:
     """Transonic wave-drag increment (exactly ``0.0`` below transonic)."""
-    compressible = xp.asarray(compressible)
+    compressible = _flag_array(xp, compressible)
     value = xp.abs(_finite(xp, mach, 0.0))
     excess = xp.maximum(value - MACH_TRANSONIC, 0.0)
     supersonic = xp.maximum(value - 1.0, 0.0)
@@ -474,11 +530,11 @@ def post_stall_lift_coefficient(
     # Python condition (``AttributeError: 'bool' object has no attribute
     # 'astype'``) while NumPy and :class:`ScalarMath` accept it.  The kernel
     # has to behave the same on all three backends.
-    sign = xp.where(xp.asarray(alpha) >= 0.0, 1.0, -1.0)
+    sign = xp.where(alpha >= 0.0, _f64(xp, 1.0), _f64(xp, -1.0))
     abs_alpha = xp.abs(alpha)
     stall_alpha = xp.abs(_finite(xp, stall_alpha_deg, 14.0))
     reference = xp.abs(_finite(xp, ref_cl, 0.0))
-    blend_angle = _finite(xp, blend_deg, POST_STALL_PLATE_BLEND_DEG)
+    blend_angle = _f64(xp, _finite(xp, blend_deg, POST_STALL_PLATE_BLEND_DEG))
     plate = flat_plate_lift_coefficient(xp, alpha)
     # The blend target is the *magnitude* of the plate value at the blend
     # angle.  Using the signed value (``sign * blend_angle``) made the
@@ -540,15 +596,19 @@ def lift_coefficient(
     cos_a = xp.cos(alpha_rad)
 
     linear_default = zero_lift + slope * alpha_rad
-    linear_polhamus = zero_lift + kp * sin_a * (cos_a ** 2) + kv * (sin_a ** 2) * cos_a
+    linear_polhamus = (
+        zero_lift
+        + kp * sin_a * xp.square(cos_a)
+        + kv * xp.square(sin_a) * cos_a
+    )
     linear = xp.where(kp > 0.0, linear_polhamus, linear_default)
     if True:  # the LEV increment is added on top of the Helmbold branch
-        vortex = kv * (sin_a ** 2) * cos_a
+        vortex = kv * xp.square(sin_a) * cos_a
         linear = xp.where((kp <= 0.0) & (kv > 0.0), linear + vortex, linear)
 
     stall_rad = _rad(xp, stall_alpha)
     linear_at_stall = zero_lift + slope * stall_rad
-    stall_vortex = kv * (xp.sin(stall_rad) ** 2) * xp.cos(stall_rad)
+    stall_vortex = kv * xp.square(xp.sin(stall_rad)) * xp.cos(stall_rad)
     linear_at_stall = linear_at_stall + xp.where(kv > 0.0, stall_vortex, 0.0)
 
     ceiling = xp.maximum(xp.abs(_finite(xp, cl_max, 0.90)), 1.0e-6)
@@ -586,11 +646,13 @@ def separated_pressure_drag_coefficient(
     stall_alpha = xp.abs(_finite(xp, stall_alpha_deg, 14.0))
     angle = _rad(xp, alpha)
     parasite = _finite(xp, cd0, 0.02)
-    separated = 2.0 * xp.sin(angle) ** 2 + parasite * xp.maximum(xp.cos(angle), 0.0)
+    separated = 2.0 * xp.square(xp.sin(angle)) + parasite * xp.maximum(xp.cos(angle), 0.0)
     weight = _smoothstep01(
         xp,
         (xp.abs(alpha) - stall_alpha)
-        / xp.maximum(_finite(xp, blend_deg, POST_STALL_DRAG_BLEND_DEG), 1.0),
+        / xp.maximum(
+            _f64(xp, _finite(xp, blend_deg, POST_STALL_DRAG_BLEND_DEG)), 1.0
+        ),
     )
     return weight * separated
 
@@ -680,7 +742,7 @@ def trailing_edge_fold_effects(xp: Any, fold_trailing_deg: Any) -> Dict[str, Any
     dcl = 0.015 * fold
     dcm = -0.012 * fold
     sin_val = xp.sin(rad)
-    dcd = 0.035 * (sin_val ** 2)
+    dcd = 0.035 * xp.square(sin_val)
     return {"dcl": dcl, "dcm": dcm, "dcd": dcd}
 
 
@@ -820,6 +882,620 @@ class AeroParams:
 # --------------------------------------------------------------------------
 # 6. Full coefficient assembly
 # --------------------------------------------------------------------------
+#: The :class:`AeroParams` fields the coefficient evaluation reads, in the
+#: order of the core signature.
+_CORE_BUNDLE_FIELDS: Tuple[str, ...] = (
+    "area",
+    "chord",
+    "span",
+    "aspect",
+    "oswald",
+    "cL0",
+    "cl_alpha",
+    "cl_max",
+    "stall_alpha_deg",
+    "stall_sharpness",
+    "polhamus_kp",
+    "polhamus_kv",
+    "cd0",
+    "re_cd0_exponent",
+    "cm0",
+    "cm_alpha",
+    "cm_q",
+    "cm_roll_rate",
+    "cm_pitch_rate",
+    "cm_yaw_rate",
+    "cl_beta",
+    "cl_roll_rate",
+    "cl_pitch_rate",
+    "cl_yaw_rate",
+    "cn_beta",
+    "cn_roll_rate",
+    "cn_pitch_rate",
+    "cn_yaw_rate",
+    "cy_beta",
+    "aileron_deg",
+    "asymmetry_cl",
+    "rudder_deg",
+    "elevon_deg",
+    "elevon_authority",
+    "fold_trailing_deg",
+    "cg_offset_x",
+    "cp_shift_gain",
+    "ground_cushion_lift",
+    "ground_pitch_coupling",
+    "lift_scale",
+    "drag_scale",
+    "compressible",
+    "ground_effect_enabled",
+)
+
+#: The state arguments of the core, in the order of the core signature.
+_CORE_STATE_FIELDS: Tuple[str, ...] = (
+    "alpha_deg",
+    "beta_deg",
+    "p_rate",
+    "q_rate",
+    "r_rate",
+    "speed",
+    "reynolds",
+    "mach",
+    "ground_height_m",
+    "density",
+)
+
+#: The coefficients the evaluation returns, in the order of the core's
+#: return tuple.
+_COEFFICIENT_KEYS: Tuple[str, ...] = (
+    "cl",
+    "cd",
+    "cy",
+    "cm",
+    "cl_roll",
+    "cm_roll",
+    "cn_roll",
+    "roll_coeff",
+    "yaw_coeff",
+    "cl_control",
+    "elevon_dcl",
+    "elevon_dcm",
+    "elevon_dalpha_trim_deg",
+    "te_fold_dcl",
+    "te_fold_dcm",
+    "te_fold_dcd",
+    "q_dyn",
+    "lift_n",
+    "drag_n",
+    "side_n",
+    "lift_left_n",
+    "lift_right_n",
+    "pitching_nm",
+    "rolling_nm",
+    "yawing_nm",
+    "stall_margin",
+    "stalled",
+    "ground_ratio",
+    "cp_x_m",
+    "polar_constant",
+    "cl_zero_lift",
+)
+
+
+def _coefficient_core(
+    xp: Any,
+    area: Any,
+    chord: Any,
+    span: Any,
+    aspect: Any,
+    oswald: Any,
+    cL0: Any,
+    cl_alpha: Any,
+    cl_max: Any,
+    stall_alpha_deg: Any,
+    stall_sharpness: Any,
+    polhamus_kp: Any,
+    polhamus_kv: Any,
+    cd0: Any,
+    re_cd0_exponent: Any,
+    cm0: Any,
+    cm_alpha: Any,
+    cm_q: Any,
+    cm_roll_rate: Any,
+    cm_pitch_rate: Any,
+    cm_yaw_rate: Any,
+    cl_beta: Any,
+    cl_roll_rate: Any,
+    cl_pitch_rate: Any,
+    cl_yaw_rate: Any,
+    cn_beta: Any,
+    cn_roll_rate: Any,
+    cn_pitch_rate: Any,
+    cn_yaw_rate: Any,
+    cy_beta: Any,
+    aileron_deg: Any,
+    asymmetry_cl: Any,
+    rudder_deg: Any,
+    elevon_deg: Any,
+    elevon_authority: Any,
+    fold_trailing_deg: Any,
+    cg_offset_x: Any,
+    cp_shift_gain: Any,
+    ground_cushion_lift: Any,
+    ground_pitch_coupling: Any,
+    lift_scale: Any,
+    drag_scale: Any,
+    compressible: Any,
+    ground_effect_enabled: Any,
+    alpha_deg: Any,
+    beta_deg: Any,
+    p_rate: Any,
+    q_rate: Any,
+    r_rate: Any,
+    speed: Any,
+    reynolds: Any,
+    mach: Any,
+    ground_height_m: Any,
+    density: Any,
+) -> Tuple[Any, ...]:
+    """The aerodynamic evaluation as one elementwise expression tree.
+
+    This is the single source of the coefficients.  The body is written
+    strictly elementwise -- no reduction, no data-dependent branching and no
+    host-side conversion of a value -- so that the **same source** runs
+
+    * on :class:`ScalarMath` (the scalar 6-DoF reference path),
+    * on NumPy (the vectorised reference path),
+    * on CuPy eagerly, and
+    * on CuPy **fused into a single CUDA kernel** (see
+      :func:`_fused_coefficients`).
+
+    The parameter list is flat on purpose: a fused kernel receives its
+    inputs as kernel arguments, so the airframe parameters cannot travel
+    as an attribute of a bundle object.  The order is fixed by
+    ``_CORE_BUNDLE_FIELDS + _CORE_STATE_FIELDS`` and checked against the
+    signature at import time.
+
+    The formulas, their coefficients, their units and the order of the
+    arithmetic are the ones of the pre-fusion kernel -- the fusion changes
+    only *how* the expression tree is executed, never *what* it computes.
+    """
+    alpha = _finite(xp, alpha_deg, 0.0)
+    # The side force is bounded: a body broadside to the flow carries the
+    # flat-plate limit (2 sin(beta) cos^2(beta) <= 0.77), not an unbounded
+    # linear function of beta.  The coefficients are clamped and wrapped over
+    # beta in [-90, 90] with no singularity.
+    beta = _clamp(xp, _finite(xp, beta_deg, 0.0), -90.0, 90.0)
+    speed = xp.abs(_finite(xp, speed, 0.0))
+    reynolds = xp.abs(_finite(xp, reynolds, RE_REFERENCE))
+    mach = xp.abs(_finite(xp, mach, 0.0))
+    density = xp.maximum(_finite(xp, density, 1.225), 1.0e-6)
+    height = _finite(xp, ground_height_m, 1.0)
+
+    area = xp.maximum(area, 1.0e-9)
+    chord = xp.maximum(chord, 1.0e-9)
+    span = xp.maximum(span, 1.0e-6)
+
+    lift_scale = xp.maximum(lift_scale, 0.0)
+    drag_scale = xp.maximum(drag_scale, 0.0)
+
+    elevon = elevon_effects(
+        xp, elevon_deg, elevon_authority, cm0, cm_alpha
+    )
+    te_fold = _guard_fold_increment(
+        xp, trailing_edge_fold_effects(xp, fold_trailing_deg), cl_max
+    )
+    # The two bundle methods of the pre-fusion kernel are inlined here:
+    # ``lift_slope`` (the Helmbold slope times the Prandtl-Glauert factor)
+    # and ``polar_constant`` (``k = pi e AR``).  Their expressions and their
+    # order are unchanged.
+    slope = _finite(xp, cl_alpha, 0.0) * xp.where(
+        compressible, prandtl_glauert(xp, mach), 1.0
+    )
+    polar = math.pi * _clamp(xp, _finite(xp, oswald, 0.75), 0.05, 1.0) * xp.maximum(
+        _finite(xp, aspect, 1.0), 1.0e-3
+    )
+
+    cl_raw = lift_coefficient(
+        xp,
+        alpha,
+        cL0,
+        slope,
+        stall_alpha_deg,
+        stall_sharpness,
+        cl_max=cl_max,
+        polhamus_kp=polhamus_kp,
+        polhamus_kv=polhamus_kv,
+        cl_offset=elevon["dcl"] + te_fold["dcl"],
+    )
+    cl = cl_raw * lift_scale
+
+    ground_ratio = ground_effect_factor(xp, height, span, ground_effect_enabled)
+    cd0 = parasite_drag_coefficient(xp, cd0, reynolds, re_cd0_exponent) + te_fold["dcd"]
+    cd = (
+        cd0
+        + (cl * cl / xp.maximum(polar, 1.0e-12)) * ground_ratio
+        + separated_pressure_drag_coefficient(xp, alpha, stall_alpha_deg, cd0)
+        + wave_drag_coefficient(xp, mach, compressible)
+    ) * drag_scale
+
+    # --- rate derivatives --------------------------------------------------
+    two_v = 2.0 * speed
+    p_hat = _safe_div(xp, _finite(xp, p_rate, 0.0) * span, two_v, 0.0)
+    q_hat = _safe_div(xp, _finite(xp, q_rate, 0.0) * chord, two_v, 0.0)
+    r_hat = _safe_div(xp, _finite(xp, r_rate, 0.0) * span, two_v, 0.0)
+    beta_rad = _rad(xp, beta)
+
+    cl_roll = cl_roll_rate * p_hat
+    cm_roll = cm_roll_rate * p_hat
+    cn_roll = cn_roll_rate * p_hat
+
+    # Side force: the linear side-force derivative in attached flow, bounded
+    # by the flat-plate limit as the body turns broadside to the flow.  A body
+    # broadside to the flow carries a BOUNDED side force (2 sin(beta)
+    # cos^2(beta) <= 0.77), not an unbounded linear function of beta; the
+    # coefficients are clamped and wrapped over beta in [-90, 90] with no
+    # singularity.  The linear law is kept wherever it is the smaller of the
+    # two, so the attached-flow behaviour is unchanged.
+    cy_linear = cy_beta * beta_rad
+    flat_side = 2.0 * xp.sin(beta_rad) * xp.square(xp.cos(beta_rad))
+    cy = xp.where(
+        xp.abs(cy_linear) <= xp.abs(flat_side),
+        cy_linear,
+        xp.copysign(xp.abs(flat_side), cy_linear),
+    )
+    aileron = aileron_deg
+    asym_cl = asymmetry_cl
+    rudder = rudder_deg
+    cl_control = 0.015 * aileron + 0.25 * asym_cl
+    roll_coeff = (
+        cl_beta * beta_rad
+        + cl_roll
+        + cl_control
+        + cl_pitch_rate * q_hat
+        + cl_yaw_rate * r_hat
+    )
+
+    # --- pitching moment ----------------------------------------------------
+    stall_alpha = xp.abs(stall_alpha_deg)
+    stall_rad = _rad(xp, stall_alpha)
+    alpha_rad = _rad(xp, alpha)
+    cm_alpha_value = cm_alpha
+    attached = xp.abs(alpha_rad) <= stall_rad
+    w_stall = stall_blend_weight(xp, alpha, stall_alpha, stall_sharpness)
+    linear_val = cm_alpha_value * xp.copysign(stall_rad, alpha_rad)
+    flat_plate_cm = cm_alpha_value * xp.sin(alpha_rad) * xp.abs(xp.cos(alpha_rad)) * stall_rad
+    cm_alpha_term = xp.where(
+        attached,
+        cm_alpha_value * alpha_rad,
+        (1.0 - w_stall) * linear_val + w_stall * flat_plate_cm,
+    )
+
+    cm = (
+        cm0
+        + cm_alpha_term
+        + cm_q * q_hat
+        + elevon["dcm"]
+        + te_fold["dcm"]
+        + cm_roll
+        + cm_pitch_rate * q_hat
+        + cm_yaw_rate * r_hat
+    )
+
+    cn_control = 0.010 * rudder - 0.002 * aileron
+    yaw_coeff = (
+        cn_beta * beta_rad
+        + cn_roll
+        + cn_control
+        + cn_pitch_rate * q_hat
+        + cn_yaw_rate * r_hat
+    )
+
+    # --- ground proximity ---------------------------------------------------
+    h_b_ratio = _safe_div(xp, xp.maximum(height, 0.0), span, 10.0)
+    ground_proximity = xp.where(ground_effect_enabled, xp.exp(-4.0 * h_b_ratio), 0.0)
+
+    cushion_gain = xp.maximum(ground_cushion_lift, 0.0)
+    cl = cl + xp.where(
+        (cushion_gain > 0.0) & (ground_proximity > 0.0),
+        cushion_gain * ground_proximity,
+        0.0,
+    )
+
+    pitch_coupling = xp.maximum(ground_pitch_coupling, 0.0)
+    cm = cm + xp.where(
+        (pitch_coupling > 0.0) & (ground_proximity > 0.0),
+        -pitch_coupling * cl * ground_proximity,
+        0.0,
+    )
+
+    cp_fraction = center_of_pressure_fraction(
+        xp, alpha, stall_alpha, cp_shift_gain
+    )
+    cp_x = cp_fraction * chord
+    cp_gain = xp.maximum(cp_shift_gain, 0.0)
+    cm = cm + xp.where(
+        cp_gain > 0.0,
+        -_safe_div(xp, cp_x - 0.25 * chord, chord, 0.0) * cl,
+        0.0,
+    )
+
+    # --- dimensional forces -------------------------------------------------
+    q_dyn = 0.5 * density * speed * speed
+    lift_n = q_dyn * area * cl
+    d_lift = q_dyn * area * cl_control
+    lift_left_n = 0.5 * lift_n + 0.5 * d_lift
+    lift_right_n = 0.5 * lift_n - 0.5 * d_lift
+    drag_n = q_dyn * area * cd
+    side_n = q_dyn * area * cy
+
+    # --- low-speed apex pushover -------------------------------------------
+    low_speed = speed < 3.0
+    v_norm = _clamp(xp, speed / 3.0, 0.0, 1.0)
+    speed_gate = 1.0 - v_norm * v_norm * (3.0 - 2.0 * v_norm)
+    q_eff = 0.5 * density * xp.square(xp.maximum(speed, 0.8))
+    alpha_gate = xp.tanh(xp.abs(alpha) / 8.0)
+    sin_a = xp.sin(_rad(xp, _clamp(xp, alpha, -90.0, 90.0)))
+    pushover = -q_eff * area * chord * 0.85 * sin_a * speed_gate * alpha_gate
+    pushover_moment = xp.where(low_speed & (xp.abs(alpha) > 0.1), pushover, 0.0)
+
+    # --- low-speed cross-flow rotational damping ---------------------------
+    q_rate_value = _finite(xp, q_rate, 0.0)
+    rot_damping = (
+        -0.5 * density * 1.2 * area * xp.square(chord) * xp.abs(q_rate_value) * q_rate_value
+        - 0.00015 * area * chord * density * q_rate_value
+    ) * speed_gate
+    rot_damping = xp.where(
+        low_speed & (area > 1.0e-6) & (chord > 1.0e-4), rot_damping, 0.0
+    )
+
+    pitching_nm = (
+        q_dyn * area * chord * cm
+        + cg_offset_x * lift_n
+        + pushover_moment
+        + rot_damping
+    )
+    rolling_nm = q_dyn * area * span * roll_coeff
+    yawing_nm = q_dyn * area * span * yaw_coeff
+
+    # --- stall bookkeeping --------------------------------------------------
+    threshold = stall_alpha
+    stalled = xp.abs(alpha) > threshold
+    stall_margin = _safe_div(
+        xp,
+        threshold - xp.abs(alpha),
+        xp.where(threshold != 0.0, xp.abs(threshold), 1.0),
+        0.0,
+    )
+
+    return (
+        cl,
+        cd,
+        cy,
+        cm,
+        cl_roll,
+        cm_roll,
+        cn_roll,
+        roll_coeff,
+        yaw_coeff,
+        cl_control,
+        elevon["dcl"],
+        elevon["dcm"],
+        elevon["dalpha_trim_deg"],
+        te_fold["dcl"],
+        te_fold["dcm"],
+        te_fold["dcd"],
+        q_dyn,
+        lift_n,
+        drag_n,
+        side_n,
+        lift_left_n,
+        lift_right_n,
+        pitching_nm,
+        rolling_nm,
+        yawing_nm,
+        stall_margin,
+        stalled,
+        ground_ratio,
+        cp_x,
+        polar,
+        cL0 * lift_scale + (elevon["dcl"] + te_fold["dcl"]) * lift_scale,
+    )
+
+
+# --------------------------------------------------------------------------
+# 6a. Fused GPU execution
+# --------------------------------------------------------------------------
+#: ``"unavailable"`` -- no CuPy, or the fused kernel could not be built;
+#: ``"pending"`` -- the fused kernel exists but has not been verified yet;
+#: ``"verified"`` -- the fused kernel reproduced the eager evaluation bit
+#: for bit; ``"rejected"`` -- the verification failed, so the eager path is
+#: used from now on.
+_FUSED_STATE: str = "unavailable"
+
+#: The compiled fused kernel.  It is created on first use, because CuPy is
+#: an optional dependency of this module.
+_FUSED_KERNEL: Any = None
+
+#: The order of the core's arguments.
+_CORE_PARAM_ORDER: Tuple[str, ...] = _CORE_BUNDLE_FIELDS + _CORE_STATE_FIELDS
+
+#: The core's signature without the array-module argument.  It has to agree
+#: with :data:`_CORE_PARAM_ORDER`, because the arguments travel positionally
+#: to the core and to the fused kernel.
+_CORE_SIGNATURE: Tuple[str, ...] = tuple(
+    inspect.signature(_coefficient_core).parameters
+)[1:]
+
+if _CORE_SIGNATURE != _CORE_PARAM_ORDER:
+    raise RuntimeError(
+        "aero_kernel: the coefficient core signature and the field order disagree"
+    )
+
+#: Rounding-sensitive states used by the bit-exactness verification of the
+#: fused kernel.  The values are deliberately awkward (irrational-looking
+#: angles, non-dyadic speeds) so that a contracted multiply-add differs
+#: from the eager multiplication and addition.
+_FUSED_PROBE_STATES: Tuple[Tuple[float, ...], ...] = (
+    (3.7, -11.3, 0.37, -0.29, 0.19, 7.3, 3.1e4, 0.021, 1.37, 1.213),
+    (-27.4, 23.9, -0.83, 1.19, -0.61, 12.7, 7.9e4, 0.037, 0.83, 1.241),
+    (18.3, -4.7, 0.53, 0.41, -0.37, 3.1, 1.7e4, 0.009, 2.71, 1.198),
+)
+
+
+def _is_cupy(xp: Any) -> bool:
+    """``True`` when ``xp`` is the CuPy array module."""
+    return getattr(xp, "__name__", "") == "cupy"
+
+
+@contextlib.contextmanager
+def _fma_contraction_disabled() -> Any:
+    """Compile the fused kernel without FMA contraction.
+
+    A fused kernel evaluates a whole expression tree inside one thread, so
+    the compiler may contract a multiplication and the addition that
+    consumes it into a single fused multiply-add.  The eager path cannot do
+    that -- it runs one operation per kernel -- so the contraction would
+    make the fused kernel differ from the eager one in the last bit.  The
+    option is therefore removed from the NVRTC command line of the fused
+    kernel alone, which keeps the two paths bit-identical.
+
+    The patch is scoped to the compilation of the fused kernel; every other
+    CuPy kernel of the process keeps the default (contracting) behaviour.
+    The patch is held for the whole fused call, not only for the first one,
+    because a new dtype combination would be compiled during that call and
+    would have to be compiled without the contraction as well.  The window
+    is short and the batch path is single threaded, so a kernel compiled
+    concurrently by another thread would at worst lose its contraction --
+    a last-bit difference in an unrelated kernel.
+    """
+    try:
+        import cupy.cuda.compiler as compiler
+    except Exception:  # pragma: no cover - a CuPy without the compiler module
+        yield
+        return
+    original = getattr(compiler, "_compile_module_with_cache", None)
+    if original is None:  # pragma: no cover - an unknown CuPy layout
+        yield
+        return
+
+    def without_fma(source, options=(), *args, **kwargs):
+        return original(source, tuple(options) + ("--fmad=false",), *args, **kwargs)
+
+    compiler._compile_module_with_cache = without_fma
+    try:
+        yield
+    finally:
+        compiler._compile_module_with_cache = original
+
+
+def _device_array(xp: Any, value: Any) -> Any:
+    """The value as a device array the fused kernel can consume."""
+    if hasattr(value, "get"):  # already a CuPy array
+        return value
+    return xp.asarray(value)
+
+
+def _run_fused(xp: Any, device_arguments: Tuple[Any, ...]) -> Tuple[Any, ...]:
+    """Run the fused kernel (compiling it on first use)."""
+    global _FUSED_KERNEL
+    if _FUSED_KERNEL is None:
+        import cupy
+
+        @cupy.fuse(kernel_name="aero_coefficients_fused")
+        def _fused(*kernel_arguments: Any) -> Tuple[Any, ...]:
+            return _coefficient_core(cupy, *kernel_arguments)
+
+        _FUSED_KERNEL = _fused
+    with _fma_contraction_disabled():
+        return _FUSED_KERNEL(*device_arguments)
+
+
+def _values_match(xp: Any, fused: Any, eager: Any) -> bool:
+    """``True`` when the fused and the eager value are the same number.
+
+    The two may differ in shape -- the fused kernel returns the broadcast
+    shape of all its inputs, while the eager path keeps the shape of the
+    expression that produced the value -- so the comparison is made on the
+    broadcast of the two.
+    """
+    fused = xp.asarray(fused)
+    eager = xp.asarray(eager)
+    if fused.dtype != eager.dtype:
+        return False
+    if fused.dtype == xp.bool_:
+        return bool(xp.all(fused == eager))
+    fused, eager = xp.broadcast_arrays(fused, eager)
+    equal = (fused == eager) | (xp.isnan(fused) & xp.isnan(eager))
+    return bool(xp.all(equal))
+
+
+def _fused_matches_eager(
+    xp: Any, arguments: Tuple[Any, ...], values: Tuple[Any, ...]
+) -> bool:
+    """``True`` when the fused kernel reproduces the eager evaluation exactly.
+
+    The comparison covers the state of the call itself and a set of
+    rounding-sensitive probe states, evaluated with the same airframe.
+    """
+    eager = _coefficient_core(xp, *arguments)
+    if len(eager) != len(values):
+        return False
+    for fused_value, eager_value in zip(values, eager):
+        if not _values_match(xp, fused_value, eager_value):
+            return False
+
+    shape = xp.asarray(arguments[_CORE_BUNDLE_FIELDS.index("area")]).shape
+    for probe in _FUSED_PROBE_STATES:
+        probe_arguments = list(arguments)
+        for offset, value in enumerate(probe):
+            index = len(_CORE_BUNDLE_FIELDS) + offset
+            probe_arguments[index] = xp.full(shape, value, dtype=xp.float64)
+        probe_values = _run_fused(xp, tuple(probe_arguments))
+        probe_eager = _coefficient_core(xp, *probe_arguments)
+        for fused_value, eager_value in zip(probe_values, probe_eager):
+            if not _values_match(xp, fused_value, eager_value):
+                return False
+    return True
+
+
+def _fused_coefficients(xp: Any, arguments: Tuple[Any, ...]) -> Any:
+    """Evaluate the coefficients in a single fused CUDA kernel.
+
+    Returns ``None`` when the fused path is not usable (no CuPy, no usable
+    ``cupy.fuse``, or the bit-exactness verification failed); the caller then
+    uses the eager path, which computes the same numbers.
+    """
+    global _FUSED_STATE, _FUSED_KERNEL
+    if _FUSED_STATE == "rejected":
+        return None
+    try:
+        device_arguments = tuple(_device_array(xp, value) for value in arguments)
+        values = _run_fused(xp, device_arguments)
+    except Exception:
+        # A CuPy build without a working fusion must not break the batch
+        # path: the eager evaluation computes exactly the same numbers.
+        _FUSED_STATE = "rejected"
+        _FUSED_KERNEL = None
+        return None
+    if _FUSED_STATE != "verified":
+        if not _fused_matches_eager(xp, device_arguments, values):
+            _FUSED_STATE = "rejected"
+            _FUSED_KERNEL = None
+            return None
+        _FUSED_STATE = "verified"
+    return values
+
+
+def fused_gpu_state() -> str:
+    """The state of the fused GPU path.
+
+    ``"unavailable"`` (no CuPy or no fused kernel), ``"verified"`` (the
+    fused kernel is in use and reproduces the eager evaluation bit for bit)
+    or ``"rejected"`` (the verification failed and the eager path is used).
+    """
+    return _FUSED_STATE
+
+
 def evaluate_coefficients(
     xp: Any,
     p: AeroParams,
@@ -841,242 +1517,36 @@ def evaluate_coefficients(
     :func:`physics.aero_domain.evaluate_aero`: the scalar 6-DoF path and the
     GPU path both come through here, so the same airframe at the same state
     produces the same lift, drag and moments in either path.
+
+    On the GPU the evaluation runs as **one fused kernel** (see
+    :func:`_fused_coefficients`): the 13-state RK4 integrator of the batch
+    path is dominated by the kernel launch overhead, and the fused kernel
+    replaces the several hundred launches of one state evaluation with a
+    single one.  The fused kernel is verified against the eager evaluation
+    bit for bit before it is used; if the verification fails -- or if CuPy
+    is not available at all -- the eager path computes the very same
+    numbers.
     """
-    alpha = _finite(xp, alpha_deg, 0.0)
-    # The side force is bounded: a body broadside to the flow carries the
-    # flat-plate limit (2 sin(beta) cos^2(beta) <= 0.77), not an unbounded
-    # linear function of beta.  The coefficients are clamped and wrapped over
-    # beta in [-90, 90] with no singularity.
-    beta = _clamp(xp, _finite(xp, beta_deg, 0.0), -90.0, 90.0)
-    speed = xp.abs(_finite(xp, speed, 0.0))
-    reynolds = xp.abs(_finite(xp, reynolds, RE_REFERENCE))
-    mach = xp.abs(_finite(xp, mach, 0.0))
-    density = xp.maximum(_finite(xp, density, 1.225), 1.0e-6)
-    height = _finite(xp, ground_height_m, 1.0)
+    values = {name: getattr(p, name) for name in _CORE_BUNDLE_FIELDS}
+    values["compressible"] = xp.asarray(p.compressible)
+    values["ground_effect_enabled"] = xp.asarray(p.ground_effect_enabled)
+    values["alpha_deg"] = alpha_deg
+    values["beta_deg"] = beta_deg
+    values["p_rate"] = p_rate
+    values["q_rate"] = q_rate
+    values["r_rate"] = r_rate
+    values["speed"] = speed
+    values["reynolds"] = reynolds
+    values["mach"] = mach
+    values["ground_height_m"] = ground_height_m
+    values["density"] = density
+    arguments = tuple(values[name] for name in _CORE_PARAM_ORDER)
 
-    area = xp.maximum(p.area, 1.0e-9)
-    chord = xp.maximum(p.chord, 1.0e-9)
-    span = xp.maximum(p.span, 1.0e-6)
-
-    lift_scale = xp.maximum(p.lift_scale, 0.0)
-    drag_scale = xp.maximum(p.drag_scale, 0.0)
-    compressible = xp.asarray(p.compressible)
-    ground_enabled = xp.asarray(p.ground_effect_enabled)
-
-    elevon = elevon_effects(
-        xp, p.elevon_deg, p.elevon_authority, p.cm0, p.cm_alpha
-    )
-    te_fold = _guard_fold_increment(
-        xp, trailing_edge_fold_effects(xp, p.fold_trailing_deg), p.cl_max
-    )
-    slope = p.lift_slope(xp, mach)
-    polar = p.polar_constant(xp)
-
-    cl_raw = lift_coefficient(
-        xp,
-        alpha,
-        p.cL0,
-        slope,
-        p.stall_alpha_deg,
-        p.stall_sharpness,
-        cl_max=p.cl_max,
-        polhamus_kp=p.polhamus_kp,
-        polhamus_kv=p.polhamus_kv,
-        cl_offset=elevon["dcl"] + te_fold["dcl"],
-    )
-    cl = cl_raw * lift_scale
-
-    ground_ratio = ground_effect_factor(xp, height, span, ground_enabled)
-    cd0 = parasite_drag_coefficient(xp, p.cd0, reynolds, p.re_cd0_exponent) + te_fold["dcd"]
-    cd = (
-        cd0
-        + (cl * cl / xp.maximum(polar, 1.0e-12)) * ground_ratio
-        + separated_pressure_drag_coefficient(xp, alpha, p.stall_alpha_deg, cd0)
-        + wave_drag_coefficient(xp, mach, compressible)
-    ) * drag_scale
-
-    # --- rate derivatives --------------------------------------------------
-    two_v = 2.0 * speed
-    p_hat = _safe_div(xp, _finite(xp, p_rate, 0.0) * span, two_v, 0.0)
-    q_hat = _safe_div(xp, _finite(xp, q_rate, 0.0) * chord, two_v, 0.0)
-    r_hat = _safe_div(xp, _finite(xp, r_rate, 0.0) * span, two_v, 0.0)
-    beta_rad = _rad(xp, beta)
-
-    cl_roll = p.cl_roll_rate * p_hat
-    cm_roll = p.cm_roll_rate * p_hat
-    cn_roll = p.cn_roll_rate * p_hat
-
-    # Side force: the linear side-force derivative in attached flow, bounded
-    # by the flat-plate limit as the body turns broadside to the flow.  A body
-    # broadside to the flow carries a BOUNDED side force (2 sin(beta)
-    # cos^2(beta) <= 0.77), not an unbounded linear function of beta; the
-    # coefficients are clamped and wrapped over beta in [-90, 90] with no
-    # singularity.  The linear law is kept wherever it is the smaller of the
-    # two, so the attached-flow behaviour is unchanged.
-    cy_linear = p.cy_beta * beta_rad
-    flat_side = 2.0 * xp.sin(beta_rad) * xp.cos(beta_rad) ** 2
-    cy = xp.where(
-        xp.abs(cy_linear) <= xp.abs(flat_side),
-        cy_linear,
-        xp.copysign(xp.abs(flat_side), cy_linear),
-    )
-    aileron = p.aileron_deg
-    asym_cl = p.asymmetry_cl
-    rudder = p.rudder_deg
-    cl_control = 0.015 * aileron + 0.25 * asym_cl
-    roll_coeff = (
-        p.cl_beta * beta_rad
-        + cl_roll
-        + cl_control
-        + p.cl_pitch_rate * q_hat
-        + p.cl_yaw_rate * r_hat
-    )
-
-    # --- pitching moment ----------------------------------------------------
-    stall_alpha = xp.abs(p.stall_alpha_deg)
-    stall_rad = _rad(xp, stall_alpha)
-    alpha_rad = _rad(xp, alpha)
-    cm_alpha_value = p.cm_alpha
-    attached = xp.abs(alpha_rad) <= stall_rad
-    w_stall = stall_blend_weight(xp, alpha, stall_alpha, p.stall_sharpness)
-    linear_val = cm_alpha_value * xp.copysign(stall_rad, alpha_rad)
-    flat_plate_cm = cm_alpha_value * xp.sin(alpha_rad) * xp.abs(xp.cos(alpha_rad)) * stall_rad
-    cm_alpha_term = xp.where(
-        attached,
-        cm_alpha_value * alpha_rad,
-        (1.0 - w_stall) * linear_val + w_stall * flat_plate_cm,
-    )
-
-    cm = (
-        p.cm0
-        + cm_alpha_term
-        + p.cm_q * q_hat
-        + elevon["dcm"]
-        + te_fold["dcm"]
-        + cm_roll
-        + p.cm_pitch_rate * q_hat
-        + p.cm_yaw_rate * r_hat
-    )
-
-    cn_control = 0.010 * rudder - 0.002 * aileron
-    yaw_coeff = (
-        p.cn_beta * beta_rad
-        + cn_roll
-        + cn_control
-        + p.cn_pitch_rate * q_hat
-        + p.cn_yaw_rate * r_hat
-    )
-
-    # --- ground proximity ---------------------------------------------------
-    h_b_ratio = _safe_div(xp, xp.maximum(height, 0.0), span, 10.0)
-    ground_proximity = xp.where(ground_enabled, xp.exp(-4.0 * h_b_ratio), 0.0)
-
-    cushion_gain = xp.maximum(p.ground_cushion_lift, 0.0)
-    cl = cl + xp.where(
-        (cushion_gain > 0.0) & (ground_proximity > 0.0),
-        cushion_gain * ground_proximity,
-        0.0,
-    )
-
-    pitch_coupling = xp.maximum(p.ground_pitch_coupling, 0.0)
-    cm = cm + xp.where(
-        (pitch_coupling > 0.0) & (ground_proximity > 0.0),
-        -pitch_coupling * cl * ground_proximity,
-        0.0,
-    )
-
-    cp_fraction = center_of_pressure_fraction(
-        xp, alpha, stall_alpha, p.cp_shift_gain
-    )
-    cp_x = cp_fraction * chord
-    cp_gain = xp.maximum(p.cp_shift_gain, 0.0)
-    cm = cm + xp.where(
-        cp_gain > 0.0,
-        -_safe_div(xp, cp_x - 0.25 * chord, chord, 0.0) * cl,
-        0.0,
-    )
-
-    # --- dimensional forces -------------------------------------------------
-    q_dyn = 0.5 * density * speed * speed
-    lift_n = q_dyn * area * cl
-    d_lift = q_dyn * area * cl_control
-    lift_left_n = 0.5 * lift_n + 0.5 * d_lift
-    lift_right_n = 0.5 * lift_n - 0.5 * d_lift
-    drag_n = q_dyn * area * cd
-    side_n = q_dyn * area * cy
-
-    # --- low-speed apex pushover -------------------------------------------
-    low_speed = speed < 3.0
-    v_norm = _clamp(xp, speed / 3.0, 0.0, 1.0)
-    speed_gate = 1.0 - v_norm * v_norm * (3.0 - 2.0 * v_norm)
-    q_eff = 0.5 * density * xp.maximum(speed, 0.8) ** 2
-    alpha_gate = xp.tanh(xp.abs(alpha) / 8.0)
-    sin_a = xp.sin(_rad(xp, _clamp(xp, alpha, -90.0, 90.0)))
-    pushover = -q_eff * area * chord * 0.85 * sin_a * speed_gate * alpha_gate
-    pushover_moment = xp.where(low_speed & (xp.abs(alpha) > 0.1), pushover, 0.0)
-
-    # --- low-speed cross-flow rotational damping ---------------------------
-    q_rate_value = _finite(xp, q_rate, 0.0)
-    rot_damping = (
-        -0.5 * density * 1.2 * area * (chord ** 2) * xp.abs(q_rate_value) * q_rate_value
-        - 0.00015 * area * chord * density * q_rate_value
-    ) * speed_gate
-    rot_damping = xp.where(
-        low_speed & (area > 1.0e-6) & (chord > 1.0e-4), rot_damping, 0.0
-    )
-
-    pitching_nm = (
-        q_dyn * area * chord * cm
-        + p.cg_offset_x * lift_n
-        + pushover_moment
-        + rot_damping
-    )
-    rolling_nm = q_dyn * area * span * roll_coeff
-    yawing_nm = q_dyn * area * span * yaw_coeff
-
-    # --- stall bookkeeping --------------------------------------------------
-    threshold = stall_alpha
-    stalled = xp.abs(alpha) > threshold
-    stall_margin = _safe_div(
-        xp,
-        threshold - xp.abs(alpha),
-        xp.where(threshold != 0.0, xp.abs(threshold), 1.0),
-        0.0,
-    )
-
-    return {
-        "cl": cl,
-        "cd": cd,
-        "cy": cy,
-        "cm": cm,
-        "cl_roll": cl_roll,
-        "cm_roll": cm_roll,
-        "cn_roll": cn_roll,
-        "roll_coeff": roll_coeff,
-        "yaw_coeff": yaw_coeff,
-        "cl_control": cl_control,
-        "elevon_dcl": elevon["dcl"],
-        "elevon_dcm": elevon["dcm"],
-        "elevon_dalpha_trim_deg": elevon["dalpha_trim_deg"],
-        "te_fold_dcl": te_fold["dcl"],
-        "te_fold_dcm": te_fold["dcm"],
-        "te_fold_dcd": te_fold["dcd"],
-        "q_dyn": q_dyn,
-        "lift_n": lift_n,
-        "drag_n": drag_n,
-        "side_n": side_n,
-        "lift_left_n": lift_left_n,
-        "lift_right_n": lift_right_n,
-        "pitching_nm": pitching_nm,
-        "rolling_nm": rolling_nm,
-        "yawing_nm": yawing_nm,
-        "stall_margin": stall_margin,
-        "stalled": stalled,
-        "ground_ratio": ground_ratio,
-        "cp_x_m": cp_x,
-        "polar_constant": polar,
-        "cl_zero_lift": p.cL0 * lift_scale + (elevon["dcl"] + te_fold["dcl"]) * lift_scale,
-    }
+    if _is_cupy(xp):
+        fused = _fused_coefficients(xp, arguments)
+        if fused is not None:
+            return dict(zip(_COEFFICIENT_KEYS, fused))
+    return dict(zip(_COEFFICIENT_KEYS, _coefficient_core(xp, *arguments)))
 
 
 # --------------------------------------------------------------------------

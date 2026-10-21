@@ -53,6 +53,7 @@ import time
 import types
 import typing
 from collections import OrderedDict, deque
+from collections.abc import Mapping
 from dataclasses import dataclass, field, fields, is_dataclass, replace
 from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
 from uuid import uuid4
@@ -717,6 +718,56 @@ _ATMOSPHERE_CACHE_LIMIT = 256
 _ATMOSPHERE_LOCK = threading.Lock()
 
 
+#: Cache for :func:`wind_vector`.  The wind is a *pure* function of the query
+#: point, the time and the environment -- the turbulence is generated from a
+#: seeded lattice, not from a running random stream -- so the memo can only be
+#: keyed on the query itself.  Two properties are required for that:
+#:
+#: * the key has to describe the environment *completely*, otherwise a scene
+#:   that differs from another one in a field the wind model reads (the
+#:   wind-tunnel geometry, the thermal plume, the ground level, ...) inherits
+#:   the wind of the other scene;
+#: * the key has to carry the *exact* query point and time, otherwise the memo
+#:   answers a request with the wind of a neighbouring point, which perturbs
+#:   the reference path and breaks the parity with the batch path.
+#:
+#: Both are satisfied below, so the memo is value preserving: the cached vector
+#: is bit for bit the vector the upstream solver would have returned.
+_WIND_CACHE: "OrderedDict[tuple, np.ndarray]" = OrderedDict()
+_WIND_CACHE_LIMIT = 256
+_WIND_LOCK = threading.Lock()
+
+#: Every field of the environment configuration.  The fingerprint is built from
+#: the whole configuration instead of a hand written subset, so a field added
+#: to :class:`~physics.config_schema.EnvironmentConfig` later cannot be left
+#: out of the key by accident.
+_WIND_ENV_FIELDS: Tuple[str, ...] = tuple(
+    entry.name for entry in fields(EnvironmentConfig)
+)
+
+
+def _hashable(value: Any) -> Any:
+    """A hashable stand-in for a configuration value."""
+    if value is None or isinstance(value, (bool, int, float, str, bytes)):
+        return value
+    if isinstance(value, (np.bool_, np.integer, np.floating)):
+        return value.item()
+    try:
+        hash(value)
+    except TypeError:
+        return repr(value)
+    return value
+
+
+def _wind_fingerprint(env: EnvironmentConfig) -> Tuple[Any, ...]:
+    """Complete description of the environment the wind field depends on."""
+    if isinstance(env, Mapping):
+        items: List[Tuple[Any, Any]] = sorted(env.items(), key=lambda item: str(item[0]))
+    else:
+        items = [(name, getattr(env, name, None)) for name in _WIND_ENV_FIELDS]
+    return tuple((name, _hashable(value)) for name, value in items)
+
+
 def atmosphere_state(
     env: EnvironmentConfig, altitude_m: float = 0.0, reference_chord_m: float = 0.1
 ) -> Dict[str, Any]:
@@ -878,6 +929,25 @@ def wind_vector(position: VectorLike, env: EnvironmentConfig, time_s: float = 0.
         return np.zeros(3, dtype=np.float64)
     module = wind_module()
     func = _resolve_callable(module, ("wind_velocity", "velocity_at", "sample_wind"))
+    # The key carries the exact query (not a rounded one) and the whole
+    # environment, so the memo answers a request with the wind of that very
+    # point: the cached vector is bit for bit the vector the solver returns.
+    # The resolved solver is part of the key as well, so a reloaded or
+    # monkeypatched wind model cannot be masked by a stale entry.
+    key = (
+        _finite(position[0]),
+        _finite(position[1]),
+        _finite(position[2]),
+        _finite(time_s),
+        _wind_fingerprint(env),
+        func,
+    )
+    with _WIND_LOCK:
+        cached = _WIND_CACHE.get(key)
+        if cached is not None:
+            _WIND_CACHE.move_to_end(key)
+            return np.array(cached, dtype=np.float64)
+    vector: Optional[np.ndarray] = None
     if func is not None:
         height = -_finite(position[2])
         query = np.array([_finite(position[0]), _finite(position[1]), height], dtype=np.float64)
@@ -893,12 +963,66 @@ def wind_vector(position: VectorLike, env: EnvironmentConfig, time_s: float = 0.
         )
         if out is not None:
             try:
-                vector = np.asarray(out, dtype=np.float64).reshape(-1)
+                candidate = np.asarray(out, dtype=np.float64).reshape(-1)
             except (TypeError, ValueError):
-                vector = np.zeros(0, dtype=np.float64)
-            if vector.size >= 3 and bool(np.all(np.isfinite(vector[:3]))):
-                return np.array([float(vector[0]), float(vector[1]), -float(vector[2])], dtype=np.float64)
-    return _local_wind(env, position, time_s)
+                candidate = np.zeros(0, dtype=np.float64)
+            if candidate.size >= 3 and bool(np.all(np.isfinite(candidate[:3]))):
+                vector = np.array([float(candidate[0]), float(candidate[1]), -float(candidate[2])], dtype=np.float64)
+    if vector is None:
+        vector = _local_wind(env, position, time_s)
+    with _WIND_LOCK:
+        # The memo stores its own copy: the caller receives the vector and is
+        # free to modify it, and a modified return value must never poison the
+        # cache for the next query.
+        _WIND_CACHE[key] = np.array(vector, dtype=np.float64)
+        if len(_WIND_CACHE) > _WIND_CACHE_LIMIT:
+            _WIND_CACHE.popitem(last=False)
+    return vector
+
+
+#: Heading of a model mounted on the wind-tunnel bench, in degrees.
+#:
+#: The tunnel stream is the velocity of the **air** along the tunnel axis
+#: (``+x``), so a model held on the bench has to *face* the oncoming flow: its
+#: air-relative velocity is ``-(v, 0, 0)``, which is only true for a heading of
+#: 180 deg.  The incidence requested for the bench is added on top of that
+#: heading.
+WIND_TUNNEL_BENCH_HEADING_DEG = 180.0
+
+
+def wind_tunnel_bench_quaternion(alpha_deg: float = 0.0, beta_deg: float = 0.0) -> np.ndarray:
+    """Mounting quaternion of a model held on the wind-tunnel bench.
+
+    The wind-tunnel mode of :mod:`physics.wind_domain` streams the **air** along
+    the tunnel axis with the velocity ``(v, 0, 0)``.  A model that is clamped
+    onto the bench therefore sees the flow arriving from ``+x`` and has to be
+    mounted with its nose pointing at ``-x`` (heading 180 deg) for the flow to
+    reach the nose instead of the tail.
+
+    The incidence is measured against the flight path, so the bench mounts the
+    model with the requested ``alpha_deg`` as the **angle of attack** and the
+    requested ``beta_deg`` as the sideslip:
+
+    * ``alpha_deg = 4`` mounts the nose 4 deg above the oncoming flow, so the
+      aerodynamic evaluation sees ``alpha = +4 deg``;
+    * the former implementation mounted the model with heading 0 deg, which
+      turned the same bench into ``alpha = 180 + 4 = 184 deg`` (reported as
+      ``-176 deg``) -- the model was blown from behind.
+
+    Returns
+    -------
+    numpy.ndarray
+        The unit quaternion ``(w, x, y, z)`` of the mounting, in the ZYX
+        (yaw-pitch-roll) convention of
+        :func:`physics.geometry_utils.quaternion_from_euler`.
+    """
+    alpha = _finite(alpha_deg, 0.0)
+    beta = _finite(beta_deg, 0.0)
+    return quaternion_from_euler(
+        0.0,
+        alpha,
+        WIND_TUNNEL_BENCH_HEADING_DEG - beta,
+    )
 
 
 # --------------------------------------------------------------------------
@@ -1512,9 +1636,12 @@ def resolve_throw(
     inertia[0, 1] = inertia[1, 0] = derived.get("inertia_xy_kgm2", 0.0)
     inertia[0, 2] = inertia[2, 0] = derived.get("inertia_xz_kgm2", 0.0)
     inertia[1, 2] = inertia[2, 1] = derived.get("inertia_yz_kgm2", 0.0)
+    # The release rotation is the rigid-body rate the contact impulse produces,
+    # ``w = I^-1 (r x F) dt eta``.  No component is scaled beyond the
+    # documented ``throw_torque_efficiency`` ``eta``: a per-axis factor would
+    # be an unsourced magic number that biases the initial condition of every
+    # flight (root AGENTS.md section 1.5).
     torque_rate = np.linalg.solve(inertia, moment * duration * efficiency)
-    # Finger pinch guide effect: pinching the paper fuselage dampens excessive pitch-kick on release
-    torque_rate[1] *= 0.10
     rates = np.array(
         [
             clamp(
@@ -1896,9 +2023,7 @@ class FlightSimulator:
         if bool(getattr(self.environment, "wind_tunnel_enabled", False)):
             alpha = float(getattr(self.environment, "wind_tunnel_alpha_deg", 4.0))
             beta = float(getattr(self.environment, "wind_tunnel_beta_deg", 0.0))
-            pitch_rad = math.radians(alpha)
-            yaw_rad = math.radians(-beta)
-            q = quaternion_from_euler(0.0, alpha, -beta)
+            q = wind_tunnel_bench_quaternion(alpha, beta)
             self._state = StateVector(
                 time_s=0.0,
                 position_m=(0.0, 0.0, -1.2),
@@ -3075,9 +3200,7 @@ class FlightSimulator:
         if bool(getattr(self.environment, "wind_tunnel_enabled", False)):
             alpha = float(getattr(self.environment, "wind_tunnel_alpha_deg", 4.0))
             beta = float(getattr(self.environment, "wind_tunnel_beta_deg", 0.0))
-            pitch_rad = math.radians(alpha)
-            yaw_rad = math.radians(-beta)
-            q = quaternion_from_euler(0.0, alpha, -beta)
+            q = wind_tunnel_bench_quaternion(alpha, beta)
             self._state = replace(
                 self._state,
                 position_m=(0.0, 0.0, -1.2),

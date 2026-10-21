@@ -15,7 +15,7 @@ const OBJECTIVE_LABELS = {
   max_ld_ratio: { label: "最大 L/D", unit: "", dir: "最大化" },
   min_max_stress: { label: "最小最大応力", unit: "Pa", dir: "最小化" },
   max_stall_margin: { label: "最大失速マージン", unit: "", dir: "最大化" },
-  min_launch_speed: { label: "最小発射初速", unit: "m/s", dir: "最小化" },
+  min_launch_speed: { label: "最小投擲初速", unit: "m/s", dir: "最小化" },
   max_stability: { label: "最大静的安定性", unit: "", dir: "最大化" },
 };
 

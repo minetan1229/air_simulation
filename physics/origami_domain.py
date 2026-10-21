@@ -633,6 +633,27 @@ def _compile_pattern(
     return CreasePattern(key=key, label=label, faces=faces, nodes=nodes, creases=creases)
 
 
+def fold_sequence(pattern: CreasePattern) -> List[Dict[str, Any]]:
+    """Return the ordered fold programme (the hinge tree) of a pattern.
+
+    Every hinge the pattern compiler created is reported in the order it was
+    folded: the crease it belongs to, the signed rotation it applied at the
+    given fold progression and its depth in the hinge tree.  This is the
+    hinge-tree algorithm the pattern docstring refers to; it makes the
+    compiled programme observable instead of leaving it unread (§P3-11).
+    """
+    return [
+        {
+            "nid": node.nid,
+            "parent": node.parent,
+            "crease": node.name,
+            "phi_deg": node.phi_deg,
+            "level": node.level,
+        }
+        for node in pattern.nodes
+    ]
+
+
 def _signed_phi(crease: Crease) -> float:
     """Signed rotation angle (degrees) applied to the moving half plane."""
     magnitude = crease.angle_deg
@@ -923,7 +944,15 @@ def assign_layers(
 
 @dataclass
 class OrigamiMesh:
-    """A renderable, closed origami mesh with per-vertex shading data."""
+    """A renderable origami mesh with per-vertex shading data.
+
+    The mesh is a **double-sided sheet of finite thickness**: every folded
+    face contributes an upper and a lower skin, the creases are closed by
+    rolled strips and the cut edges by rectangular walls.  It is therefore
+    not a single closed 2-manifold -- the walls are not vertex welded to the
+    skins -- but every triangle is wound consistently with the surface it
+    belongs to, so the shading never turns inside out (§P2-18).
+    """
 
     archetype: str
     alpha: float
@@ -937,6 +966,9 @@ class OrigamiMesh:
     twist_weights: List[float] = field(default_factory=list)
     paper_sides: List[float] = field(default_factory=list)
     face_ids: List[int] = field(default_factory=list)
+    #: The ordered fold programme (the hinge tree) of this mesh: one entry
+    #: per hinge, in the order the creases were folded (§P3-11).
+    folds: List[Dict[str, Any]] = field(default_factory=list)
     layer_pitch_m: float = LAYER_PITCH_M
     paper_thickness_m: float = VISUAL_THICKNESS_M
     max_layers: int = 1
@@ -1024,6 +1056,26 @@ class _MeshBuilder:
         if _same_point3(self.positions[a], self.positions[c], 1e-12):
             return
         self.indices.append((a, b, c))
+
+    def oriented_triangle(self, a: int, b: int, c: int, outward: Vec3) -> None:
+        """Emit a triangle whose winding agrees with ``outward``.
+
+        The skins, the crease rolls and the cut walls are stitched from
+        independently computed directions, so a triangle can end up wound
+        against the surface it belongs to.  Such a triangle shades as if it
+        were seen from the back, which is what made a large part of the
+        folded sheet render inside out (§P2-18).  Flipping the winding keeps
+        the geometry untouched and the shading consistent.
+        """
+        if a == b or b == c or a == c:
+            return
+        normal = _cross3(
+            _sub3(self.positions[b], self.positions[a]),
+            _sub3(self.positions[c], self.positions[a]),
+        )
+        if _dot3(normal, outward) < 0.0:
+            b, c = c, b
+        self.triangle(a, b, c)
 
 
 @dataclass
@@ -1315,8 +1367,10 @@ def build_pattern_mesh(
                 builder.positions[skin.top[i]], builder.positions[skin.top[j]], 1e-9
             ):
                 continue
-            builder.triangle(top_center, skin.top[i], skin.top[j])
-            builder.triangle(bottom_center, skin.bottom[j], skin.bottom[i])
+            builder.oriented_triangle(top_center, skin.top[i], skin.top[j], ref)
+            builder.oriented_triangle(
+                bottom_center, skin.bottom[j], skin.bottom[i], _scale3(ref, -1.0)
+            )
         for ta, tb, bb, ba in skin.cut_edges:
             if _same_point3(
                 builder.positions[ta], builder.positions[tb], 1e-9
@@ -1326,8 +1380,8 @@ def build_pattern_mesh(
             outward = _unit3(_cross3(cut_dir, ref))
             if _dot3(outward, _sub3(builder.positions[ta], face.centroid3d)) < 0.0:
                 outward = _scale3(outward, -1.0)
-            builder.triangle(ta, tb, bb)
-            builder.triangle(ta, bb, ba)
+            builder.oriented_triangle(ta, tb, bb, outward)
+            builder.oriented_triangle(ta, bb, ba, outward)
             for index in (ta, tb, bb, ba):
                 builder.normals[index] = outward
 
@@ -1372,8 +1426,12 @@ def build_pattern_mesh(
                 )
             )
         for i in range(len(samples) - 1):
-            builder.triangle(plus_ids[i], plus_ids[i + 1], minus_ids[i + 1])
-            builder.triangle(plus_ids[i], minus_ids[i + 1], minus_ids[i])
+            builder.oriented_triangle(
+                plus_ids[i], plus_ids[i + 1], minus_ids[i + 1], samples[i].normal
+            )
+            builder.oriented_triangle(
+                plus_ids[i], minus_ids[i + 1], minus_ids[i], samples[i].normal
+            )
 
     mesh = OrigamiMesh(
         archetype=archetype,

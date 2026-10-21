@@ -18,7 +18,10 @@ const CHORD_SEGMENTS = 12;
 /*/** Leading-edge sweep per shape family (0 = dart, 1 = glider/suzanne, 2 = wide-body/sky-king). */
 // Dart has extreme slender delta wing sweep (0.92 = ~75 deg sweep angle)
 const SHAPE_SWEEP = [0.92, 0.44, 0.28];
-const SHAPE_NAME = ["dart", "glider (suzanne)", "wide-body (sky king)"];
+// Canonical Japanese labels of the three analysis airframe families.  The
+// configuration rail (static/js/panels.js) uses the very same wording so the
+// two selections never read as two different concepts (§P3-4).
+const SHAPE_NAME = ["ダート", "グライダー", "ワイド機体"];
 
 
 function shapeIndex(flag) {

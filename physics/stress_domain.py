@@ -84,6 +84,7 @@ __all__ = [
     "root_bending_moment_batch",
     "section_modulus_batch",
     "peak_root_stress_pa",
+    "dihedral_load_multiplier",
     "root_chord_batch",
     "te_fold_chord_scale",
     "heatmap_colour",
@@ -248,6 +249,26 @@ def section_modulus_batch(
     return xp.maximum(chord_m * thickness_m * thickness_m * z_gain / 6.0, 1.0e-30)
 
 
+def dihedral_load_multiplier(xp: Any, dihedral_rad: Any) -> Any:
+    """Projection of the wing-root moment onto the body vertical.
+
+    Dihedral tilts the wing, so the load normal to the surface reaches the
+    body vertical through ``cos(dihedral)``.  The canonical stress field
+    (:func:`stress_field`) applies that projection, therefore every *scalar
+    reduction* of the field has to apply the very same one: without it the
+    reduction and the field disagree by ``1 / cos(dihedral)`` (3.8e-3 at the
+    default 5 deg, 1.0e-1 at the 45 deg limit of the configuration).
+
+    The tangent is clamped exactly as the field clamps it, so the two paths
+    cannot drift apart at extreme dihedral angles either.
+
+    ``dihedral_rad`` is the dihedral angle in radians; the field publishes it
+    as ``dihedral_rad`` and the batch path carries it per airframe.
+    """
+    tilt = xp.clip(xp.tan(dihedral_rad), -_TILT_LIMIT, _TILT_LIMIT)
+    return 1.0 / xp.sqrt(1.0 + tilt * tilt)
+
+
 def peak_root_stress_pa(
     xp: Any,
     load_factor: Any,
@@ -258,6 +279,7 @@ def peak_root_stress_pa(
     root_chord_m: Any,
     thickness_m: Any,
     z_gain: Any,
+    dihedral_rad: Any,
     chord_scale: Any = 1.0,
     tip_factor: Any = 0.0,
 ) -> Any:
@@ -267,6 +289,14 @@ def peak_root_stress_pa(
     carries the largest bending moment and the leading edge the largest
     chordwise shape factor, so the peak of the stress field is the root
     section evaluated at the leading edge.
+
+    Every factor the field applies to the wing-root moment is applied here
+    as well -- the tip-fold gain and the dihedral projection
+    (:func:`dihedral_load_multiplier`) -- so the reduction reproduces the
+    field of the canonical 6-DoF grid (``spanwise=3``, ``chordwise=2``, where
+    the centre row sits exactly on the wing root) to round-off precision.
+    ``dihedral_rad`` is therefore part of the signature: a reduction that
+    ignored it would silently report a different quantity from the field.
 
     The GPU batch path evaluates this function instead of an inline formula
     of its own.  That inline formula used a *span* based section modulus and
@@ -280,6 +310,9 @@ def peak_root_stress_pa(
     )
     # A folded winglet raises the moment carried by the root section.
     moment = moment * (1.0 + TIP_MOMENT_GAIN * xp.clip(tip_factor, 0.0, 1.0))
+    # Dihedral tilts the wing: the load reaches the body vertical through
+    # cos(dihedral).  The field applies the same projection.
+    moment = moment * dihedral_load_multiplier(xp, dihedral_rad)
     modulus = section_modulus_batch(xp, root_chord_m * chord_scale, thickness_m, z_gain)
     return KAPPA_SIGMA * moment / modulus
 
@@ -825,7 +858,6 @@ def stress_field(
     nz = max(_finite_or(load_factor, 0.0), 0.0)
     beta = _finite_or(beta_deg, 0.0)
     dihedral_rad = deg2rad(_finite_or(float(cfg.dihedral_deg), 0.0))
-    tilt = clamp(math.tan(dihedral_rad), -_TILT_LIMIT, _TILT_LIMIT)
     side = clamp(math.tan(deg2rad(beta)), -_TILT_LIMIT, _TILT_LIMIT)
 
     area = max(_finite_or(float(derived.get("ref_area_m2") or derived["wing_area_m2"]), 0.0), _EPS)
@@ -879,7 +911,7 @@ def stress_field(
     # wingtips equally instead of splitting load port/starboard.  The former
     # ``tilt * y_signed`` terms broke symmetry and are removed; the dihedral
     # roll moment is reported separately by dihedral_roll_couple().
-    load_mult = 1.0 / math.sqrt(1.0 + tilt * tilt)
+    load_mult = dihedral_load_multiplier(xp, dihedral_rad)
     couple_mult = 1.0
     side_mult = 1.0 + SIDELOAD_COUPLING * side * y_signed
     moment = moment * xp.maximum(load_mult, 0.05) * xp.maximum(couple_mult, 0.05) * xp.maximum(

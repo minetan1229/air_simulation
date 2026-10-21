@@ -13,6 +13,7 @@ from ..core import (
     MAX_MACH,
     MAX_SPEED_MPS,
     SESSION,
+    SIMULATION_TRAJECTORY_LOCK,
     BadRequest,
     as_float,
     as_int,
@@ -142,16 +143,19 @@ def environment_config():
     if "simulation" in payload:
         settings_cfg = build(SimulationSettings, payload["simulation"])
 
-    with SESSION.lock:
-        if aircraft_cfg is not None:
-            SESSION.set_aircraft(aircraft_cfg)
-        if environment_cfg is not None:
-            SESSION.set_environment(environment_cfg)
-        if launch_cfg is not None:
-            SESSION.set_launch(launch_cfg)
-        if settings_cfg is not None:
-            SESSION.set_settings(settings_cfg)
-        return jsonify(SESSION.current_snapshot())
+    # The configuration must not change while a trajectory is running, so the
+    # trajectory lock is taken first and the state lock second (§P2-2).
+    with SIMULATION_TRAJECTORY_LOCK:
+        with SESSION.lock:
+            if aircraft_cfg is not None:
+                SESSION.set_aircraft(aircraft_cfg)
+            if environment_cfg is not None:
+                SESSION.set_environment(environment_cfg)
+            if launch_cfg is not None:
+                SESSION.set_launch(launch_cfg)
+            if settings_cfg is not None:
+                SESSION.set_settings(settings_cfg)
+            return jsonify(SESSION.current_snapshot())
 
 
 # ---------------------------------------------------------------------------

@@ -38,6 +38,7 @@ Path-traversal / security are out of scope here; see
 from __future__ import annotations
 
 import contextlib
+import logging
 import math
 import threading
 import time
@@ -46,6 +47,8 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Callable, Dict, List, Optional
 
 from .config_schema import JobRecord, as_dict, make_uuid, utc_now_iso
+
+log = logging.getLogger("paper_airplane.job_manager")
 
 __all__ = [
     "ETA_ALPHA",
@@ -655,6 +658,7 @@ class JobManager:
 
     def fail(self, job_id: str, message: str) -> JobRecord:
         """``-> failed`` with the diagnostic ``message`` (progress frozen)."""
+        log.warning("job %s failed: %s", job_id, message)
         with self._lock:
             state = self._require_state(job_id)
             record = state.record
@@ -678,6 +682,7 @@ class JobManager:
             if record.status in TERMINAL_STATUSES:
                 return _copy_record(record)
             message = record.message or "cancelled by request"
+            log.info("job %s cancelled: %s", job_id, message)
             return _copy_record(self._finalise(state, "cancelled", message))
 
     def register_thread(self, job_id: str, thread: Any) -> None:

@@ -1,14 +1,19 @@
 """
-Discord Remote Bridge for Antigravity (AGY)
-Allows full remote control of the local Antigravity agent from Discord.
+Discord Remote Bridge for Antigravity (AGY) and Kilo Code (KILO)
+Allows full remote control of the local agent stack from Discord.
 
 Features:
 - Workspace strictly locked to simulation/v3 directory
+- Two agent backends: Antigravity (primary) and Kilo Code (automatic fallback)
 - Real-time live status updates (Thinking progress, Tool executions, Subagent spawns & completion)
 - Interactive multi-turn chat (DM or dedicated channel without repeated mentions)
 - Chat List & History inspection (!chats / /chats) with resumption (!resume / /resume)
 - Direct chat command (!chat <prompt> / /chat <prompt>)
 - Dynamic model selection via slash commands (/model) or prefix (!model, !m)
+- Remaining rate limit / quota display (!quota / /quota)
+- Monitor agent surfacing health, API latency, errors and rate limits (!monitor / /monitor)
+- Automatic continuation on HTTP 429 with exponential backoff
+- Automatic fallback from Antigravity to Kilo Code (free model) when the primary fails
 - Process cancellation / abort (!abort, /abort, or 🛑 reaction)
 - User / Channel access control
 """
@@ -36,11 +41,41 @@ from discord import app_commands
 from dotenv import load_dotenv
 
 try:
-    import psutil
-    HAS_PSUTIL = True
-except ImportError:
-    HAS_PSUTIL = False
-    psutil = None
+    from tools.bridge_backends import (
+        ANTIGRAVITY_BACKEND,
+        ANTIGRAVITY_MODELS,
+        BACKEND_MODELS,
+        KILO_BACKEND,
+        KILO_DEFAULT_MODEL,
+        KILO_MODELS,
+        WORKSPACE_DIR,
+        build_default_backends,
+        describe_model,
+        detect_backend,
+        model_catalog,
+    )
+    from tools.bridge_monitor import MonitorAgent, MonitorAlert, get_system_metrics as _collect_system_metrics
+    from tools.bridge_quota import QuotaSnapshot, QuotaTracker
+    from tools.bridge_router import BridgeOutcome, BridgeRequest, BridgeRouter
+except ImportError:  # pragma: no cover - direct script execution
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+    from tools.bridge_backends import (
+        ANTIGRAVITY_BACKEND,
+        ANTIGRAVITY_MODELS,
+        BACKEND_MODELS,
+        KILO_BACKEND,
+        KILO_DEFAULT_MODEL,
+        KILO_MODELS,
+        WORKSPACE_DIR,
+        build_default_backends,
+        describe_model,
+        detect_backend,
+        model_catalog,
+    )
+    from tools.bridge_monitor import MonitorAgent, MonitorAlert, get_system_metrics as _collect_system_metrics
+    from tools.bridge_quota import QuotaSnapshot, QuotaTracker
+    from tools.bridge_router import BridgeOutcome, BridgeRequest, BridgeRouter
+
 
 # Setup logging
 logging.basicConfig(
@@ -56,6 +91,18 @@ DISCORD_BOT_TOKEN = os.getenv("DISCORD_BOT_TOKEN", "").strip()
 ALLOWED_USERS_RAW = os.getenv("ALLOWED_USER_IDS", "").strip()
 ALLOWED_CHANNELS_RAW = os.getenv("ALLOWED_CHANNEL_IDS", "").strip()
 DEFAULT_MODEL = os.getenv("DEFAULT_MODEL", "gemini-3.8-flash-low").strip()
+DEFAULT_BACKEND = os.getenv("DEFAULT_BACKEND", ANTIGRAVITY_BACKEND).strip()
+FALLBACK_MODEL = os.getenv("FALLBACK_MODEL", KILO_DEFAULT_MODEL).strip()
+
+# Router / resilience configuration.
+FALLBACK_ENABLED = os.getenv("BRIDGE_FALLBACK_ENABLED", "1") == "1"
+RATE_LIMIT_MAX_RETRIES = int(os.getenv("BRIDGE_RATE_LIMIT_RETRIES", "3"))
+BACKOFF_BASE_SECONDS = float(os.getenv("BRIDGE_BACKOFF_BASE", "2.0"))
+BACKOFF_CAP_SECONDS = float(os.getenv("BRIDGE_BACKOFF_CAP", "60.0"))
+TASK_TIMEOUT_SECONDS = float(os.getenv("BRIDGE_TASK_TIMEOUT", "1800"))
+MONITOR_INTERVAL_SECONDS = float(os.getenv("BRIDGE_MONITOR_INTERVAL", "60"))
+MONITOR_ERROR_THRESHOLD = int(os.getenv("BRIDGE_MONITOR_ERROR_THRESHOLD", "3"))
+QUOTA_CACHE_TTL_SECONDS = float(os.getenv("BRIDGE_QUOTA_TTL", "120"))
 
 ALLOWED_USER_IDS: Set[int] = {
     int(u.strip()) for u in ALLOWED_USERS_RAW.split(",") if u.strip().isdigit()
@@ -172,79 +219,20 @@ def is_chrome_url_allowed(url: str) -> bool:
 def make_error_id() -> str:
     return uuid.uuid4().hex[:12]
 
-# Strictly lock workspace to simulation/v3
-WORKSPACE_DIR = Path(__file__).resolve().parent.parent
+# Strictly lock workspace to simulation/v3 (defined in tools.bridge_backends)
+assert WORKSPACE_DIR == Path(__file__).resolve().parent.parent
 
 # Brain directories to discover conversation sessions
 CLI_BRAIN_DIR = Path(os.environ.get("USERPROFILE", "")) / ".gemini" / "antigravity-cli" / "brain"
 APP_BRAIN_DIR = Path(os.environ.get("USERPROFILE", "")) / ".gemini" / "antigravity" / "brain"
 
-# Available Models in AGY
-AVAILABLE_MODELS: Dict[str, str] = {
-    "gemini-3.8-flash-low": "Gemini 3.8 Flash (Low - High Speed)",
-    "gemini-3.8-flash-medium": "Gemini 3.8 Flash (Medium)",
-    "gemini-3.8-flash-high": "Gemini 3.8 Flash (High)",
-    "claude-sonnet-4-6": "Claude Sonnet 4.6 (Thinking)",
-    "claude-opus-4-6-thinking": "Claude Opus 4.6 (Thinking)",
-    "gpt-oss-120b-medium": "GPT-OSS 120B (Medium)",
-}
+# Every selectable model: Antigravity first, then the Kilo Code catalogue.
+AVAILABLE_MODELS: Dict[str, str] = model_catalog()
 
 
 def get_system_metrics() -> Dict[str, Any]:
-    """Gather CPU, RAM, and GPU status."""
-    metrics = {
-        "cpu": "N/A",
-        "cpu_percent": 0.0,
-        "memory": "N/A",
-        "memory_percent": 0.0,
-        "gpu": "GPU: 未検出 / 利用不可",
-    }
-    if HAS_PSUTIL and psutil:
-        try:
-            cpu_pct = psutil.cpu_percent(interval=0.1)
-            cpu_count = psutil.cpu_count(logical=True)
-            metrics["cpu_percent"] = cpu_pct
-            metrics["cpu"] = f"{cpu_pct:.1f}% ({cpu_count} Threads)"
-
-            mem = psutil.virtual_memory()
-            mem_used_gb = mem.used / (1024 ** 3)
-            mem_tot_gb = mem.total / (1024 ** 3)
-            metrics["memory_percent"] = mem.percent
-            metrics["memory"] = f"{mem_used_gb:.1f}GB / {mem_tot_gb:.1f}GB ({mem.percent}%)"
-        except Exception as e:
-            logger.warning(f"Failed to gather psutil metrics: {e}")
-
-    # Query GPU via nvidia-smi if available
-    smi = shutil.which("nvidia-smi")
-    if smi:
-        try:
-            res = subprocess.run(
-                [smi, "--query-gpu=name,utilization.gpu,memory.used,memory.total", "--format=csv,noheader,nounits"],
-                capture_output=True,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
-                timeout=3,
-            )
-            if res.returncode == 0 and res.stdout.strip():
-                gpus = []
-                for line in res.stdout.strip().splitlines():
-                    parts = [p.strip() for p in line.split(",")]
-                    if len(parts) >= 4:
-                        name, util, m_used, m_tot = parts[0], parts[1], parts[2], parts[3]
-                        try:
-                            m_used_f = float(m_used) / 1024.0
-                            m_tot_f = float(m_tot) / 1024.0
-                            gpus.append(f"{name} | 負荷: {util}% | VRAM: {m_used_f:.1f}GB / {m_tot_f:.1f}GB")
-                        except ValueError:
-                            gpus.append(f"{name} | 負荷: {util}% | VRAM: {m_used}MB / {m_tot}MB")
-                if gpus:
-                    metrics["gpu"] = "\n".join(gpus)
-        except Exception as e:
-            logger.warning(f"nvidia-smi execution error: {e}")
-            metrics["gpu"] = f"GPU取得エラー: {e}"
-
-    return metrics
+    """Gather CPU, RAM, and GPU status (implemented in tools.bridge_monitor)."""
+    return _collect_system_metrics()
 
 
 def launch_chrome_browser(url: str = "http://localhost:5000") -> Tuple[bool, str]:
@@ -325,8 +313,38 @@ def get_recent_conversations(limit: int = 10) -> List[Dict[str, Any]]:
                 "mtime": mtime,
                 "date_str": datetime.fromtimestamp(mtime).strftime("%m/%d %H:%M"),
                 "prompt": first_prompt[:70] + ("..." if len(first_prompt) > 70 else ""),
+                "backend": ANTIGRAVITY_BACKEND,
             })
 
+    sessions.sort(key=lambda s: s["mtime"], reverse=True)
+    return sessions[:limit]
+
+
+def get_recent_kilo_sessions(limit: int = 10) -> List[Dict[str, Any]]:
+    """Collect the recent Kilo Code sessions of this workspace."""
+    backend = client.backends.get(KILO_BACKEND)
+    if backend is None:
+        return []
+    raw_sessions = backend.list_sessions(limit=limit)
+    sessions: List[Dict[str, Any]] = []
+    for item in raw_sessions:
+        session_id = str(item.get("id") or "")
+        if not session_id:
+            continue
+        updated = item.get("updated") or item.get("created") or 0
+        try:
+            mtime = float(updated) / 1000.0
+        except (TypeError, ValueError):
+            mtime = 0.0
+        title = str(item.get("title") or "(No prompt)")
+        sessions.append({
+            "id": session_id,
+            "short_id": session_id[:8],
+            "mtime": mtime,
+            "date_str": datetime.fromtimestamp(mtime).strftime("%m/%d %H:%M") if mtime else "-",
+            "prompt": title[:70] + ("..." if len(title) > 70 else ""),
+            "backend": KILO_BACKEND,
+        })
     sessions.sort(key=lambda s: s["mtime"], reverse=True)
     return sessions[:limit]
 
@@ -369,12 +387,13 @@ class ChatSelectView(discord.ui.View):
 
         options = []
         for s in sessions[:15]:
-            is_active = (s["id"] == current_conv or s["short_id"] == current_conv)
+            stored = encode_session(s.get("backend", ANTIGRAVITY_BACKEND), s["id"])
+            is_active = (stored == current_conv or s["short_id"] == current_conv)
             label = f"{s['date_str']} - {s['prompt']}"[:95]
             options.append(
                 discord.SelectOption(
                     label=label,
-                    value=s["id"],
+                    value=stored,
                     description=f"Session ID: {s['short_id']}",
                     default=is_active,
                 )
@@ -482,10 +501,35 @@ class DiscordBridgeClient(discord.Client):
         self.channel_models: Dict[int, str] = {}
         # channel_id -> conversation_id (for multi-turn memory)
         self.channel_conversations: Dict[int, Optional[str]] = {}
+        # channel_id -> backend that owns the stored conversation
+        self.channel_session_backends: Dict[int, str] = {}
+        # channel_id -> active backend (antigravity | kilo)
+        self.channel_backends: Dict[int, str] = {}
         # task_id (str) -> asyncio.subprocess.Process
         self.active_processes: Dict[str, asyncio.subprocess.Process] = {}
         # channel_id -> Set[str] of task_ids
         self.channel_tasks: Dict[int, Set[str]] = {}
+
+        # Agent stack: backends, monitor agent, quota tracker and the router.
+        self.backends = build_default_backends()
+        self.quota_tracker = QuotaTracker(ttl=QUOTA_CACHE_TTL_SECONDS)
+        self.monitor = MonitorAgent(
+            interval=MONITOR_INTERVAL_SECONDS,
+            error_threshold=MONITOR_ERROR_THRESHOLD,
+            on_alert=self._on_monitor_alert,
+        )
+        self.router = BridgeRouter(
+            backends=self.backends,
+            monitor=self.monitor,
+            fallback_enabled=FALLBACK_ENABLED,
+            max_rate_limit_retries=RATE_LIMIT_MAX_RETRIES,
+            backoff_base=BACKOFF_BASE_SECONDS,
+            backoff_cap=BACKOFF_CAP_SECONDS,
+            task_timeout=TASK_TIMEOUT_SECONDS,
+            quota_tracker=self.quota_tracker,
+        )
+        # Channels that receive monitor alerts and fallback notices.
+        self.alert_channels: Set[int] = set(ALLOWED_CHANNEL_IDS)
 
     async def setup_hook(self):
         # Register persistent SessionReplyView for dynamic custom_ids
@@ -510,7 +554,27 @@ class DiscordBridgeClient(discord.Client):
         return self.channel_models.get(channel_id, DEFAULT_MODEL)
 
     def set_model(self, channel_id: int, model: str):
+        """Store the active model and derive the owning backend from its id."""
         self.channel_models[channel_id] = model
+        self.channel_backends[channel_id] = detect_backend(model)
+
+    def get_backend(self, channel_id: int) -> str:
+        """Return the backend that serves the requests of this channel."""
+        return self.channel_backends.get(channel_id, DEFAULT_BACKEND)
+
+    def set_backend(self, channel_id: int, backend: str):
+        """Switch the backend of a channel, aligning the active model with it."""
+        backend = backend.strip().lower()
+        if backend not in BACKEND_MODELS:
+            raise ValueError(f"未知のバックエンド: {backend}")
+        self.channel_backends[channel_id] = backend
+        current = self.channel_models.get(channel_id)
+        if backend == KILO_BACKEND:
+            if not current or detect_backend(current) != KILO_BACKEND:
+                self.channel_models[channel_id] = KILO_DEFAULT_MODEL
+        else:
+            if current and detect_backend(current) != ANTIGRAVITY_BACKEND:
+                self.channel_models[channel_id] = DEFAULT_MODEL
 
     def register_task(self, channel_id: int, task_id: str, proc: asyncio.subprocess.Process):
         self.active_processes[task_id] = proc
@@ -549,8 +613,118 @@ class DiscordBridgeClient(discord.Client):
                     pass
         return aborted
 
+    async def _on_monitor_alert(self, alert: MonitorAlert) -> None:
+        """Deliver a monitor alert to Discord and to the main agent."""
+        await deliver_monitor_alert(alert)
+
 
 client = DiscordBridgeClient()
+
+
+def encode_session(backend: str, session_id: Optional[str]) -> Optional[str]:
+    """Store a session id together with the backend that owns it."""
+    if not session_id:
+        return None
+    if backend == KILO_BACKEND:
+        return f"{KILO_BACKEND}:{session_id}"
+    return session_id
+
+
+def decode_session(value: Optional[str]) -> Tuple[str, Optional[str]]:
+    """Split a stored session value into ``(backend, session_id)``."""
+    if not value:
+        return ANTIGRAVITY_BACKEND, None
+    if ":" in value:
+        backend, _, session_id = value.partition(":")
+        if backend in BACKEND_MODELS:
+            return backend, session_id or None
+    return ANTIGRAVITY_BACKEND, value
+
+
+def notify_main_agent(title: str, summary: str, status_type: str = "warning") -> bool:
+    """Send a webhook notification to the main agent (Discord webhook channel)."""
+    try:
+        from tools.notify_discord import send_notification
+    except ImportError:  # pragma: no cover - direct script execution
+        sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+        from tools.notify_discord import send_notification
+
+    try:
+        return send_notification(status_type, title, summary, auto_report=False)
+    except Exception as exc:  # pragma: no cover - notification must not break the flow
+        logger.warning(f"Could not notify the main agent: {exc}")
+        return False
+
+
+async def deliver_monitor_alert(alert: MonitorAlert) -> None:
+    """Post a monitor alert into Discord and notify the main agent."""
+    color = {
+        "info": discord.Color.blue(),
+        "warning": discord.Color.orange(),
+        "critical": discord.Color.red(),
+    }.get(alert.level, discord.Color.blue())
+
+    embed = discord.Embed(
+        title=f"🩺 監視エージェント: {alert.kind}",
+        description="\n".join(alert.to_embed_lines()),
+        color=color,
+        timestamp=datetime.now(),
+    )
+    if alert.details:
+        embed.add_field(
+            name="詳細",
+            value="\n".join(f"`{key}`: {value}" for key, value in alert.details.items())[:1000],
+            inline=False,
+        )
+
+    targets: List[discord.TextChannel] = []
+    for cid in client.alert_channels:
+        channel = client.get_channel(cid)
+        if isinstance(channel, discord.TextChannel):
+            targets.append(channel)
+
+    for channel in targets:
+        try:
+            await channel.send(embed=embed)
+        except Exception as exc:
+            logger.warning(f"Could not deliver the monitor alert to {channel.id}: {exc}")
+
+    notify_main_agent(
+        f"監視エージェントアラート: {alert.kind}",
+        alert.message,
+        status_type="warning" if alert.level == "warning" else "error",
+    )
+
+
+def build_quota_embed(
+    quota_snapshot: Optional[QuotaSnapshot],
+    kilo_model: str,
+    estimated_requests: Optional[float] = None,
+    title: str = "📊 レート制限 / クォータ残量",
+) -> discord.Embed:
+    """Build the embed that shows the remaining rate limit of the backends."""
+    embed = discord.Embed(title=title, color=discord.Color.teal(), timestamp=datetime.now())
+    if quota_snapshot is None:
+        embed.description = "ℹ️ クォータ情報をまだ取得していません (`!quota` で取得できます)。"
+        return embed
+
+    embed.description = "\n".join(quota_snapshot.summary_lines())
+    if estimated_requests is not None:
+        embed.add_field(
+            name="🎯 推定利用可能回数",
+            value=f"**約 {estimated_requests:.0f} 回**（実測した消費傾きからの推定）",
+            inline=True,
+        )
+    if quota_snapshot.credits_remaining is not None:
+        embed.add_field(
+            name="💳 残りクレジット",
+            value=f"**{quota_snapshot.credits_remaining}**",
+            inline=True,
+        )
+    embed.add_field(name="🤖 Kilo Code モデル", value=f"`{kilo_model}`（無料）", inline=True)
+    if quota_snapshot.error:
+        embed.add_field(name="⚠️ 取得エラー", value=quota_snapshot.error[:1000], inline=False)
+    return embed
 
 
 def check_auth(interaction: discord.Interaction) -> bool:
@@ -565,6 +739,7 @@ async def on_ready():
     logger.info(f"Discord Bridge Bot logged in as {client.user} (ID: {client.user.id})")
     logger.info(f"Strict Workspace Directory: {WORKSPACE_DIR}")
     logger.info(f"Default Model: {DEFAULT_MODEL}")
+    logger.info(f"Backends: {client.router.backend_status()}")
     logger.info(f"System CPU: {metrics['cpu']} | Memory: {metrics['memory']}")
     logger.info(f"System GPU:\n{metrics['gpu']}")
     if ALLOWED_USER_IDS:
@@ -572,19 +747,40 @@ async def on_ready():
     else:
         logger.warning("ALLOWED_USER_IDS is empty: NO user is authorized (safe default deny-all).")
 
+    # Start the monitor agent (health / API latency / errors / rate limits).
+    client.monitor.start(client.backends)
+
     # Optionally notify startup message with system metrics to configured channels
     embed = discord.Embed(
-        title="🚀 Antigravity Discord Bridge 起動完了",
-        description="Antigravity Remote Bridge が起動しました。\n並列チャット処理・Chrome起動・システム監視が有効です。",
+        title="🚀 Agent Discord Bridge 起動完了",
+        description=(
+            "Antigravity (主) + Kilo Code (フォールバック) の Discord リモートブリッジです。\n"
+            "並列チャット処理・Chrome起動・システム監視・レート制限表示が有効です。"
+        ),
         color=discord.Color.green(),
         timestamp=datetime.now(),
     )
     embed.add_field(name="⚙️ CPU 使用率", value=f"`{metrics['cpu']}`", inline=True)
     embed.add_field(name="🧠 メモリ (RAM)", value=f"`{metrics['memory']}`", inline=True)
     embed.add_field(name="⚡ GPU 稼働状況", value=f"```{metrics['gpu']}```", inline=False)
+    backend_status = client.router.backend_status()
+    embed.add_field(
+        name="🤖 エージェントバックエンド",
+        value=(
+            f"• Antigravity: `{'✅ 利用可能' if backend_status.get(ANTIGRAVITY_BACKEND) else '❌ 未検出'}`\n"
+            f"• Kilo Code: `{'✅ 利用可能' if backend_status.get(KILO_BACKEND) else '❌ 未検出'}`\n"
+            f"• フォールバック先モデル: `{FALLBACK_MODEL}`\n"
+            f"• 429 自動継続: 最大 **{RATE_LIMIT_MAX_RETRIES}** 回 (指数バックオフ)"
+        ),
+        inline=False,
+    )
     embed.add_field(
         name="ℹ️ 設定情報",
-        value=f"• モデル: `{DEFAULT_MODEL}`\n• ワークスペース: `simulation/v3`\n• コマンド一覧: `!help` / `/status` / `/chrome` / `/chat`",
+        value=(
+            f"• 既定モデル: `{DEFAULT_MODEL}`\n"
+            f"• ワークスペース: `simulation/v3`\n"
+            f"• コマンド一覧: `!help` / `/status` / `/quota` / `/monitor` / `/backend` / `/chrome` / `/chat`"
+        ),
         inline=False,
     )
 
@@ -630,7 +826,7 @@ async def cmd_chat(interaction: discord.Interaction, prompt: str):
     await execute_agy_prompt(interaction.channel, prompt, interaction.user, interaction=interaction)
 
 
-@client.tree.command(name="chats", description="List recent conversation sessions and resume them")
+@client.tree.command(name="chats", description="List recent conversation sessions (Antigravity + Kilo Code) and resume them")
 async def cmd_chats(interaction: discord.Interaction):
     if not check_auth(interaction):
         await interaction.response.send_message("❌ Unauthorized.", ephemeral=True)
@@ -640,7 +836,10 @@ async def cmd_chats(interaction: discord.Interaction):
     await interaction.response.defer()
 
     # Offload disk search to thread to avoid blocking asyncio event loop
-    sessions = await asyncio.to_thread(get_recent_conversations, 10)
+    agy_sessions = await asyncio.to_thread(get_recent_conversations, 10)
+    kilo_sessions = await asyncio.to_thread(get_recent_kilo_sessions, 10)
+    sessions = agy_sessions + kilo_sessions
+    sessions.sort(key=lambda s: s["mtime"], reverse=True)
     current_conv = client.channel_conversations.get(interaction.channel_id)
 
     if not sessions:
@@ -649,13 +848,19 @@ async def cmd_chats(interaction: discord.Interaction):
 
     embed = discord.Embed(
         title="💬 Recent Conversations (Chat List)",
-        description=f"Current active session: **`{current_conv[:8] if current_conv else 'None (New)'}`**\nSelect from dropdown or use `/resume <id>` to switch.",
+        description=(
+            f"Current active session: **`{current_conv[:8] if current_conv else 'None (New)'}`**\n"
+            "Select from dropdown or use `/resume <id>` to switch."
+        ),
         color=discord.Color.teal(),
     )
     for s in sessions:
-        prefix = "👉 **[ACTIVE]** " if (s["id"] == current_conv or s["short_id"] == current_conv) else "• "
+        stored = encode_session(s.get("backend", ANTIGRAVITY_BACKEND), s["id"])
+        is_active = stored == current_conv or s["short_id"] == current_conv
+        prefix = "👉 **[ACTIVE]** " if is_active else "• "
+        backend_tag = "🟦" if s.get("backend") == KILO_BACKEND else "🟧"
         embed.add_field(
-            name=f"{prefix}`{s['short_id']}` ({s['date_str']})",
+            name=f"{prefix}{backend_tag} `{s['short_id']}` ({s['date_str']})",
             value=s["prompt"] or "(No prompt)",
             inline=False,
         )
@@ -685,34 +890,50 @@ async def cmd_resume(interaction: discord.Interaction, conversation_id: str):
 
     cid = conversation_id.strip()
     # Resolve short ID if given asynchronously
-    sessions = await asyncio.to_thread(get_recent_conversations, 30)
+    agy_sessions = await asyncio.to_thread(get_recent_conversations, 30)
+    kilo_sessions = await asyncio.to_thread(get_recent_kilo_sessions, 30)
     matched_full_id = cid
-    for s in sessions:
+    matched_backend = ANTIGRAVITY_BACKEND
+    for s in agy_sessions + kilo_sessions:
         if s["id"].startswith(cid):
             matched_full_id = s["id"]
+            matched_backend = s.get("backend", ANTIGRAVITY_BACKEND)
             break
 
-    client.channel_conversations[interaction.channel_id] = matched_full_id
+    client.channel_conversations[interaction.channel_id] = encode_session(matched_backend, matched_full_id)
+    client.channel_session_backends[interaction.channel_id] = matched_backend
     await interaction.followup.send(
-        f"✅ Resumed conversation **`{matched_full_id[:8]}`** (`{matched_full_id}`)."
+        f"✅ Resumed conversation **`{matched_full_id[:8]}`** (`{matched_full_id}`) on `{matched_backend}`."
     )
 
 
-@client.tree.command(name="models", description="List all available Antigravity models")
+@client.tree.command(name="models", description="List all available models (Antigravity + Kilo Code)")
 async def cmd_models(interaction: discord.Interaction):
     if not check_auth(interaction):
         await interaction.response.send_message("❌ Unauthorized: You do not have permission to run commands.", ephemeral=True)
         return
 
     current = client.get_model(interaction.channel_id)
+    backend = client.get_backend(interaction.channel_id)
     embed = discord.Embed(
-        title="🤖 Available Antigravity Models",
-        description=f"Current active model in this channel: **`{current}`**",
+        title="🤖 利用可能モデル (Antigravity + Kilo Code)",
+        description=(
+            f"現在のバックエンド: **`{backend}`** / アクティブモデル: **`{current}`**\n"
+            "Kilo Code の既定は**無料モデル** (`kilo/kilo-auto/free`) です。"
+        ),
         color=discord.Color.blue(),
     )
-    for model_id, name in AVAILABLE_MODELS.items():
-        prefix = "👉 " if model_id == current else "• "
-        embed.add_field(name=f"{prefix}{name}", value=f"`{model_id}`", inline=False)
+    for backend_name, catalog in BACKEND_MODELS.items():
+        lines = []
+        for model_id, name in catalog.items():
+            prefix = "👉 " if model_id == current else "• "
+            free_mark = " 🆓" if model_id.endswith(":free") or "free" in model_id.split("/")[-1] else ""
+            lines.append(f"{prefix}{name}{free_mark} — `{model_id}`")
+        embed.add_field(
+            name=f"{'🟧' if backend_name == ANTIGRAVITY_BACKEND else '🟦'} {backend_name}",
+            value="\n".join(lines)[:1000],
+            inline=False,
+        )
 
     view = ModelSelectView(current, on_model_selected)
     await interaction.response.send_message(embed=embed, view=view)
@@ -725,12 +946,12 @@ async def on_model_selected(interaction: discord.Interaction, selected_model: st
     client.set_model(interaction.channel_id, selected_model)
     display_name = AVAILABLE_MODELS.get(selected_model, selected_model)
     await interaction.response.send_message(
-        f"✅ Model switched to: **{display_name}** (`{selected_model}`)"
+        f"✅ Model switched to: **{display_name}** (`{selected_model}`) — backend: `{client.get_backend(interaction.channel_id)}`"
     )
 
 
 @client.tree.command(name="model", description="Set or view active model for this channel")
-@app_commands.describe(model_id="Model ID (e.g. gemini-3.8-flash-low, claude-sonnet-4-6)")
+@app_commands.describe(model_id="Model ID (gemini-3.8-flash-low, claude-sonnet-4-6, kilo/kilo-auto/free)")
 async def cmd_model(interaction: discord.Interaction, model_id: Optional[str] = None):
     if not check_auth(interaction):
         await interaction.response.send_message("❌ Unauthorized.", ephemeral=True)
@@ -740,16 +961,21 @@ async def cmd_model(interaction: discord.Interaction, model_id: Optional[str] = 
         current = client.get_model(interaction.channel_id)
         view = ModelSelectView(current, on_model_selected)
         await interaction.response.send_message(
-            f"Current active model: **`{current}`**\nSelect a new model below:",
+            f"Current active model: **`{current}`** (backend: `{client.get_backend(interaction.channel_id)}`)\n"
+            "Select a new model below:",
             view=view,
         )
         return
 
     target_model = None
-    for mid in AVAILABLE_MODELS:
-        if model_id.lower() in mid.lower():
-            target_model = mid
-            break
+    lowered = model_id.lower().strip()
+    if lowered in AVAILABLE_MODELS:
+        target_model = lowered
+    else:
+        for mid in AVAILABLE_MODELS:
+            if lowered in mid.lower():
+                target_model = mid
+                break
 
     if not target_model:
         await interaction.response.send_message(
@@ -761,8 +987,83 @@ async def cmd_model(interaction: discord.Interaction, model_id: Optional[str] = 
     client.set_model(interaction.channel_id, target_model)
     display_name = AVAILABLE_MODELS.get(target_model, target_model)
     await interaction.response.send_message(
-        f"✅ Active model updated to: **{display_name}** (`{target_model}`)"
+        f"✅ Active model updated to: **{display_name}** (`{target_model}`) — backend: `{client.get_backend(interaction.channel_id)}`"
     )
+
+
+@client.tree.command(name="backend", description="Switch the agent backend of this channel")
+@app_commands.describe(backend="antigravity (主) or kilo (無料フォールバック先)")
+async def cmd_backend(interaction: discord.Interaction, backend: Optional[str] = None):
+    if not check_auth(interaction):
+        await interaction.response.send_message("❌ Unauthorized.", ephemeral=True)
+        return
+
+    if not backend:
+        current_backend = client.get_backend(interaction.channel_id)
+        status = client.router.backend_status()
+        await interaction.response.send_message(
+            f"現在のバックエンド: **`{current_backend}`** / モデル: **`{client.get_model(interaction.channel_id)}`**\n"
+            f"• `antigravity`: {'✅ 利用可能' if status.get(ANTIGRAVITY_BACKEND) else '❌ 未検出'}\n"
+            f"• `kilo`: {'✅ 利用可能' if status.get(KILO_BACKEND) else '❌ 未検出'}\n"
+            "使用例: `/backend kilo`",
+        )
+        return
+
+    key = backend.strip().lower()
+    if key not in BACKEND_MODELS:
+        await interaction.response.send_message(
+            f"❌ Unknown backend: `{backend}` (antigravity / kilo が選択できます)", ephemeral=True
+        )
+        return
+
+    client.set_backend(interaction.channel_id, key)
+    await interaction.response.send_message(
+        f"✅ バックエンドを **`{key}`** に切り替えました (モデル: `{client.get_model(interaction.channel_id)}`)"
+    )
+
+
+@client.tree.command(name="quota", description="Show the remaining rate limit / quota of the agent backends")
+async def cmd_quota(interaction: discord.Interaction):
+    if not check_auth(interaction):
+        await interaction.response.send_message("❌ Unauthorized.", ephemeral=True)
+        return
+
+    await interaction.response.defer()
+    snapshot = await client.quota_tracker.get(ANTIGRAVITY_BACKEND, WORKSPACE_DIR)
+    client.monitor.record_quota(snapshot)
+    estimated = client.quota_tracker.estimated_remaining_requests(ANTIGRAVITY_BACKEND)
+    embed = build_quota_embed(snapshot, client.get_model(interaction.channel_id), estimated)
+    await interaction.followup.send(embed=embed)
+
+
+@client.tree.command(name="monitor", description="Show the monitor agent status (health, API, errors, rate limits)")
+async def cmd_monitor(interaction: discord.Interaction):
+    if not check_auth(interaction):
+        await interaction.response.send_message("❌ Unauthorized.", ephemeral=True)
+        return
+
+    status = client.monitor.status()
+    embed = discord.Embed(
+        title="🩺 監視エージェント (Monitor Agent)",
+        color=discord.Color.teal(),
+        timestamp=datetime.now(),
+    )
+    embed.description = "\n".join(client.monitor.status_lines())
+    backend_status = client.router.backend_status()
+    embed.add_field(
+        name="🤖 バックエンド可用性",
+        value="\n".join(f"`{name}`: {'✅' if ok else '❌'}" for name, ok in backend_status.items()) or "—",
+        inline=False,
+    )
+    if status["recent_alerts"]:
+        embed.add_field(
+            name="🔔 最新アラート",
+            value="\n".join(
+                f"• [{alert['level']}] {alert['kind']}: {alert['message']}" for alert in status["recent_alerts"]
+            )[:1000],
+            inline=False,
+        )
+    await interaction.response.send_message(embed=embed)
 
 
 @client.tree.command(name="new", description="Start a fresh conversation (reset conversation context)")
@@ -797,12 +1098,30 @@ async def cmd_status(interaction: discord.Interaction):
     embed.add_field(name="🧠 メモリ (RAM)", value=f"`{metrics['memory']}`", inline=True)
     embed.add_field(name="⚡ GPU 稼働状況", value=f"```{metrics['gpu']}```", inline=False)
     embed.add_field(
-        name="🤖 Antigravity 稼働状況",
+        name="🤖 エージェント稼働状況",
         value=(
             f"• 実行中タスク数: **{active_count}** 件 (このチャンネル: **{channel_active}** 件)\n"
+            f"• バックエンド: **`{client.get_backend(interaction.channel_id)}`**\n"
             f"• アクティブモデル: **`{model}`**\n"
             f"• 会話コンテキスト: **`{conv_label}`**\n"
             f"• 作業ディレクトリ: `simulation/v3`"
+        ),
+        inline=False,
+    )
+    quota_snapshot = client.quota_tracker.cached(ANTIGRAVITY_BACKEND)
+    if quota_snapshot is not None:
+        estimated = client.quota_tracker.estimated_remaining_requests(ANTIGRAVITY_BACKEND)
+        quota_text = "\n".join(quota_snapshot.summary_lines())
+        if estimated is not None:
+            quota_text += f"\n🎯 推定利用可能回数: **約 {estimated:.0f} 回**"
+        embed.add_field(name="📊 残りレート制限 / クォータ", value=quota_text[:1000], inline=False)
+    monitor_status = client.monitor.status()
+    embed.add_field(
+        name="🩺 監視エージェント",
+        value=(
+            f"• 成功 **{monitor_status['success_count']}** / エラー **{monitor_status['error_count']}**\n"
+            f"• レート制限 **{monitor_status['rate_limit_count']}** / フォールバック **{monitor_status['fallback_count']}**\n"
+            f"• 監視中: **{'はい' if monitor_status['running'] else 'いいえ'}**"
         ),
         inline=False,
     )
@@ -846,43 +1165,45 @@ async def cmd_abort(interaction: discord.Interaction):
 # Execution Engine (Live Progress & Streaming)
 # ==========================================
 
-async def execute_agy_prompt(
+async def execute_agent_prompt(
     channel: discord.TextChannel | discord.DMChannel,
     prompt: str,
     user: discord.User,
     reply_to_msg: Optional[discord.Message] = None,
     interaction: Optional[discord.Interaction] = None,
+    backend: Optional[str] = None,
+    model: Optional[str] = None,
 ):
     """
-    Runs agy CLI strictly in simulation/v3 workspace in parallel,
-    streams live progress (thinking, subagents, tools), and posts reply.
-    Supports concurrent executions across and within channels without blocking.
+    Runs the selected agent backend strictly in the simulation/v3 workspace in
+    parallel, streams the live progress and posts the reply.
+
+    The router takes care of the HTTP 429 backoff with the automatic
+    ``continue`` and of the automatic fallback from Antigravity to the free
+    Kilo Code model.
     """
     channel_id = channel.id
     task_id = f"{channel_id}_{int(time.time() * 1000)}"
     active_in_channel = len(client.channel_tasks.get(channel_id, set()))
 
-    model = client.get_model(channel_id)
-    conv_id = client.channel_conversations.get(channel_id)
+    selected_backend = backend or client.get_backend(channel_id)
+    selected_model = model or client.get_model(channel_id)
+    stored_session = client.channel_conversations.get(channel_id)
+    session_backend, session_id = decode_session(stored_session)
+    if session_backend != selected_backend:
+        session_id = None
 
-    # Command construction: locked to WORKSPACE_DIR
-    cmd = [
-        "agy",
-        "-p", prompt,
-        "--model", model,
-        "--output-format", "stream-json",
-        "--dangerously-skip-permissions",
-    ]
-    if conv_id:
-        cmd.extend(["--conversation", conv_id])
-
-    logger.info(f"Running Task {task_id} in {WORKSPACE_DIR} (Model: {model}, Conv: {conv_id}): {prompt[:60]}...")
+    logger.info(
+        f"Running Task {task_id} in {WORKSPACE_DIR} "
+        f"(Backend: {selected_backend}, Model: {selected_model}, Session: {session_id}): {prompt[:60]}..."
+    )
 
     status_embed = discord.Embed(
-        title="🚀 Antigravity Agent Running",
+        title=f"🚀 {selected_backend} Agent Running",
         description=(
             f"**Task ID**: `{task_id[-8:]}` | **並列タスク**: {active_in_channel + 1}件目\n"
-            f"**Model**: `{model}`\n"
+            f"**Backend**: `{selected_backend}`\n"
+            f"**Model**: `{selected_model}`\n"
             f"**Workspace**: `simulation/v3`\n"
             f"**Prompt**: {prompt[:120]}{'...' if len(prompt) > 120 else ''}"
         ),
@@ -901,139 +1222,104 @@ async def execute_agy_prompt(
     except Exception:
         pass
 
-    proc = None
-    try:
-        env = os.environ.copy()
-        env["PYTHONIOENCODING"] = "utf-8"
-        proc = await asyncio.create_subprocess_exec(
-            *cmd,
-            cwd=str(WORKSPACE_DIR),
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-            env=env,
-        )
-        client.register_task(channel_id, task_id, proc)
+    current_status_line = "🧠 Thinking / Analyzing codebase..."
+    recent_activity_log: List[str] = []
+    last_edit_time = time.time()
+    used_backend = selected_backend
 
-        accumulated_text = ""
-        current_status_line = "🧠 Thinking / Analyzing codebase..."
-        recent_activity_log: List[str] = []
-        last_edit_time = time.time()
-
-        async def update_live_embed(force: bool = False):
-            nonlocal last_edit_time
-            now = time.time()
-            if force or (now - last_edit_time >= 1.5):
-                try:
-                    status_embed.set_field_at(
-                        0,
-                        name="Current Status",
-                        value=current_status_line[:250],
-                        inline=False,
-                    )
-                    if recent_activity_log:
-                        log_display = "\n".join(recent_activity_log[-3:])
-                        if len(status_embed.fields) > 1:
-                            status_embed.set_field_at(1, name="Recent Activity", value=log_display[:500], inline=False)
-                        else:
-                            status_embed.add_field(name="Recent Activity", value=log_display[:500], inline=False)
-
-                    await status_msg.edit(embed=status_embed)
-                    last_edit_time = now
-                except Exception:
-                    pass
-
-        while True:
-            line = await proc.stdout.readline()
-            if not line:
-                break
-            line_str = line.decode("utf-8", errors="replace").strip()
-            if not line_str:
-                continue
-
+    async def update_live_embed(force: bool = False):
+        nonlocal last_edit_time
+        now = time.time()
+        if force or (now - last_edit_time >= 1.5):
             try:
-                data = json.loads(line_str)
-                event = data.get("event")
+                status_embed.set_field_at(
+                    0,
+                    name="Current Status",
+                    value=current_status_line[:250],
+                    inline=False,
+                )
+                if recent_activity_log:
+                    log_display = "\n".join(recent_activity_log[-3:])
+                    if len(status_embed.fields) > 1:
+                        status_embed.set_field_at(1, name="Recent Activity", value=log_display[:500], inline=False)
+                    else:
+                        status_embed.add_field(name="Recent Activity", value=log_display[:500], inline=False)
 
-                if event == "init":
-                    new_conv_id = data.get("conversation_id")
-                    if new_conv_id:
-                        client.channel_conversations[channel_id] = new_conv_id
+                await status_msg.edit(embed=status_embed)
+                last_edit_time = now
+            except Exception:
+                pass
 
-                elif event == "step_update":
-                    step = data.get("step_update", {})
-                    step_type = step.get("step_type")
-                    state = step.get("state")
-                    tool_name = step.get("tool_name")
+    async def handle_event(event) -> None:
+        nonlocal current_status_line, used_backend
+        if event.kind == "status":
+            current_status_line = event.text[:250]
+            await update_live_embed()
+        elif event.kind == "fallback":
+            used_backend = KILO_BACKEND
+            current_status_line = event.text[:250]
+            recent_activity_log.append(event.text[:120])
+            await update_live_embed(force=True)
+        elif event.kind == "session":
+            if event.session_id:
+                client.channel_conversations[channel_id] = encode_session(used_backend, event.session_id)
+                client.channel_session_backends[channel_id] = used_backend
+        elif event.kind == "text":
+            current_status_line = "✍️ Generating response..."
+            await update_live_embed()
+        elif event.kind == "error":
+            recent_activity_log.append(f"⚠️ {event.text[:100]}")
+            await update_live_embed()
 
-                    # Subagent events
-                    if step_type == "subagent" or tool_name == "invoke_subagent":
-                        sub_info = step.get("subagent_info", {})
-                        subagents = sub_info.get("subagents", [])
-                        if subagents:
-                            sub_types = ", ".join(s.get("type_name", "subagent") for s in subagents)
-                            current_status_line = f"👥 Subagent running: **{sub_types}**"
-                            recent_activity_log.append(f"👥 Subagent `{sub_types}` active")
-                        else:
-                            current_status_line = "👥 Managing subagents..."
-                        await update_live_embed()
+    def _on_process(proc) -> None:
+        """Register (or release) the running process so !abort can stop it."""
+        if proc is None:
+            client.unregister_task(channel_id, task_id)
+        else:
+            client.register_task(channel_id, task_id, proc)
 
-                    # Tool execution events
-                    elif step_type == "tool":
-                        info = step.get("tool_info", {})
-                        params = info.get("parameters", {})
-                        if tool_name == "run_command":
-                            cmd_str = params.get("CommandLine", "")[:60]
-                            current_status_line = f"⚙️ Running command: `{cmd_str}`"
-                        elif tool_name in ("view_file", "replace_file_content", "write_to_file"):
-                            target_file = params.get("TargetFile") or params.get("AbsolutePath", "")
-                            base_name = Path(target_file).name if target_file else "file"
-                            current_status_line = f"📝 File op ({tool_name}): `{base_name}`"
-                        elif tool_name == "invoke_subagent":
-                            current_status_line = "👥 Spawning subagents..."
-                        else:
-                            current_status_line = f"⚙️ Tool: `{tool_name}`"
+    request = BridgeRequest(
+        prompt=prompt,
+        backend=selected_backend,
+        model=selected_model,
+        session_id=session_id,
+        continue_session=False,
+        timeout=TASK_TIMEOUT_SECONDS,
+        on_process=_on_process,
+    )
 
-                        if state == "DONE":
-                            recent_activity_log.append(f"✅ {current_status_line}")
-                        await update_live_embed()
-
-                    # Agent response streaming / thinking
-                    elif step_type == "agent_response":
-                        delta = step.get("text_delta", "")
-                        accumulated_text += delta
-                        usage = step.get("usage", {})
-                        thinking_tokens = usage.get("thinking_tokens", 0)
-                        if thinking_tokens > 0:
-                            current_status_line = f"🧠 Thinking ({thinking_tokens} tokens reasoning)..."
-                        else:
-                            current_status_line = "✍️ Generating response..."
-                        await update_live_embed()
-
-                elif event == "result":
-                    res = data.get("result", {})
-                    resp_text = res.get("response")
-                    if resp_text:
-                        accumulated_text = resp_text
-
-            except json.JSONDecodeError:
-                accumulated_text += line_str + "\n"
-
-        stdout, stderr = await proc.communicate()
-        if proc.returncode != 0 and not accumulated_text.strip():
-            err_msg = stderr.decode("utf-8", errors="replace").strip()
-            accumulated_text = f"❌ Process exited with code {proc.returncode}:\n```\n{err_msg[:1800]}\n```"
-
+    outcome: Optional[BridgeOutcome] = None
+    accumulated_text = ""
+    try:
+        outcome = await client.router.execute(request, on_event=handle_event)
+        accumulated_text = outcome.text
     except asyncio.CancelledError:
-        if proc and proc.returncode is None:
-            proc.kill()
+        client.abort_tasks(task_id=task_id)
         await channel.send("🛑 Task was cancelled.")
         return
-    except Exception as e:
+    except Exception as exc:
         err_id = make_error_id()
-        logger.error(f"Error running agy [error_id={err_id}]: {e}", exc_info=True)
+        logger.error(f"Error running the agent [error_id={err_id}]: {exc}", exc_info=True)
         accumulated_text = f"❌ Internal error (error_id={err_id}). 詳細はサーバーログを参照してください。"
-    finally:
-        client.unregister_task(channel_id, task_id)
+
+    if outcome is not None:
+        if outcome.session_id:
+            client.channel_conversations[channel_id] = encode_session(outcome.backend, outcome.session_id)
+            client.channel_session_backends[channel_id] = outcome.backend
+        if not outcome.ok and not accumulated_text.strip():
+            accumulated_text = (
+                f"❌ `{outcome.backend}` が処理を完了できませんでした: {outcome.error or outcome.status}"
+            )
+        if outcome.fallback_used:
+            fallback_note = (
+                f"🔀 **Kilo Code へフォールバック**しました "
+                f"(Antigravity: {outcome.fallback_reason}) — モデル: `{outcome.model}`"
+            )
+            recent_activity_log.append(fallback_note[:120])
+            try:
+                await channel.send(fallback_note)
+            except Exception:
+                pass
 
     # Clean up status message
     try:
@@ -1067,6 +1353,24 @@ async def execute_agy_prompt(
             await channel.send(content=preview, file=discord_file, view=reply_view)
 
 
+async def execute_agy_prompt(
+    channel: discord.TextChannel | discord.DMChannel,
+    prompt: str,
+    user: discord.User,
+    reply_to_msg: Optional[discord.Message] = None,
+    interaction: Optional[discord.Interaction] = None,
+):
+    """Backwards compatible alias of :func:`execute_agent_prompt`."""
+    await execute_agent_prompt(
+        channel,
+        prompt,
+        user,
+        reply_to_msg=reply_to_msg,
+        interaction=interaction,
+    )
+
+
+
 # ==========================================
 # Text Message & Prefix Commands Handler
 # ==========================================
@@ -1085,7 +1389,10 @@ async def on_message(message: discord.Message):
         cmd_name = parts[0].lower() if parts else ""
         cmd_arg = parts[1].strip() if len(parts) > 1 else ""
 
-        valid_cmds = ("chat", "chats", "history", "resume", "model", "m", "models", "new", "abort", "help", "status", "chrome")
+        valid_cmds = (
+            "chat", "chats", "history", "resume", "model", "m", "models", "new", "abort",
+            "help", "status", "chrome", "quota", "monitor", "backend",
+        )
         if cmd_name in valid_cmds:
             if not client.is_authorized(message.author.id, message.channel.id):
                 await message.reply("❌ Unauthorized: You do not have permission to control Antigravity.")
@@ -1111,12 +1418,29 @@ async def on_message(message: discord.Message):
                 embed.add_field(name="🧠 メモリ (RAM)", value=f"`{metrics['memory']}`", inline=True)
                 embed.add_field(name="⚡ GPU 稼働状況", value=f"```{metrics['gpu']}```", inline=False)
                 embed.add_field(
-                    name="🤖 Antigravity 稼働状況",
+                    name="🤖 エージェント稼働状況",
                     value=(
                         f"• 実行中タスク数: **{active_count}** 件 (このチャンネル: **{channel_active}** 件)\n"
+                        f"• バックエンド: **`{client.get_backend(message.channel.id)}`**\n"
                         f"• アクティブモデル: **`{model}`**\n"
                         f"• 会話コンテキスト: **`{conv_label}`**\n"
                         f"• 作業ディレクトリ: `simulation/v3`"
+                    ),
+                    inline=False,
+                )
+                quota_snapshot = client.quota_tracker.cached(ANTIGRAVITY_BACKEND)
+                if quota_snapshot is not None:
+                    estimated = client.quota_tracker.estimated_remaining_requests(ANTIGRAVITY_BACKEND)
+                    quota_text = "\n".join(quota_snapshot.summary_lines())
+                    if estimated is not None:
+                        quota_text += f"\n🎯 推定利用可能回数: **約 {estimated:.0f} 回**"
+                    embed.add_field(name="📊 残りレート制限 / クォータ", value=quota_text[:1000], inline=False)
+                monitor_status = client.monitor.status()
+                embed.add_field(
+                    name="🩺 監視エージェント",
+                    value=(
+                        f"• 成功 **{monitor_status['success_count']}** / エラー **{monitor_status['error_count']}**\n"
+                        f"• レート制限 **{monitor_status['rate_limit_count']}** / フォールバック **{monitor_status['fallback_count']}**"
                     ),
                     inline=False,
                 )
@@ -1149,7 +1473,10 @@ async def on_message(message: discord.Message):
                 return
 
             elif cmd_name in ("chats", "history"):
-                sessions = get_recent_conversations(10)
+                agy_sessions = get_recent_conversations(10)
+                kilo_sessions = get_recent_kilo_sessions(10)
+                sessions = agy_sessions + kilo_sessions
+                sessions.sort(key=lambda s: s["mtime"], reverse=True)
                 current_conv = client.channel_conversations.get(message.channel.id)
                 if not sessions:
                     await message.reply("ℹ️ No previous conversation history found in workspace.")
@@ -1160,9 +1487,12 @@ async def on_message(message: discord.Message):
                     color=discord.Color.teal(),
                 )
                 for s in sessions:
-                    prefix = "👉 **[ACTIVE]** " if (s["id"] == current_conv or s["short_id"] == current_conv) else "• "
+                    stored = encode_session(s.get("backend", ANTIGRAVITY_BACKEND), s["id"])
+                    is_active = (stored == current_conv or s["short_id"] == current_conv)
+                    prefix = "👉 **[ACTIVE]** " if is_active else "• "
+                    backend_tag = "🟦" if s.get("backend") == KILO_BACKEND else "🟧"
                     embed.add_field(
-                        name=f"{prefix}`{s['short_id']}` ({s['date_str']})",
+                        name=f"{prefix}{backend_tag} `{s['short_id']}` ({s['date_str']})",
                         value=s["prompt"] or "(No prompt)",
                         inline=False,
                     )
@@ -1175,49 +1505,130 @@ async def on_message(message: discord.Message):
                     await message.reply("⚠️ Please specify a session ID. Example: `!resume 8678b84b`")
                     return
                 cid = cmd_arg.strip()
-                sessions = get_recent_conversations(30)
+                agy_sessions = get_recent_conversations(30)
+                kilo_sessions = get_recent_kilo_sessions(30)
                 matched_id = cid
-                for s in sessions:
+                matched_backend = ANTIGRAVITY_BACKEND
+                for s in agy_sessions + kilo_sessions:
                     if s["id"].startswith(cid):
                         matched_id = s["id"]
+                        matched_backend = s.get("backend", ANTIGRAVITY_BACKEND)
                         break
-                client.channel_conversations[message.channel.id] = matched_id
-                await message.reply(f"✅ Resumed conversation **`{matched_id[:8]}`** (`{matched_id}`). Next messages will continue this session.")
+                client.channel_conversations[message.channel.id] = encode_session(matched_backend, matched_id)
+                client.channel_session_backends[message.channel.id] = matched_backend
+                await message.reply(f"✅ Resumed conversation **`{matched_id[:8]}`** (`{matched_id}`) on `{matched_backend}`. Next messages will continue this session.")
                 return
 
             elif cmd_name in ("model", "m"):
                 if not cmd_arg:
                     current = client.get_model(message.channel.id)
                     view = ModelSelectView(current, on_model_selected)
-                    await message.reply(f"Current active model: **`{current}`**\nSelect a new model below:", view=view)
+                    await message.reply(
+                        f"Current active model: **`{current}`** (backend: `{client.get_backend(message.channel.id)}`)\n"
+                        "Select a new model below:",
+                        view=view,
+                    )
                     return
-                target_model = None
-                for mid in AVAILABLE_MODELS:
-                    if cmd_arg.lower() in mid.lower():
-                        target_model = mid
-                        break
+                lowered = cmd_arg.lower().strip()
+                target_model = lowered if lowered in AVAILABLE_MODELS else None
+                if target_model is None:
+                    for mid in AVAILABLE_MODELS:
+                        if lowered in mid.lower():
+                            target_model = mid
+                            break
                 if not target_model:
                     await message.reply(f"❌ Unknown model: `{cmd_arg}`\nAvailable: {', '.join(f'`{m}`' for m in AVAILABLE_MODELS.keys())}")
                     return
                 client.set_model(message.channel.id, target_model)
-                await message.reply(f"✅ Active model updated to: **{AVAILABLE_MODELS[target_model]}** (`{target_model}`)")
+                await message.reply(
+                    f"✅ Active model updated to: **{AVAILABLE_MODELS[target_model]}** (`{target_model}`) "
+                    f"— backend: `{client.get_backend(message.channel.id)}`"
+                )
                 return
 
             elif cmd_name == "models":
                 current = client.get_model(message.channel.id)
                 embed = discord.Embed(
-                    title="🤖 Available Antigravity Models",
-                    description=f"Current active model in this channel: **`{current}`**\nWorkspace: `simulation/v3`",
+                    title="🤖 利用可能モデル (Antigravity + Kilo Code)",
+                    description=(
+                        f"現在のバックエンド: **`{client.get_backend(message.channel.id)}`** / "
+                        f"アクティブモデル: **`{current}`**\nWorkspace: `simulation/v3`\n"
+                        "Kilo Code の既定は**無料モデル** (`kilo/kilo-auto/free`) です。"
+                    ),
                     color=discord.Color.blue(),
                 )
-                for mid, name in AVAILABLE_MODELS.items():
-                    prefix = "👉 " if mid == current else "• "
-                    embed.add_field(name=f"{prefix}{name}", value=f"`{mid}`", inline=False)
+                for backend_name, catalog in BACKEND_MODELS.items():
+                    lines = []
+                    for mid, name in catalog.items():
+                        prefix = "👉 " if mid == current else "• "
+                        free_mark = " 🆓" if "free" in mid.split("/")[-1] else ""
+                        lines.append(f"{prefix}{name}{free_mark} — `{mid}`")
+                    embed.add_field(
+                        name=f"{'🟧' if backend_name == ANTIGRAVITY_BACKEND else '🟦'} {backend_name}",
+                        value="\n".join(lines)[:1000],
+                        inline=False,
+                    )
+                await message.reply(embed=embed)
+                return
+
+            elif cmd_name == "backend":
+                if not cmd_arg:
+                    status = client.router.backend_status()
+                    await message.reply(
+                        f"現在のバックエンド: **`{client.get_backend(message.channel.id)}`** / "
+                        f"モデル: **`{client.get_model(message.channel.id)}`**\n"
+                        f"• `antigravity`: {'✅ 利用可能' if status.get(ANTIGRAVITY_BACKEND) else '❌ 未検出'}\n"
+                        f"• `kilo`: {'✅ 利用可能' if status.get(KILO_BACKEND) else '❌ 未検出'}\n"
+                        "使用例: `!backend kilo`"
+                    )
+                    return
+                key = cmd_arg.strip().lower()
+                if key not in BACKEND_MODELS:
+                    await message.reply(f"❌ Unknown backend: `{cmd_arg}` (antigravity / kilo が選択できます)")
+                    return
+                client.set_backend(message.channel.id, key)
+                await message.reply(
+                    f"✅ バックエンドを **`{key}`** に切り替えました (モデル: `{client.get_model(message.channel.id)}`)"
+                )
+                return
+
+            elif cmd_name == "quota":
+                snapshot = await client.quota_tracker.get(ANTIGRAVITY_BACKEND, WORKSPACE_DIR)
+                client.monitor.record_quota(snapshot)
+                estimated = client.quota_tracker.estimated_remaining_requests(ANTIGRAVITY_BACKEND)
+                embed = build_quota_embed(snapshot, client.get_model(message.channel.id), estimated)
+                await message.reply(embed=embed)
+                return
+
+            elif cmd_name == "monitor":
+                status = client.monitor.status()
+                embed = discord.Embed(
+                    title="🩺 監視エージェント (Monitor Agent)",
+                    color=discord.Color.teal(),
+                    timestamp=datetime.now(),
+                )
+                embed.description = "\n".join(client.monitor.status_lines())
+                backend_status = client.router.backend_status()
+                embed.add_field(
+                    name="🤖 バックエンド可用性",
+                    value="\n".join(f"`{name}`: {'✅' if ok else '❌'}" for name, ok in backend_status.items()) or "—",
+                    inline=False,
+                )
+                if status["recent_alerts"]:
+                    embed.add_field(
+                        name="🔔 最新アラート",
+                        value="\n".join(
+                            f"• [{alert['level']}] {alert['kind']}: {alert['message']}"
+                            for alert in status["recent_alerts"]
+                        )[:1000],
+                        inline=False,
+                    )
                 await message.reply(embed=embed)
                 return
 
             elif cmd_name == "new":
                 client.channel_conversations[message.channel.id] = None
+                client.channel_session_backends.pop(message.channel.id, None)
                 await message.reply("🔄 Conversation reset. Next message will start a fresh session in `simulation/v3`.")
                 return
 
@@ -1231,13 +1642,16 @@ async def on_message(message: discord.Message):
 
             elif cmd_name == "help":
                 await message.reply(
-                    "**Antigravity Remote Bridge Commands (`simulation/v3`):**\n"
-                    "• `!chat <prompt>`: Send prompt to agent (並列実行対応)\n"
-                    "• `!status` (or `/status`): CPU・メモリ・GPU・タスク稼働状況の表示\n"
+                    "**Agent Remote Bridge Commands (`simulation/v3`):**\n"
+                    "• `!chat <prompt>`: Send prompt to agent (並列実行・429自動継続・自動フォールバック対応)\n"
+                    "• `!status` (or `/status`): CPU・メモリ・GPU・タスク・クォータ・監視状況の表示\n"
+                    "• `!quota` (or `/quota`): 残りのレート制限（利用可能回数・クォータ残量）の表示\n"
+                    "• `!monitor` (or `/monitor`): 監視エージェントの稼働状況（API応答・エラー・レート制限）\n"
+                    "• `!backend [antigravity|kilo]` (or `/backend`): 実行バックエンドの切替\n"
                     "• `!chrome [url]` (or `/chrome`): ローカル環境で Google Chrome を起動\n"
                     "• `!chats` (or `!history`): View recent conversation list & switch session\n"
                     "• `!resume <id>`: Resume previous session by ID (e.g. `!resume 8678b84b`)\n"
-                    "• `!model` or `!m [name]`: Change or view model\n"
+                    "• `!model` or `!m [name]`: Change or view model (Kilo Code は `kilo/kilo-auto/free`)\n"
                     "• `!models`: List all available models\n"
                     "• `!new`: Reset conversation context (start fresh)\n"
                     "• `!abort`: Terminate active tasks in this channel\n"
@@ -1267,9 +1681,10 @@ async def on_message(message: discord.Message):
         current_conv = client.channel_conversations.get(message.channel.id)
         conv_label = current_conv[:8] if current_conv else "New Session"
         await message.reply(
-            f"👋 Antigravity Remote Bridge is ready in `simulation/v3`.\n"
+            f"👋 Agent Remote Bridge is ready in `simulation/v3`.\n"
+            f"Backend: **`{client.get_backend(message.channel.id)}`** | "
             f"Active Model: **`{current_model}`** | Session: **`{conv_label}`**\n"
-            f"Send me any task, or type `!help` / `!status` / `!chrome` / `!chats` to manage sessions."
+            f"Send me any task, or type `!help` / `!status` / `!quota` / `!monitor` / `!chats` to manage sessions."
         )
         return
 
@@ -1310,7 +1725,7 @@ def main():
         sys.exit(1)
 
     try:
-        print("Starting Discord Remote Bridge for Antigravity (Workspace: simulation/v3)...")
+        print("Starting Discord Remote Bridge for Antigravity + Kilo Code (Workspace: simulation/v3)...")
         client.run(DISCORD_BOT_TOKEN)
     finally:
         release_instance_lock()

@@ -562,6 +562,7 @@ def _stress(xp: Any, core: Dict[str, Any], params: Any) -> Any:
         root_chord_m=params.root_chord_m,
         thickness_m=params.thickness_m,
         z_gain=params.z_gain,
+        dihedral_rad=params.dihedral_rad,
         chord_scale=params.chord_scale,
         tip_factor=params.tip_factor,
     )
@@ -670,6 +671,7 @@ def _make_step(
             root_chord_m=params.root_chord_m,
             thickness_m=params.thickness_m,
             z_gain=params.z_gain,
+            dihedral_rad=params.dihedral_rad,
             chord_scale=params.chord_scale,
             tip_factor=params.tip_factor,
         )

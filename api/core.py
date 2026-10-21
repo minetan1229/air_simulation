@@ -239,6 +239,24 @@ def merge_overlay(base: Dict[str, Any], overlay: Any, field: str) -> Dict[str, A
 #: lock-free helpers below, so no endpoint nests a second acquisition.
 SIMULATION_LOCK = threading.RLock()
 
+#: Mutex that guards a *trajectory* as a whole.
+#:
+#: A trajectory is a sequence of integration steps that must not be interleaved
+#: with another trajectory and during which the airframe configuration must not
+#: change.  Holding :data:`SIMULATION_LOCK` for the whole trajectory would
+#: serialise the entire API for the whole flight (a 240 step request blocks
+#: every other caller for its full wall time), so the two concerns are split:
+#:
+#: * :data:`SIMULATION_TRAJECTORY_LOCK` is held for the whole trajectory, so two
+#:   trajectories never interleave and the configuration cannot change midway.
+#: * :data:`SIMULATION_LOCK` is only held for the short critical sections
+#:   (one integration step, one state mutation, one history read), so read-only
+#:   endpoints keep answering while a long trajectory runs.
+#:
+#: Acquisition order is always *trajectory lock first, state lock second*, so the
+#: two mutexes cannot deadlock.
+SIMULATION_TRAJECTORY_LOCK = threading.RLock()
+
 
 class Session:
     """Server-side simulation state shared by the step/reset endpoints."""

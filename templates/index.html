@@ -50,7 +50,7 @@
       </div>
       <div class="readout readout-ghost">
         <span class="readout-key">GHOST</span>
-        <span class="readout-val num" id="top-ghost" title="前回の到達飛距離・滞空時間">—</span>
+        <span class="readout-val num" id="top-ghost" title="前回の飛距離・滞空時間">—</span>
       </div>
       <div class="readout readout-clickable readout-solver" id="readout-solver" title="物理演算GPU情報 (クリックで診断表示)">
         <span class="readout-key">SOLVER</span>
@@ -183,6 +183,7 @@
           <button class="group-head" type="button" aria-expanded="true">
             <span class="group-name">折り紙ジオメトリ</span><span class="group-en">ORIGAMI</span>
             <span class="group-note num" id="origami-summary">—</span>
+            <span class="group-note num" id="origami-shape-warning" role="status"></span>
             <span class="group-chev" aria-hidden="true"></span>
           </button>
           <div class="group-body" data-host="origami"></div>
@@ -198,7 +199,7 @@
 
         <section class="group" data-group="throw" open>
           <button class="group-head" type="button" aria-expanded="true">
-            <span class="group-name">投擲・発射設定</span><span class="group-en">THROW & LAUNCH</span>
+            <span class="group-name">投擲設定</span><span class="group-en">THROW & LAUNCH</span>
             <span class="group-chev" aria-hidden="true"></span>
           </button>
           <div class="group-body">
@@ -400,7 +401,7 @@
       <!-- クイック投擲ドックは撤去済み。
            発射はトップレール (btn-top-launch)、再生 / 最初へはトランスポートバー
            (tp-play / tp-reset)、100機一括は btn-top-gpu-ensemble に一本化し、
-           投げ方パラメータは左レールの「投擲・発射設定」だけを正とする。 -->
+           投げ方パラメータは左レールの「投擲設定」だけを正とする。 -->
 
     </section>
 
@@ -539,7 +540,7 @@
             <h4 class="wb-h">飛行結果の比較<small>BEFORE vs AFTER</small></h4>
             <div class="inv-comp-grid">
               <div class="inv-comp-card">
-                <div class="inv-comp-label">水平到達距離</div>
+                <div class="inv-comp-label">水平飛距離</div>
                 <div class="inv-comp-row">
                   <span class="muted">現在:</span> <span class="num" id="inv-comp-dist-base">—</span>
                   <span class="inv-arrow">&rarr;</span>
@@ -1137,7 +1138,7 @@
     <div class="modal-card">
       <h3>操作</h3>
       <dl class="keys">
-        <dt>Space / Enter</dt><dd>投げる (発射) / 一時停止 / 再生</dd>
+        <dt>Space / Enter</dt><dd>投げる / 一時停止 / 再生</dd>
         <dt>← →</dt><dd>1 フレーム送り / 戻し</dd>
         <dt>, .</dt><dd>速度を落とす / 上げる</dd>
         <dt>R</dt><dd>リセット</dd>

@@ -3,7 +3,8 @@
 The tests cover the guarantees the renderer relies on:
 
 * the fold programme is isometric (the paper never stretches),
-* the mesh is a closed, non-degenerate solid with valid normals,
+* the mesh is a non-degenerate double-sided sheet whose triangles are all
+  wound consistently with the surface they belong to,
 * overlapping layers are separated by at least one layer pitch, which is
   what keeps the depth buffer free of z-fighting,
 * the folded model never grows larger than the sheet it was cut from,
@@ -23,6 +24,39 @@ from physics.origami_domain import Vec3
 
 ARCHETYPES = list(od.ARCHETYPES)
 ALPHAS = (0.0, 0.25, 0.5, 0.75, 1.0)
+
+
+def test_no_triangle_is_wound_against_its_surface_normal():
+    """Every triangle must be wound along the normal of its own surface.
+
+    The skins, the rolled creases and the cut walls are stitched from
+    independently computed directions, so a triangle can end up wound the
+    wrong way round and shade as if it were seen from the back (§P2-18).
+    """
+    import numpy as np
+
+    for archetype in ARCHETYPES:
+        mesh = od.build_mesh(archetype, 1.0)
+        positions = np.asarray(mesh.positions, dtype=float)
+        normals = np.asarray(mesh.normals, dtype=float)
+        faces = np.asarray(mesh.indices, dtype=int).reshape(-1, 3)
+        a, b, c = positions[faces[:, 0]], positions[faces[:, 1]], positions[faces[:, 2]]
+        geometric = np.cross(b - a, c - a)
+        alignment = np.einsum("ij,ij->i", geometric, normals[faces[:, 0]])
+        inverted = int((alignment < 0.0).sum())
+        assert inverted == 0, f"{archetype}: {inverted} inverted triangles"
+
+
+def test_cut_edges_have_area():
+    """The cut edges of the sheet are closed by walls with a real area."""
+    import numpy as np
+
+    mesh = od.build_mesh(od.ARCHETYPE_DART, 1.0)
+    positions = np.asarray(mesh.positions, dtype=float)
+    faces = np.asarray(mesh.indices, dtype=int).reshape(-1, 3)
+    a, b, c = positions[faces[:, 0]], positions[faces[:, 1]], positions[faces[:, 2]]
+    areas = 0.5 * np.linalg.norm(np.cross(b - a, c - a), axis=1)
+    assert float(areas.min()) > 0.0
 
 
 @pytest.fixture()

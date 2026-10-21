@@ -43,11 +43,14 @@ import multiprocessing
 import os
 import pickle
 import atexit
+import logging
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, Union, cast
 
 import numpy as np
 ProgressCallback = Callable[[int, int, Any], None]
+
+log = logging.getLogger("paper_airplane.parallel_engine")
 
 from .config_schema import (
     LAPSE_RATE_ISA,
@@ -343,11 +346,11 @@ def _release_cached_pool() -> None:
     try:
         pool.close()
     except Exception:
-        pass
+        log.warning("closing the cached spawn pool failed", exc_info=True)
     try:
         pool.join()
     except Exception:
-        pass
+        log.warning("joining the cached spawn pool failed", exc_info=True)
 
 
 atexit.register(_release_cached_pool)
@@ -367,6 +370,7 @@ def _get_cached_pool(workers: int) -> Any:
     pool = context.Pool(processes=workers, initializer=_pool_init, initargs=(-1,))
     _CACHED_POOL = pool
     _CACHED_POOL_WORKERS = workers
+    log.info("spawn pool created with %d workers", workers)
     return pool
 
 
@@ -767,6 +771,7 @@ def evaluate_case(case: Dict[str, Any]) -> Dict[str, Any]:
                     limitations=("Aerodynamic and material coefficients require experimental calibration.",),
                 )
         except Exception as exc:
+            log.warning("6-DoF evaluation failed, reporting an empty payload", exc_info=True)
             return empty_payload(
                 status="failed",
                 error=str(exc),
@@ -1581,12 +1586,20 @@ def gpu_batch_evaluate_cases(
     and batch parameter sweeps.
 
     The device path is **kernel-launch bound**, not compute bound: one
-    integration step issues ~8e3 CuPy kernel launches (six rigid-body state
+    integration step issues ~5.2e3 CuPy kernel launches (six rigid-body state
     evaluations of a few hundred element-wise operations each), so the
-    per-step wall clock barely depends on the batch size.  On Windows/WDDM
-    (RTX 4060 Laptop, CuPy 14.2) a step costs ~130 ms for a batch of one
-    and ~127 ms for a batch of 256, which makes the device path slower than
-    the CPU path for every batch size an optimiser actually runs.
+    per-step wall clock barely depends on the batch size.  The step is
+    therefore captured into a **CUDA graph**
+    (:func:`physics.gpu_dynamics.simulate_batch`) and replayed with a single
+    launch: on Windows/WDDM (RTX 4060 Laptop, CuPy 14.2) a step costs
+    ~15 ms for a batch of 32 instead of the ~340 ms the eager path needs,
+    a speed-up of ~22x.  The captured step performs the same operations in
+    the same order as the eager step, so the numbers are the same numbers.
+
+    The flight summary is accumulated on the **reporting grid** of the
+    canonical 6-DoF path (a sample every ``dt_max`` seconds, the launch
+    sample included), so the payload of the device path and the payload of
+    the reference path measure the same statistic of the same trajectory.
     """
     import numpy as np
 
@@ -1768,6 +1781,10 @@ def evaluate_cases_on_device(
         landed = _to_host(xp, batch["landed"])
         crashed = _to_host(xp, batch["crashed"])
         stall_margin = _to_host(xp, batch["stall_margin"])
+        # The endpoint of the measured path length: the last recorded
+        # sample of the reporting grid.
+        last_x = _to_host(xp, batch.get("last_recorded_x", state[:, 0]))
+        last_y = _to_host(xp, batch.get("last_recorded_y", state[:, 1]))
 
         for position, index in enumerate(members):
             duration = group_durations[position]
@@ -1790,17 +1807,21 @@ def evaluate_cases_on_device(
             # cannot carry the contract it advertises, so only the echoed
             # request fields keep their fixed-point form.
             # The range fields describe the **straight-line** distance from
-            # the release point to the final point, the way the 6-DoF path
-            # reports them (``horizontal_range_m`` is the hypotenuse of the
-            # range, ``landing_distance_m`` its published alias).  The
-            # device path used to publish the accumulated path under those
-            # names, so the same field meant two different things depending
-            # on the backend.
-            range_x = abs(float(state[position, 0]) - float(initial[position, 0]))
-            range_y = abs(float(state[position, 1]) - float(initial[position, 1]))
+            # the release point to the last recorded sample, the way the 6-DoF
+            # path reports them (``flight_sim.evaluate_flight``: "straight-line
+            # horizontal range from the launch point to the final recorded
+            # position"; ``horizontal_range_m`` is the hypotenuse of the
+            # range, ``landing_distance_m`` its published alias).  The device
+            # path used to publish the accumulated path under those names, so
+            # the same field meant two different things depending on the
+            # backend, and the range was measured to the touchdown while the
+            # path length ended at the last recorded sample -- two different
+            # endpoints for one flight.
+            range_x = abs(float(last_x[position]) - float(initial[position, 0]))
+            range_y = abs(float(last_y[position]) - float(initial[position, 1]))
             horizontal_range = math.hypot(
-                float(state[position, 0]) - float(initial[position, 0]),
-                float(state[position, 1]) - float(initial[position, 1]),
+                float(last_x[position]) - float(initial[position, 0]),
+                float(last_y[position]) - float(initial[position, 1]),
             )
             entry = {
                 "distance_m": float(distance[position]),

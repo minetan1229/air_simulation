@@ -148,9 +148,11 @@ class ErrorLoggerDomain:
                 pass
 
 
-            # Write to plain text log
+            # Write to plain text log.  The record id is part of the line so a
+            # stderr entry can be joined with the matching JSONL record and
+            # with the ``error_id`` of the physics payload (§P3-6).
             try:
-                text_msg = f"[{record.category}] {record.message}"
+                text_msg = f"[{record.id}] [{record.category}] {record.message}"
                 if record.path:
                     text_msg += f" (Path: {record.method or 'GET'} {record.path})"
                 if record.traceback_str:

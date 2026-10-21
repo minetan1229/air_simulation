@@ -8,6 +8,7 @@ paths report the same number.
 
 from __future__ import annotations
 
+import math
 import sys
 from pathlib import Path
 
@@ -60,6 +61,7 @@ def main() -> int:
                 ),
                 thickness_m=thickness,
                 z_gain=z_gain,
+                dihedral_rad=math.radians(cfg.dihedral_deg),
                 chord_scale=stress_domain.te_fold_chord_scale(np, cfg.fold_trailing_deg),
                 tip_factor=tip_factor,
             )
