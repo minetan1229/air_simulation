@@ -1,0 +1,279 @@
+/*
+ * ga-research.css — the autonomous research mode of the console.
+ *
+ * It only adds what the console does not have yet: the layout of the
+ * research mode, the folding viewer (step slider, crease pattern, recipe)
+ * and the research monitor.  Every colour, font and control reuses the
+ * design tokens of console.css.
+ */
+
+/* ------------------------------------------------------------------ */
+/* Top rail: mode switch                                              */
+/* ------------------------------------------------------------------ */
+
+.toprail-mode-group {
+  padding: 0 8px;
+  border-right: 1px solid #2c2f34;
+}
+.toprail-mode-group .fleet-mode-selector .btn {
+  padding: 0 11px;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+/* ------------------------------------------------------------------ */
+/* Research mode layout                                               */
+/* ------------------------------------------------------------------ */
+
+body[data-mode="research"] .console {
+  grid-template-rows: var(--top-h) minmax(0, 1fr) auto;
+}
+body[data-mode="research"] .stage {
+  grid-template-columns: minmax(0, 1fr);
+}
+body[data-mode="research"] .rail-left,
+body[data-mode="research"] .rail-right,
+body[data-mode="research"] .transport,
+body[data-mode="research"] .toprail-flight-group,
+body[data-mode="research"] .flight-telemetry-hud {
+  display: none;
+}
+body[data-mode="research"] .wb-panes {
+  height: min(440px, 54vh);
+}
+
+/* ------------------------------------------------------------------ */
+/* Folding viewer                                                     */
+/* ------------------------------------------------------------------ */
+
+.ga-step-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 6px 0 3px;
+}
+.ga-step-row input[type="range"] {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 4px;
+  cursor: pointer;
+  accent-color: var(--accent);
+}
+.ga-step-label {
+  font-family: var(--mono);
+  font-size: 10.5px;
+  color: var(--ink-2);
+  margin-bottom: 2px;
+}
+.ga-marker-switch {
+  margin: 2px 0 4px;
+}
+.ga-marker-switch .switch-label {
+  font-size: 11px;
+  color: var(--ink-2);
+}
+
+.ga-crease-host {
+  border: 1px solid var(--line);
+  background: #fff;
+  padding: 6px;
+  overflow: auto;
+  max-height: 340px;
+}
+.ga-crease-host svg {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+.ga-crease-host [data-step] {
+  cursor: pointer;
+}
+.ga-crease-host line.ga-crease-active {
+  stroke-width: 3.6;
+}
+.ga-crease-host text.ga-crease-active {
+  font-weight: 700;
+}
+
+.ga-recipe-wrap {
+  max-height: 250px;
+  overflow: auto;
+  border: 1px solid var(--line);
+  background: #fff;
+}
+.ga-recipe-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 10.5px;
+}
+.ga-recipe-table th,
+.ga-recipe-table td {
+  border-bottom: 1px solid var(--line);
+  padding: 3px 5px;
+  text-align: left;
+  vertical-align: top;
+}
+.ga-recipe-table th {
+  position: sticky;
+  top: 0;
+  background: var(--surface-2);
+  font-family: var(--mono);
+  font-size: 9px;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+  font-weight: 400;
+}
+.ga-recipe-table tbody tr {
+  cursor: pointer;
+}
+.ga-recipe-table tbody tr:hover {
+  background: var(--accent-bg);
+}
+.ga-recipe-table tbody tr.is-active {
+  background: var(--accent-bg);
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+.ga-recipe-line {
+  font-family: var(--mono);
+  font-size: 9.5px;
+  color: var(--ink-2);
+}
+
+/* ------------------------------------------------------------------ */
+/* Research monitor                                                   */
+/* ------------------------------------------------------------------ */
+
+.ga-island-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 10.5px;
+}
+.ga-island-table th,
+.ga-island-table td {
+  border-bottom: 1px solid var(--line);
+  padding: 3px 5px;
+  text-align: right;
+}
+.ga-island-table th:first-child,
+.ga-island-table td:first-child {
+  text-align: left;
+}
+.ga-island-table th {
+  font-family: var(--mono);
+  font-size: 9px;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+  font-weight: 400;
+}
+
+.ga-journal {
+  max-height: 300px;
+  overflow: auto;
+  border: 1px solid var(--line);
+  background: #fff;
+  font-size: 10.5px;
+}
+.ga-journal-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px 9px;
+  align-items: baseline;
+  padding: 3px 6px;
+  border-bottom: 1px solid var(--line);
+}
+.ga-journal-time {
+  color: var(--muted);
+  font-size: 9.5px;
+}
+.ga-journal-gen,
+.ga-journal-island {
+  font-family: var(--mono);
+  font-size: 9.5px;
+  color: var(--ink-2);
+}
+.ga-journal-decision {
+  font-weight: 600;
+  color: var(--ink);
+}
+.ga-journal-changes {
+  font-family: var(--mono);
+  font-size: 9.5px;
+}
+
+/* ------------------------------------------------------------------ */
+/* Key/value blocks and notices                                       */
+/* ------------------------------------------------------------------ */
+
+.ga-kv {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 2px 0;
+  border-bottom: 1px dotted var(--line);
+  font-size: 11px;
+}
+.ga-kv:last-child {
+  border-bottom: 0;
+}
+.ga-kv-k {
+  color: var(--ink-2);
+  white-space: nowrap;
+}
+.ga-kv-v {
+  text-align: right;
+  font-weight: 600;
+  color: var(--ink);
+  overflow-wrap: anywhere;
+}
+.ga-kv-v.num {
+  font-variant-numeric: tabular-nums;
+}
+
+/* The empty state of a panel: a plain line of text, never an overlay. */
+.ga-empty {
+  margin: 4px 0;
+  font-family: var(--mono);
+  font-size: 10.5px;
+  color: var(--muted);
+}
+
+.ga-notice {
+  font-size: 10.5px;
+  line-height: 1.45;
+  color: var(--ink-2);
+  margin: 6px 0;
+  padding: 5px 8px;
+  border-left: 3px solid var(--line-2);
+  background: var(--surface-2);
+}
+.ga-notice[hidden] {
+  display: none;
+}
+.ga-notice[data-tone="error"] {
+  border-left-color: var(--bad);
+  color: #a50e0e;
+  background: #fce8e6;
+}
+.ga-notice[data-tone="warn"] {
+  border-left-color: var(--warn);
+  color: #8a5a00;
+  background: #fef7e0;
+}
+.ga-notice[data-tone="ok"] {
+  border-left-color: var(--ok);
+  color: #137333;
+  background: #e6f4ea;
+}
+
+.ga-ckpt-path {
+  font-family: var(--mono);
+  font-size: 9.5px;
+  overflow-wrap: anywhere;
+}
+
+#ga-run-status[data-state="running"] { color: var(--accent); font-weight: 600; }
+#ga-run-status[data-state="completed"] { color: var(--ok); font-weight: 600; }
+#ga-run-status[data-state="failed"],
+#ga-run-status[data-state="error"] { color: var(--bad); font-weight: 600; }
+#ga-run-status[data-state="cancelled"],
+#ga-run-status[data-state="stopped"] { color: #b06000; font-weight: 600; }

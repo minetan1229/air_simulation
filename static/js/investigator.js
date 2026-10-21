@@ -284,7 +284,10 @@ export class InvestigatorPanel {
   }
 
   adoptRecommended() {
-    if (!this.result || !this.result.recommended) return;
+    if (!this.result || !this.result.recommended) {
+      this.notify("調査結果がまだ用意されていません", "warn");
+      return;
+    }
 
     const recAir = this.result.recommended.aircraft || {};
     const recLau = this.result.recommended.launch || {};
@@ -293,18 +296,31 @@ export class InvestigatorPanel {
     const keysAir = ["elevon_deg", "dihedral_deg", "fold_trailing_deg", "fold_tip_deg", "aileron_deg", "rudder_deg", "cg_offset_x"];
     const keysLau = ["launch_angle_deg", "launch_roll_deg", "launch_speed"];
 
+    // ConfigStore.set(section, key, value, origin) -- the section is a plain
+    // section name, never an [section, key] pair (that form silently created
+    // a bogus "aircraft,elevon_deg" bucket and wrote nothing).
+    let applied = 0;
+    let offered = 0;
     keysAir.forEach((k) => {
-      if (k in recAir) {
-        this.store.set(["aircraft", k], recAir[k]);
-      }
+      if (!(k in recAir)) return;
+      offered += 1;
+      if (this.store.set("aircraft", k, recAir[k], "investigator")) applied += 1;
     });
 
     keysLau.forEach((k) => {
-      if (k in recLau) {
-        this.store.set(["launch", k], recLau[k]);
-      }
+      if (!(k in recLau)) return;
+      offered += 1;
+      if (this.store.set("launch", k, recLau[k], "investigator")) applied += 1;
     });
 
-    this.notify("推奨セッティングを機体に適用しました！新しい飛行軌道を確認できます。", "success");
+    if (!offered) {
+      this.notify("推奨設定に適用できる項目がありません", "warn");
+      return;
+    }
+    if (!applied) {
+      this.notify(`推奨設定 (${offered} 項目) は現在の設定と同一でした`, "warn");
+      return;
+    }
+    this.notify(`推奨セッティングを機体に適用しました (${applied}/${offered} 項目変更)。新しい飛行軌道を確認できます。`, "success");
   }
 }

@@ -11,6 +11,7 @@ import { api, ApiError } from "./api.js";
 import { airframeSummary } from "./airframe.js";
 import { DataPanel } from "./datapanel.js";
 import { FlowField } from "./flowfield.js";
+import { GaResearchPanel } from "./ga_research.js";
 import {
   $,
   clear,
@@ -52,6 +53,20 @@ const GEOMETRY_KEYS = [
   "shape_flag",
 ];
 
+/** localStorage key of the last console mode (simulation / research). */
+const MODE_KEY = "paper-airplane-console:mode";
+
+/** The workbench tabs of the simulation mode, in the order they appear. */
+const SIMULATION_TABS = ["investigate", "optimizer", "guinness", "model", "data"];
+
+/** Flight-status dot colours (CSS custom properties from console.css). */
+const FLIGHT_STATUS_COLOR = {
+  ready: "var(--accent)",
+  flying: "var(--ok)",
+  landed: "var(--ink-2)",
+  error: "var(--bad)",
+};
+
 class ConsoleApp {
   constructor() {
     this.store = store;
@@ -60,6 +75,9 @@ class ConsoleApp {
     this.flightDirty = false;
     this.tunnelMode = false;
     this.geomSignature = "";
+    this.mode = "simulation";
+    this._activeTab = "investigate";
+    this._simulationTab = "investigate";
     this._pushDebounced = debounce(() => this._push(), 180);
     this._polarDebounced = debounce(() => this.refreshPolar(), 340);
     this._skipFirstRank = false;
@@ -76,7 +94,8 @@ class ConsoleApp {
     this._bindTransport();
     this._bindHeader();
     this._bindKeyboard();
-    this._initQuickLaunchBar();
+    this._bindModeSwitch();
+    this._initChampionActions();
 
     this.toastHost = $("#toasts");
 
@@ -95,6 +114,8 @@ class ConsoleApp {
         },
         "init"
       );
+      // Local-only GA research state (never pushed to the flight backend).
+      this.store.merge("research", { mode: this._readStoredMode() }, "init");
     } catch (error) {
       this.notify(`サーバに接続できません: ${this._describe(error)}`, "error");
       return;
@@ -231,6 +252,75 @@ class ConsoleApp {
     });
     this.dataPanel.mount();
 
+    // The GA research state is local: it travels with the saved configuration
+    // file but never reaches the flight backend.
+    const baseSnapshot = this.dataPanel.snapshot.bind(this.dataPanel);
+    this.dataPanel.snapshot = () => {
+      const bundle = baseSnapshot();
+      bundle.research = { ...(this.store.data.research || {}) };
+      return bundle;
+    };
+
+    this.gaResearch = new GaResearchPanel({
+      api,
+      store: this.store,
+      dom: {
+        params: $("#ga-params"),
+        notice: $("#ga-notice"),
+        resultNote: $("#ga-result-note"),
+        budgetNote: $("#ga-budget-note"),
+        run: $("#ga-run"),
+        stop: $("#ga-stop"),
+        runId: $("#ga-run-id"),
+        runStatus: $("#ga-run-status"),
+        elapsed: $("#ga-elapsed"),
+        tier: $("#ga-tier"),
+        evaluations: $("#ga-evaluations"),
+        generation: $("#ga-generation"),
+        best: $("#ga-best"),
+        // 読み取り専用の「目標」表示。#ga-objective は GA パラメータ表が
+        // 生成する select の id なので、ここは別 id にする（id 重複回避）。
+        objective: $("#ga-objective-value"),
+        targetNote: $("#ga-target-note"),
+        outputDir: $("#ga-output-dir"),
+        foldSource: $("#ga-fold-source"),
+        foldSeed: $("#ga-fold-seed"),
+        foldSteps: $("#ga-fold-steps"),
+        foldStrategy: $("#ga-fold-strategy"),
+        foldSlider: $("#ga-fold-slider"),
+        foldLabel: $("#ga-fold-label"),
+        foldPrev: $("#ga-fold-prev"),
+        foldNext: $("#ga-fold-next"),
+        foldNotice: $("#ga-fold-notice"),
+        markerToggle: $("#ga-marker-toggle"),
+        creasePanel: $("#ga-crease-panel"),
+        recipeBody: $("#ga-recipe-body"),
+        exportJson: $("#ga-export-json"),
+        exportMd: $("#ga-export-md"),
+        exportSvg: $("#ga-export-svg"),
+        throwParams: $("#ga-throw-params"),
+        stats: $("#ga-stats"),
+        gripSummary: $("#ga-grip-summary"),
+        chart: $("#ga-chart"),
+        chartEmpty: $("#ga-chart-empty"),
+        islandList: $("#ga-island-list"),
+        journal: $("#ga-journal"),
+        ckptList: $("#ga-ckpt-list"),
+        ckptNotice: $("#ga-ckpt-notice"),
+        ckptRefresh: $("#ga-ckpt-refresh"),
+        ckptSave: $("#ga-ckpt-save"),
+        resume: $("#ga-resume"),
+        resumeMaxTrials: $("#ga-resume-max-trials"),
+        resumeTopK: $("#ga-resume-top-k"),
+        resumeGenerations: $("#ga-resume-generations"),
+      },
+      notify: (message, tone) => this.notify(message, tone),
+      viewport: this.viewport,
+    });
+    this.gaResearch.mount().catch((error) => {
+      this.notify(`GA研究パネルを初期化できません: ${this._describe(error)}`, "error");
+    });
+
     this.store.on("change", (event) => this._onStoreChange(event));
     this.store.on("mesh", () => this._adoptServerAirframe());
 
@@ -242,6 +332,7 @@ class ConsoleApp {
     await this._initGuinnessPresets();
     this._updateLaunchVector();
     await this._detectGpu();
+    this.setMode(this._readStoredMode());
   }
 
   _cacheDom() {
@@ -298,11 +389,8 @@ class ConsoleApp {
       "btn-force-gpu-edge",
       "top-ghost",
       "btn-top-launch",
-      "btn-rail-launch",
-      "tp-play-glyph",
       "btn-top-investigate",
       "btn-top-record",
-      "btn-record-video",
       "record-preset-select",
       "record-card",
       "record-badge",
@@ -315,8 +403,6 @@ class ConsoleApp {
       "rec-angle",
       "rec-height",
       "rec-style",
-      "btn-apply-record",
-      "btn-apply-throw-only",
       "unified-aircraft-select",
       "unified-mesh-file",
       "btn-unified-mesh-import",
@@ -379,8 +465,6 @@ class ConsoleApp {
       "tunnel-hud",
       "tunnel-toggle",
       "tp-glide",
-      "tp-launch",
-      "tp-launch-label",
       "tp-play",
       "tp-play-label",
       "tp-prev",
@@ -408,9 +492,6 @@ class ConsoleApp {
       "vp-flight-status-announcer",
       "status-dot",
       "status-text",
-      "vp-controls-guide",
-      "guide-toggle-btn",
-      "guide-content",
       "ensemble-champion-card",
       "champ-best-dist",
       "champ-best-detail",
@@ -436,18 +517,6 @@ class ConsoleApp {
       "champ-close-btn",
       "champ-leaderboard-body",
       "champ-backend-sub",
-      "quick-launch-dock",
-      "quick-btn-throw",
-      "quick-btn-ensemble",
-      "quick-dock-toggle",
-      "quick-dock-toggle-icon",
-      "quick-tuning-panel",
-      "quick-slide-speed",
-      "quick-slide-pitch",
-      "quick-slide-roll",
-      "quick-val-speed",
-      "quick-val-pitch",
-      "quick-val-roll",
     ];
     for (const id of ids) this.dom[id] = document.getElementById(id);
   }
@@ -500,6 +569,8 @@ class ConsoleApp {
     for (const tab of tabs) {
       tab.addEventListener("click", () => {
         this.setWorkbench(true);
+        this._activeTab = tab.dataset.tab;
+        if (this._activeTab !== "research") this._simulationTab = this._activeTab;
         for (const other of tabs) {
           other.setAttribute("aria-selected", other === tab ? "true" : "false");
         }
@@ -509,10 +580,15 @@ class ConsoleApp {
         if (tab.dataset.tab === "optimizer" && this.optimizer && this.optimizer.chart) {
           this.optimizer.chart.resize();
         }
+        if (tab.dataset.tab === "research" && this.gaResearch && this.gaResearch.chart) {
+          this.gaResearch.chart.resize();
+        }
       });
     }
     const activeTab = tabs.find((t) => t.getAttribute("aria-selected") === "true") || tabs[0];
     if (activeTab) {
+      this._activeTab = activeTab.dataset.tab;
+      this._simulationTab = this._activeTab;
       for (const pane of document.querySelectorAll(".wb-pane")) {
         pane.hidden = pane.dataset.pane !== activeTab.dataset.tab;
       }
@@ -528,6 +604,107 @@ class ConsoleApp {
         this.setGlobalEta({ clock: "—", left: "待機中", active: false, title: "計算完了予想時間 (ETA)" });
       });
     }
+  }
+
+  /* ------------------------------------------------------------- modes */
+
+  /**
+   * The last console mode.
+   *
+   * The mode is a purely local view state: it is remembered in the shared
+   * store, in localStorage (so a reload keeps it) and in the saved
+   * configuration file.
+   */
+  _readStoredMode() {
+    try {
+      const raw = window.localStorage.getItem(MODE_KEY);
+      if (raw === "research" || raw === "simulation") return raw;
+    } catch (error) {
+      /* localStorage may be unavailable (private mode) */
+    }
+    const stored = this.store && this.store.get("research", "mode");
+    if (stored === "research" || stored === "simulation") return stored;
+    return "simulation";
+  }
+
+  _bindModeSwitch() {
+    this.modeButtons = {
+      simulation: document.getElementById("btn-mode-simulation"),
+      research: document.getElementById("btn-mode-research"),
+    };
+    for (const [mode, button] of Object.entries(this.modeButtons)) {
+      if (!button) continue;
+      button.addEventListener("click", () => this.setMode(mode));
+    }
+  }
+
+  /**
+   * Switch between the simulation console and the autonomous research mode.
+   *
+   * The two modes really show different tools: the simulation mode keeps the
+   * flight rail, the flight instruments and the transport, the research mode
+   * hands the whole stage over to the GA workbench.
+   */
+  setMode(mode) {
+    const next = mode === "research" ? "research" : "simulation";
+    this.mode = next;
+    document.body.dataset.mode = next;
+    for (const [key, button] of Object.entries(this.modeButtons || {})) {
+      if (button) button.classList.toggle("active", key === next);
+    }
+    this.store.set("research", "mode", next, "ui");
+    try {
+      window.localStorage.setItem(MODE_KEY, next);
+    } catch (error) {
+      /* localStorage may be unavailable (private mode) */
+    }
+    if (next === "research") {
+      if (this._activeTab !== "research" && SIMULATION_TABS.includes(this._activeTab)) {
+        this._simulationTab = this._activeTab;
+      }
+      this.setWorkbench(true);
+      const tab = document.getElementById("wb-tab-research");
+      if (tab) tab.click();
+    } else {
+      const wanted = SIMULATION_TABS.includes(this._simulationTab) ? this._simulationTab : "investigate";
+      const tab = document.getElementById(`wb-tab-${wanted}`);
+      if (tab) tab.click();
+    }
+    if (this.viewport) requestAnimationFrame(() => this.viewport.resize());
+    if (this.viewport && typeof this.viewport.setResearchPresentation === "function") {
+      this.viewport.setResearchPresentation(next === "research");
+      const followToggle = document.getElementById("tgl-follow");
+      if (followToggle) followToggle.dataset.on = this.viewport.follow ? "1" : "0";
+      if (next === "research") {
+        this._setCameraChipActive("cam-mode-fixed");
+      } else {
+        const previous = this.viewport.previousCameraMode();
+        if (previous) this._setCameraChipActive(`cam-mode-${previous}`);
+      }
+    }
+  }
+
+  /**
+   * Restore the GA research section of a loaded configuration file.
+   *
+   * The server only knows the flight sections, so the research block is
+   * applied on the client.
+   */
+  _applyResearchBundle(text) {
+    let bundle = null;
+    try {
+      bundle = JSON.parse(text);
+    } catch (error) {
+      return;
+    }
+    const research = bundle && bundle.research;
+    if (!research || typeof research !== "object") return;
+    this.store.merge("research", research, "load");
+    if (this.gaResearch && typeof this.gaResearch.applyStoreParams === "function") {
+      this.gaResearch.applyStoreParams();
+    }
+    const mode = research.mode === "research" ? "research" : "simulation";
+    this.setMode(mode);
   }
 
   _workbenchOpen() {
@@ -556,9 +733,6 @@ class ConsoleApp {
       rates.append(button);
     }
 
-    if (this.dom["tp-launch"]) {
-      this.dom["tp-launch"].addEventListener("click", () => this._launchFlight());
-    }
     this.dom["tp-play"].addEventListener("click", () => this._togglePlay());
     this.dom["tp-prev"].addEventListener("click", () => this._guard(() => this.transport.stepBack()));
     this.dom["tp-next"].addEventListener("click", () => this._guard(() => this.transport.stepForward()));
@@ -693,11 +867,6 @@ class ConsoleApp {
     this._initTunnelControls();
     this._initUnifiedAircraftSelector();
 
-    const btnGpuEnsemble = document.getElementById("btn-gpu-ensemble");
-    if (btnGpuEnsemble) {
-      btnGpuEnsemble.addEventListener("click", () => this._runGpuEnsemble(100));
-    }
-
     if (this.dom["sim-error-close"]) {
       this.dom["sim-error-close"].addEventListener("click", () => this.hideSimulationError());
     }
@@ -717,7 +886,7 @@ class ConsoleApp {
     }
 
     // Bind recording buttons
-    const recBtns = [this.dom["btn-top-record"], this.dom["btn-record-video"]].filter(Boolean);
+    const recBtns = [this.dom["btn-top-record"]].filter(Boolean);
     recBtns.forEach((btn) => {
       btn.addEventListener("click", () => this._toggleRecording());
     });
@@ -740,7 +909,7 @@ class ConsoleApp {
   }
 
   _updateRecordButtons(isRecording) {
-    const btns = [this.dom["btn-top-record"], this.dom["btn-record-video"]].filter(Boolean);
+    const btns = [this.dom["btn-top-record"]].filter(Boolean);
     btns.forEach((btn) => {
       if (isRecording) {
         btn.classList.add("is-recording");
@@ -1115,101 +1284,14 @@ class ConsoleApp {
     if (!dot || !txt) return;
 
     dot.className = `status-dot ${status}`;
+    dot.dataset.state = status;
+    dot.style.backgroundColor = FLIGHT_STATUS_COLOR[status] || "var(--line-2)";
     txt.textContent = text;
   }
 
-  _initQuickLaunchBar() {
-    // 1. Throw & Playback buttons
-    if (this.dom["quick-btn-throw"]) {
-      this.dom["quick-btn-throw"].addEventListener("click", () => this._launchFlight());
-    }
-    if (this.dom["quick-btn-play"]) {
-      this.dom["quick-btn-play"].addEventListener("click", () => this._togglePlay());
-    }
-    if (this.dom["quick-btn-reset"]) {
-      this.dom["quick-btn-reset"].addEventListener("click", () => this._guard(() => this._resetFlight(true)));
-    }
-    if (this.dom["quick-btn-ensemble"]) {
-      this.dom["quick-btn-ensemble"].addEventListener("click", () => this._runGpuEnsemble(100));
-    }
-
-    // 2. Dock toggle
-    const toggleBtn = this.dom["quick-dock-toggle"];
-    const panel = this.dom["quick-tuning-panel"];
-    if (toggleBtn && panel) {
-      panel.setAttribute("hidden", "");
-      panel.style.display = "none";
-      toggleBtn.innerHTML = '<img src="https://api.iconify.design/material-symbols/tune.svg?color=%235f6368" class="ui-icon" alt=""> 投げ方調整';
-
-      toggleBtn.addEventListener("click", () => {
-        const isHidden = panel.style.display === "none" || panel.hasAttribute("hidden");
-        if (isHidden) {
-          panel.removeAttribute("hidden");
-          panel.style.display = "grid";
-          toggleBtn.innerHTML = "閉じる";
-        } else {
-          panel.setAttribute("hidden", "");
-          panel.style.display = "none";
-          toggleBtn.innerHTML = '<img src="https://api.iconify.design/material-symbols/tune.svg?color=%235f6368" class="ui-icon" alt=""> 投げ方調整';
-        }
-      });
-    }
-
-    // 3. Quick tuning sliders
-    const slideSpeed = this.dom["quick-slide-speed"];
-    const slidePitch = this.dom["quick-slide-pitch"];
-    const slideRoll = this.dom["quick-slide-roll"];
-
-    const updateQuickLaunch = () => {
-      const spd = Number(slideSpeed ? slideSpeed.value : 10);
-      const pitch = Number(slidePitch ? slidePitch.value : 12);
-      const roll = Number(slideRoll ? slideRoll.value : 0);
-
-      if (this.dom["quick-val-speed"]) this.dom["quick-val-speed"].textContent = `${spd.toFixed(1)} m/s`;
-      if (this.dom["quick-val-pitch"]) this.dom["quick-val-pitch"].textContent = `${pitch.toFixed(1)}°`;
-      if (this.dom["quick-val-roll"]) this.dom["quick-val-roll"].textContent = `${roll.toFixed(1)}°`;
-
-      this.store.set("launch", "launch_speed", spd, "quick-dock");
-      this.store.set("launch", "launch_angle_deg", pitch, "quick-dock");
-      this.store.set("launch", "launch_roll_deg", roll, "quick-dock");
-    };
-
-    if (slideSpeed) slideSpeed.addEventListener("input", updateQuickLaunch);
-    if (slidePitch) slidePitch.addEventListener("input", updateQuickLaunch);
-    if (slideRoll) slideRoll.addEventListener("input", updateQuickLaunch);
-
-    // 4. Preset chips
-    document.querySelectorAll(".quick-tuning-panel .tuning-chip").forEach((chip) => {
-      chip.addEventListener("click", () => {
-        const type = chip.dataset.type;
-        const val = Number(chip.dataset.val);
-        if (type === "speed" && slideSpeed) {
-          slideSpeed.value = val;
-        } else if (type === "pitch" && slidePitch) {
-          slidePitch.value = val;
-        } else if (type === "roll" && slideRoll) {
-          slideRoll.value = val;
-        }
-        chip.parentElement.querySelectorAll(".tuning-chip").forEach((c) => c.classList.remove("active"));
-        chip.classList.add("active");
-        updateQuickLaunch();
-      });
-    });
-
-    // 5. Controls Guide Toggle
-    const guideToggle = this.dom["guide-toggle-btn"];
-    const guideBox = this.dom["vp-controls-guide"];
-    if (guideBox) {
-      const toggleGuide = () => {
-        const isCollapsed = guideBox.classList.toggle("collapsed");
-        if (guideToggle) guideToggle.textContent = isCollapsed ? "▸" : "▾";
-      };
-      if (guideToggle) guideToggle.addEventListener("click", (e) => { e.stopPropagation(); toggleGuide(); });
-      const guideHead = guideBox.querySelector(".guide-header");
-      if (guideHead) guideHead.addEventListener("click", toggleGuide);
-    }
-
-    // 6. Champion Card Actions
+  /** Champion card actions (ensemble leaderboard, throw adoption, focus). */
+  _initChampionActions() {
+    // Champion Card Actions
     if (this.dom["champ-close-btn"]) {
       this.dom["champ-close-btn"].addEventListener("click", () => {
         if (this.dom["ensemble-champion-card"]) this.dom["ensemble-champion-card"].hidden = true;
@@ -1221,28 +1303,40 @@ class ConsoleApp {
         if (this.dom["ensemble-champion-card"] && !this.dom["ensemble-champion-card"].hidden) {
           this.dom["ensemble-champion-card"].hidden = true;
         }
-        if (this.dom["quick-tuning-panel"] && !this.dom["quick-tuning-panel"].hasAttribute("hidden")) {
-          this.dom["quick-tuning-panel"].setAttribute("hidden", "");
-          this.dom["quick-tuning-panel"].style.display = "none";
-          if (this.dom["quick-dock-toggle"]) this.dom["quick-dock-toggle"].innerHTML = "⚙️ 投げ方調整";
-        }
       }
     });
     if (this.dom["champ-btn-adopt"]) {
       this.dom["champ-btn-adopt"].addEventListener("click", () => {
         if (!this._lastChampionFlight) return;
         const f = this._lastChampionFlight;
-        const speed = f.speed_mps != null ? f.speed_mps : 10;
-        const pitch = f.pitch_deg != null ? f.pitch_deg : 12;
-        const roll = f.roll_deg != null ? f.roll_deg : 0;
+        const speed = Number(f.speed_mps);
+        const pitch = Number(f.pitch_deg);
+        const roll = Number(f.roll_deg);
+        if (!Number.isFinite(speed) || !Number.isFinite(pitch) || !Number.isFinite(roll)) {
+          this.notify("1位の機体の投げ方データ (初速・仰角・ロール) が取得できないため反映できません", "warn");
+          return;
+        }
 
-        if (slideSpeed) slideSpeed.value = speed;
-        if (slidePitch) slidePitch.value = pitch;
-        if (slideRoll) slideRoll.value = roll;
-        updateQuickLaunch();
+        // 投げ方パラメータの正は左レール「投擲・発射設定」だけなので、
+        // ここでもストアへ直接書き込み、同じ範囲補正を適用する。
+        const appliedSpeed = this._clampLaunchParam("launch_speed", speed);
+        const appliedPitch = this._clampLaunchParam("launch_angle_deg", pitch);
+        const appliedRoll = this._clampLaunchParam("launch_roll_deg", roll);
+        if (appliedSpeed == null || appliedPitch == null || appliedRoll == null) {
+          this.notify("投げ方設定が利用できないため、1位の投げ方を設定に反映できません", "warn");
+          return;
+        }
+
+        this.store.set("launch", "launch_speed", appliedSpeed, "adopt");
+        this.store.set("launch", "launch_angle_deg", appliedPitch, "adopt");
+        this.store.set("launch", "launch_roll_deg", appliedRoll, "adopt");
+        // 直接指定の初速・角を適用するので、投げ方も直接指定へ寄せる。
+        this.store.set("launch", "throw_speed_source", "direct", "adopt");
+        this.store.set("launch", "throw_style", "direct", "adopt");
+        if (this.panels) this.panels.sync();
 
         const rankTag = this._skipFirstRank ? "繰り上げ1位" : "1位";
-        this.notify(`${rankTag} (機体 #${f.id ?? "—"}) の投げ方を設定に反映しました！ (初速: ${speed}m/s, 仰角: ${pitch}°, ロール: ${roll}°)`, "ok");
+        this.notify(`${rankTag} (機体 #${f.id ?? "—"}) の投げ方を設定に反映しました！ (初速: ${appliedSpeed}m/s, 仰角: ${appliedPitch}°, ロール: ${appliedRoll}°)`, "ok");
       });
     }
     if (this.dom["champ-btn-focus-mean"]) {
@@ -1326,37 +1420,24 @@ class ConsoleApp {
         }
       });
     }
+  }
 
-    // Synchronize initial values from store
-    this.store.on("change", ({ section, key, value, origin }) => {
-      if (origin === "quick-dock" || section !== "launch") return;
-      if (key === "launch_speed" && slideSpeed) {
-        slideSpeed.value = value;
-        if (this.dom["quick-val-speed"]) this.dom["quick-val-speed"].textContent = `${Number(value).toFixed(1)} m/s`;
-      } else if (key === "launch_angle_deg" && slidePitch) {
-        slidePitch.value = value;
-        if (this.dom["quick-val-pitch"]) this.dom["quick-val-pitch"].textContent = `${Number(value).toFixed(1)}°`;
-      } else if (key === "launch_roll_deg" && slideRoll) {
-        slideRoll.value = value;
-        if (this.dom["quick-val-roll"]) this.dom["quick-val-roll"].textContent = `${Number(value).toFixed(1)}°`;
-      }
-    });
-
-    this.store.on("adopt", (data) => {
-      const launch = (data && data.launch) || {};
-      if (launch.launch_speed != null && slideSpeed) {
-        slideSpeed.value = launch.launch_speed;
-        if (this.dom["quick-val-speed"]) this.dom["quick-val-speed"].textContent = `${Number(launch.launch_speed).toFixed(1)} m/s`;
-      }
-      if (launch.launch_angle_deg != null && slidePitch) {
-        slidePitch.value = launch.launch_angle_deg;
-        if (this.dom["quick-val-pitch"]) this.dom["quick-val-pitch"].textContent = `${Number(launch.launch_angle_deg).toFixed(1)}°`;
-      }
-      if (launch.launch_roll_deg != null && slideRoll) {
-        slideRoll.value = launch.launch_roll_deg;
-        if (this.dom["quick-val-roll"]) this.dom["quick-val-roll"].textContent = `${Number(launch.launch_roll_deg).toFixed(1)}°`;
-      }
-    });
+  /**
+   * Clamp a launch parameter to the range the console exposes for it.
+   * The bounds come from the parameter panel (single source of truth), so a
+   * value adopted from a flight result can never exceed what the UI allows.
+   * Returns null when the parameter is not exposed by the panel.
+   */
+  _clampLaunchParam(key, value) {
+    const control = (this.panels?.controls || []).find(
+      (entry) => entry.section === "launch" && entry.spec.key === key && entry.kind === "slider"
+    );
+    if (!control) return null;
+    const raw = Number(value);
+    if (!Number.isFinite(raw)) return null;
+    const min = Number.isFinite(control.min) ? control.min : -Infinity;
+    const max = Number.isFinite(control.max) ? control.max : Infinity;
+    return Math.min(Math.max(raw, min), max);
   }
 
   async _detectGpu() {
@@ -1432,31 +1513,11 @@ class ConsoleApp {
     if (this.dom["btn-top-launch"]) {
       this.dom["btn-top-launch"].addEventListener("click", () => this._launchFlight());
     }
-    if (this.dom["btn-top-play"]) {
-      this.dom["btn-top-play"].addEventListener("click", () => this._togglePlay());
-    }
-    if (this.dom["btn-rail-launch"]) {
-      this.dom["btn-rail-launch"].addEventListener("click", () => this._launchFlight());
-    }
-    const btnSingleMode = document.getElementById("btn-mode-single");
     const btnTopGpu = document.getElementById("btn-top-gpu-ensemble");
-    if (btnSingleMode) {
-      btnSingleMode.addEventListener("click", () => {
-        btnSingleMode.classList.add("active");
-        if (btnTopGpu) btnTopGpu.classList.remove("active");
-        this.notify("単機飛行モードを選択しました。「発射」で単機の詳細シミュレーションを実行します。", "info");
-      });
-    }
     if (btnTopGpu) {
       btnTopGpu.addEventListener("click", () => {
-        if (btnSingleMode) btnSingleMode.classList.remove("active");
-        btnTopGpu.classList.add("active");
         this._runGpuEnsemble(100);
       });
-    }
-    const btnRailGpu = document.getElementById("btn-rail-gpu-ensemble");
-    if (btnRailGpu) {
-      btnRailGpu.addEventListener("click", () => this._runGpuEnsemble(100));
     }
 
     this.dom["btn-save"].addEventListener("click", () => this.dataPanel.exportConfigJson());
@@ -1467,6 +1528,8 @@ class ConsoleApp {
       try {
         const text = await file.text();
         await this.dataPanel.applyBundle(text);
+        // The GA research block is local: the server does not know it.
+        this._applyResearchBundle(text);
         if (this.dom["bundle-paste"]) this.dom["bundle-paste"].value = text;
       } finally {
         event.target.value = "";
@@ -1660,11 +1723,15 @@ class ConsoleApp {
 
   _onStoreChange(event) {
     if (event.section) {
-      this.dirty.add(event.section);
-      if (event.section === "aircraft" || event.section === "launch" || event.section === "environment") {
-        this.flightDirty = true;
+      if (event.section === "research") {
+        // The GA research state is local only and never reaches the backend.
+      } else {
+        this.dirty.add(event.section);
+        if (event.section === "aircraft" || event.section === "launch" || event.section === "environment") {
+          this.flightDirty = true;
+        }
+        this._schedulePush();
       }
-      this._schedulePush();
     } else {
       this.flightDirty = true;
     }
@@ -1723,6 +1790,9 @@ class ConsoleApp {
    */
   _syncOrigami() {
     if (!this.viewport) return;
+    // The research mode shows the folded solid of a GA genome in its own
+    // group; the flight origami panel must not fight over the same mesh.
+    if (this.mode === "research") return;
     const state = this.store.data.origami || {};
     const enabled = Boolean(state.enabled);
     const archetype = String(state.archetype || "classic_dart");
@@ -1900,11 +1970,11 @@ class ConsoleApp {
     message = "",
     hint = "",
     badge = "ERROR",
-    icon = "⚠️",
+    icon = '<svg viewBox="0 0 24 24" fill="currentColor" style="width:20px;height:20px;color:#d93025;"><path d="M1 21h22L12 2 1 21zm12-3h-2v-2h2v2zm0-4h-2v-4h2v4z"/></svg>',
   } = {}) {
     const banner = this.dom["sim-error-banner"];
     if (!banner) return;
-    if (this.dom["sim-error-icon"]) this.dom["sim-error-icon"].textContent = icon;
+    if (this.dom["sim-error-icon"]) this.dom["sim-error-icon"].innerHTML = icon;
     if (this.dom["sim-error-title"]) this.dom["sim-error-title"].textContent = title;
     if (this.dom["sim-error-badge"]) {
       this.dom["sim-error-badge"].textContent = badge;
@@ -2018,6 +2088,8 @@ class ConsoleApp {
         // The origami panel is a local view state and never reaches the
         // flight backend.
         if (section === "origami") continue;
+        // The GA research state is local as well.
+        if (section === "research") continue;
         patch[section] = this.store.data[section];
       }
       if (Object.keys(patch).length) {
@@ -2367,7 +2439,8 @@ class ConsoleApp {
   }
 
   _setLaunchButtonsDisabled(disabled) {
-    const ids = ["btn-top-launch", "btn-top-gpu-ensemble", "quick-btn-ensemble", "btn-gpu-ensemble"];
+    // 発射の入口は btn-top-launch (単機) と btn-top-gpu-ensemble (100機一括) のみ。
+    const ids = ["btn-top-launch", "btn-top-gpu-ensemble"];
     ids.forEach((id) => {
       const el = document.getElementById(id);
       if (el) {
@@ -2972,20 +3045,6 @@ class ConsoleApp {
         await this._applyRecordPreset(false);
       });
 
-      const btnApplyAll = this.dom["btn-apply-record"];
-      if (btnApplyAll) {
-        btnApplyAll.addEventListener("click", () => this._applyRecordPreset(false));
-      }
-
-      const btnOpenStudio = document.getElementById("btn-open-guinness-studio");
-      if (btnOpenStudio) {
-        btnOpenStudio.addEventListener("click", () => {
-          const tab = document.getElementById("wb-tab-guinness");
-          if (tab) tab.click();
-          this.setWorkbench(true);
-        });
-      }
-
       // Initialize dedicated Guinness Studio workbench pane
       await this._initGuinnessStudioPane(presets);
     } catch (err) {
@@ -3305,7 +3364,7 @@ class ConsoleApp {
     const isReadyToLaunch = this.flightDirty || !this.transport.history || !this.transport.history.length;
     const isPlaying = Boolean(state.playing);
 
-    // 1. Bottom Transport Play Button
+    // 1. Transport Play Button (再生 / 一時停止 の唯一の入口)
     const play = this.dom["tp-play"];
     if (play) {
       play.dataset.playing = isPlaying ? "1" : "0";
@@ -3322,42 +3381,7 @@ class ConsoleApp {
       }
     }
 
-    // 2. Toprail Play Button
-    const topPlay = this.dom["btn-top-play"];
-    if (topPlay) {
-      topPlay.dataset.playing = isPlaying ? "1" : "0";
-      const topPlayIcon = document.getElementById("top-play-icon");
-      if (topPlayIcon) {
-        if (isPlaying) {
-          topPlayIcon.innerHTML = '<path d="M6 19h4V5H6zm8-14v14h4V5z"/>';
-        } else {
-          topPlayIcon.innerHTML = '<path d="M8 5v14l11-7z"/>';
-        }
-      }
-      const topPlayLabel = document.getElementById("top-play-label");
-      if (topPlayLabel) {
-        topPlayLabel.textContent = isPlaying ? "一時停止" : "再生";
-      }
-    }
-
-    // 3. Quick Launch Dock Play Button (in 3D viewport)
-    const quickPlay = this.dom["quick-btn-play"];
-    if (quickPlay) {
-      quickPlay.dataset.playing = isPlaying ? "1" : "0";
-      const quickPlayIcon = document.getElementById("quick-play-icon");
-      if (quickPlayIcon) {
-        if (isPlaying) {
-          quickPlayIcon.innerHTML = '<path d="M6 19h4V5H6zm8-14v14h4V5z"/>';
-        } else {
-          quickPlayIcon.innerHTML = '<path d="M8 5v14l11-7z"/>';
-        }
-      }
-      const quickPlayTitle = document.getElementById("quick-play-title");
-      if (quickPlayTitle) {
-        quickPlayTitle.textContent = isPlaying ? "一時停止" : "再生";
-      }
-    }
-
+    // 2. Playback rate buttons
     for (const button of document.querySelectorAll(".rate-btn")) {
       button.setAttribute("aria-pressed", Number(button.dataset.rate) === state.rate ? "true" : "false");
     }

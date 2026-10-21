@@ -26,7 +26,7 @@
 1. **常駐**: ルート `AGENTS.md` §1〜§4 ＋ `.agents/Knowledge-important.md`
 2. **付録（該当時のみ）**: ルート `AGENTS.md` §5〜§8 / `.agents/Project.md` /
    `.agents/Knowledge.md` / `docs/SPECIFICATION.md`
-3. **禁止**: ログ・ソースの全文出力。行指定・範囲指定・关键词検索を徹底する。
+3. **禁止**: ログ・ソースの全文出力。行指定・範囲指定・キーワード検索を徹底する。
 
 ---
 

@@ -90,6 +90,8 @@ class ErrorLoggerDomain:
             "%(asctime)s [%(levelname)s] [%(name)s] %(message)s"
         )
         self._text_handler.setFormatter(self._text_formatter)
+        self._jsonl_formatter = logging.Formatter("%(message)s")
+        self._file_handler.setFormatter(self._jsonl_formatter)
 
     def record_error(
         self,
@@ -129,13 +131,19 @@ class ErrorLoggerDomain:
 
             self._buffer.append(record)
 
-            # Write to JSONL
+            # Write to JSONL (rotation handled by RotatingFileHandler.emit)
             try:
-                stream = self._file_handler.stream
-                if stream is not None:
-                    line = json.dumps(record.to_dict(), ensure_ascii=False) + "\n"
-                    stream.write(line)
-                    stream.flush()
+                line = json.dumps(record.to_dict(), ensure_ascii=False)
+                jsonl_record = logging.LogRecord(
+                    name="error_domain.jsonl",
+                    level=logging.INFO,
+                    pathname=__file__,
+                    lineno=0,
+                    msg=line,
+                    args=(),
+                    exc_info=None,
+                )
+                self._file_handler.emit(jsonl_record)
             except Exception:
                 pass
 

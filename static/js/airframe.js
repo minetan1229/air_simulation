@@ -464,25 +464,86 @@ export function buildPanelLines(cfg) {
 }
 
 /**
- * Bilinear sample of the server stress grid.
+ * Orientation of the server stress grid.
+ *
+ * `stress_index` is a row-major 2-D array and the payload publishes the
+ * resolution of both axes (`spanwise` = stations across the full span,
+ * `chordwise` = stations from the leading edge to the trailing edge), so the
+ * two possible layouts are told apart by the array shape:
+ *
+ *   rows.length === spanwise   ->  grid[spanwise][chordwise]
+ *   rows.length === chordwise  ->  grid[chordwise][spanwise]
+ *
+ * A square grid (or a payload without the metadata) is resolved from the
+ * cantilever peak instead: the peak sits on the wing root line, so the axis
+ * whose peak coordinate is closest to the middle of the grid is the span
+ * axis.
  */
-function sampleGrid(grid, u, v) {
+function rowsWalkSpanwise(grid, rows) {
+  const rowCount = rows.length;
+  const colCount = (rows[0] || []).length;
+  const declaredSpan = Number(grid && grid.spanwise);
+  const declaredChord = Number(grid && grid.chordwise);
+  const hasSpan = Number.isFinite(declaredSpan) && declaredSpan > 0;
+  const hasChord = Number.isFinite(declaredChord) && declaredChord > 0;
+  if (hasSpan && hasChord && declaredSpan !== declaredChord) {
+    if (rowCount === declaredSpan && colCount === declaredChord) return true;
+    if (rowCount === declaredChord && colCount === declaredSpan) return false;
+  }
+  let peakRow = 0;
+  let peakCol = 0;
+  let peak = -Infinity;
+  for (let r = 0; r < rowCount; r += 1) {
+    const line = rows[r] || [];
+    for (let c = 0; c < line.length; c += 1) {
+      const value = Number(line[c]);
+      if (Number.isFinite(value) && value > peak) {
+        peak = value;
+        peakRow = r;
+        peakCol = c;
+      }
+    }
+  }
+  const rowMid = (rowCount - 1) / 2;
+  const colMid = (colCount - 1) / 2;
+  return Math.abs(peakRow - rowMid) < Math.abs(peakCol - colMid);
+}
+
+/**
+ * Bilinear sample of the server stress grid.
+ *
+ * The mesh UV is `(uSpan, t)`: `u` runs left tip -> wing root -> right tip
+ * (spanwise) and `v` runs leading edge -> trailing edge (chordwise).  Which
+ * array axis carries the span is taken from the payload's axis contract
+ * (`rowsWalkSpanwise`), so the wing-root leading-edge peak is always drawn
+ * on the root line and always decays along the span.
+ */
+function sampleGrid(grid, u, v, axes) {
   const rows = grid && grid.stress_index;
   if (!rows || !rows.length) return 0;
-  const ny = rows.length - 1;
-  const nx = (rows[0] || []).length - 1;
-  const fy = Math.min(Math.max(v, 0), 1) * ny;
-  const fx = Math.min(Math.max(u, 0), 1) * nx;
-  const y0 = Math.min(Math.floor(fy), ny);
-  const x0 = Math.min(Math.floor(fx), nx);
-  const wy = fy - y0;
-  const wx = fx - x0;
+  const rowCount = rows.length;
+  const colCount = (rows[0] || []).length;
+  if (!colCount) return 0;
+
+  const spanFrac = Math.min(Math.max(u, 0), 1);
+  const chordFrac = Math.min(Math.max(v, 0), 1);
+  const rowsAreSpanwise = axes ? axes.rowsAreSpanwise : rowsWalkSpanwise(grid, rows);
+
+  const rowExtent = rowCount - 1;
+  const colExtent = colCount - 1;
+  const rowPos = (rowsAreSpanwise ? spanFrac : chordFrac) * rowExtent;
+  const colPos = (rowsAreSpanwise ? chordFrac : spanFrac) * colExtent;
+
+  const y0 = Math.min(Math.floor(rowPos), rowExtent);
+  const x0 = Math.min(Math.floor(colPos), colExtent);
+  const wy = rowPos - y0;
+  const wx = colPos - x0;
   const r0 = rows[y0] || [];
-  const r1 = rows[Math.min(y0 + 1, ny)] || [];
+  const r1 = rows[Math.min(y0 + 1, rowExtent)] || [];
   const a = r0[x0] ?? 0;
-  const b = r0[Math.min(x0 + 1, nx)] ?? a;
+  const b = r0[Math.min(x0 + 1, colExtent)] ?? a;
   const c = r1[x0] ?? a;
-  const d = r1[Math.min(x0 + 1, nx)] ?? c;
+  const d = r1[Math.min(x0 + 1, colExtent)] ?? c;
   return (a * (1 - wx) + b * wx) * (1 - wy) + (c * (1 - wx) + d * wx) * wy;
 }
 
@@ -506,6 +567,12 @@ export function applyStressColors(geometry, grid, heatColour) {
     box.getSize(size);
     useBox = true;
   }
+  // The grid orientation only depends on the payload, so resolve it once
+  // instead of once per vertex.
+  const gridRows = grid && grid.stress_index;
+  const axes = gridRows && gridRows.length
+    ? { rowsAreSpanwise: rowsWalkSpanwise(grid, gridRows) }
+    : null;
   for (let i = 0; i < count; i += 1) {
     let u;
     let v;
@@ -518,7 +585,7 @@ export function applyStressColors(geometry, grid, heatColour) {
       u = uv.getX(i);
       v = uv.getY(i);
     }
-    const value = sampleGrid(grid, u, v);
+    const value = sampleGrid(grid, u, v, axes);
     const [r, g, b] = heatColour(value);
     colors.setXYZ(i, r / 255, g / 255, b / 255);
   }

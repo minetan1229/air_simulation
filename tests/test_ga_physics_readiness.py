@@ -528,26 +528,134 @@ def test_the_optimizer_payload_exposes_the_verification_fields() -> None:
 # ---------------------------------------------------------------------------
 # The branch guard of the genetic-project phase
 # ---------------------------------------------------------------------------
-def test_the_entry_points_refuse_to_run_on_a_protected_branch(monkeypatch) -> None:
-    """``app`` and ``smoke_test`` must abort when the branch is protected."""
+def test_the_entry_points_refuse_to_run_on_a_protected_branch(monkeypatch, capsys) -> None:
+    """``app`` and ``smoke_test`` must abort when the branch is protected.
+
+    The two entry points have **different** contracts, and both of them are
+    pinned here:
+
+    * ``app.main()`` **raises** ``SystemExit(2)`` -- the server must not
+      start on a protected branch.
+    * ``smoke_test.main()`` **returns** 2 -- it reports the violation on
+      stderr and its ``__main__`` block turns that return value into the
+      process exit code.  It does not raise.
+
+    The guard is patched at the level each entry point reads it from.
+    ``app.py`` resolved ``assert_branch_allowed`` at import time, so the
+    name is a module attribute of ``app``.  ``smoke_test.py`` imports it
+    *inside* ``main()``; a function local ``from X import Y`` creates a
+    local name that shadows any module attribute, so the smoke test never
+    reads a module attribute of ``smoke_test`` -- it reads the attribute
+    of the **source** module at call time.  Patching
+    ``smoke_test.assert_branch_allowed`` therefore installs an attribute
+    the smoke test never looks at.  Both patches are active at the same
+    time, because they resolve two different bindings.
+    """
     import app as app_module
     import smoke_test
 
+    from tools import branch_guard
     from tools.branch_guard import BranchViolation
 
-    def refuse(*_args, **_kwargs):
-        raise BranchViolation("branch 'master' is protected")
+    # The policy is read from the module, not hard coded: the phase branch
+    # and the protected branches are the ones the guard really uses.
+    assert branch_guard.EXPECTED_BRANCH == "genetic-project"
+    assert branch_guard.PROTECTED_BRANCHES, "the guard must name the protected branches"
+    protected = branch_guard.PROTECTED_BRANCHES[0]
 
+    def refuse(*_args, **_kwargs):
+        raise BranchViolation(f"branch '{protected}' is protected")
+
+    # ``app`` resolved the guard at import time ...
     monkeypatch.setattr(app_module, "assert_branch_allowed", refuse)
-    monkeypatch.setattr(smoke_test, "assert_branch_allowed", refuse, raising=False)
+    # ... the smoke test resolves it from the source module at call time.
+    monkeypatch.setattr("tools.branch_guard.assert_branch_allowed", refuse)
+
+    # ------------------------------------------------------------------
+    # app.main(): the server refuses to start
+    # ------------------------------------------------------------------
+    def no_server(*_args, **_kwargs):
+        raise AssertionError("the server must not start on a protected branch")
+
+    def no_domain(*_args, **_kwargs):
+        raise AssertionError("the GPU warmup must not start on a protected branch")
+
+    monkeypatch.setattr(app_module.app, "run", no_server)
+    monkeypatch.setattr(app_module, "domain", no_domain)
+    # The entry points parse the command line: give them a clean one, so
+    # the guard is what is under test and not the argument parser.
+    monkeypatch.setattr(sys, "argv", ["app"])
 
     with pytest.raises(SystemExit) as app_exit:
         app_module.main()
-    assert app_exit.value.code == 2
+    assert app_exit.value.code == 2, "the app must exit with the code 2"
 
-    with pytest.raises(SystemExit) as smoke_exit:
-        smoke_test.main()
-    assert smoke_exit.value.code == 2
+    # ------------------------------------------------------------------
+    # smoke_test.main(): the stages are skipped and the code is returned
+    # ------------------------------------------------------------------
+    def no_stage(*_args, **_kwargs):
+        raise AssertionError("no smoke test stage may run on a protected branch")
+
+    monkeypatch.setattr(
+        smoke_test,
+        "STAGES",
+        [(name, no_stage) for name, _fn in smoke_test.STAGES],
+    )
+    monkeypatch.setattr(sys, "argv", ["smoke_test"])
+
+    capsys.readouterr()  # drop whatever the imports printed
+    exit_code = smoke_test.main()
+    captured = capsys.readouterr()
+
+    assert exit_code == 2, "the smoke test must report the violation with the code 2"
+    assert "branch guard" in captured.err, "the smoke test must report the violation"
+    assert protected in captured.err, "the violation must name the protected branch"
+    assert captured.out == "", "the smoke test must not print a single stage line"
+
+
+def test_the_branch_guard_refuses_the_protected_branches(monkeypatch) -> None:
+    """The policy of the guard itself: the protected branches are refused.
+
+    The test pins the policy of :mod:`tools.branch_guard` instead of a hard
+    coded branch name: the expected branch and the protected list are read
+    from the module, every protected branch must raise a
+    :class:`BranchViolation`, and the branch the phase is carried out on
+    must not.
+    """
+    from tools import branch_guard
+    from tools.branch_guard import BranchViolation
+
+    assert branch_guard.EXPECTED_BRANCH == "genetic-project"
+    assert branch_guard.PROTECTED_BRANCHES == ("master", "main")
+
+    # The strict policy, whatever the environment of the runner says (a CI
+    # runner downgrades the severity to a warning).
+    monkeypatch.setenv(branch_guard.GUARD_ENV_VAR, "error")
+
+    for protected in branch_guard.PROTECTED_BRANCHES:
+        monkeypatch.setattr(
+            branch_guard,
+            "current_branch",
+            lambda repo_root=None, _name=protected: _name,
+        )
+        status = branch_guard.guard_status()
+        assert status["protected"] is True
+        assert status["severity"] == "error"
+        assert status["expected_branch"] == branch_guard.EXPECTED_BRANCH
+        with pytest.raises(BranchViolation):
+            branch_guard.assert_branch_allowed()
+
+    # The branch of the phase itself is not a violation.
+    monkeypatch.setattr(
+        branch_guard,
+        "current_branch",
+        lambda repo_root=None: branch_guard.EXPECTED_BRANCH,
+    )
+    status = branch_guard.guard_status()
+    assert status["protected"] is False
+    assert status["severity"] == "none"
+    assert status["ok"] is True
+    branch_guard.assert_branch_allowed()  # must not raise
 
 
 def test_the_kernel_and_the_domain_agree_on_the_coefficients() -> None:

@@ -1,5 +1,6 @@
 """Close CI failure issues when CI passes."""
 
+import argparse
 import json
 import os
 import sys
@@ -36,7 +37,10 @@ def github_api_request(
         return None
 
 
-def close_resolved_ci_issues() -> int:
+def close_resolved_ci_issues(
+    dry_run: bool = False,
+    yes_confirm: bool = False,
+) -> int:
     token = get_env_var("GITHUB_TOKEN")
     if not token:
         print("Notice: GITHUB_TOKEN not configured. Skipping closing issues.", file=sys.stderr)
@@ -60,10 +64,20 @@ def close_resolved_ci_issues() -> int:
     endpoint = f"/repos/{repo}/issues?state=open&labels=ci-failure&per_page=50"
     try:
         issues: List[Dict[str, Any]] = github_api_request(endpoint, method="GET", token=token)
+        matched = 0
         for issue in issues:
             if "pull_request" not in issue and issue.get("title") == title:
                 issue_number = issue["number"]
-                print(f"Closing resolved CI failure issue #{issue_number}...")
+                matched += 1
+                print(f"対象: CI失敗Issue #{issue_number} ({issue.get('title')})")
+
+                if dry_run:
+                    print(f"  [dry-run] 閉じる対象として一覧表示のみ（API への書き込みなし）: #{issue_number}")
+                    continue
+
+                if not yes_confirm:
+                    print(f"  [スキップ] --yes 未指定のため閉じません（安全側）: #{issue_number}")
+                    continue
 
                 # Post comment
                 comment_endpoint = f"/repos/{repo}/issues/{issue_number}/comments"
@@ -80,6 +94,10 @@ def close_resolved_ci_issues() -> int:
                 close_body = {"state": "closed", "state_reason": "completed"}
                 github_api_request(close_endpoint, method="PATCH", data=close_body, token=token)
                 print(f"Issue #{issue_number} closed successfully.")
+        if dry_run:
+            print(f"[dry-run] 閉じる対象: {matched} 件（副作用なし）")
+        elif not yes_confirm:
+            print(f"[安全側] 閉じる対象 {matched} 件を検出しましたが、--yes 未指定のため何も実行しませんでした。")
     except Exception as exc:
         print(f"Warning: Failed to auto-close CI issue: {exc}", file=sys.stderr)
         return 1
@@ -87,5 +105,22 @@ def close_resolved_ci_issues() -> int:
     return 0
 
 
+def main() -> int:
+    parser = argparse.ArgumentParser(description="Close resolved CI failure issues.")
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="閉じる対象を一覧表示するのみで、実際のクローズ/コメント API は呼び出さない。",
+    )
+    parser.add_argument(
+        "--yes",
+        action="store_true",
+        help="確認プロンプトをスキップして、実際に Issue をクローズする。",
+    )
+    args = parser.parse_args()
+
+    return close_resolved_ci_issues(dry_run=args.dry_run, yes_confirm=args.yes)
+
+
 if __name__ == "__main__":
-    sys.exit(close_resolved_ci_issues())
+    sys.exit(main())

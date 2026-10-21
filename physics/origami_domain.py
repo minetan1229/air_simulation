@@ -75,6 +75,28 @@ SHEET_LENGTH_M: float = 0.297
 #: Number of segments used to tessellate a rolled crease fold.
 ROLL_SAMPLES: int = 5
 
+#: Angle between the two panel directions of a crease below which the rolled
+#: crease is declared degenerate.
+#:
+#: A rolled crease is closed by the cubic Bezier that leaves the parent panel
+#: tangentially and enters the child panel tangentially.  Its two inner
+#: control points sit on the intersection ``v`` of the two panel directions,
+#: so ``v`` must stay finite and close to the crease.  When the two panels
+#: are nearly parallel the intersection runs off to an undefined distance and
+#: the Bezier degenerates into a spike that reaches metres in front of the
+#: nose.  The rolled crease first diverges at an angle of 1e-8 rad, so the
+#: degeneracy test has to reject *at least* that angle; the threshold below
+#: is 1e-3 rad (0.057 deg), five orders of magnitude coarser and still far
+#: below the angle of any crease that carries paper.
+CREASE_DEGENERATE_ANGLE_RAD: float = 1.0e-3
+
+#: Degeneracy threshold of the crease intersection, expressed the way
+#: :func:`_line_intersection_3d` measures it: ``denom = |d1 x d2|^2`` is the
+#: square of the sine of the angle between the two panel directions, so
+#: ``denom = 1e-6`` corresponds to the 1e-3 rad of
+#: :data:`CREASE_DEGENERATE_ANGLE_RAD`.
+CREASE_DEGENERATE_DENOM: float = 1.0e-6
+
 #: Amplitude of the bulge a folded paper packet develops between its creases.
 #: A stack of folded sheets is never flat: the layers bow apart towards the
 #: middle of the panel, which is what gives a folded nose its soft pocket.
@@ -167,6 +189,11 @@ def _unit3(v: Vec3) -> Vec3:
     if n <= 1e-12:
         return (0.0, 0.0, 1.0)
     return (v[0] / n, v[1] / n, v[2] / n)
+
+
+def _finite3(v: Vec3) -> bool:
+    """True when every component of ``v`` is a finite number."""
+    return math.isfinite(v[0]) and math.isfinite(v[1]) and math.isfinite(v[2])
 
 
 def _mat_mul(a: Mat3, b: Mat3) -> Mat3:
@@ -1039,14 +1066,27 @@ def _cubic_bezier_tangent(p0: Vec3, q1: Vec3, q2: Vec3, p3: Vec3, t: float) -> V
 def _line_intersection_3d(
     p: Vec3, d1: Vec3, q: Vec3, d2: Vec3
 ) -> Optional[Vec3]:
-    """Intersection of the line ``p + s*d1`` with the line ``q + u*d2``."""
+    """Intersection of the line ``p + s*d1`` with the line ``q + u*d2``.
+
+    ``None`` is returned when the two lines are parallel within
+    :data:`CREASE_DEGENERATE_DENOM` -- their intersection is then undefined
+    and the rolled crease would spike -- and whenever the arithmetic does not
+    produce a finite point.  A non-finite intersection is never handed back
+    to the caller, so the crease can only fall back on the bounded control
+    polygon of :func:`_roll_samples`.
+    """
     cross = _cross3(d1, d2)
     denom = _dot3(cross, cross)
-    if denom <= 1e-6:
+    if not math.isfinite(denom) or denom <= CREASE_DEGENERATE_DENOM:
         return None
     delta = _sub3(q, p)
     s = _dot3(_cross3(delta, d2), cross) / denom
-    return (p[0] + s * d1[0], p[1] + s * d1[1], p[2] + s * d1[2])
+    if not math.isfinite(s):
+        return None
+    point = (p[0] + s * d1[0], p[1] + s * d1[1], p[2] + s * d1[2])
+    if not _finite3(point):
+        return None
+    return point
 
 
 def _roll_samples(
@@ -1080,6 +1120,11 @@ def _roll_samples(
         d1 = _unit3(_cross3(crease_dir, parent_normal))
         d2 = _unit3(_cross3(crease_dir, child_normal))
         v = _line_intersection_3d(p, d1, c, d2)
+        # The intersection is only a usable control point when it stays close
+        # to the crease: the rolled arc is a few paper thicknesses wide, so a
+        # control point further away than three of those widths would pull the
+        # curve out of the paper.  Such an intersection is dropped and the
+        # curve falls back on the chord between the two panels.
         if v is not None and (
             _len3(_sub3(v, p)) > 3.0 * length or _len3(_sub3(v, c)) > 3.0 * length
         ):
@@ -1088,11 +1133,19 @@ def _roll_samples(
             q1 = _add3(p, _scale3(_sub3(v, p), 1.0 / 3.0))
             q2 = _add3(c, _scale3(_sub3(v, c), 1.0 / 3.0))
         else:
+            # Control polygon of the straight crease: the Bezier then follows
+            # the chord between the two panels exactly, which is the finite
+            # and physically bounded limit of a degenerate rolled crease.
             q1 = _add3(p, _scale3(chord, 1.0 / 3.0))
             q2 = _add3(p, _scale3(chord, 2.0 / 3.0))
         mid = _cubic_bezier(p, q1, q2, c, t)
         tangent = _cubic_bezier_tangent(p, q1, q2, c, t)
         normal = _cross3(crease_dir, tangent)
+        if not (_finite3(mid) and _finite3(tangent) and _finite3(normal)):
+            # A rolled crease must never inject a non-finite vertex into the
+            # mesh: fall back on the straight crease between the two panels.
+            mid = _add3(p, _scale3(chord, t))
+            normal = parent_normal
         if _len3(normal) <= 1e-12:
             normal = parent_normal
         else:
@@ -1228,6 +1281,7 @@ def build_pattern_mesh(
             sigma,
             offset,
             roll_samples,
+            alpha,
             builder,
             thickness,
         )
@@ -1382,6 +1436,7 @@ def _build_face_skin(
     sigma: float,
     offset: Dict[int, Vec3],
     roll_samples: Dict[Tuple[int, int], List[_RollSample]],
+    alpha: float,
     builder: _MeshBuilder,
     thickness: float,
 ) -> _FaceSkin:
@@ -1396,6 +1451,10 @@ def _build_face_skin(
     flat_face = pattern.face_by_id(face.fid)
     links = flat_face.links if flat_face is not None else []
     count = len(face.poly3d)
+    # Packet camber only develops while the sheet is being folded, so it
+    # scales with the fold progression and vanishes at the flat sheet.
+    camber = alpha * PACKET_CAMBER_M * (1.0 + layer)
+    segments = [(link.a, link.b) for link in links]
     for i in range(count):
         a = face.poly3d[i]
         b = face.poly3d[(i + 1) % count]
@@ -1450,10 +1509,16 @@ def _build_face_skin(
                 continue
         pa = _add3(a, offset[face.fid])
         pb = _add3(b, offset[face.fid])
-        ta = _add3(pa, _scale3(ref, half))
-        tb = _add3(pb, _scale3(ref, half))
-        ba = _sub3(pa, _scale3(ref, half))
-        bb = _sub3(pb, _scale3(ref, half))
+        # Layered packets bow out of the sheet plane between their creases.
+        # The bulge is proportional to the layer count, fades to zero at the
+        # crease (``_camber_weight``) and is injected along the face normal so
+        # the sheet thickness stays constant while the mid-surface cambered.
+        wa = _camber_weight(pa, segments)
+        wb = _camber_weight(pb, segments)
+        ta = _add3(pa, _scale3(ref, half + camber * wa))
+        tb = _add3(pb, _scale3(ref, half + camber * wb))
+        ba = _sub3(pa, _scale3(ref, half - camber * wa))
+        bb = _sub3(pb, _scale3(ref, half - camber * wb))
         crease_a = _crease_weight(links, a)
         crease_b = _crease_weight(links, b)
         if skin.top and _same_point3(builder.positions[skin.top[-1]], ta, 1e-9):
@@ -1820,16 +1885,36 @@ def _archetype_creases(
         )
         if archetype == ARCHETYPE_NAKAMURA:
             # The belly fold traps the folded nose packet in the centre of
-            # the sheet: that is the lock of the Nakamura glider, it holds
-            # the left and the right layers of the nose together.
+            # the sheet.  The lock is a central triangle: a symmetric base
+            # crease folds the nose tip in, and two stepped side creases tuck
+            # one side's layer under the other so the packet cannot spring
+            # open.
             lock_half = 0.085
+            lock_v = 0.5 + lock_half * 1.5
+            lock_cv = 0.5 + lock_half * 0.9
+            lock_w = lock_half * 0.35
+            # Center base crease: both halves fold by half the angle, forming
+            # the central locking plane.
+            creases.append(
+                Crease(
+                    key="lock_center",
+                    p0=(0.5 - lock_w, lock_v),
+                    p1=(0.5 + lock_w, lock_v),
+                    angle_deg=24.0,
+                    side=0,
+                    up=False,
+                    level=2,
+                    set_group_pair=("lock_l", "lock_r"),
+                    groups=("flap_l", "flap_r"),
+                )
+            )
             creases.append(
                 Crease(
                     key="lock_l",
-                    p0=(0.5 - lock_half * 0.35, 0.5 + lock_half * 1.5),
-                    p1=(0.5, 0.5 + lock_half * 0.9),
+                    p0=(0.5 - lock_w, lock_v),
+                    p1=(0.5, lock_cv),
                     angle_deg=24.0,
-                    side=-1,
+                    side=1,
                     up=True,
                     level=2,
                     groups=("flap_l",),
@@ -1839,11 +1924,11 @@ def _archetype_creases(
             creases.append(
                 Crease(
                     key="lock_r",
-                    p0=(0.5 + lock_half * 0.35, 0.5 + lock_half * 1.5),
-                    p1=(0.5, 0.5 + lock_half * 0.9),
+                    p0=(0.5 + lock_w, lock_v),
+                    p1=(0.5, lock_cv),
                     angle_deg=24.0,
-                    side=1,
-                    up=False,
+                    side=-1,
+                    up=True,
                     level=2,
                     groups=("flap_r",),
                     set_group="lock_r",
@@ -1857,12 +1942,20 @@ def _archetype_creases(
         wing_u = 0.40
     else:
         wing_u = 0.42
-    wing_angle = body_half + abs(dihedral_deg)
+    #: Leading-edge sweep applied to the wing fold near the nose (sheet
+    #: units).  The wing crease angles back toward the tail at the wingtip so
+    #    the planform is a swept wing instead of a rectangle.
+    _LEADING_SWEEP_U: float = 0.05
+    wing_angle = body_half + dihedral_deg
+    # The nose end of the wing crease sweeps back (toward the tail at the
+    # wingtip), mirroring a real dart's swept leading edge.
+    wing_l_nose = wing_u - _LEADING_SWEEP_U
+    wing_r_nose = 1.0 - wing_u + _LEADING_SWEEP_U
     creases.append(
         Crease(
             key="wing_l",
             p0=(wing_u, 0.0),
-            p1=(wing_u, 1.0),
+            p1=(wing_l_nose, 1.0),
             angle_deg=wing_angle,
             side=1,
             up=True,
@@ -1875,7 +1968,7 @@ def _archetype_creases(
         Crease(
             key="wing_r",
             p0=(1.0 - wing_u, 0.0),
-            p1=(1.0 - wing_u, 1.0),
+            p1=(wing_r_nose, 1.0),
             angle_deg=wing_angle,
             side=-1,
             up=True,
@@ -1895,7 +1988,7 @@ def _archetype_creases(
     else:
         winglet_u = 0.07
         winglet_angle = 80.0
-    winglet_angle += max(0.0, fold_tip_deg)
+    winglet_angle += fold_tip_deg
     creases.append(
         Crease(
             key="winglet_l",
@@ -1952,17 +2045,34 @@ def _archetype_creases(
     )
 
     trailing_v = 0.055
+    # The trailing edge is folded on both wings.  Each half is creased on its
+    # own wing so the left and right elevons are mirror images: a single
+    # full-width crease with a global moving side would tessellate the two
+    # halves differently and break left/right symmetry.
     creases.append(
         Crease(
-            key="trailing",
+            key="trailing_l",
             p0=(0.0, trailing_v),
-            p1=(1.0, trailing_v),
-            angle_deg=abs(fold_trailing_deg),
+            p1=(0.5, trailing_v),
+            angle_deg=fold_trailing_deg,
             side=-1,
             up=False,
             level=0,
-            groups=("elevon_l", "elevon_r"),
-            set_group="trailing",
+            groups=("elevon_l",),
+            set_group="trailing_l",
+        )
+    )
+    creases.append(
+        Crease(
+            key="trailing_r",
+            p0=(0.5, trailing_v),
+            p1=(1.0, trailing_v),
+            angle_deg=fold_trailing_deg,
+            side=-1,
+            up=False,
+            level=0,
+            groups=("elevon_r",),
+            set_group="trailing_r",
         )
     )
     return creases

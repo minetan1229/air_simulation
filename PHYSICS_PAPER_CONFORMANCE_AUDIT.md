@@ -18,10 +18,10 @@
 | P1-⑥ | 失速後揚力ノッチ除去 | **完了** | 固定ターゲットブレンド化で C_L が 0 帯へ落ちない。負側のみ系統的に沈む欠陥も修正（`aero_kernel.post_stall_lift_coefficient`） |
 | P1-⑦ | Hoerner 抗力 `C_D0 cos α` | **完了** | `aero_kernel.separated_pressure_drag_coefficient`（旧 0.10 定数を廃止） |
 | P1-⑧ | 慣性テンソルの λ 依存 | **完了** | `config_schema` へテーパ比依存の第二慣性モーメントを追加 |
-| P1-⑨ | 空力弾性を δ_eff 幾何モデルへ | **完了** | モーフングは幾何量（後縁偏差）としてのみ作用。`cL0` / `cm0` を 同じ俜数で ス케ールしない。`aeroelastic_morph_exponent` / `aeroelastic_pressure_scale_pa` を設定化 |
+| P1-⑨ | 空力弾性を δ_eff 幾何モデルへ | **完了** | モーフングは幾何量（後縁偏差）としてのみ作用。`cL0` / `cm0` を 同じ係数で スケールしない。`aeroelastic_morph_exponent` / `aeroelastic_pressure_scale_pa` を設定化 |
 | P1-⑩ | Polhamus 公開式 | **完了** | 公開式 `K_p sinα cos²α + K_v sin²α cosα` を実装（`polhamus_kp` で `K_p` 明示可）。`copysign` 符号誤りは廃止 |
 | P1-⑪ | 熱上昇流の符号 | **完了** | `wind_domain` の熱上昇流符号を修正 |
-| P2-⑫⑬⑭ | 接地インパルス / ステップ受容 / 相対速度刻み | **完了** | `flight_sim` にコン judルコーン・エネルギー拘束つきのインパルス接触判定、ステップ受容のスケーリング、相対速度ベース刻みを導入 |
+| P2-⑫⑬⑭ | 接地インパルス / ステップ受容 / 相対速度刻み | **完了** | `flight_sim` にCoulomb 円錐・エネルギー拘束つきのインパルス接触判定、ステップ受容のスケーリング、相対速度ベース刻みを導入 |
 | P3-⑯〜⑳ | GPU 13 状態 RK4 ベクトル化 | **完了** | `physics/gpu_dynamics.py` に 13 状態 RK4 を実装し、GPU 最適化バッチ経路を正規経路と同一モデルに統合（パリティ検証付き） |
 
 回帰テスト: `tests/test_paper_conformance_p0_p1.py`（本監査専用の固定化テスト）
@@ -304,7 +304,7 @@ Helmbold (1942) / Polhamus (1966,1971) / Viterna & Corrigan (1982) / Wieselsberg
   ```
 - **論文・物理法則との乖離**:
   1. **不連続**: 既定失速角14°で `cl_linear = 0.12 + 3.142×0.2443 = 0.888`、`cl_post_stall = 0.85·sin(0.4886) = 0.398`。閾値通過で**揚力が瞬時に55 % 落ちる**＝ステップ状の力変化。これはステップ関数の力＝**インパルス的ピッチング/ロールトルク**を生む。仕様 §1.1 は「滑らかに接続」を要求、旧 `PHYSICS_AUDIT_REPORT.md:16` は「シグモイド重み関数」と明記している。**重み関数が存在しない**。また `0.85` は Viterna の `A₁`（翼型ごとに測定してフィット）ではなく固定値。
-  2. **抗力**: `0.35(1−cosα)` は Hoerner の `2 sin²α + C_D0 cosα` とも Viterna の `B₁ sinα + B₂ cosα` とも無関係。α=30° で 0.045（Hoerner 0.52）、45° で 0.103（Hoerner 1.01）、90° で 0.35（Hoerner 2.0）。**到達可能最大 C_D は約 0.10** で、仕様の `C_Dmax ≈ 1.8–2.0` に**11–20倍届かず**。深失速した紙飛行機が正常滑空보다高効率になる（L/D が逆転）。
+  2. **抗力**: `0.35(1−cosα)` は Hoerner の `2 sin²α + C_D0 cosα` とも Viterna の `B₁ sinα + B₂ cosα` とも無関係。α=30° で 0.045（Hoerner 0.52）、45° で 0.103（Hoerner 1.01）、90° で 0.35（Hoerner 2.0）。**到達可能最大 C_D は約 0.10** で、仕様の `C_Dmax ≈ 1.8–2.0` に**11–20倍届かず**。深失速した紙飛行機が正常滑空より高効率になる（L/D が逆転）。
   3. `cl = xp.clip(cl_linear, -0.6, cl_max)` は負迎角 −13°超で C_L を −0.6 に固定（線形連続の連続性が切れる）。
 - **修正案**: §2-H01 のベクトル化ポートで `aero_domain` の**同一実装**を使う。その上で失速後を Viterna 形で書く場合:
   ```python
@@ -314,7 +314,7 @@ Helmbold (1942) / Polhamus (1966,1971) / Viterna & Corrigan (1982) / Wieselsberg
   cl = (1-w)*cl_linear + w*cl_vit
   ```
   - **安定性ガード**: `A₁=0.85`（測定フィット）、`A₂=0`（薄板）、`B₁=1.0`、`B₂=cd0`；`|sinα| ≥ 1e-3` ゲート；最終 `|C_L| ≤ 4.0` の安全網のみ。
-- **計算コスト・メモリへの影響**: 1ステップあたり +10 の要素 transcendentals。N=4096・2000ステップで ≈80 MFLOP → **GPU 0.3 s / CPU 1.5 s**。VRAM +3〜4 本の `float64[N]`（131 kB @N=4096）。**現 общиe +20 %以内**に収まる。
+- **計算コスト・メモリへの影響**: 1ステップあたり +10 の要素 transcendentals。N=4096・2000ステップで ≈80 MFLOP → **GPU 0.3 s / CPU 1.5 s**。VRAM +3〜4 本の `float64[N]`（131 kB @N=4096）。**現状 +20 %以内**に収まる。
 
 ---
 
@@ -330,7 +330,7 @@ Helmbold (1942) / Polhamus (1966,1971) / Viterna & Corrigan (1982) / Wieselsberg
   | AeroSandbox `AeroBuildup`（レジストリの自称根拠） | `2πAR/(2+√(AR²(1+λ)²+4))` | 2.409 | +17.2 % |
 
   GPU 経路は**テーパ項を落とし**、`4AR/π` を定数 `4` に置き換えている。SPEC は `+4` と `tan²(Λ_c/2)`（本来 Helmbold 1942 の三角翼形）を使うが、コード／旧監査報告／公開レジストリは Raymer 形（`+4AR/π`, `1+λ`）を使う。
-- **論文・物理法則との乖離**: Helmbold (1942) の原式は `2πAR/(2+√(AR²(1+tan²(Λ_c/2))+4))`（**三角翼・前縁後退角**依存）、Raymer の**テーパ翼**への拡張が `1+λ` 形式。紙飛行機は後縁後退のない**三角翼**（λ→0）が原理的に近いため、SPEC の式が物理的に正しく、コードの Raymer 形（かつ既定 `taper_ratio=0.70` は紙飛行機として不自然）は別の機体を仮定している。**GPU 経路はさらに第3の形**を使うため、GPU の有無で同一機体の揚力曲線が変わる（+11.3 %）。C_Lα はトリム迎角と失速マージンを支配するため、优化器は「GPU 付きなら少し背の低い翼」を選好する。
+- **論文・物理法則との乖離**: Helmbold (1942) の原式は `2πAR/(2+√(AR²(1+tan²(Λ_c/2))+4))`（**三角翼・前縁後退角**依存）、Raymer の**テーパ翼**への拡張が `1+λ` 形式。紙飛行機は後縁後退のない**三角翼**（λ→0）が原理的に近いため、SPEC の式が物理的に正しく、コードの Raymer 形（かつ既定 `taper_ratio=0.70` は紙飛行機として不自然）は別の機体を仮定している。**GPU 経路はさらに第3の形**を使うため、GPU の有無で同一機体の揚力曲線が変わる（+11.3 %）。C_Lα はトリム迎角と失速マージンを支配するため、最適化器は「GPU 付きなら少し背の低い翼」を選好する。
 - **修正案**:
   1. `physics/aero_domain.py` に**単一実装**を置く（コードは既にここにある）:
      ```python
@@ -394,7 +394,7 @@ Helmbold (1942) / Polhamus (1966,1971) / Viterna & Corrigan (1982) / Wieselsberg
          d_i  = -alt_i                       # 貫入深
          if d_i <= 0: continue
          n_i  = body_to_world(q, r_hat_i)    # 接触法線（世界）
-         N_i  = max(0.0, k*d_i + c*dot(v, n_i))          # 接触則（線形弹簧+減衰）
+         N_i  = max(0.0, k*d_i + c*dot(v, n_i))          # 接触則（線形ばね+減衰）
          F_t  = tangential_component(F_req, n_i)         # Coulomb: |F_t| <= mu*N_i
          M   += cross(r_i, N_i*n_i + F_t)
      ```
@@ -443,7 +443,7 @@ Helmbold (1942) / Polhamus (1966,1971) / Viterna & Corrigan (1982) / Wieselsberg
   | `INDEX_REFERENCE_PA`（ヒートマップ / テレメトリ `max_stress_index`） | **25 000 Pa** | **11.36×** |
   | `parallel_engine._STRESS_LIMIT_PA`（GPU 批次、`clamp(0,1.5)`） | **120 000 Pa** | **54.55×**（ヒートマップ比で 4.8×） |
 
-  さらに `index_grid = normalise_heatmap(stress_np) * clamp(max_stress/25kPa, 0, 1)` であり、`normalise_heatmap` は**min-max 正規化**なので、**最小応力セルは絶対値に関係なく常に 0.0**、パターン部分は载荷不変。
+  さらに `index_grid = normalise_heatmap(stress_np) * clamp(max_stress/25kPa, 0, 1)` であり、`normalise_heatmap` は**min-max 正規化**なので、**最小応力セルは絶対値に関係なく常に 0.0**、パターン部分は載荷不変。
 - **論文・物理法則との乖離**: `docs/SPECIFICATION.md:40` は頂点値を「**0.0: 安全 〜 1.0: 破断限界**」と規定。実装の 1.0 は 25 kPa = 破断限界の **11.4倍**。トリム点での実応力 σ=52.2 Pa に対し `head = 0.0021` ＝ **ヒートマップは全面黒**。破断（failure_index ≥ 1, σ=2200 Pa ≈ 42 G）でも index は 0.088 しかなく、**1.0 到達には 25 kPa ≒ 480 G / 290 m/s** が必要（到達不能）。
   **下流の被害**: `flight_sim.py:2474: if impact > 15.0 and impact_stress["max_stress_index"] >= 1.0: crashed = True` は**永久に成立しない死コード**（σ≥25 kPa が必要だが `impact_g` は 16 G で上限）。一方 `stress_domain` 自身の `status` は 42 G で "failed" とする。→ **同一ペイロード内に 11 倍意味の違う2つの「インデックス」**。
   さらに §0.5 の実測で **CPU 281.8 Pa vs GPU 355 388 Pa（1261倍）**、`max_stress_index` が 0.0113 vs 1.5000（133倍） Roadsourced している。
@@ -531,10 +531,10 @@ Helmbold (1942) / Polhamus (1966,1971) / Viterna & Corrigan (1982) / Wieselsberg
   2113: effective_cL0 = float(self.aircraft.cL0) * morph_factor           # ★ 仕様外
   2114: compliance_deflection = 12.0*aero_comp_gain*(pr**1.5)/(1.0+(pr**1.5))
   ```
-  `2109` のwashout は `q` に対して**線形かつ無制限**で、`1000 Pa`（`paper_stiffness=0.35` → `q_ref=35 Pa`, `aeroelastic_twist=1.0`）で `aero_twist_deg = 114°` になる（2094/2095 の `*5.0`/`*4.0` が出典なし）。このtwistは `2097: effective_alpha_deg = alpha_deg - aero_twist_deg` として**迎角そのもの**から引かれ、**迎角を反転**させる。`aero_domain` 側の `1073-1078` は**別の式**（`q_scale = q/(50*stiffness)`, `*2.5`/`*1.5`）で、**2つの経路が 서로違う量**を返している（`flight_sim` は `stress_domain.aeroelastic_deformations` の値を使うため、API `POST /aerodynamics/calculate` の `aeroelastic_dihedral_deg` は**シミュレータが実際に使用した変形ではない**）。
+  `2109` のwashout は `q` に対して**線形かつ無制限**で、`1000 Pa`（`paper_stiffness=0.35` → `q_ref=35 Pa`, `aeroelastic_twist=1.0`）で `aero_twist_deg = 114°` になる（2094/2095 の `*5.0`/`*4.0` が出典なし）。このtwistは `2097: effective_alpha_deg = alpha_deg - aero_twist_deg` として**迎角そのもの**から引かれ、**迎角を反転**させる。`aero_domain` 側の `1073-1078` は**別の式**（`q_scale = q/(50*stiffness)`, `*2.5`/`*1.5`）で、**2つの経路が異なる量**を返している（`flight_sim` は `stress_domain.aeroelastic_deformations` の値を使うため、API `POST /aerodynamics/calculate` の `aeroelastic_dihedral_deg` は**シミュレータが実際に使用した変形ではない**）。
 - **論文・物理法則との乖離**: `docs/SPECIFICATION.md:25` の式は **δ_eff(q) のみ**:
   `δ_eff(q) = δ_trim · [1 / (1 + (q/q_aeroelastic)^{n_morph})]`
-  `PHYSICS_AUDIT_REPORT.md:55` も同じ。`n_morph` は**論文が名指しするモデルパラメータ**だが、コードには設定項目が存在せずリテラル `3.0` が固定されている（`tools/test_morph_cm0.py:26-28` は `q_aeroelastic = 30.0*stiffness`, `n_morph=1.5` を使い、`tools/check_morph_decay.py` は `n_morph ∈ {1.5,2.0,2.5,3.0}` を掃引 — **手動探索した値が仕様化 없이凍結**されている）。
+  `PHYSICS_AUDIT_REPORT.md:55` も同じ。`n_morph` は**論文が名指しするモデルパラメータ**だが、コードには設定項目が存在せずリテラル `3.0` が固定されている（`tools/test_morph_cm0.py:26-28` は `q_aeroelastic = 30.0*stiffness`, `n_morph=1.5` を使い、`tools/check_morph_decay.py` は `n_morph ∈ {1.5,2.0,2.5,3.0}` を掃引 — **手動探索した値が仕様化なしで凍結**されている）。
   `cL0` と `cm0` に**同一倍率**を掛けるのは物理的に誤り：後縁折れによるキャンバー変化は `ΔC_L0` と `ΔC_m0` に**異なる量**（エレオンは重心後方なので `ΔC_m/ΔC_L ≈ 0.22·(x_ac−x_cg)/c`）を与える。同一倍率にすると `q → ∞` で**翼が平板(cL0=cm0=0)になり、静安定トリムそのものが消える** — まさに「頭上げループ抑制」-Net_FEATUREの制御対象である高 q 域で静的安定性が消滅する。
 - **修正案**:
   1. `q_ref`（`aeroelastic_q_ref_pa`）と `n_morph`（`aeroelastic_n_morph`, 既定3）を**設定項目に昇格**し、160.0/3.0 リテラルを廃止。
@@ -662,7 +662,7 @@ Helmbold (1942) / Polhamus (1966,1971) / Viterna & Corrigan (1982) / Wieselsberg
   2155: a_body[2] = (force_body[2] / m_eff_z) + gravity_body[2]   # ★ 重力が m_eff でない
   ```
   平板の法線方向付加質量は `m_a = ρ π b c²/8`（あるいは `ρ π b³/8` の回転形）。本実装は `π/4·ρ·b·c²` という**平板法線形と球形係数の折衝**で、**機体 z 軸1本のみ**に適用（面内 x,y は 0）。**回転付加慣性**（タンブルする紙飛行機では支配的）は完全に欠落（コードのコメント `2143-2145` が自認）。加えて**重力が有効質量でスケールされない**ため、機体重量を `m/m_eff` だけ過大に評価する。`PHYSICS_AUDIT_REPORT.md:104-106` は「付加質量…は**未実装**」と明記しており、**コードと文書が矛盾**する。
-- **論文・物理法则との乖離**: 正しい法線方向運動方程式は `m_eff·a_n = F_n + m_a·g_n`（流体も一部重量を負担）。既定機体（m=5 g, b=0.20 m, c=0.08 m, ρ=1.225）で `m_a = (π/4)(1.225)(0.20)(0.0064) = 1.23e-3 kg` ＝ **機体質量の 26 %**。滑空時の力平衡に対する**一次の誤差**である。`added_mass_enabled` の既定は False なので現行挙動は「準定常」だが、**コード経路自体は誤り**。
+- **論文・物理法則との乖離**: 正しい法線方向運動方程式は `m_eff·a_n = F_n + m_a·g_n`（流体も一部重量を負担）。既定機体（m=5 g, b=0.20 m, c=0.08 m, ρ=1.225）で `m_a = (π/4)(1.225)(0.20)(0.0064) = 1.23e-3 kg` ＝ **機体質量の 26 %**。滑空時の力平衡に対する**一次の誤差**である。`added_mass_enabled` の既定は False なので現行挙動は「準定常」だが、**コード経路自体は誤り**。
 - **修正案**:
   ```python
   # 実装する場合
@@ -721,7 +721,7 @@ Helmbold (1942) / Polhamus (1966,1971) / Viterna & Corrigan (1982) / Wieselsberg
      ok = (rate_jump <= max(MAX_RATE_JUMP_RADPS, (1+SAFETY)*predicted_rate)) and \
           (speed_jump <= max(MAX_SPEED_JUMP_MPS, (1+SAFETY)*predicted_speed))
      ```
-     これで「ステップが微分が予測した대로動いたか」という**真の局所誤差推定**になる。
+     これで「ステップが微分が予測したどおり動いたか」という**真の局所誤差推定**になる。
   2. 代替（厳密）: ステップ倍化（Richardson）誤差推定 `‖y(h) − y(h/2)/2‖ / (‖y(h/2)/2‖+ε) < 1e-6`。**+1 RK4 スイープ = +4 力評価/段 ≈ +400 % CPU** → 収束性検証ハーネス専用。
   3. `2260-2261` の空虚な四元数ノルム検査を削除（または生 `y1` に対して実施）。
   4. 棄却を**テレメトリに露出**（`step_rejections` カウンタ）し、ユーザーが物理結果と数値人工物の区別できるようにする。
@@ -828,7 +828,7 @@ Helmbold (1942) / Polhamus (1966,1971) / Viterna & Corrigan (1982) / Wieselsberg
 
 ### [重要度：中] M-09. 失速ブレンドが `logistic⁴`（形状パラメータ）で、50 % 点・90 % 点が 1.65 倍シフト
 - **該当箇所**: `physics/aero_domain.py:130`（`STALL_BLEND_ORDER = 4`）、`:338-354`
-- **現在の実装と制限内容**: `_logistic(sharpness*offset) ** 4`。docstring は「ロброastricをべき乗にすることで失速前の線形分岐を機械精度で再現するため（`tests/test_aero.py` が 1e-29 相対を要求）」と**明記**。50 % 点が `Δα=0` から `1.19°` へ、90 % 点が `1.57°` から `2.60°` へ移動＝**失速が 1.65 倍鋭くなる**。
+- **現在の実装と制限内容**: `_logistic(sharpness*offset) ** 4`。docstring は「ロジスティックをべき乗にすることで失速前の線形分岐を機械精度で再現するため（`tests/test_aero.py` が 1e-29 相対を要求）」と**明記**。50 % 点が `Δα=0` から `1.19°` へ、90 % 点が `1.57°` から `2.60°` へ移動＝**失速が 1.65 倍鋭くなる**。
 - **修正案**: 指数の代わりに**C1 連続の局所線形化**で exacta な付着流を作る: `w = 1/(1+exp(-k·d))`、`|d| ≤ 1e-3` では `w = 0.5 + 0.25·k·d`。指数を維持する場合は `stall_blend_order` を設定項目にし、`PHYSICS_AUDIT_REPORT.md` §1.1 に「意図的な形状パラメータ」として記載。
 - **計算コスト・メモリへの影響**: 0（`pow` → 乗算）。
 
@@ -964,7 +964,7 @@ Helmbold (1942) / Polhamus (1966,1971) / Viterna & Corrigan (1982) / Wieselsberg
 
 ### [重要度：中] M-26. 応力場が**圧縮側をクリップ**し、薄板の座屈（支配的破壊モード）が見えない
 - **該当箇所**: `physics/stress_domain.py:726`（`stress = xp.maximum(stress, 0.0)`）
-- **現在の実装と制限内容**: 曲げ応力は符号付きだが、下限 0 に clip。翼根曲げモーメントが正なら下表面は**圧縮**（座屈で破断）するはずが、圧縮側は完全に消える。载荷反転時は場が**恒等的にゼロ**になる。
+- **現在の実装と制限内容**: 曲げ応力は符号付きだが、下限 0 に clip。翼根曲げモーメントが正なら下表面は**圧縮**（座屈で破断）するはずが、圧縮側は完全に消える。載荷反転時は場が**恒等的にゼロ**になる。
 - **修正案**: `stress_pa` は符号付き保持。利用率は `|σ|`（または von Mises 相当）から求め、圧縮側に**明示的な座屈チャンネル**を追加: `σ_cr = π²Et²/(12(1−ν²)(b/t)²)`。
 - **計算コスト・メモリへの影響**: O(1)/セル。
 
@@ -1008,7 +1008,7 @@ Helmbold (1942) / Polhamus (1966,1971) / Viterna & Corrigan (1982) / Wieselsberg
   424: washout_twist   = clamp((q * area * c_mac * twist_gain * norm_scale) / denom, -20.0, 20.0)
   ```
   `norm_scale` は**次元的な根拠が無く**、変位が ±30°/±20° の窓に収まることのみが目的（「見た目の調整定数」）。分母 `denom = eff_stiff·t³` は**無次元の「剛さ」**と物理的な `t³` を掛け合わせており、`1/(EI)` の梁スケールは名目上のみ。重力は `9.80665` 固定だが、大気/ISA 全体は実行時可変の `env.gravity` で駆動されている（`config_schema.py:469,503`）。
-- **論文・物理法則との乖離**: 弹性たわみは `δ = F·L³/(3EI)` で、EI は実ヤング率と実断面二次モーメントから成る。現状は `EI` が存在せず、`E_MD`/`E_CD`/`ν` がモジュール内に**一切現れない**（`paper_stiffness` は無次元 0–1 スライダー）。また §2-H13 の通り `aero_domain.py:1073-1078` は**別の式**（`q/(50·stiffness)`, `*2.5`/`*1.5`）を持ち、`flight_sim` は `stress_domain` 側の値を使うため、**API `POST /aerodynamics/calculate` の `aeroelastic_dihedral_deg` はシミュレータが実際に使った変形ではない**。Mars/Moon の重力スライダーは飛行を変えるが**空力弾性たわみは変えない**。
+- **論文・物理法則との乖離**: 弾性たわみは `δ = F·L³/(3EI)` で、EI は実ヤング率と実断面二次モーメントから成る。現状は `EI` が存在せず、`E_MD`/`E_CD`/`ν` がモジュール内に**一切現れない**（`paper_stiffness` は無次元 0–1 スライダー）。また §2-H13 の通り `aero_domain.py:1073-1078` は**別の式**（`q/(50·stiffness)`, `*2.5`/`*1.5`）を持ち、`flight_sim` は `stress_domain` 側の値を使うため、**API `POST /aerodynamics/calculate` の `aeroelastic_dihedral_deg` はシミュレータが実際に使った変形ではない**。Mars/Moon の重力スライダーは飛行を変えるが**空力弾性たわみは変えない**。
 - **修正案**:
   1. `config_schema` に実材料定数を追加: `E_MD ≈ 3.0 GPa`, `E_CD ≈ 1.5 GPa`, `ν ≈ 0.3`, `ρ_bulk = 800 kg/m³`（§2-H11 と共通）。
   2. 変位を `δ = F·L³/(3EI)`（`I` は折り断面から、§2-H11）で算出。
@@ -1046,7 +1046,7 @@ Helmbold (1942) / Polhamus (1966,1971) / Viterna & Corrigan (1982) / Wieselsberg
   1350: chord_bin = np.clip(((chord_proj - chord_lo)/chord_range*nx).astype(np.int64), 0, nx-1)
   ```
   `MeshLibrary._build` は `panel_nx/panel_ny` を渡さずに `compute_metrics` を呼ぶため、**全ての取り込みモデルが 192 セル固定**（モデル寸法・要求解像度と無関係）。さらに各**三角形全体を重心の属する bin へ丸ごと**割り当てるので、境界をまたぐ三角形は全面積を**誤ったセル**に持ち込む（O(h) 誤差）し、面積分布が量子化される。
-- **論文・物理法則との乖離**: パネル法は-wing 上の揚力分布（ Vignelli / 面素法）の**離散化**であり、解像度は**近似誤差と計算コストのトレードオフ**パラメータであるべきもの。固定 192 セルは、细小な折り形状（DJの折れ目など）で形状解像度を確保できず、パネル荷重が形状を正しく表現しない。
+- **論文・物理法則との乖離**: パネル法は-wing 上の揚力分布（ Vignelli / 面素法）の**離散化**であり、解像度は**近似誤差と計算コストのトレードオフ**パラメータであるべきもの。固定 192 セルは、細かな折り形状（DJの折れ目など）で形状解像度を確保できず、パネル荷重が形状を正しく表現しない。
 - **修正案**:
   1. `panel_nx/panel_ny` を API と `MeshLibrary` に露出し、既定を**弦基準**（約 20 セル/弦）にする。
   2. 重心 binning を**bin 平面で三角形をクリップ**する方式に置き換える（面積重み付き).
@@ -1315,7 +1315,7 @@ Helmbold (1942) / Polhamus (1966,1971) / Viterna & Corrigan (1982) / Wieselsberg
 | H-12 | 慣性テンソルの第二モーメントに**平行軸項**を復元。三角翼で −25%（既定 λ=0.70 で −7.9%）の過小評価を解消 | `config_schema.py` |
 | H-13 | 空力弾性モーフィングから `cL0`/`cm0` の倍率変異を除去し、`n_morph` と `q_aeroelastic` を**設定項目**化 | `flight_sim.py`, `config_schema.py` |
 | H-14 | `_local_aero` と `aero_domain` の係数乖離（ピッチ減衰2倍、ラダー4倍、逆ヨー欠落）を解消（`aero_domain` を正とする共通化） | `flight_sim.py`, `aero_domain.py` |
-| H-15 | Polhamus 項の `copysign` 符号誤りを修正（|α|>90° で涡吸引が逆符号になる問題） | `aero_domain.py` |
+| H-15 | Polhamus 項の `copysign` 符号誤りを修正（|α|>90° で渦吸引が逆符号になる問題） | `aero_domain.py` |
 | H-16 | 熱上昇柱の巻き込み流の**符号を反転**し、柱頂より上は流出・柱基部は流入（連続性 `∇·V≠0` の解消） | `wind_domain.py` |
 | H-17 | 風向の符号規約を**共有ヘルパー**へ統一（GPU 2経路の90°回転・符号反転を解消） | `parallel_engine.py` |
 | H-18 | 付加質量の部分実装（重力未スケール、回転付加慣性欠落）を是正 | `flight_sim.py` |

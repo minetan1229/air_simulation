@@ -117,7 +117,6 @@ __all__ = [
     "BACKEND",
     "EVALUATE_KEYS",
     "STATUS_VALUES",
-    "FlightDivergenceError",
     "FlightSimulator",
     "ThrowSolution",
     "aero_forces",
@@ -159,28 +158,21 @@ STATUS_VALUES: Tuple[str, ...] = (
 EVALUATE_KEYS: Tuple[str, ...] = PAYLOAD_KEYS
 
 
-class FlightDivergenceError(RuntimeError):
-    """Raised when the 6-DoF integration cannot be completed.
-
-    The exception separates a *physical* divergence (the integration left its
-    stable region) from an *implementation* error (a bad configuration or an
-    unexpected payload).  :func:`evaluate_flight` reports the two cases with
-    different ``status`` values so that a broken design is never scored as a
-    legitimate 0 m flight.
-    """
-
-
 # --------------------------------------------------------------------------
 # Numerical guard rails
 # --------------------------------------------------------------------------
 #: Hard speed cap (m/s).  Beyond this the airframe is considered lost.
 HARD_SPEED_LIMIT_MPS = 500.0
-#: Hard altitude cap (m) in either direction from ``ground_level_m``.
-HARD_ALTITUDE_LIMIT_M = 1.0e4
+#: Hard altitude cap (m) in either direction from ``ground_level_m``.  Set to
+#: the ISA troposphere ceiling (11 km) so the barometric column stays inside the
+#: domain the aerodynamic model is declared valid for.
+HARD_ALTITUDE_LIMIT_M = 1.1e4
 #: Hard horizontal range cap (m) from the world origin sqrt(x^2 + y^2).
 HARD_HORIZONTAL_LIMIT_M = 1.0e5
-#: Hard body-rate cap (rad/s) catching moment / inertia blow-ups.
-HARD_ANGULAR_RATE_LIMIT_RPS = 5.0e3
+#: Hard body-rate cap (rad/s) catching moment / inertia blow-ups.  Set well
+#: above the maximum hand-release rate (45 rad/s roll) so realistic flight is
+#: unaffected, but low enough to latch a numerical / inertia blow-up as divergent.
+HARD_ANGULAR_RATE_LIMIT_RPS = 1.0e2
 #: Number of time-step halving retries before the integration is divergent.
 DIVERGENCE_RETRIES = 6
 #: Maximum attitude rotation tolerated inside a single RK4 step (rad).
@@ -203,11 +195,6 @@ MAX_SPEED_JUMP_MPS = 25.0
 #: size) when judging whether an integrated step is acceptable.  A step whose
 #: observed jump exceeds ``(1 + SAFETY) * predicted`` is rejected and halved.
 STEP_ACCEPT_SAFETY = 1.25
-#: Maximum angular-rate change a single ground-contact impulse may inject
-#: (rad/s).  A contact impulse is a torque, so it scales with the impact
-#: energy; the bound only exists to stop a pathological geometry from
-#: producing an infinite rate in one sub-step.
-MAX_CONTACT_RATE_JUMP_RADPS = 8.0
 #: Tolerance of the raw (pre-normalisation) quaternion norm drift per step.
 QUATERNION_NORM_TOLERANCE = 5.0e-3
 #: Safety factor of the RK4 stiff-mode bound.  The explicit RK4 polynomial is
@@ -223,8 +210,6 @@ RK4_STIFFNESS_SAFETY = 2.0
 STIFFNESS_CACHE_TOLERANCE = 0.05
 #: Fraction of the mean aerodynamic chord the airframe may travel in one step.
 TRAVEL_FRACTION_PER_STEP = 0.5
-#: Legacy low-speed scale retained for compatible imports; flow uses actual airspeed.
-EFFECTIVE_SPEED_FLOOR_MPS = 0.05
 #: Legacy airspeed cap (m/s).  **Deprecated / inert**: the aerodynamic solver
 #: is no longer fed a truncated airspeed (that silently evaluated every
 #: aerodynamic force at a different airspeed than the body experiences).  The
@@ -808,7 +793,10 @@ def _atmosphere_state_uncached(
                             1.0e-12,
                         ),
                         "dynamic_viscosity_pa_s": _finite(
-                            _lookup(payload, ("dynamic_viscosity_pa_s", "mu_pa_s", "mu", "dynamic_viscosity")),
+                            _lookup(
+                                payload,
+                                ("dynamic_viscosity_Pa_s", "dynamic_viscosity_pa_s", "mu_pa_s", "mu", "dynamic_viscosity"),
+                            ),
                             1.7e-5,
                         ),
                         "pressure_pa": _finite(_lookup(payload, ("pressure_pa", "pressure", "p_pa"))),
@@ -886,7 +874,7 @@ def wind_vector(position: VectorLike, env: EnvironmentConfig, time_s: float = 0.
     module = wind_module()
     func = _resolve_callable(module, ("wind_velocity", "velocity_at", "sample_wind"))
     if func is not None:
-        height = -_finite(position[2]) - _finite(env.ground_level_m)
+        height = -_finite(position[2])
         query = np.array([_finite(position[0]), _finite(position[1]), height], dtype=np.float64)
         out = _call_upstream(
             func,
@@ -993,7 +981,9 @@ def aero_forces(
             "alpha_deg": _finite(alpha_deg),
             "beta_deg": _finite(beta_deg),
             "mach": _finite(mach),
-            "reynolds": None if reynolds is None else clamp(_finite(reynolds, 1.0e5), 1.0e2, 1.0e9),
+            "reynolds": None if reynolds is None else clamp(
+                _finite(reynolds, 1.0e5), MODEL_REYNOLDS_MIN, MODEL_REYNOLDS_MAX
+            ),
             "ground_height_m": max(_finite(ground_height_m, 1.0), 0.0),
             "angular_rate": vec3(angular_rate),
             "density_kgm3": density,
@@ -1280,7 +1270,7 @@ MAX_RELEASE_YAW_RATE_RADPS = 14.0
 #: Ceiling on a release speed produced by the hand model.  A hand can reach
 #: roughly 25-30 m/s on a light airframe (the 98 m distance record is a
 #: ~20 m/s throw); beyond that the model refuses to extrapolate.
-MAX_RELEASE_SPEED_MPS = 60.0
+MAX_RELEASE_SPEED_MPS = 20.0
 
 
 def _velocity_from_elevation_azimuth(
@@ -1816,7 +1806,6 @@ class FlightSimulator:
                 inertia_yz_kgm2=0.0,
             )
             self._inertia = body_inertia_tensor(derived_properties(clean_cfg))
-        self._trim_pitch_deg = self._resolve_trim_pitch()
 
     def _resolve_trim_pitch(self) -> float:
         """Elevon trim angle of attack, from ``aero_domain`` when available."""
@@ -3301,18 +3290,6 @@ def evaluate_flight(
         simulator = FlightSimulator(aircraft, environment, launch, settings)
         summary = simulator.simulate(duration_s=total, record=True)
         samples = simulator.history()
-    except FlightDivergenceError as exc:
-        # A physical divergence: the integration left its stable region.  The
-        # status is reported as such and the reason is kept for the audit.
-        return empty_payload(
-            duration_s=float(total),
-            status="diverged",
-            model="rigid_body_6dof",
-            approximate=False,
-            physics_verification_eligible=False,
-            limitations=("The 6-DoF integration did not complete.",),
-            error=str(exc),
-        )
     except (ValueError, KeyError, TypeError, IndexError) as exc:
         # An implementation error (bad configuration, unexpected payload).  It
         # must never be reported as a legitimate 0 m flight: the optimiser

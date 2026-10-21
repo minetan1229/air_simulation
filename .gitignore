@@ -29,11 +29,25 @@ logs/
 !tests/**/*.csv
 smoke_*.json
 
+# Generated verification artefacts (regenerable with tools/verify_physics_repair.py
+# and tools/capture_ui.py; the JSON dumps are tens of megabytes)
+artifacts/
+
+# Scratch diagnostics kept in the working tree are not part of the product.
+scratch_*
+tmp_*.py
+
 .pytest_cache/
 .coverage
 htmlcov/
 .vscode/
 .idea/
+
+# Tool caches and CI summaries (listed explicitly instead of relying on the
+# self-ignore the tools write into their own cache directory)
+.mypy_cache/
+.ruff_cache/
+pytest_failure_summary.txt
 
 # Prevent accidental shadowing of standard modules
 antigravity.py

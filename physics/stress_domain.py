@@ -10,6 +10,17 @@ empirical crease approximations, not experimentally validated paper material
 properties. Reported failure status is an unvalidated indicator, not a
 certified fracture prediction. NumPy is the CPU fallback; CuPy is optional.
 Body axes follow config_schema: x forward, y right, z down.
+
+Grid axis contract: every 2-D array published by :func:`stress_field`
+(``stress_index``, ``stress_shape``, ``stress_pa``, ``colours``) is indexed
+``grid[chordwise][spanwise]`` -- the **row** walks the chord from the leading
+edge (row 0) to the trailing edge, the **column** walks the full span from
+the port tip (column 0) through the wing root (the centre column for an odd
+``spanwise``, the two columns straddling it for an even one) to the
+starboard tip.  The cantilever peak therefore belongs to the wing-root
+leading edge, i.e. ``grid[0][(spanwise - 1) // 2]``.  The contract is
+spelled out in :data:`STRESS_GRID_AXES` and checked at every call, so a
+silent transpose cannot reach the payload.
 """
 
 from __future__ import annotations
@@ -50,6 +61,7 @@ __all__ = [
     "STATUS_HIGH_LOAD_THRESHOLD",
     "STATUS_FAILED_THRESHOLD",
     "CHORDWISE_EXPONENT",
+    "STRESS_GRID_AXES",
     "dynamic_pressure",
     "load_factor",
     "aircraft_load_factor",
@@ -128,6 +140,20 @@ STATUS_FAILED_THRESHOLD: float = 1.0
 #: the cantilever (1) and the simply supported free-end (2) case and peaks
 #: at the leading edge / root rib.
 CHORDWISE_EXPONENT: float = 1.5
+
+#: Axis order of every 2-D stress array published by :func:`stress_field`:
+#: ``("chordwise", "spanwise")``, i.e. ``grid[row][column]``.
+#:
+#: The **row** walks the chord: row 0 is the leading edge, row
+#: ``chordwise - 1`` the trailing edge.  The **column** walks the full span:
+#: column 0 is the port tip, the centre column is the wing root (an exact
+#: column for an odd ``spanwise``, the two columns straddling it for an
+#: even one) and column ``spanwise - 1`` the starboard tip.  The cantilever
+#: peak -- the wing-root leading edge -- is ``grid[0][(spanwise - 1) // 2]``.
+#:
+#: A client resolves the layout from the ``chordwise`` and ``spanwise``
+#: resolution keys published next to the grid, so no axis has to be guessed.
+STRESS_GRID_AXES: Tuple[str, str] = ("chordwise", "spanwise")
 
 # --- documented dimensionless couplings ----------------------------------
 TIP_MOMENT_GAIN: float = 1.6            # winglet fold tip cantilever
@@ -677,8 +703,11 @@ def critical_point_body(
 
     ``chordwise_frac`` runs 0 (leading edge) to 1 (trailing edge) and
     ``spanwise_frac`` runs -1 (port tip) to +1 (starboard tip), matching the
-    sign convention of the ``spanwise`` axis of :func:`stress_field`.  Used
-    by the UI to place the "peak stress" marker on the 3D model.
+    sign convention of the internal ``spanwise`` axis of :func:`stress_field`.
+    The published ``critical_spanwise_frac`` is the *unsigned* distance from
+    the wing root (0 = root, 1 = tip), so a caller that needs the side of
+    the root takes the sign from the peak station itself.  Used by the UI to
+    place the "peak stress" marker on the 3D model.
     """
     if derived is None:
         derived = derived_properties(cfg)
@@ -720,6 +749,18 @@ def stress_field(
     gravity: float = 9.80665,
 ) -> Dict[str, Any]:
     """Build the ``chordwise x spanwise`` wing stress heat map.
+
+    The published grid is indexed ``grid[chordwise][spanwise]``: the row
+    walks the chord from the leading edge (row 0) to the trailing edge, the
+    column walks the full span from the port tip (column 0) through the wing
+    root (the centre column for an odd ``spanwise``, the two columns
+    straddling it for an even one) to the starboard tip.  The cantilever
+    peak is the wing-root leading edge, i.e. ``grid[0][(spanwise - 1) // 2]``,
+    and ``critical_chordwise_frac`` / ``critical_spanwise_frac`` report its
+    station (0 = leading edge / wing root).  The ``chordwise`` and
+    ``spanwise`` resolution keys published beside the grid let a client
+    resolve the layout without guessing; the contract itself is
+    :data:`STRESS_GRID_AXES`.
 
     load_factor is the prescribed aircraft normal load divided by m*g.
     Dynamic pressure is metadata here; it is not multiplied into nz again.
@@ -821,13 +862,29 @@ def stress_field(
     shape = shape + ELEVON_TE_GAIN * arm * xp.power(x_axis, 4.0)
 
     # --- cell bending stress [Pa] -----------------------------------------
+    # The broadcast below is (spanwise, chordwise): one row per span
+    # station, one column per chord station.  The published grid is the
+    # other way round -- (chordwise, spanwise), see ``STRESS_GRID_AXES`` --
+    # so the transpose is part of the payload contract, not a formatting
+    # detail.
     section_modulus = xp.maximum(local_chord * thickness * thickness * z_gain / 6.0, 1.0e-30)
-    stress = (KAPPA_SIGMA * moment / section_modulus)[:, xp.newaxis] * shape[xp.newaxis, :]
-    stress = xp.nan_to_num(stress.T, nan=0.0, posinf=0.0, neginf=0.0)
+    stress_span_chord = (KAPPA_SIGMA * moment / section_modulus)[:, xp.newaxis] * shape[
+        xp.newaxis, :
+    ]
+    stress = xp.nan_to_num(stress_span_chord.T, nan=0.0, posinf=0.0, neginf=0.0)
     stress = xp.maximum(stress, 0.0)
 
     # Convert to NumPy for host formatting if computed on GPU
     stress_np = stress.get() if hasattr(stress, "get") else np.asarray(stress)
+
+    # The published contract is (chordwise, spanwise).  A transpose that
+    # slipped through here would move the wing-root peak into the middle of
+    # the grid, so the shape is verified on every call.
+    if stress_np.shape != (nc, ns):
+        raise RuntimeError(
+            "stress grid axis contract violated: expected (chordwise, spanwise) "
+            f"= {(nc, ns)}, got {tuple(stress_np.shape)}"
+        )
 
     max_stress = float(stress_np.max())
     mean_stress = float(stress_np.mean())
@@ -844,11 +901,17 @@ def stress_field(
     shape_index = normalise_heatmap(stress_np)
     index_grid = np.clip(np.nan_to_num(stress_np / max(allowable, _EPS), nan=0.0), 0.0, 1.0)
 
-    # argmax: axis 0 walks the span, axis 1 the chord
-    i_arg = int(np.argmax(index_grid.max(axis=0)))
-    j_arg = int(np.argmax(index_grid[:, i_arg]))
-    critical_span = clamp(abs(i_arg - centre) / half_index, 0.0, 1.0)
-    critical_chord = clamp(j_arg / max(nc - 1, 1), 0.0, 1.0)
+    # Peak station.  The published grid is (chordwise, spanwise): reducing
+    # over the chordwise axis (axis 0) leaves the spanwise profile, whose
+    # largest entry is the spanwise station of the peak; reducing that
+    # column over the spanwise axis (axis 1) gives its chordwise station.
+    span_index = int(np.argmax(index_grid.max(axis=0)))
+    chord_index = int(np.argmax(index_grid[:, span_index]))
+    # ``critical_spanwise_frac`` is the unsigned distance from the wing root
+    # (0 = root, 1 = tip); ``critical_chordwise_frac`` runs from the leading
+    # edge (0) to the trailing edge (1).
+    critical_span = clamp(abs(span_index - centre) / half_index, 0.0, 1.0)
+    critical_chord = clamp(chord_index / max(nc - 1, 1), 0.0, 1.0)
 
     status = status_for_failure_index(fi)
 

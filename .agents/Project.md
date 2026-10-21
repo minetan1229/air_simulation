@@ -10,7 +10,7 @@
 - [x] ルート `AGENTS.md` の仕様を `docs/SPECIFICATION.md` へ移管・整理
 - [x] ルート `AGENTS.md` をプロジェクト非依存の「Agent Core Protocol OS」に再構築し、`.agents/` 自律ループと完全同期
 - [x] `.agents/Knowledge-important.md` に常駐制約・技術ガードレールを統合（50行以内）
-- [x] 全監査テスト (10/10) および smoke_test (13/13 stages) の完全パスと master (`82d48ea`) への反映
+- [x] 全監査テスト (10/10) および smoke_test (13/13 stages) の完全パスと master (`82d48ea`) への反映（13ステージは当時値。現在の smoke_test は **14 ステージ**）
 - [x] ループエンジニアリング観点における `AGENTS.md` の監査・問題点特定および正常終了プロトコル（Phase 6）の導入
 - [x] ループエンジニアリング監査で特定された全14項目（#2, #5〜#17）のプロトコル策定および反映完了
 - [x] 現行フェーズ・マイルストーンの全完了（Finalized）
@@ -18,14 +18,23 @@
 - [x] 3D物理アノマリー自律修正サイクル: 水平境界(100km)、地中埋没防止、高速連続衝突判定(CCD)、翼端接地エネルギー保存則制約の実装・全720テストPASS
 - [x] **3D物理 論文一致度監査（2026-10-19）**: `PHYSICS_PAPER_CONFORMANCE_AUDIT.md` 作成。高20/中34/低30/非論文系8 の指摘と修正案・ロードマップ（P0〜P3）を提示。**コード未変更**
 - [x] `agents.md` を「常駐コア（規約・ガードレール）+ 参照索引」に再構成し、知識・技能・現在地の正本は `.agents/` 配下へ維持（重複長文の常駐回避）
-- [x] **プロシージャル折り紙3Dジオメトリ（2026-10-20 新マイルストーン）**: `physics/origami_domain.py` に展開図コンパイラ→三次元ヒンジ列→多層ソルidd生成を実装。Classic Dart / Nakamura Lock / Sky King の3機体、折り工程 α、Z-Fighting 構造的排除、紙の厚み・折り目ロール・PBR紙材質を実装し、UI に折り工程スライダーと機体タイプ切替を統合。
+- [x] **プロシージャル折り紙3Dジオメトリ（2026-10-20 新マイルストーン）**: `physics/origami_domain.py` に展開図コンパイラ→三次元ヒンジ列→多層ソリッド生成を実装。Classic Dart / Nakamura Lock / Sky King の3機体、折り工程 α、Z-Fighting 構造的排除、紙の厚み・折り目ロール・PBR紙材質を実装し、UI に折り工程スライダーと機体タイプ切替を統合。
 - [x] **genetic-project フェーズ立上り（2026-10-20）**: `genetic-project` ブランチを新規作成し、GA（遺伝的アルゴリズム）実装前に物理的健全性（P0〜P3）を確立する専用フェーズへ移行。`master`/`main` とは完全に分離（コミット・マージ・チェリーピック・PR 禁止）。`tools/branch_guard.py` による保護ブランチ実行停止を `conftest.py` / `app.py` / `smoke_test.py` に実装。
 - [x] **無作為折り方遺伝子エンジン（2026-10-20 新マイルストーン）**: `physics/origami_genome.py` に折り操作のシーケンスを遺伝子として表現する Procedural Origami Engine を実装。`FoldStep`（折り線・山/谷別角度 -180..+180°・対称性・層順序・対象パネル）、世代0の完全無作為生成、保持可能判定（持ち手/キール幾何フィルタ＋重心位置＋自己貫通検査）、折り手順レシピ（手順表・Markdown・展開図 SVG）と段階メッシュ生成を実装し、API 6 系統と UI の折り手順スライダを統合。
+- [x] **論文一致度 P0〜P3 の完了とコミット（2026-10-21）**: `9538f8b` で P0〜P3 を完了。進捗の正本は `PHYSICS_PAPER_CONFORMANCE_AUDIT.md` §0.0、回帰固定化テストは `tests/test_paper_conformance_p0_p1.py`（P0/P1）と `tests/test_ga_physics_readiness.py`（P2/P3）。master が非汚染（最新 `7c87b1b`）であることも確認。
+- [x] **遺伝子 JSON 往復の欠陥修正（2026-10-21）**: `physics/origami_genome.py::genome_from_dict` が `fold_type` の**文字列**を真偽評価していたため**谷折りが全て山折りへ復元**されていた不具合を修正（seed=7 families: 幾何 bounds y −0.010/0.194 → −0.174/0.063、CG y 71.3 mm → −29.9 mm）。POST した機体と返る機体の不一致、および谷折りを含むチェックポイントの折り返し再開を解消。回帰テスト `tests/test_origami_genome_roundtrip.py`。
+- [x] **風高度規約の GPU バッチ parity 修正（2026-10-21）**: `physics/gpu_dynamics.py` が `params.ground_level_m - z_ned`（世界原点基準）で風をサンプルしていた不具合を `z_up = -z_ned`（地表面基準）へ修正。`ground_level_m=100`・`z=-105`・`wind_speed=8` で参照 9.8056 m/s 対バッチ 13.2212 m/s の 35 % 不一致を解消。回帰テスト `tests/test_wind_height_parity.py`。
+- [x] **失敗評価の status 無変換転送（2026-10-21）**: `physics/parallel_engine.py` の CPU フォールバックが `error`/`failed` を `timeout`/`crashed` へリラベルしていたため、**壊れた設計が正当な 0 m 飛行**としてパレート前線・ incumbent に入り得た経路（報酬ハッキング）を塞いだ。回帰テスト `tests/test_gpu_kernel_parity.py`。
+- [x] **自律研究 GA エンジンの実装（2026-10-21）**: `physics/ga_domain.py`（実行統括・tier0→tier3 マルチフィデリティ・統計・島・メタ制御・ジャーナル）、`physics/ga_cma.py`（CMA-ES）、`physics/ga_config.py`（正規設定と YAML-subset ローダ。PyYAML 非依存）、`config/genetic_research.yaml`、`tools/run_ga_research.py`（CLI）、`api/routes/ga_research.py`（API）。目的関数は `distance`（参照 88.318 m）と `airtime`（参照 29.2 s）を分離し、記録で適合度を正規化（記録は 1.0）。試行回数は宣言済み既定値のみで、YAML/CLI/API/チェックポイント再開から上書き可能。
+- [x] **研究コンソールの実装（2026-10-21）**: シミュレーション ⇄ GA研究モード切替、動的パラメータ表つきワークベンチ、3連動折りビューア（3D ステップスライダ ⇄ 展開図 SVG（山=赤実線/谷=青破線＋符号付き角度）⇄ 手順カード）、CG・キールマーカー、世代チャート（記録基準線）、島の多様性表、ライブジャーナル、チェックポイント保存・再開。
+- [x] **折り紙 G9-4 の解決（2026-10-21）**: レシピの Markdown と SVG は API が返していたのにブラウザ未表示だったため、折り紙パネルに展開図と手順表を実装。
+- [x] **文字化け（mojibake）修復の完了（2026-10-21）**: `physics/records_domain.py` の日本語93行を**ギネス記録の原文出典から再記述**し、レジストリ（`search/`）のバイト列欠陥と Markdown 全文の文字化けも併せて修復。**再発防止のガード**は `tools/check_mojibake.py`（検出）と `tests/test_no_mojibake.py`（回帰固定化、保留中の除外指定は 0 件）。`no-finish.md` の P0-12 と F-1 は解消済み。
+- [x] **コンソール操作の一本化（2026-10-21）**: 発射 3 箇所・再生 3 箇所（うち 2 個は `this.dom` キャッシュ漏れで**死んだボタン**）・リセット 2 箇所・100機一括 2 箇所を**各 1 箇所に集約**（発射=`btn-top-launch`、再生/最初へ=`tp-play`/`tp-reset`、100機一括=`btn-top-gpu-ensemble`）。ビューポート上のフローティングドック（`.quick-launch-dock`）を撤去。投げ方パラメータの正を左レール「投擲・発射設定」1 箇所に統一（旧ドックスライダは `throw_style` を "direct" にせず物理へ伝わらない二重書き込み）。`data-host` 置換で消滅していた世界記録の再現モード切替を復帰。重複 element id（`param-launch-release_pitch_deg` / `ga-objective`）も 0 件に。検証: ブラウザ実測で重複 0・死んだボタン 0・コンソールエラー 0、発射/再生の実動作、`smoke_test.py` 14/14、`ruff` 0 件。
+- [x] **GA v2: 超大規模GA・マルチGPU DNS/FSI 統合アーキテクチャ（2026-10-21 新マイルストーン）**: `physics/ga2/` に第2世代の検索基盤を実装。`scaling.py`（3ティアの `ScalingProfile` とCUDA自動検出）、`genome.py`（3〜8工程の可変長ハイブリッド折り遺伝子・往復無損失・Warm Start 2/8/90%）、`stage0.py`（幾何トポロジ高速フィルタ）、`stage1.py`（**ホスト往復ゼロ・CUDA Graph 捕捉**のバッチ6DoFスクリー）、`stage2.py`（座屈・弾性変形・ピッチ安定性の准静的FSI）、`stage3.py`+`lbm.py`（D3Q19格子ボルツマン+浸漬境界+モーダル構造の**双方向FSI**、1 GPU=1個体のタスク並列/MPI禁止）、`archive.py`（MAP-Elites + Pareto）、`surrogate.py`（SQLite 蓄積 + リッジ補正）、`vram.py`（85% 固定VRAMプール）、`checkpoint.py`（アトミック保存 + **ホット移行**）、`runner.py`（世代ループ）。正本仕様は `docs/GA_V2_ARCHITECTURE.md`。
 
 ## 3. Loop State (現在のループ状態・引き継ぎメモリ)
-- **Current Phase**: Phase 4 [Verify / Stage] — 無作為折り方遺伝子エンジン検証完了・ステージング
-- **Status Summary**: `physics/origami_genome.py` および `tests/test_origami_genome.py`（22/22 テスト完全PASS）のコンパイル・監査・単体テスト完了。折り紙エンドポイント（`/origami/genome`, `/genome/recipe`, `/genome/steps`）検証完了。
-- **Branch & Safety**: `genetic-project` ブランチ保護確認（`tools/branch_guard.py` PASS）。未追跡ファイルおよびループ状態のステージング完了。
-- **Verification Criteria**: `test_origami_genome.py` (22 PASS), `branch_guard.py` (0 error), `compileall` (0 syntax error).
-- **Next Action**: `genetic-project` ブランチでのコミット作成および次期GA最適化ループ（適合度評価・交叉・変異）への移行。
-- **既知の残課題（既存）**: `physics/mesh_domain.py` F822（既存）、`PHYSICS_PAPER_CONFORMANCE_AUDIT.md` M級項目（次フェーズ）。
+- **Current Phase**: Phase 5 [Distill & Loop] — GA v2 統合アーキテクチャ実装完了・正本文書（`.agents/` / `no-finish.md`）の同期
+- **Status Summary**: GA v2（`physics/ga2/`）を実装。**CUDA Graph 捕捉**（H2D禁止・cuBLAS禁止・relaxedモードの3条件 fulfile）により Stage 1 の 1 ステップ再生が eager 比で約80倍高速化。`physics/gpu_dynamics.py` には H2D と cuBLAS を避ける 2 修正（同一数値・既存 parity テストは pass）。D3Q19 ソルバは重み・衝突/流れ順・移動バウンスバック・重心座標ラスタライズで安定化済み。進捗の正本は `docs/GA_V2_ARCHITECTURE.md` と `.agents/Knowledge.md`「GA v2」節。
+- **Branch & Safety**: `genetic-project` ブランチで作業中。`master`/`main` へのコミット・マージ・チェリーピック・PR は厳禁（`AGENTS.md` §2 Branch Isolation）。master は非汚染（最新 `7c87b1b`）を確認済み。保護ブランチ判定の正本は `tools/branch_guard.py`。
+- **Verification Criteria**: `tests/test_ga2_*.py`（scaling / genome / archive / stage1 / checkpoint / runner）の PASS、`tests/test_origami_genome_roundtrip.py` / `tests/test_wind_height_parity.py` / `tests/test_gpu_kernel_parity.py` / `tests/test_ga_engine.py` / `tests/test_paper_conformance_p0_p1.py` / `tests/test_ga_physics_readiness.py` / `tests/test_no_mojibake.py` の PASS、`python tools/check_aero_kernel_parity.py`（全係数で最大相対差 0.000e+00、pitching_nm のみ 5.875e-16）、`python tools/check_mojibake.py .`（0 件）、`python -m ruff check .` 0 件、`smoke_test.py` **14/14 ステージ**。
+- **Next Action**: 親オーケストレータによる `genetic-project` ブランチでのコミットと CI 完了確認。GA v2 の残課題: 局所DNSの絶対係数は未検証（形状指標とラUHNK補正の入力に限定して使用、6DoF参照経路が正本）、Stage 1 の固定ステップは被覆率（coverage）を報告し**順位はStage 2 の参照再飛行で決定**、検索用投擲モデル（8 m/s / 25° / 1.5 m）。**既知の残課題（既存）**: `physics/mesh_domain.py` F822、`PHYSICS_PAPER_CONFORMANCE_AUDIT.md` M級項目（次フェーズ）、`test_advanced_physics_audit.py::test_wind_spatial_and_temporal_correlation` と `test_gpu_kernel_parity.py` の peak stress 2 件（**UI 変更と無関係の既存失敗**＝本変更を stash した状態でも同数和で失敗）。

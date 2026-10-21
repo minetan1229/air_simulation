@@ -6,6 +6,7 @@
 <meta name="color-scheme" content="light">
 <title>紙飛行機 風洞実験台 — Paper Airplane Wind-Tunnel Console</title>
 <link rel="stylesheet" href="static/css/console.css">
+<link rel="stylesheet" href="static/css/ga-research.css">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cpath fill='%231a73e8' d='M29 3 4.6 13.1a.6.6 0 0 0 .05 1.13l8.9 2.9 2.9 8.9a.6.6 0 0 0 1.12.05L29 3Z'/%3E%3C/svg%3E">
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js" integrity="sha384-9nhczxUqK87bcKHh20fSQcTGD4qq5GhayNYSYWqwBkINBhOfQLg/P5HG5lF1urn4" crossorigin="anonymous"></script>
 <script type="importmap">
@@ -68,16 +69,19 @@
         <span class="eta-sub num" id="eta-left">待機中</span>
       </div>
 
-      <!-- フライト制御グループ (発射 / 再生 / モード選択) -->
-      <div class="toprail-group toprail-flight-group">
-        <button class="btn btn-primary btn-launch-top" id="btn-top-launch" type="button" title="現在の設定で飛行軌跡を一括シミュレーション計算して再生します (Enter)"><svg class="ui-icon" viewBox="0 0 24 24" fill="currentColor"><path d="m13.13 22.19-1.63-3.83c1.57-.58 3.04-1.5 4.35-2.73l-2.72 6.56M5.64 12.5l-3.83-1.63 6.56-2.72c-1.23 1.31-2.15 2.78-2.73 4.35m8.58-8.58C12.9 5.24 11.23 7.31 9.77 9.77l4.46 4.46c2.46-1.46 4.53-3.13 5.85-4.45 1.54-1.54 2.42-3.15 2.58-4.24.03-.22-.05-.44-.22-.61-.17-.17-.39-.25-.61-.22-1.09.16-2.7 1.04-4.24 2.58M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2"/></svg> <span class="btn-text">発射</span></button>
-        <button class="btn btn-top-play" id="btn-top-play" type="button" title="飛行の再生 / 一時停止 (Space)"><svg class="ui-icon" id="top-play-icon" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg> <span id="top-play-label" class="btn-text">再生</span></button>
-        
-        <!-- 単機 / 100機一括 モードセレクター -->
-        <div class="fleet-mode-selector">
-          <button class="btn btn-mini active" id="btn-mode-single" type="button" title="単機（1機）で飛行シミュレーションを実行">単機</button>
-          <button class="btn btn-mini" id="btn-top-gpu-ensemble" type="button" title="GPUで100機を同時に一括シミュレーション計算して全軌跡を描画">100機一括</button>
+      <!-- モード切替 (シミュレーション検証 / GA自律研究) -->
+      <div class="toprail-group toprail-mode-group">
+        <div class="fleet-mode-selector" role="group" aria-label="動作モード切替">
+          <button class="btn btn-mini active" id="btn-mode-simulation" type="button" title="飛行シミュレーションと最適化による検証モード (SIMULATION)">シミュレーション検証</button>
+          <button class="btn btn-mini" id="btn-mode-research" type="button" title="遺伝アルゴリズムによる自律研究モード (GA RESEARCH)">GA自律研究</button>
         </div>
+      </div>
+
+      <!-- フライト制御グループ (発射 = 単機飛行, 100機一括 = GPU並列) -->
+      <!-- 再生 / 一時停止はトランスポートバー (tp-play) が一箇所のみに担う -->
+      <div class="toprail-group toprail-flight-group">
+        <button class="btn btn-primary btn-launch-top" id="btn-top-launch" type="button" title="現在の設定で1機（単機）をシミュレーション計算して発射・再生します (Enter)"><svg class="ui-icon" viewBox="0 0 24 24" fill="currentColor"><path d="m13.13 22.19-1.63-3.83c1.57-.58 3.04-1.5 4.35-2.73l-2.72 6.56M5.64 12.5l-3.83-1.63 6.56-2.72c-1.23 1.31-2.15 2.78-2.73 4.35m8.58-8.58C12.9 5.24 11.23 7.31 9.77 9.77l4.46 4.46c2.46-1.46 4.53-3.13 5.85-4.45 1.54-1.54 2.42-3.15 2.58-4.24.03-.22-.05-.44-.22-.61-.17-.17-.39-.25-.61-.22-1.09.16-2.7 1.04-4.24 2.58M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2"/></svg> <span class="btn-text">発射</span></button>
+        <button class="btn btn-mini" id="btn-top-gpu-ensemble" type="button" title="GPUで100機を同時に一括シミュレーション計算して全軌跡を描画">100機一括</button>
       </div>
 
       <!-- ツールグループ (風洞 / 調査) -->
@@ -197,16 +201,22 @@
             <span class="group-name">投擲・発射設定</span><span class="group-en">THROW & LAUNCH</span>
             <span class="group-chev" aria-hidden="true"></span>
           </button>
-          <div class="group-body" data-host="throw">
-            <!-- 投擲モード（フルフライト / 頂点滑空） -->
-            <div class="throw-mode-box" style="margin-bottom:8px; display:flex; gap:6px;">
-              <button type="button" class="btn btn-mini active" id="btn-mode-calibrated" style="flex:1; font-size:10.5px; padding:4px 6px; justify-content:center;" title="手元からの全飛行（手元投擲〜上昇〜滑空〜着地）">
-                フルフライト
-              </button>
-              <button type="button" class="btn btn-mini" id="btn-mode-raw" style="flex:1; font-size:10.5px; padding:4px 6px; justify-content:center;" title="最高到達点（頂点）からの純粋滑空">
-                頂点滑空のみ
-              </button>
+          <div class="group-body">
+            <!-- 世界記録プリセットの再現モード（発射の入口ではない） -->
+            <!-- 注: data-host="throw" は panels.js が中身を生成・置換するため、
+                 モード切替は data-host の外側に置く（置換すると消えるため） -->
+            <div class="throw-mode-box" style="margin-bottom:8px;">
+              <span style="display:block; font-size:10px; font-weight:600; color:var(--ink-2); margin-bottom:4px;">世界記録の再現モード</span>
+              <div style="display:flex; gap:6px;">
+                <button type="button" class="btn btn-mini active" id="btn-mode-calibrated" style="flex:1; font-size:10.5px; padding:4px 6px; justify-content:center;" title="世界記録プリセットを手元からの全飛行（手元投擲〜上昇〜滑空〜着地）で再現します">
+                  フルフライト
+                </button>
+                <button type="button" class="btn btn-mini" id="btn-mode-raw" style="flex:1; font-size:10.5px; padding:4px 6px; justify-content:center;" title="世界記録プリセットを最高到達点（頂点）からの純粋滑空で再現します">
+                  頂点滑空のみ
+                </button>
+              </div>
             </div>
+            <div data-host="throw"></div>
           </div>
         </section>
 
@@ -255,6 +265,7 @@
           <button class="chip active" id="cam-mode-mean" type="button" title="代表平均機を追従するカメラ (揺れなし)">平均機追従</button>
           <button class="chip" id="cam-mode-lead" type="button" title="1位トップ機を追尾するカメラ">トップ機</button>
           <button class="chip" id="cam-mode-fleet" type="button" title="100機全体を見渡す俯瞰カメラ">俯瞰</button>
+          <button class="chip" id="cam-mode-swarm" type="button" title="100機の群れを斜め上方から追うスウォームカメラ">スウォーム</button>
           <button class="chip" id="cam-mode-fixed" type="button" title="固定視点 (追従オフ)">固定カメラ</button>
           <button class="chip" id="btn-view-reset" type="button" title="視点を初期化 (V)">リセット</button>
           <span class="toolbar-sep" aria-hidden="true"></span>
@@ -311,6 +322,11 @@
             <span class="hud-phase-pill" id="f-hud-phase" style="font-size:9.5px; padding:1px 6px; border-radius:10px; background:#e8f0fe; color:#1a73e8; font-weight:600;">待機中</span>
           </div>
 
+          <div style="display:flex; align-items:center; gap:6px; margin-bottom:6px; font-size:10.5px; color:var(--ink-2);">
+            <span id="status-dot" style="width:8px; height:8px; border-radius:50%; background:var(--line-2); flex-shrink:0;"></span>
+            <span id="status-text">投擲待機中</span>
+          </div>
+
           <div style="display:grid; grid-template-columns: 1fr 1fr; gap: 6px 12px; font-size:11px;">
             <div>
               <div style="color:var(--muted); font-size:9.5px;">高度</div>
@@ -362,6 +378,29 @@
         <p id="vp-notice-msg"></p>
         <p class="muted">設定・数値計算・最適化はそのまま利用できます。</p>
       </div>
+
+      <!-- シミュレーションエラーバナー (致命エラー・タイムアウトの一括通知) -->
+      <div class="sim-error-banner" id="sim-error-banner" hidden>
+        <span class="sim-error-icon" id="sim-error-icon"></span>
+        <div class="sim-error-body">
+          <div class="sim-error-header">
+            <span class="sim-error-title" id="sim-error-title">シミュレーションエラー</span>
+            <span class="sim-error-badge" id="sim-error-badge"></span>
+          </div>
+          <div class="sim-error-message" id="sim-error-msg"></div>
+          <div class="sim-error-hint" id="sim-error-hint" hidden></div>
+        </div>
+        <button class="sim-error-close" id="sim-error-close" type="button" aria-label="エラーを閉じる">×</button>
+      </div>
+
+      <!-- スクリーンリーダー用の飛行ステータス読み上げ (視覚的には非表示) -->
+      <div id="vp-flight-status-announcer" role="status" aria-live="polite"
+           style="position:absolute; width:1px; height:1px; margin:-1px; padding:0; overflow:hidden; clip:rect(0 0 0 0); white-space:nowrap; border:0;"></div>
+
+      <!-- クイック投擲ドックは撤去済み。
+           発射はトップレール (btn-top-launch)、再生 / 最初へはトランスポートバー
+           (tp-play / tp-reset)、100機一括は btn-top-gpu-ensemble に一本化し、
+           投げ方パラメータは左レールの「投擲・発射設定」だけを正とする。 -->
 
     </section>
 
@@ -431,6 +470,7 @@
   <section class="workbench" id="workbench" data-open="0" aria-label="作業台">
     <nav class="wb-tabs" role="tablist">
       <button class="wb-tab" id="wb-tab-investigate" role="tab" aria-selected="true" data-tab="investigate"><img src="https://api.iconify.design/material-symbols/search.svg?color=%231a73e8" class="ui-icon" alt=""> Auto調査<small>INVESTIGATE</small></button>
+      <button class="wb-tab" id="wb-tab-research" role="tab" aria-selected="false" data-tab="research"><img src="https://api.iconify.design/material-symbols/science.svg?color=%235f6368" class="ui-icon" alt=""> GA自律研究<small>GA RESEARCH</small></button>
       <button class="wb-tab" id="wb-tab-optimizer" role="tab" aria-selected="false" data-tab="optimizer"><img src="https://api.iconify.design/material-symbols/tune.svg?color=%235f6368" class="ui-icon" alt=""> 最適化<small>OPTIMIZER</small></button>
       <button class="wb-tab" id="wb-tab-guinness" role="tab" aria-selected="false" data-tab="guinness"><img src="https://api.iconify.design/material-symbols/trophy-outline.svg?color=%23f29900" class="ui-icon" alt=""> ギネス独立検証<small>GUINNESS</small></button>
       <button class="wb-tab" id="wb-tab-model" role="tab" aria-selected="false" data-tab="model"><img src="https://api.iconify.design/material-symbols/view-in-ar.svg?color=%235f6368" class="ui-icon" alt=""> 3D モデル<small>MESH</small></button>
@@ -533,6 +573,141 @@
             <div style="margin-bottom: 8px;"><img src="https://api.iconify.design/material-symbols/flight.svg?color=%231a73e8" style="width: 28px; height: 28px;" alt=""></div>
             <div>「調査開始」をクリックすると、現在の機体を診断し、もっと飛ぶようになるための調整手順とアドバイスを自動作成します。</div>
           </div>
+        </div>
+      </div>
+
+      <!-- GA autonomous research -->
+      <div class="wb-pane" data-pane="research" role="tabpanel" hidden>
+        <div class="wb-col wb-col-1">
+          <h4 class="wb-h">研究設定<small>GA RESEARCH SETUP</small></h4>
+          <p class="ga-notice" id="ga-notice" hidden></p>
+          <div id="ga-params"></div>
+          <div class="field">
+            <div class="field-top"><span class="field-key">出力先ディレクトリ</span><span class="field-unit">OUTPUT DIR</span></div>
+            <input class="text" id="ga-output-dir" type="text" placeholder="未指定 (サーバー既定)" spellcheck="false">
+          </div>
+          <div class="btn-row">
+            <button class="btn btn-primary" id="ga-run" type="button">研究開始</button>
+            <button class="btn" id="ga-stop" type="button" disabled>停止</button>
+          </div>
+          <p class="ga-notice" id="ga-result-note"></p>
+          <p class="ga-notice" id="ga-budget-note"></p>
+          <p class="muted" id="ga-target-note" style="font-size:10.5px; margin:6px 0 0;">目標: ギネス記録 88.31 m (Dillon Ruble)</p>
+
+          <h4 class="wb-h" style="margin-top: 16px;">実行ステータス<small>RUN STATUS</small></h4>
+          <div class="ga-kv-list">
+            <div class="ga-kv"><span class="ga-kv-k">RUN ID</span><span class="ga-kv-v num" id="ga-run-id">—</span></div>
+            <div class="ga-kv"><span class="ga-kv-k">状態</span><span class="ga-kv-v" id="ga-run-status">待機中</span></div>
+            <div class="ga-kv"><span class="ga-kv-k">経過時間</span><span class="ga-kv-v num" id="ga-elapsed">0.0 s</span></div>
+            <div class="ga-kv"><span class="ga-kv-k">Tier</span><span class="ga-kv-v" id="ga-tier">—</span></div>
+            <div class="ga-kv"><span class="ga-kv-k">評価数</span><span class="ga-kv-v num" id="ga-evaluations">0</span></div>
+            <div class="ga-kv"><span class="ga-kv-k">世代</span><span class="ga-kv-v num" id="ga-generation">0 / 0</span></div>
+            <div class="ga-kv"><span class="ga-kv-k">最良適応度</span><span class="ga-kv-v num" id="ga-best">—</span></div>
+            <div class="ga-kv"><span class="ga-kv-k">目標</span><span class="ga-kv-v" id="ga-objective-value">—</span></div>
+          </div>
+
+          <h4 class="wb-h" style="margin-top: 16px;">チェックポイント / 再開<small>CHECKPOINT &amp; RESUME</small></h4>
+          <div class="btn-row">
+            <button class="btn btn-mini" id="ga-ckpt-refresh" type="button">チェックポイント一覧更新</button>
+            <button class="btn btn-mini" id="ga-ckpt-save" type="button">保存要求</button>
+          </div>
+          <div class="grid-2" style="margin-top: 6px;">
+            <div class="field">
+              <div class="field-top"><span class="field-key">上書き max_trials</span></div>
+              <input class="num-input" id="ga-resume-max-trials" type="number" min="1" step="1" placeholder="継承" style="width:100%;">
+            </div>
+            <div class="field">
+              <div class="field-top"><span class="field-key">上書き top_k</span></div>
+              <input class="num-input" id="ga-resume-top-k" type="number" min="1" step="1" placeholder="継承" style="width:100%;">
+            </div>
+            <div class="field">
+              <div class="field-top"><span class="field-key">上書き generations</span></div>
+              <input class="num-input" id="ga-resume-generations" type="number" min="1" step="1" placeholder="継承" style="width:100%;">
+            </div>
+          </div>
+          <div class="btn-row">
+            <button class="btn btn-primary btn-mini" id="ga-resume" type="button">再開 (Resume)</button>
+          </div>
+          <p class="ga-notice" id="ga-ckpt-notice"></p>
+          <div id="ga-ckpt-list"></div>
+        </div>
+
+        <div class="wb-col wb-col-2">
+          <h4 class="wb-h">折り方ビューア<small>FOLDING VIEWER</small></h4>
+          <div class="grid-2">
+            <div class="field">
+              <div class="field-top"><span class="field-key">表示する折り方</span><span class="field-unit">SOURCE</span></div>
+              <select class="select" id="ga-fold-source">
+                <option value="sample">サンプル折り方 (シード指定)</option>
+                <option value="ga" disabled>GA最良個体 (研究結果待ち)</option>
+              </select>
+            </div>
+            <div class="field">
+              <div class="field-top"><span class="field-key">遺伝子戦略</span><span class="field-unit">STRATEGY</span></div>
+              <select class="select" id="ga-fold-strategy">
+                <option value="families">折り族群 (families)</option>
+                <option value="free">完全無作為 (free)</option>
+              </select>
+            </div>
+            <div class="field">
+              <div class="field-top"><span class="field-key">シード</span></div>
+              <input class="num-input" id="ga-fold-seed" type="number" min="0" step="1" value="7" style="width:100%;">
+            </div>
+            <div class="field">
+              <div class="field-top"><span class="field-key">折り手数</span></div>
+              <input class="num-input" id="ga-fold-steps" type="number" min="1" max="64" step="1" value="8" style="width:100%;">
+            </div>
+          </div>
+          <div class="ga-step-row">
+            <button class="btn btn-mini" id="ga-fold-prev" type="button" title="前の折り工程">◀ 前</button>
+            <input type="range" id="ga-fold-slider" min="0" max="0" value="0" step="1" aria-label="折り工程ステップ">
+            <button class="btn btn-mini" id="ga-fold-next" type="button" title="次の折り工程">次 ▶</button>
+          </div>
+          <div class="ga-step-label" id="ga-fold-label">Step 0 — 展開紙 (flat sheet)</div>
+          <label class="switch ga-marker-switch">
+            <input type="checkbox" id="ga-marker-toggle" checked>
+            <span class="switch-box"></span>
+            <span class="switch-label">持ち手 (Keel) 領域と重心 (CG) を 3D 表示</span>
+          </label>
+          <p class="ga-notice" id="ga-fold-notice"></p>
+
+          <h4 class="wb-h">展開図<small>CREASE PATTERN</small></h4>
+          <p class="muted" style="font-size:10px; margin:0 0 4px;">赤実線 = 山折り / 青破線 = 谷折り (折り順番号と角度付き)</p>
+          <div class="ga-crease-host" id="ga-crease-panel"></div>
+
+          <h4 class="wb-h">折り手順<small>FOLDING RECIPE</small></h4>
+          <div class="ga-recipe-wrap">
+            <table class="ga-recipe-table">
+              <thead>
+                <tr><th>#</th><th>折り線 (mm)</th><th>種別</th><th>角度</th><th>パネル</th><th>指示</th></tr>
+              </thead>
+              <tbody id="ga-recipe-body"></tbody>
+            </table>
+          </div>
+          <div class="btn-row">
+            <button class="btn btn-mini" id="ga-export-json" type="button">JSON</button>
+            <button class="btn btn-mini" id="ga-export-md" type="button">Markdown</button>
+            <button class="btn btn-mini" id="ga-export-svg" type="button">SVG</button>
+          </div>
+
+          <h4 class="wb-h">最適な投げ方<small>OPTIMAL THROW</small></h4>
+          <div id="ga-throw-params"></div>
+          <h4 class="wb-h">評価統計<small>EVALUATION STATISTICS</small></h4>
+          <div id="ga-stats"></div>
+          <h4 class="wb-h">持ち手評価<small>GRIP REPORT</small></h4>
+          <div id="ga-grip-summary"></div>
+        </div>
+
+        <div class="wb-col wb-col-3">
+          <h4 class="wb-h">世代別適応度の推移<small>GENERATION TREND</small></h4>
+          <div class="chart-wrap">
+            <canvas id="ga-chart"></canvas>
+            <p class="chart-empty" id="ga-chart-empty">未実行</p>
+          </div>
+          <h4 class="wb-h">島ごとの多様性<small>ISLAND DIVERSITY</small></h4>
+          <div id="ga-island-list"></div>
+          <h4 class="wb-h">研究ジャーナル<small>RESEARCH JOURNAL</small></h4>
+          <div class="ga-journal" id="ga-journal"></div>
         </div>
       </div>
 
@@ -735,9 +910,6 @@
       <span class="tp-badge-text">再生プレイヤー</span>
     </div>
     <div class="tp-controls">
-      <button class="tp-btn tp-btn-launch" id="tp-launch" type="button" title="現在の設定で飛行シミュレーションを発射 (Enter)">
-        <svg class="ui-icon" viewBox="0 0 24 24" fill="currentColor"><path d="m13.13 22.19-1.63-3.83c1.57-.58 3.04-1.5 4.35-2.73l-2.72 6.56M5.64 12.5l-3.83-1.63 6.56-2.72c-1.23 1.31-2.15 2.78-2.73 4.35m8.58-8.58C12.9 5.24 11.23 7.31 9.77 9.77l4.46 4.46c2.46-1.46 4.53-3.13 5.85-4.45 1.54-1.54 2.42-3.15 2.58-4.24.03-.22-.05-.44-.22-.61-.17-.17-.39-.25-.61-.22-1.09.16-2.7 1.04-4.24 2.58M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2"/></svg><span class="tp-label">発射</span>
-      </button>
       <button class="tp-btn" id="tp-reset" type="button" title="最初に戻る / 待機状態 (R)">
         <svg class="ui-icon" viewBox="0 0 24 24" fill="currentColor"><path d="M12 5V1L7 6l5 5V7c3.31 0 6 2.69 6 6s-2.69 6-6 6-6-2.69-6-6H4c0 4.42 3.58 8 8 8s8-3.58 8-8-3.58-8-8-8z"/></svg><span class="tp-label">最初へ</span>
       </button>
@@ -861,6 +1033,15 @@
       </button>
       <button class="btn btn-sm champ-btn" id="champ-btn-toggle-fleet" type="button" title="全100機表示と上位トップ3表示を切り替え">
         <img src="https://api.iconify.design/material-symbols/layers.svg?color=%235f6368" class="ui-icon" alt=""> 表示: 全100機 ⇄ 上位3機
+      </button>
+      <button class="btn btn-sm champ-btn" id="champ-btn-focus-mean" type="button" title="代表平均機 (Mean Aircraft) の軌跡にカメラをフォーカス">
+        <img src="https://api.iconify.design/material-symbols/group-work.svg?color=%231a73e8" class="ui-icon" alt=""> 平均機にフォーカス
+      </button>
+      <button class="btn btn-sm champ-btn" id="champ-btn-download-json" type="button" title="100機シミュレーション結果を JSON で書き出す">
+        <img src="https://api.iconify.design/material-symbols/data-object.svg?color=%235f6368" class="ui-icon" alt=""> JSON
+      </button>
+      <button class="btn btn-sm champ-btn" id="champ-btn-download-csv" type="button" title="100機シミュレーション結果を CSV で書き出す">
+        <img src="https://api.iconify.design/material-symbols/table-chart.svg?color=%235f6368" class="ui-icon" alt=""> CSV
       </button>
     </div>
 

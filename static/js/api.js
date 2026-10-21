@@ -2,6 +2,10 @@
 
 const BASE = "/api/v1";
 
+/* The GA research engine lives outside /api/v1: it is a separate blueprint
+ * with its own prefix (see api/routes/ga_research.py). */
+const GA_BASE = "/api/ga/research";
+
 export class ApiError extends Error {
   constructor(message, status, payload) {
     super(message);
@@ -102,6 +106,44 @@ async function getText(path, options = {}) {
   }
 }
 
+/* ------------------------------------------------------------------ */
+/* GA research surface (/api/ga/research)                             */
+/* ------------------------------------------------------------------ */
+
+async function gaGet(path, options = {}) {
+  const init = {
+    headers: { Accept: "application/json" },
+    cache: "no-store",
+    signal: createSignal(options),
+    ...options,
+  };
+  try {
+    const response = await fetch(`${GA_BASE}${path}`, init);
+    return parse(response);
+  } catch (err) {
+    handleFetchError(err);
+  }
+}
+
+async function gaPost(path, body, options = {}) {
+  const init = {
+    method: "POST",
+    headers: { Accept: "application/json" },
+    signal: createSignal(options),
+  };
+  if (body !== undefined && body !== null) {
+    init.headers["Content-Type"] = "application/json";
+    init.body = JSON.stringify(body);
+  }
+  Object.assign(init, options);
+  try {
+    const response = await fetch(`${GA_BASE}${path}`, init);
+    return parse(response);
+  } catch (err) {
+    handleFetchError(err);
+  }
+}
+
 export const api = {
   ApiError,
 
@@ -180,4 +222,21 @@ export const api = {
   recordThrowTechniques: () => get("/records/throw_techniques"),
   guinnessSimulate: (payload) => post("/guinness/simulate", payload),
   guinnessVerification: (category) => get(`/guinness/verification${category ? `?category=${encodeURIComponent(category)}` : ""}`),
+
+  /* GA autonomous research (/api/ga/research) */
+  gaResearch: {
+    base: GA_BASE,
+    /** Server-declared defaults; 404 when the engine does not publish them. */
+    defaults: () => gaGet("/defaults"),
+    run: (payload) => gaPost("/run", payload, { timeoutMs: 120000 }),
+    status: (runId) => gaGet(`/status/${encodeURIComponent(runId)}`),
+    result: (runId) => gaGet(`/result/${encodeURIComponent(runId)}`),
+    checkpoints: (runId) => gaGet(`/checkpoints/${encodeURIComponent(runId)}`),
+    /** Optional: ask the engine to write a checkpoint now. */
+    saveCheckpoint: (runId) => gaPost(`/checkpoints/${encodeURIComponent(runId)}`, {}, { timeoutMs: 30000 }),
+    resume: (payload) => gaPost("/resume", payload, { timeoutMs: 120000 }),
+    journal: (runId) => gaGet(`/journal/${encodeURIComponent(runId)}`),
+    /** Optional: server side abort of a running evaluation. */
+    stop: (runId) => gaPost(`/stop/${encodeURIComponent(runId)}`, {}, { timeoutMs: 30000 }),
+  },
 };

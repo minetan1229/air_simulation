@@ -261,6 +261,188 @@ def test_gpu_batch_reports_the_rigid_body_model():
 
 
 # --------------------------------------------------------------------------
+# 3a. The public payload carries the parity contract
+# --------------------------------------------------------------------------
+def _default_parity_case(duration: float = 6.0) -> dict:
+    """The launch of the default airframe, as the public API receives it."""
+    return {
+        "aircraft": AircraftConfig(),
+        "environment": EnvironmentConfig(),
+        "launch": LaunchConfig(launch_speed=8.0, launch_angle_deg=0.0, launch_height_m=1.2),
+        "duration_s": duration,
+    }
+
+
+def test_the_device_payload_publishes_the_peak_stress_without_quantisation():
+    """The published peak stress must not be rounded to two decimals.
+
+    The payload builder used to publish the peak stress as
+    ``round(stress_pa, 2)`` and its index as ``round(stress_index, 6)``.
+    The quantisation existed for JSON tidiness and it cost the parity
+    contract: through the public payload the peak stress could only agree
+    with the 6-DoF reference to ~1e-5 relative instead of the 1e-6 the
+    contract demands.
+
+    The payload builder is backend agnostic -- it takes the array module as
+    an argument -- so the regression is pinned with NumPy as well: a host
+    without a CUDA device still proves that the published payload carries
+    the device value unchanged, and that value is the one the 6-DoF
+    reference agrees with.
+    """
+    from physics.parallel_engine import evaluate_cases_on_device
+
+    aircraft = AircraftConfig()
+    env = EnvironmentConfig()
+    launch = LaunchConfig(launch_speed=8.0, launch_angle_deg=0.0, launch_height_m=1.2)
+    duration = 6.0
+
+    reference, _samples = _reference_flight(aircraft, env, launch, duration=duration)
+    params = gpu_dynamics.build_params(np, [aircraft], env)
+    initial = gpu_dynamics.launch_state_vector(launch, env, aircraft)[np.newaxis, :]
+    device = gpu_dynamics.simulate_batch(np, params, initial, duration, 2.0e-2)
+    device_stress = float(np.asarray(device["peak_stress_pa"])[0])
+    device_index = float(np.asarray(device["peak_stress_index"])[0])
+
+    payload = evaluate_cases_on_device([_default_parity_case(duration)], np)[0]
+
+    # The payload carries the device value unchanged: no quantisation.
+    assert float(payload["max_stress_pa"]) == device_stress
+    assert float(payload["max_stress_index"]) == device_index
+    # And that value honours the established rel=1e-6 parity contract
+    # against the 6-DoF reference -- the same comparison and the same
+    # tolerance as ``test_gpu_batch_reproduces_the_6dof_flight``.
+    assert float(payload["max_stress_pa"]) == pytest.approx(
+        float(reference["max_stress_pa"]), rel=1e-6
+    ), f"peak stress {payload['max_stress_pa']} != {reference['max_stress_pa']}"
+    assert float(payload["max_stress_index"]) == pytest.approx(
+        float(reference["max_stress_index"]), rel=1e-6
+    ), f"stress index {payload['max_stress_index']} != {reference['max_stress_index']}"
+
+
+def test_the_public_batch_payload_agrees_with_the_reference_on_the_peak_stress():
+    """The public ``gpu_batch_evaluate_cases`` payload must honour rel=1e-6.
+
+    On a CUDA host the public wrapper takes the device path, and the device
+    path is where the quantisation lived.  On a host without a device the
+    wrapper falls back to the CPU reference path, which never quantised the
+    stress and therefore satisfies the contract as well; the regression
+    above pins the shared payload builder itself.
+    """
+    from physics.parallel_engine import gpu_batch_evaluate_cases
+
+    aircraft = AircraftConfig()
+    env = EnvironmentConfig()
+    launch = LaunchConfig(launch_speed=8.0, launch_angle_deg=0.0, launch_height_m=1.2)
+    duration = 6.0
+
+    reference, _samples = _reference_flight(aircraft, env, launch, duration=duration)
+    payload = gpu_batch_evaluate_cases([_default_parity_case(duration)])[0]
+
+    assert float(payload["max_stress_pa"]) == pytest.approx(
+        float(reference["max_stress_pa"]), rel=1e-6
+    ), f"peak stress {payload['max_stress_pa']} != {reference['max_stress_pa']}"
+    assert float(payload["max_stress_index"]) == pytest.approx(
+        float(reference["max_stress_index"]), rel=1e-6
+    ), f"stress index {payload['max_stress_index']} != {reference['max_stress_index']}"
+
+
+# --------------------------------------------------------------------------
+# 3b. The trailing-edge fold is the same model in both paths
+# --------------------------------------------------------------------------
+def test_trailing_edge_fold_bundle_carries_the_fold_angle():
+    """The batch bundle must carry the fold angle of the airframe.
+
+    ``39bb795`` rebuilt the batch bundle from an explicit list of
+    :class:`~physics.aero_kernel.AeroParams` fields and the list did not
+    contain ``fold_trailing_deg``: the batch path therefore evaluated an
+    airframe with a *flat* trailing edge while the reference path evaluated
+    the folded one.  The two paths were not comparing the same airplane.
+    """
+    env = EnvironmentConfig()
+    for angle in (-30.0, 0.0, 15.0, 45.0):
+        params = gpu_dynamics.build_params(np, [AircraftConfig(fold_trailing_deg=angle)], env)
+        assert float(np.asarray(params.aero.fold_trailing_deg)[0]) == pytest.approx(angle)
+
+
+def test_trailing_edge_fold_contribution_is_identical_in_both_paths():
+    """Both paths must derive the fold increments from the same kernel call."""
+    env = EnvironmentConfig()
+    cfg = AircraftConfig(fold_trailing_deg=30.0)
+    params = gpu_dynamics.build_params(np, [cfg], env)
+
+    scalar = aero_kernel.evaluate_coefficients(
+        aero_kernel.ScalarMath,
+        aero_kernel.params_from_aircraft(cfg),
+        alpha_deg=4.0,
+        speed=10.0,
+    )
+    batch = aero_kernel.evaluate_coefficients(
+        np, params.aero, alpha_deg=4.0, speed=10.0
+    )
+    for key in ("te_fold_dcl", "te_fold_dcm", "te_fold_dcd", "cl", "cd", "cm"):
+        assert float(np.asarray(batch[key])[0]) == pytest.approx(
+            float(scalar[key]), rel=1e-12
+        ), key
+    # The increments are the ones the conformance audit prescribes.
+    assert float(np.asarray(batch["te_fold_dcl"])[0]) == pytest.approx(0.45, rel=1e-12)
+    assert float(np.asarray(batch["te_fold_dcm"])[0]) == pytest.approx(-0.36, rel=1e-12)
+
+
+def test_trailing_edge_fold_changes_the_batch_flight():
+    """A folded trailing edge must change the flight the batch reports.
+
+    The batch used to ignore the fold entirely, so an optimisation run on a
+    CUDA host scored a different airplane than the reference path.
+    """
+    env = EnvironmentConfig()
+    launch = LaunchConfig(launch_speed=9.0, launch_angle_deg=2.0, launch_height_m=1.2)
+
+    def batch_flight(fold_deg: float):
+        cfg = AircraftConfig(fold_trailing_deg=fold_deg)
+        params = gpu_dynamics.build_params(np, [cfg], env)
+        initial = gpu_dynamics.launch_state_vector(launch, env, cfg)[np.newaxis, :]
+        return gpu_dynamics.simulate_batch(np, params, initial, 6.0, 2.0e-2)
+
+    flat = batch_flight(0.0)
+    folded = batch_flight(30.0)
+    assert float(np.asarray(folded["distance_m"])[0]) != pytest.approx(
+        float(np.asarray(flat["distance_m"])[0]), rel=1e-9
+    )
+    assert float(np.asarray(folded["peak_stress_pa"])[0]) != pytest.approx(
+        float(np.asarray(flat["peak_stress_pa"])[0]), rel=1e-9
+    )
+
+
+def test_a_failed_evaluation_keeps_its_failure_status_in_the_batch_fallback():
+    """A broken evaluation must not be relabelled as a benign timeout.
+
+    ``optimizer_domain.is_infeasible_flight`` decides from the ``status``
+    alone whether a design is infeasible, and an infeasible design must never
+    enter the Pareto front: it used to look like a legitimate 0 m flight.  The
+    batch path therefore has to forward the failure status unchanged --
+    relabelling ``"error"`` as ``"timeout"`` (or ``"failed"`` as ``"crashed"``)
+    hides the failure and lets the broken design into the front.
+    """
+    from physics import parallel_engine
+    from physics.optimizer_domain import is_infeasible_flight
+
+    case = {
+        "aircraft": {"wingspan_m": "not-a-number"},
+        "environment": {},
+        "launch": {},
+        "duration_s": 0.2,
+    }
+    reference = parallel_engine.evaluate_case(case)
+    assert reference["status"] == "error"
+
+    rows = parallel_engine.gpu_batch_evaluate_cases([case], force_cpu=True)
+    assert len(rows) == 1
+    assert rows[0]["status"] == "error"
+    assert rows[0]["landed"] is False
+    assert is_infeasible_flight(rows[0])
+
+
+# --------------------------------------------------------------------------
 # 4. The post-stall branch
 # --------------------------------------------------------------------------
 def test_post_stall_lift_has_no_zero_band():

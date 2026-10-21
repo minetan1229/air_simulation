@@ -598,7 +598,7 @@ TECHNIQUES: Dict[str, Dict[str, str]] = {
     },
     "multiphysics": {
         "label": "マルチフィジックス連成",
-        "apply": "空力・構造・熱の連成を分割 방식으로既存 6DoF ループへ挿入し、1 ステップあたりの計算量を抑える。",
+        "apply": "空力・構造・熱の連成を分割方式で既存 6DoF ループへ挿入し、1 ステップあたりの計算量を抑える。",
     },
     "fluid structure interaction": {
         "label": "流体構造連成 (FSI)",

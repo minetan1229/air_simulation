@@ -200,11 +200,29 @@ def merge_overlay(base: Dict[str, Any], overlay: Any, field: str) -> Dict[str, A
 # ---------------------------------------------------------------------------
 # Session state
 # ---------------------------------------------------------------------------
+#: Process-wide mutex that guards the shared simulation state.
+#:
+#: ``SESSION.simulator`` is a single :class:`~physics.flight_sim.FlightSimulator`
+#: instance shared by every client, and the launch endpoint integrates it with
+#: ``simulator.simulate()`` -- a loop that mutates the airframe state and appends
+#: to the history ring buffer.  ``FlightSimulator._lock`` only protects the
+#: history snapshot, not the integration itself, so a concurrent ``/simulation/step``
+#: would advance the same state machine in the middle of the launch loop and mix
+#: its frames into the recorded trajectory.
+#:
+#: Every endpoint that touches the shared state therefore has to hold this one
+#: mutex.  It is an ``RLock`` because a few call sites (``Session.set_*``) keep
+#: their historical self-locking behaviour, but the endpoints in
+#: ``api/routes/simulation.py`` acquire it exactly once and then call the
+#: lock-free helpers below, so no endpoint nests a second acquisition.
+SIMULATION_LOCK = threading.RLock()
+
+
 class Session:
     """Server-side simulation state shared by the step/reset endpoints."""
 
     def __init__(self) -> None:
-        self.lock = threading.RLock()
+        self.lock = SIMULATION_LOCK
         self.aircraft = AircraftConfig()
         self.environment = EnvironmentConfig()
         self.launch = LaunchConfig()
@@ -213,57 +231,113 @@ class Session:
         self.mesh_model_id: str = ""
         self.selected_mesh: Any = None
 
+    # -- lock-free primitives ------------------------------------------------
+    # The caller must already hold SIMULATION_LOCK.
+
+    def _apply_aircraft(self, cfg: AircraftConfig) -> None:
+        self.aircraft = cfg
+        self.simulator = None
+
+    def _apply_environment(self, cfg: EnvironmentConfig) -> None:
+        self.environment = cfg
+        if self.simulator is not None:
+            try:
+                self.simulator.environment = cfg
+                if hasattr(self.simulator, "_refresh_derived"):
+                    self.simulator._refresh_derived()
+            except Exception:  # pragma: no cover
+                self.simulator = None
+
+    def _apply_launch(self, cfg: LaunchConfig) -> None:
+        self.launch = cfg
+        self.simulator = None
+
+    def _apply_settings(self, cfg: SimulationSettings) -> None:
+        self.settings = cfg
+        if self.simulator is not None:
+            try:
+                self.simulator.settings = cfg
+                if hasattr(self.simulator, "_history") and hasattr(self.simulator._history, "maxlen"):
+                    if self.simulator._history.maxlen != cfg.ring_buffer_capacity:
+                        from collections import deque
+                        old_items = list(self.simulator._history)
+                        self.simulator._history = deque(old_items, maxlen=cfg.ring_buffer_capacity)
+            except Exception:  # pragma: no cover
+                self.simulator = None
+
+    def _simulator_instance(self) -> Any:
+        if self.simulator is None:
+            flight = domain("flight_sim")
+            self.simulator = flight.FlightSimulator(
+                aircraft=self.aircraft,
+                environment=self.environment,
+                launch=self.launch,
+                settings=self.settings,
+            )
+        return self.simulator
+
+    def apply_payload(self, payload: Dict[str, Any]) -> None:
+        """Apply a request payload to the shared configuration.
+
+        The caller **must** hold :data:`SIMULATION_LOCK`.  No lock is acquired
+        here, so a request that already owns the mutex cannot deadlock on a
+        re-entrant acquisition of the same mutex.
+        """
+        if payload.get("aircraft"):
+            self._apply_aircraft(build(AircraftConfig, payload["aircraft"]))
+        if payload.get("environment"):
+            self._apply_environment(
+                merge_environment(payload["environment"], self.environment)
+            )
+        if payload.get("launch"):
+            self._apply_launch(build(LaunchConfig, payload["launch"]))
+        if payload.get("simulation"):
+            self._apply_settings(build(SimulationSettings, payload["simulation"]))
+
+    def simulator_for_request(self, payload: Dict[str, Any]) -> Any:
+        """Apply ``payload`` and return the shared simulator.
+
+        The caller **must** hold :data:`SIMULATION_LOCK`; no lock is acquired
+        here.  The payload is applied before the simulator is handed out, so the
+        returned instance always matches the configuration it was built from.
+        """
+        self.apply_payload(payload)
+        return self._simulator_instance()
+
+    def reset_state(self) -> Any:
+        """Reset the shared simulator back to the release state.
+
+        The caller **must** hold :data:`SIMULATION_LOCK`; no lock is acquired
+        here.
+        """
+        sim = self._simulator_instance()
+        return sim.reset(launch=self.launch)
+
+    # -- self-locking public API --------------------------------------------
+
     def set_aircraft(self, cfg: AircraftConfig) -> None:
         with self.lock:
-            self.aircraft = cfg
-            self.simulator = None
+            self._apply_aircraft(cfg)
 
     def set_environment(self, cfg: EnvironmentConfig) -> None:
         with self.lock:
-            self.environment = cfg
-            if self.simulator is not None:
-                try:
-                    self.simulator.environment = cfg
-                    if hasattr(self.simulator, "_refresh_derived"):
-                        self.simulator._refresh_derived()
-                except Exception:  # pragma: no cover
-                    self.simulator = None
+            self._apply_environment(cfg)
 
     def set_launch(self, cfg: LaunchConfig) -> None:
         with self.lock:
-            self.launch = cfg
-            self.simulator = None
+            self._apply_launch(cfg)
 
     def set_settings(self, cfg: SimulationSettings) -> None:
         with self.lock:
-            self.settings = cfg
-            if self.simulator is not None:
-                try:
-                    self.simulator.settings = cfg
-                    if hasattr(self.simulator, "_history") and hasattr(self.simulator._history, "maxlen"):
-                        if self.simulator._history.maxlen != cfg.ring_buffer_capacity:
-                            from collections import deque
-                            old_items = list(self.simulator._history)
-                            self.simulator._history = deque(old_items, maxlen=cfg.ring_buffer_capacity)
-                except Exception:  # pragma: no cover
-                    self.simulator = None
+            self._apply_settings(cfg)
 
     def simulator_instance(self) -> Any:
         with self.lock:
-            if self.simulator is None:
-                flight = domain("flight_sim")
-                self.simulator = flight.FlightSimulator(
-                    aircraft=self.aircraft,
-                    environment=self.environment,
-                    launch=self.launch,
-                    settings=self.settings,
-                )
-            return self.simulator
+            return self._simulator_instance()
 
     def reset(self) -> Any:
         with self.lock:
-            sim = self.simulator_instance()
-            return sim.reset(launch=self.launch)
+            return self.reset_state()
 
     def current_snapshot(self) -> Dict[str, Any]:
         return {

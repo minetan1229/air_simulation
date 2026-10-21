@@ -37,17 +37,12 @@ def branch_guard_session_check() -> None:
 
     ``master`` / ``main`` are hard forbidden during the ``genetic-project``
     phase.  Any other branch is accepted with a warning, so a pull-request
-    checkout still runs the suite.  See ``tools/branch_guard.py``.
+    checkout still runs the suite.  A checkout that the CI runner made for
+    its own event is not judged from its branch name at all: the branch of a
+    push checkout is created by ``actions/checkout``, not by the author.
+    See ``tools/branch_guard.py``.
     """
-    from tools.branch_guard import assert_branch_allowed, describe_status, guard_status
+    from tools.branch_guard import enforce_branch_policy
 
-    status = guard_status()
-    if str(status.get("severity", "none")) == "error":
-        from tools.branch_guard import BranchViolation
-
-        raise BranchViolation(
-            f"{status.get('message')} -- refusing to run the test suite on a protected branch"
-        )
-    if str(status.get("severity", "none")) == "warning":
-        print(describe_status(status))
+    enforce_branch_policy()
 

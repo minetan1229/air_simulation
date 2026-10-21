@@ -1,0 +1,161 @@
+# Default configuration of the autonomous genetic research engine.
+#
+# Every number that decides how much work a run does lives in this file (or
+# in the equivalent field of `physics.ga_config.GAConfig`, which is the
+# canonical definition -- `tests/test_ga_engine.py` proves that the two
+# agree).  The command line, the runtime API and a checkpoint resume can all
+# override any of them; nothing in the search logic contains a trial count.
+#
+# The file is read by the YAML subset parser of `physics/ga_config.py`
+# (PyYAML is not a dependency of this project).
+
+# ---------------------------------------------------------------------------
+# Objective and fitness statistic
+# ---------------------------------------------------------------------------
+# distance -> maximise the horizontal flight distance (reference 88.31 m)
+# airtime  -> maximise the hang time (reference 29.2 s)
+objective: distance
+
+# mean | median | hybrid_median_mean | best
+# hybrid_median_mean = (w_mean * mean + w_median * median) / (w_mean + w_median)
+stat_mode: hybrid_median_mean
+stat_weights:
+  mean: 0.5
+  median: 0.5
+
+# ---------------------------------------------------------------------------
+# Budgets -- every count is overridable and none of them is hard coded
+# ---------------------------------------------------------------------------
+max_trials: 100000
+top_k: 1000
+tier1_trials: 20
+tier2_trials: 1000
+tier3_trials: 100000
+
+# ---------------------------------------------------------------------------
+# Population
+# ---------------------------------------------------------------------------
+seed: 7
+generations: 20
+islands: 4
+population_size: 16
+max_fold_steps: 8
+max_fold_steps_limit: 14
+
+# ---------------------------------------------------------------------------
+# Physics fidelity
+# ---------------------------------------------------------------------------
+# 0 selects the per objective default (distance: 4 s / 12 s,
+# airtime: 8 s / 32 s).
+tier2_duration_s: 0.0
+tier3_duration_s: 0.0
+dt_max: 0.02
+paper_gsm: 100.0
+launch_height_m: 1.2
+tier3_monte_carlo_samples: 1
+# 0 -> the automatic worker count of the batch evaluator.
+processes: 0
+
+# ---------------------------------------------------------------------------
+# Turbulence and Monte-Carlo throw jitter of the full fidelity tier
+# ---------------------------------------------------------------------------
+tier3_wind_speed: 2.0
+tier3_gust_intensity: 0.25
+tier3_thermal_strength: 0.5
+tier3_turbulence_scale: 0.5
+jitter_speed_mps: 0.5
+jitter_elevation_deg: 2.0
+jitter_pitch_rate_radps: 1.0
+jitter_roll_deg: 3.0
+jitter_yaw_deg: 3.0
+
+# ---------------------------------------------------------------------------
+# Autonomous meta control
+# ---------------------------------------------------------------------------
+stagnation_generations: 10
+migration_interval: 2
+migration_elites: 2
+max_secondary_weight: 0.25
+sensitivity_threshold: 0.25
+micro_flaps: false
+
+# ---------------------------------------------------------------------------
+# CMA-ES
+# ---------------------------------------------------------------------------
+# The initial step size of the CMA-ES, expressed as a fraction of the range
+# of a gene.  The strategy searches the *normalised* unit box, so the same
+# value means the same relative step for every gene (a gene that spans 0.1 m
+# and a gene that spans 360 deg are explored with the same relative
+# step).  The covariance matrix of the strategy is stored in that normalised
+# space as well, so its diagonal is the variance of a gene as a fraction of
+# its own range.
+cma_sigma0: 0.15
+# 0 -> the standard rule lambda = 4 + floor(3 ln n), mu = lambda / 2
+cma_lambda: 0
+cma_mu: 0
+
+# ---------------------------------------------------------------------------
+# Seeding of the initial population (archetypes are grip feasible)
+# ---------------------------------------------------------------------------
+archetype_seed_count: 4
+random_seed_count: 12
+genome_strategy: families
+# The spread of the seeded generation-0 genes, as a fraction of the range
+# of every gene.
+bootstrap_gene_spread: 0.15
+
+# ---------------------------------------------------------------------------
+# The search operators
+# ---------------------------------------------------------------------------
+# The share of the offspring of one generation produced by the linkage block
+# crossover; the rest comes from the CMA-ES.
+ga_offspring_fraction: 0.5
+# The probability that the genome of a CMA-ES offspring is repaired by the
+# repair mutation.
+cma_mutation_rate: 0.35
+# The fold angle jitter of the repair mutation, in degrees.
+mutation_angle_sigma_deg: 6.0
+# The crease line translation of the repair mutation (paper units).
+mutation_crease_shift: 0.02
+# The probability that the repair mutation flips the sense of a fold.
+fold_flip_rate: 0.08
+# The probability that the repair mutation changes the symmetry of a fold.
+symmetry_change_rate: 0.08
+
+# ---------------------------------------------------------------------------
+# Fitness of an infeasible design
+# ---------------------------------------------------------------------------
+# The grip penalty of a genome that could not be folded at all.
+broken_genome_penalty: 1000000.0
+# The weight of the grip penalty in the fitness of an infeasible design.
+grip_penalty_weight: 0.01
+
+# ---------------------------------------------------------------------------
+# Population level selection
+# ---------------------------------------------------------------------------
+# The largest share of a population the elite block of the selected
+# population statistic may take; the rest of the population is new blood, so
+# the search can never freeze.
+stat_elite_max_fraction: 0.9
+# The number of generations the live progress curve keeps.
+progress_history_limit: 500
+
+# ---------------------------------------------------------------------------
+# Grip filter thresholds (physics.origami_genome.GripThresholds)
+# ---------------------------------------------------------------------------
+grip_thresholds:
+  min_grip_height_m: 0.008
+  min_grip_length_m: 0.03
+  min_grip_layers: 2
+  cg_tolerance_m: 0.015
+  grip_half_width_m: 0.012
+  max_penetrations: 0
+
+# ---------------------------------------------------------------------------
+# Input and output
+# ---------------------------------------------------------------------------
+out_dir: runs/ga_research
+checkpoint_dir: ""
+journal_path: ""
+checkpoint_interval: 1
+resume_from: ""

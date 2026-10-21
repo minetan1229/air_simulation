@@ -324,7 +324,11 @@ def test_lift_slope_matches_the_lifting_surface_estimate_used_in_the_polar() -> 
 # ==========================================================================
 def test_induced_drag_follows_the_finite_wing_polar() -> None:
     # Raymer eq. 12.48: C_Di = C_L^2 / (pi e AR)
-    cfg = AircraftConfig(cL0=0.0, cLalpha_per_rad=4.0, cd0=0.0, stall_alpha_deg=90.0)
+    # The trailing edge is flat: a folded trailing edge adds a profile drag
+    # increment (0.035 sin^2(fold)) of its own, which is not induced drag.
+    cfg = AircraftConfig(
+        cL0=0.0, cLalpha_per_rad=4.0, cd0=0.0, stall_alpha_deg=90.0, fold_trailing_deg=0.0
+    )
     geom = derived_properties(cfg)
     polar_constant = math.pi * cfg.oswald_e * geom["aspect_ratio"]
     for alpha in (0.0, 2.0, 5.0, 9.0):
@@ -334,7 +338,12 @@ def test_induced_drag_follows_the_finite_wing_polar() -> None:
 
 
 def test_polar_minima_match_the_parabolic_polar_closed_form() -> None:
-    cfg = AircraftConfig(cL0=0.0, cLalpha_per_rad=4.0, cd0=0.02, oswald_e=0.8, stall_alpha_deg=90.0)
+    # Flat trailing edge: the closed form below is the *profile* drag of the
+    # airframe, and a folded trailing edge adds 0.035 sin^2(fold) to it.
+    cfg = AircraftConfig(
+        cL0=0.0, cLalpha_per_rad=4.0, cd0=0.02, oswald_e=0.8, stall_alpha_deg=90.0,
+        fold_trailing_deg=0.0,
+    )
     reynolds = 5.0e4
     minima = drag_polar_minima(cfg, reynolds=reynolds)
     geom = derived_properties(cfg)
@@ -411,7 +420,9 @@ def test_ground_effect_factor_free_air_value_is_unity() -> None:
 
 
 def test_ground_effect_reduces_only_the_induced_part() -> None:
-    cfg = AircraftConfig()
+    # Flat trailing edge: the fold's own profile drag increment is height
+    # independent and would not be part of the induced part.
+    cfg = AircraftConfig(fold_trailing_deg=0.0)
     near = evaluate_aero(cfg, EnvironmentConfig(ground_effect_enabled=True), 9.0, 5.0, ground_height_m=0.02)
     far = evaluate_aero(cfg, EnvironmentConfig(ground_effect_enabled=True), 9.0, 5.0, ground_height_m=1.0e8)
     parasite = aero_domain.parasite_drag_coefficient(cfg, near.reynolds)
@@ -529,7 +540,12 @@ def test_cg_offset_sign_is_aft_cg_is_nose_up() -> None:
 
 
 def test_trim_nulls_the_static_pitching_moment() -> None:
-    cfg = AircraftConfig()
+    # Flat trailing edge: the closed-form trim is the *linear* solution of the
+    # attached branch.  A folded trailing edge adds a nose-down moment of
+    # -0.012 * fold, which pushes the trimmed angle of attack past the stall
+    # for the larger elevon deflections, where the closed form no longer
+    # applies.
+    cfg = AircraftConfig(fold_trailing_deg=0.0)
     env = EnvironmentConfig()
     for elevon in (-10.0, 0.0, 5.0, 15.0):
         solution = aero_domain.trim_solution(cfg, env, 6.0, elevon_deg=elevon)

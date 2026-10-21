@@ -1524,8 +1524,15 @@ def gpu_batch_evaluate_cases(
     """Simulate N flight cases simultaneously on CUDA GPU via CuPy.
 
     Designed for optimizer generations (NSGA-II, Differential Evolution, Grid Search)
-    and batch parameter sweeps, achieving over 1,000,000 trajectory step-evaluations
-    per second on NVIDIA GeForce RTX 4060.
+    and batch parameter sweeps.
+
+    The device path is **kernel-launch bound**, not compute bound: one
+    integration step issues ~8e3 CuPy kernel launches (six rigid-body state
+    evaluations of a few hundred element-wise operations each), so the
+    per-step wall clock barely depends on the batch size.  On Windows/WDDM
+    (RTX 4060 Laptop, CuPy 14.2) a step costs ~130 ms for a batch of one
+    and ~127 ms for a batch of 256, which makes the device path slower than
+    the CPU path for every batch size an optimiser actually runs.
     """
     import numpy as np
 
@@ -1543,9 +1550,26 @@ def gpu_batch_evaluate_cases(
             dur = float(cases[idx].get("duration_s", 20.0))
             t_val = min(float(item.get("flight_time_s", 0.0)), dur)
             status_raw = str(item.get("status", "flying"))
+            failed = status_raw in ("error", "failed")
             crashed = bool(item.get("crashed", status_raw == "crashed"))
+            diverged = bool(item.get("diverged", status_raw == "diverged"))
             landed = bool(item.get("landed", status_raw == "landed" or (t_val < dur - 0.01 and not crashed)))
-            status_str = "crashed" if crashed else ("landed" if landed else "timeout")
+            if failed:
+                # A failed evaluation is not a flight at all: relabelling it as a
+                # timeout (or as a crash) hides the failure from
+                # ``optimizer_domain.is_infeasible_flight`` and the broken design
+                # would enter the Pareto front as a legitimate 0 m flight.
+                status_str = status_raw
+            elif crashed:
+                status_str = "crashed"
+            elif diverged:
+                # A diverged integration is not a timeout; relabelling it hides a
+                # numerical failure behind a benign looking status.
+                status_str = "diverged"
+            elif landed:
+                status_str = "landed"
+            else:
+                status_str = "timeout"
             d_val = float(item.get("landing_distance_m", item.get("distance_m", 0.0)))
             r_entry = dict(item)
             r_entry.update({
@@ -1556,9 +1580,23 @@ def gpu_batch_evaluate_cases(
                 "range_y_m": 0.0,
                 "landed": landed,
                 "crashed": crashed,
+                "diverged": diverged,
                 "status": status_str,
+                "duration_s": round(float(dur), 4),
             })
-            cpu_results.append(r_entry)
+            model = r_entry.get("model", RIGID_BODY_MODEL_TAG)
+            approximate = bool(r_entry.get("approximate", False))
+            physics_verification_eligible = bool(r_entry.get("physics_verification_eligible", True))
+            limitations = r_entry.get("limitations", [])
+            cpu_results.append(
+                normalize_payload(
+                    r_entry,
+                    model=model,
+                    approximate=approximate,
+                    physics_verification_eligible=physics_verification_eligible,
+                    limitations=limitations,
+                )
+            )
         return cpu_results
 
     try:
@@ -1677,29 +1715,48 @@ def evaluate_cases_on_device(
                 status_str = "landed"
             else:
                 status_str = "timeout"
-            results[index] = {
-                "distance_m": round(float(distance[position]), 4),
-                "flight_time_s": round(t_val, 4),
-                "horizontal_range_m": round(float(distance[position]), 4),
-                "range_x_m": round(abs(float(state[position, 0])), 4),
-                "range_y_m": round(abs(float(state[position, 1])), 4),
-                "max_altitude_m": round(abs(float(state[position, 2])), 4),
+            # The payload publishes the **measured** values at full float
+            # precision.  It used to round them for JSON tidiness -- the
+            # peak stress to two decimals and its index to six -- and the
+            # quantisation cost the parity contract: the published peak
+            # stress could only agree with the 6-DoF reference to ~1e-5
+            # relative instead of the 1e-6 the contract demands
+            # (``tests/test_gpu_kernel_parity.py``).  A rounded payload
+            # cannot carry the contract it advertises, so only the echoed
+            # request fields keep their fixed-point form.
+            entry = {
+                "distance_m": float(distance[position]),
+                "flight_time_s": float(t_val),
+                "horizontal_range_m": float(distance[position]),
+                "landing_distance_m": float(distance[position]),
+                "range_x_m": abs(float(state[position, 0])),
+                "range_y_m": abs(float(state[position, 1])),
+                "max_altitude_m": abs(float(state[position, 2])),
                 "max_speed_mps": round(float(launches[index].launch_speed), 4),
                 "launch_speed_mps": round(float(launches[index].launch_speed), 4),
-                "max_ld_ratio": round(float(max_ld[position]), 4),
-                "max_stress_index": round(float(stress_index[position]), 6),
-                "max_stress_pa": round(float(stress_pa[position]), 2),
-                "max_g_load": round(float(max_g[position]), 4),
-                "stability": round(float(stability[position]), 6),
-                "stall_margin": round(float(stall_margin[position]), 4),
+                "max_ld_ratio": float(max_ld[position]),
+                "max_stress_index": float(stress_index[position]),
+                "max_stress_pa": float(stress_pa[position]),
+                "max_g_load": float(max_g[position]),
+                "stability": float(stability[position]),
+                "stall_margin": float(stall_margin[position]),
                 "stalled": bool(stress_index[position] >= 1.0),
                 "landed": is_landed,
                 "crashed": is_crashed,
+                "diverged": False,
                 "status": status_str,
                 "backend": backend,
                 "device_name": device_name,
+                "duration_s": round(float(duration), 4),
                 **_rigid_body_model_metadata("rigid_body_6dof_batch"),
             }
+            results[index] = normalize_payload(
+                entry,
+                model=RIGID_BODY_MODEL_TAG,
+                approximate=False,
+                physics_verification_eligible=True,
+                limitations=[],
+            )
         completed += len(members)
         if progress_cb is not None:
             try:

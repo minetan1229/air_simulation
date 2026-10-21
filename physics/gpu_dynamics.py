@@ -136,7 +136,12 @@ def quaternion_normalize_batch(xp: Any, quat: Any) -> Any:
     norm = _norm(xp, quat)
     safe = xp.where(norm > _EPS, norm, xp.ones_like(norm))
     out = quat / safe[:, xp.newaxis]
-    return xp.where((norm > _EPS)[:, xp.newaxis], out, xp.tile(xp.array([1.0, 0.0, 0.0, 0.0]), (quat.shape[0], 1)))
+    # The identity quaternion is built on the device: a host side
+    # ``xp.array([1, 0, 0, 0])`` would be an implicit host to device copy, and
+    # a copy is forbidden while a CUDA graph is being captured.
+    fallback = xp.zeros((quat.shape[0], 4), dtype=xp.float64)
+    fallback[:, 0] = 1.0
+    return xp.where((norm > _EPS)[:, xp.newaxis], out, fallback)
 
 
 def quaternion_to_matrix_batch(xp: Any, quat: Any) -> Any:
@@ -164,14 +169,36 @@ def quaternion_to_matrix_batch(xp: Any, quat: Any) -> Any:
     )
 
 
+def _contract3(xp: Any, rotation: Any, vector: Any) -> Any:
+    """Contract an ``(N, 3, 3)`` matrix with an ``(N, 3)`` vector.
+
+    The contraction is written out element by element instead of with
+    ``einsum``: CuPy lowers ``einsum`` to cuBLAS, and a cuBLAS call cannot be
+    captured into a CUDA graph.  The elementwise form is what makes the
+    graph capture of the integration step possible.
+    """
+    v0 = vector[:, 0]
+    v1 = vector[:, 1]
+    v2 = vector[:, 2]
+    return xp.stack(
+        (
+            rotation[:, 0, 0] * v0 + rotation[:, 0, 1] * v1 + rotation[:, 0, 2] * v2,
+            rotation[:, 1, 0] * v0 + rotation[:, 1, 1] * v1 + rotation[:, 1, 2] * v2,
+            rotation[:, 2, 0] * v0 + rotation[:, 2, 1] * v1 + rotation[:, 2, 2] * v2,
+        ),
+        axis=-1,
+    )
+
+
 def body_to_world_batch(xp: Any, rotation: Any, vector_body: Any) -> Any:
     """Rotate ``(N, 3)`` body vectors into the world frame."""
-    return xp.einsum("nij,nj->ni", rotation, vector_body)
+    return _contract3(xp, rotation, vector_body)
 
 
 def world_to_body_batch(xp: Any, rotation: Any, vector_world: Any) -> Any:
     """Rotate ``(N, 3)`` world vectors into the body frame."""
-    return xp.einsum("nji,nj->ni", rotation, vector_world)
+    transposed = xp.swapaxes(rotation, 1, 2)
+    return _contract3(xp, transposed, vector_world)
 
 
 def quaternion_derivative_batch(xp: Any, quat: Any, omega_body: Any) -> Any:
@@ -304,8 +331,13 @@ def wind_batch(
 
     The upstream solver works on a *z-up* height axis; the query points are
     converted the same way :func:`physics.flight_sim.wind_vector` converts
-    them, and the returned vertical component is negated back into the z-down
-    world frame.
+    them -- with ``z_up = -z_ned``, the z-up coordinate of the point itself,
+    from which the solver forms the height above the ground plane
+    (``z_up - ground_level_m``).  Adding the ground level here would sample
+    the boundary layer at the altitude above the world origin instead of at
+    the height above the ground plane, and the two paths would fly in
+    different air masses.  The returned vertical component is negated back
+    into the z-down world frame.
     """
     if params.use_mean_wind_only:
         return xp.broadcast_to(params.mean_wind, (positions.shape[0], 3))
@@ -317,7 +349,7 @@ def wind_batch(
         (
             np.asarray(host_positions[:, 0], dtype=np.float64),
             np.asarray(host_positions[:, 1], dtype=np.float64),
-            params.ground_level_m - np.asarray(host_positions[:, 2], dtype=np.float64),
+            -np.asarray(host_positions[:, 2], dtype=np.float64),
         ),
         axis=-1,
     )
@@ -384,13 +416,15 @@ def build_params(
                 "cl_beta", "cl_roll_rate", "cl_pitch_rate", "cl_yaw_rate",
                 "cn_beta", "cn_roll_rate", "cn_pitch_rate", "cn_yaw_rate",
                 "cy_beta", "aileron_deg", "asymmetry_cl", "rudder_deg",
-                "elevon_deg", "elevon_authority", "cg_offset_x",
+                "elevon_deg", "elevon_authority", "fold_trailing_deg",
+                "cg_offset_x",
                 "cp_shift_gain", "ground_cushion_lift", "ground_pitch_coupling",
             )
         }
     )
-    aero.lift_scale = ones * max(float(env.lift_scale), 0.0)
-    aero.drag_scale = ones * max(float(env.drag_scale), 0.0)
+    lift_scale, drag_scale = aero_kernel.environment_scales(env)
+    aero.lift_scale = ones * lift_scale
+    aero.drag_scale = ones * drag_scale
     aero.compressible = xp.asarray(bool(env.compressibility_enabled))
     aero.ground_effect_enabled = xp.asarray(bool(env.ground_effect_enabled))
 
@@ -903,7 +937,15 @@ def simulate_batch(
         # The impact load factor follows the reference model: the structural
         # stop distance converts the impact speed into the load the root
         # section has to carry, ``n = 1 + v^2 / (2 g d)``.
-        impact_speed = xp.maximum(y[:, 2], 0.0)
+        #
+        # The impact speed is the **vertical velocity** of the 13-state vector
+        # (``y[:, 3:6]`` is the velocity, so the NED vertical component is
+        # ``y[:, 5]``), not the altitude: ``y[:, 2]`` is the NED z *position*,
+        # which is negative while the airframe is airborne and therefore
+        # reported an impact speed of 0 m/s for every flight.  The crash test
+        # was consequently never armed in the batch path and a steep impact
+        # was reported as a landing while the 6-DoF path reported a crash.
+        impact_speed = xp.maximum(y[:, 5], 0.0)
         impact_g = 1.0 + impact_speed * impact_speed / (2.0 * params.gravity * 0.031)
         impact_stress = peak_root_stress_pa(
             xp,
@@ -919,9 +961,11 @@ def simulate_batch(
             tip_factor=params.tip_factor,
         )
         impact_index = impact_stress / params.allowable_pa
-        peak_stress = xp.where(
-            active & touching, xp.maximum(peak_stress, impact_stress), peak_stress
-        )
+        # The impact stress decides the crash, it is **not** the reported peak
+        # stress: the 6-DoF path reports the maximum stress of the *flight*
+        # samples and uses the impact stress only for the crash criterion.
+        # Folding the impact into the peak made the batch report a stress the
+        # reference path never reports.
         failed = touching & (
             (impact_index >= 1.0) | (impact_speed > CRASH_IMPACT_SPEED_MPS)
         )

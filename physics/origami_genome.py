@@ -94,6 +94,18 @@ LAYER_ORDER_ABOVE = "above"
 LAYER_ORDER_BELOW = "below"
 LAYER_ORDER_MODES: Tuple[str, ...] = (LAYER_ORDER_AUTO, LAYER_ORDER_ABOVE, LAYER_ORDER_BELOW)
 
+#: The fold senses a client may name in the ``fold_type`` field of a step.
+#: The keys are matched case-insensitively after the surrounding blanks have
+#: been stripped; the Japanese words are the ones the recipe uses.
+_FOLD_TYPE_ALIASES: Dict[str, bool] = {
+    "mountain": True,
+    "山": True,
+    "true": True,
+    "valley": False,
+    "谷": False,
+    "false": False,
+}
+
 #: Fold angle limits (degrees).  ``+180`` is a fully flattened fold (the two
 #: halves lie on top of each other), ``0`` is a flat (unfolded) crease and
 #: small angles are the trim folds of an elevon or a dihedral.
@@ -550,14 +562,50 @@ def genome_from_archetype(
     )
 
 
+def _fold_sense(value: Any, field: str, index: int) -> bool:
+    """Resolve the fold sense of one step from a ``fold_type`` field.
+
+    ``value`` is either the boolean sense itself or the name of a sense.
+    A name that is not known is an error: guessing "mountain" would turn
+    every valley fold of a genome into a mountain fold.
+    """
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        key = value.strip().lower()
+        if key in _FOLD_TYPE_ALIASES:
+            return _FOLD_TYPE_ALIASES[key]
+        raise ValueError(
+            f"step {index}: unknown {field} {value!r}; expected 'mountain' or 'valley'"
+        )
+    raise ValueError(
+        f"step {index}: {field} must be a string or a boolean, got {type(value).__name__}"
+    )
+
+
 def genome_from_dict(payload: Dict[str, Any]) -> OrigamiGenome:
     """Rebuild a genome from its JSON representation.
 
     The API accepts a genome from a client, so the dictionary form has to
     be parsed back into the data model without losing anything.
+
+    The fold sense of a step is read from its ``fold_type`` field: the name
+    of the sense (``"mountain"`` / ``"valley"``, the Japanese ``"山"`` /
+    ``"谷"`` are accepted as well) or the boolean itself.  An unknown name
+    is rejected with a :class:`ValueError` instead of being read as a
+    mountain fold.  When the field is missing the boolean ``mountain`` key
+    is used, and when that is missing too the sense follows the sign of the
+    fold angle.  The angle that comes back carries the resolved sense in its
+    sign (positive = mountain, negative = valley) and keeps its magnitude,
+    which is the invariant the :class:`FoldStep` documents.
+
+    The envelope of :func:`genome_payload` (``{"genome": {...}}``) is
+    accepted as well, so a payload can be posted back as it was received.
     """
     if not isinstance(payload, dict):
         raise ValueError("a genome payload must be an object")
+    if "steps" not in payload and isinstance(payload.get("genome"), dict):
+        payload = payload["genome"]
     steps: List[FoldStep] = []
     for index, raw in enumerate(payload.get("steps") or [], start=1):
         line = raw.get("crease_line") or []
@@ -566,9 +614,19 @@ def genome_from_dict(payload: Dict[str, Any]) -> OrigamiGenome:
         p0 = (float(line[0][0]), float(line[0][1]))
         p1 = (float(line[1][0]), float(line[1][1]))
         angle = float(raw.get("fold_angle_deg", 0.0))
-        mountain = raw.get("fold_type")
-        if mountain is None:
-            mountain = bool(raw.get("mountain", angle >= 0.0))
+        magnitude = abs(_clamp(angle, MIN_FOLD_ANGLE_DEG, MAX_FOLD_ANGLE_DEG))
+        fold_type = raw.get("fold_type")
+        if fold_type is None:
+            sense = raw.get("mountain")
+            if sense is None:
+                mountain = angle >= 0.0
+            else:
+                mountain = _fold_sense(sense, "mountain", index)
+        else:
+            mountain = _fold_sense(fold_type, "fold_type", index)
+        # The sign of the angle carries the sense: the magnitude is kept
+        # exactly, the sign follows the resolved sense.
+        signed_angle = magnitude if mountain else -magnitude
         group = raw.get("group") or ()
         if isinstance(group, str):
             group = (group,)
@@ -577,7 +635,7 @@ def genome_from_dict(payload: Dict[str, Any]) -> OrigamiGenome:
             FoldStep(
                 step_index=int(raw.get("step_index", index)),
                 crease_line=(p0, p1),
-                fold_angle_deg=_clamp(angle, MIN_FOLD_ANGLE_DEG, MAX_FOLD_ANGLE_DEG),
+                fold_angle_deg=signed_angle,
                 symmetry=str(raw.get("symmetry", SYMMETRY_SYMMETRIC)),
                 layer_order=str(raw.get("layer_order", LAYER_ORDER_AUTO)),
                 target_face_ids=tuple(int(v) for v in (raw.get("target_face_ids") or ())),
@@ -586,7 +644,7 @@ def genome_from_dict(payload: Dict[str, Any]) -> OrigamiGenome:
                 set_group_pair=(str(pair[0]), str(pair[1])) if pair else None,
                 level=int(raw.get("level", 0)),
                 residual_deg=float(raw.get("residual_deg", 0.0)),
-                mountain=bool(mountain),
+                mountain=mountain,
                 label=str(raw.get("label", "")),
             )
         )

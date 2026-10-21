@@ -12,6 +12,7 @@
 | 段階的検証 & CI/CD 手順 | `.agents/skills/verify-and-test.md` | Phase 4, 6 実行時（テスト順序・Git・CI確認） |
 | Discord Webhook 通知 | `.agents/skills/notify-webhook.md` | フェーズ開始/完了/警告時（カラー・レポート連携） |
 | サブエージェント役割分担 | `.agents/skills/subagent-delegation.md` | 並列作業・委譲時（Tier分離・担当境界表） |
+| 常駐プロセスの使用中判定と回収 | `.agents/skills/process-hygiene.md` | メモリ圧迫・残存タスク確認時（`tools/process_hygiene.py`） |
 | コンテキスト圧縮・状態引き継ぎ | `.agents/skills/loop-handover.md` | コンテキスト肥大・セッション終了時 |
 | 詳細物理・API・アーキテクチャ | `docs/SPECIFICATION.md` | 実装・設計変更時（該当章のみ抽出） |
 | ツール・タスク別スキル / MCP | `skill/README.md` / `.kilo/kilo.jsonc` | 該当スキル利用時 / MCP利用時 |
@@ -43,8 +44,11 @@
   - *CI Runner*: GitHub Actions の run は `defaults: run: shell: bash` 必須。
   - *文字コード*: PowerShell (`Get/Set-Content`) でのUTF-8破壊禁止。Python/専用ツール編集徹底。
   - *座標系*: 風場(+z上向き)と世界NED(+z下向き)の符号変換（$w_{NED}=-w_{wind}$）遵守。
+  - *風高度規約*: 風は**地表面からの高度**（`z_up = -z_ned`）でサンプルする。6DoF参照経路とGPUバッチ経路は同一規約（詳細: `.agents/Knowledge.md`「風高度規約」）。
   - *境界/接地*: 水平100km制限、地中即死(`min_alt<-0.05`)、CCD補間、翼端散逸上限適用。
-  - *既知の物理乖離*: 物理3系統分裂・接地散逸・応力分裂・慣性テンソル（詳細: `PHYSICS_PAPER_CONFORMANCE_AUDIT.md`）。
+  - *評価status*: 失敗した評価を`timeout`/`crashed`等へ**リラベル**しない（パレート前線・incumbentへの混入＝報酬ハッキング経路。詳細: `.agents/Knowledge.md`「Infeasible Status Forwarding」）。
+  - *GAの既定値*: 試行回数・目的関数の既定値は`physics/ga_config.py`へ集約し、探索ロジックにハードコードしない（詳細: `.agents/Knowledge.md`「GA Research Engine」）。
+  - *既知の物理乖離*: 監査の進捗表は`PHYSICS_PAPER_CONFORMANCE_AUDIT.md` §0.0（P0〜P3は完了）。残る乖離は同§2〜§5と`no-finish.md`が正本。
 
 ---
 
@@ -56,6 +60,7 @@
 | Discord通知 | `python tools/notify_discord.py <status> "<title>" "<summary>"`（詳細: `.agents/skills/notify-webhook.md`） |
 | MCP確認 / 呼出 | `python tools/verify_mcp_servers.py` / `python tools/mcp_call.py <server> <tool> --arg k=v` |
 | CI点検 / Issue | `python tools/check_runs.py` / `python tools/check_issues.py` / `close_resolved_issue.py` |
+| 常駐プロセス回収 | `python tools/process_hygiene.py --list` / `--apply`（判定基準: `.agents/skills/process-hygiene.md`） |
 | UI検証 / 物理診断 | `python tools/capture_ui.py` (実ブラウザはplaywright MCP) / `tools/analyze_glide_trim.py` 他 |
 
 ---

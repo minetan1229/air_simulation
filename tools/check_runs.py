@@ -1,3 +1,4 @@
+import argparse
 import json
 import os
 import sys
@@ -24,10 +25,23 @@ headers = {"User-Agent": "Python-Workflow-Checker"}
 if token:
     headers["Authorization"] = f"token {token}"
 
-url = "https://api.github.com/repos/minetan1229/air_simulation/actions/runs?per_page=6"
+
+def resolve_repo_slug() -> str:
+    parser = argparse.ArgumentParser(add_help=False)
+    parser.add_argument("--repo", default=os.environ.get("GITHUB_REPOSITORY", ""))
+    args, _ = parser.parse_known_args()
+    repo = (args.repo or "").strip()
+    if not repo:
+        print("Error: GITHUB_REPOSITORY 環境変数または --repo owner/repo が必要です。", file=sys.stderr)
+        sys.exit(1)
+    return repo
+
+
+repo = resolve_repo_slug()
+url = f"https://api.github.com/repos/{repo}/actions/runs?per_page=6"
 req = urllib.request.Request(url, headers=headers)
 try:
-    with urllib.request.urlopen(req) as res:
+    with urllib.request.urlopen(req, timeout=30) as res:
         data = json.loads(res.read().decode())
         runs = data.get("workflow_runs", [])
         print(f"Total workflow runs: {len(runs)}")

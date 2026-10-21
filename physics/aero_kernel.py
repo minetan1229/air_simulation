@@ -39,7 +39,9 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
-from typing import Any, Dict
+from dataclasses import fields as _dataclass_fields
+from dataclasses import MISSING as _MISSING
+from typing import Any, Dict, Tuple
 
 from .config_schema import (
     AircraftConfig,
@@ -240,6 +242,44 @@ class ScalarMath:
 # --------------------------------------------------------------------------
 # Array-module agnostic primitives
 # --------------------------------------------------------------------------
+def _array_module(value: Any) -> Any:
+    """The array module of ``value`` (``numpy`` / ``cupy``), or ``None``.
+
+    The kernel is written against an ``xp`` argument so that it never has to
+    import an array library itself.  The bundle sanitiser is the one place
+    that has to work on a value whose backend it does not know, so it asks the
+    value which module it belongs to.
+    """
+    root = type(value).__module__.split(".")[0]
+    if root == "numpy":
+        import numpy
+
+        return numpy
+    if root == "cupy":
+        import cupy
+
+        return cupy
+    return None
+
+
+def _sanitize_field(value: Any, default: Any) -> Any:
+    """Replace a non-finite bundle field by its documented default."""
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float):
+        return value if math.isfinite(value) else float(default)
+    module = _array_module(value)
+    if module is None:
+        return value
+    try:
+        finite = module.isfinite(value)
+    except TypeError:
+        return value
+    return module.where(finite, value, module.asarray(default, dtype=value.dtype))
+
+
 def _clamp(xp: Any, value: Any, low: Any, high: Any) -> Any:
     """``clip`` that also accepts plain Python floats.
 
@@ -639,6 +679,29 @@ def trailing_edge_fold_effects(xp: Any, fold_trailing_deg: Any) -> Dict[str, Any
     return {"dcl": dcl, "dcm": dcm, "dcd": dcd}
 
 
+def _guard_fold_increment(xp: Any, te_fold: Dict[str, Any], cl_max: Any) -> Dict[str, Any]:
+    """Stability guard of the trailing-edge fold connection (``|dC_L| <= cl_max``).
+
+    The conformance audit (H-19) prescribes this guard for the fold: the airframe
+    cannot produce more lift than its own maximum, so a fold increment larger
+    than ``cl_max`` is not a physical state.  The lift increment and the moment
+    increment are scaled **together**, so the ratio ``dcm / dcl`` -- and with it
+    the position of the fold's incremental centre of pressure (the fold's lift
+    acting at the trailing edge) -- is preserved.  The profile-drag increment is
+    a separate effect of the folded panel and is not bounded by the lift limit.
+    """
+    limit = xp.maximum(xp.abs(_finite(xp, cl_max, 0.90)), 0.0)
+    dcl = te_fold["dcl"]
+    magnitude = xp.abs(dcl)
+    oversized = magnitude > limit
+    scale = xp.where(
+        oversized,
+        limit / xp.where(magnitude > 0.0, magnitude, 1.0),
+        1.0,
+    )
+    return {"dcl": dcl * scale, "dcm": te_fold["dcm"] * scale, "dcd": te_fold["dcd"]}
+
+
 def center_of_pressure_fraction(
     xp: Any, alpha_deg: Any, stall_alpha_deg: Any, cp_shift_gain: Any
 ) -> Any:
@@ -714,6 +777,23 @@ class AeroParams:
     compressible: Any = True
     ground_effect_enabled: Any = True
 
+    def __post_init__(self) -> None:
+        """Guarantee that no field of the bundle is NaN or infinite.
+
+        The kernel reads the bundle fields directly: re-checking them on every
+        evaluation would cost one array pass per field on the batch path, which
+        is exactly the overhead the batch integrator must not pay.  The
+        guarantee therefore lives in the bundle itself -- the single place every
+        construction path goes through -- so a non-finite value can no longer
+        reach the coefficients, whichever path built the bundle.
+        """
+        for field in _dataclass_fields(self):
+            value = getattr(self, field.name)
+            default = field.default
+            if default is _MISSING:
+                default = 0.0
+            setattr(self, field.name, _sanitize_field(value, default))
+
     def polar_constant(self, xp: Any) -> Any:
         """``k = pi e AR`` -- the divisor of the induced term ``C_L^2 / k``."""
         aspect = xp.maximum(_finite(xp, self.aspect, 1.0), 1.0e-3)
@@ -781,7 +861,9 @@ def evaluate_coefficients(
     elevon = elevon_effects(
         xp, p.elevon_deg, p.elevon_authority, p.cm0, p.cm_alpha
     )
-    te_fold = trailing_edge_fold_effects(xp, p.fold_trailing_deg)
+    te_fold = _guard_fold_increment(
+        xp, trailing_edge_fold_effects(xp, p.fold_trailing_deg), p.cl_max
+    )
     slope = p.lift_slope(xp, mach)
     polar = p.polar_constant(xp)
 
@@ -1078,18 +1160,34 @@ def params_from_aircraft(cfg: AircraftConfig) -> AeroParams:
     )
 
 
+def environment_scales(env: EnvironmentConfig) -> Tuple[float, float]:
+    """Sanitised ``(lift_scale, drag_scale)`` of the environment.
+
+    The 6-DoF reference path (:func:`params_from_config`) and the batch paths
+    read the environment factors through this single helper, so a non-finite
+    value is replaced by the same default in every path instead of only in the
+    reference path.  A NaN reaching the batch path used to poison every
+    coefficient of every case of the batch.
+    """
+    return (
+        max(_finite_scalar(env.lift_scale, 1.0), 0.0),
+        max(_finite_scalar(env.drag_scale, 1.0), 0.0),
+    )
+
+
 def params_from_config(cfg: AircraftConfig, env: EnvironmentConfig) -> AeroParams:
     """Build the kernel parameter bundle from the runtime configuration.
 
     This is the bridge between the mutable configuration objects and the
     pure-function kernel.  The per-airframe correlations that need a scalar
-    (the Helmbold slope, the trip-wire stall delay) are resolved *here*, so
-    the kernel stays a pure function of its inputs and can evaluate a whole
+    (the Helmbold slope, the trip-wire stall delay) are resolved *here*, so the
+    kernel stays a pure function of its inputs and can evaluate a whole
     batch of airframes at once.
     """
     params = params_from_aircraft(cfg)
-    params.lift_scale = max(_finite_scalar(env.lift_scale, 1.0), 0.0)
-    params.drag_scale = max(_finite_scalar(env.drag_scale, 1.0), 0.0)
+    lift_scale, drag_scale = environment_scales(env)
+    params.lift_scale = lift_scale
+    params.drag_scale = drag_scale
     params.compressible = bool(env.compressibility_enabled)
     params.ground_effect_enabled = bool(env.ground_effect_enabled)
     return params

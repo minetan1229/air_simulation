@@ -1,5 +1,7 @@
 """Unit and integration tests for record-airframe domain and REST endpoints."""
 
+import re
+
 import pytest
 from app import app
 from physics import records_domain
@@ -218,4 +220,106 @@ def test_api_records_apply_calibrated_toggle():
     assert resp_raw.status_code == 200
     assert resp_raw.json["calibrated"] is False
     assert resp_raw.json["throw"]["release_speed_mps"] == 27.0
+
+
+# ---------------------------------------------------------------------------
+# Japanese text hygiene (regression guard for the CP932 mojibake incident)
+# ---------------------------------------------------------------------------
+
+#: Codepoints that only ever appear as the mangled "trail byte" side of a
+#: CP932 double byte pair, plus stray Hangul syllables.  A single occurrence
+#: in Japanese text means the string was round-tripped through the wrong
+#: codec.  Keep in sync with ``tools/check_mojibake.py``.
+MOJIBAKE_ARTIFACTS = frozenset(
+    "\u5181\u6a41\u7401\u8f01\u8a01\u5bc1\u7a41\u8ac1\u7681\u6701"
+    "\u7d81\u4e81\u5fc1\u91c1\u8d81\u8d34\u5e01\u6581\u6579\u6721"
+    "\u5e04\u5b81\u6241\u4e3a\u4e01\u5141\u3041"
+)
+HANGUL = re.compile(r"[\uac00-\ud7af]")
+DIGITS = re.compile(r"\d+(?:[.,]\d+)*")
+
+
+def _japanese_strings():
+    """Yield ``(label, text)`` for every Japanese string in the catalogue."""
+    for metric in records_domain.RECORD_METRICS.values():
+        yield "RECORD_METRICS.label_ja", metric["label_ja"]
+    for rule in records_domain.THROW_RULES:
+        yield "THROW_RULES.label_ja", rule["label_ja"]
+        yield "THROW_RULES.statement_ja", rule["statement_ja"]
+    for rule in records_domain.COMPETITION_RULES:
+        yield "COMPETITION_RULES.label_ja", rule.label_ja
+        yield "COMPETITION_RULES.statement_ja", rule.statement_ja
+    for entry in records_domain.RECORD_PRESET_CATALOGUE:
+        key = entry.key
+        yield f"{key}.name_ja", entry.name_ja
+        yield f"{key}.notes_ja", entry.notes_ja
+        yield f"{key}.holder_ja", entry.achievement.holder_ja
+        yield f"{key}.aircraft_name_ja", entry.achievement.aircraft_name_ja
+        yield f"{key}.achievement.notes_ja", entry.achievement.notes_ja
+        yield f"{key}.technique_ja", entry.throw.technique_ja
+
+
+def test_japanese_strings_are_mojibake_free_and_balanced():
+    for label, text in _japanese_strings():
+        assert "\ufffd" not in text, f"{label}: replacement character in {text!r}"
+        assert not (set(text) & MOJIBAKE_ARTIFACTS), f"{label}: mojibake artifact in {text!r}"
+        assert not HANGUL.search(text), f"{label}: hangul syllable in {text!r}"
+        assert text.count("（") == text.count("）"), f"{label}: unbalanced parentheses in {text!r}"
+        assert text.count("「") == text.count("」"), f"{label}: unbalanced quotes in {text!r}"
+        assert text.count("『") == text.count("』"), f"{label}: unbalanced book quotes in {text!r}"
+
+
+def test_japanese_record_names_match_the_english_source():
+    entry = records_domain.preset("unite_31s")
+    # Seven team members in the English holder, seven in the Japanese one.
+    assert len(entry.achievement.holder.split(", ")) == 7
+    assert entry.achievement.holder_ja == "饒翀逸・王承昊・唐帥・劉力文・楊仕安・賈思翼・潘秭辰"
+    assert entry.achievement.aircraft_name_ja == "天鹰 (Unite)"
+    # Other personal names the catalogue renders in Japanese.
+    assert records_domain.preset("toda_29_2s").achievement.holder_ja == "戸田 拓夫"
+    assert records_domain.preset("ninomiya_n424").achievement.holder_ja == "二宮康明・E. H. Mathews"
+    assert "ジョン・コリンズ" in records_domain.preset("ayoob_69_1m").name_ja
+    assert "シン・ムジュン" in records_domain.preset("kim_77m").name_ja
+    assert "ケン・ブラックバーン" in records_domain.preset("blackburn_27_6s").name_ja
+
+
+def test_japanese_notes_keep_every_digit_of_their_english_source():
+    """A number published in English must not disappear from the Japanese text."""
+    pairs = []
+    for entry in records_domain.RECORD_PRESET_CATALOGUE:
+        pairs.append((f"{entry.key}.notes", entry.notes, entry.notes_ja))
+        pairs.append((f"{entry.key}.achievement.notes",
+                      entry.achievement.notes, entry.achievement.notes_ja))
+    for rule in records_domain.COMPETITION_RULES:
+        pairs.append(("COMPETITION_RULES.statement", rule.statement, rule.statement_ja))
+    for rule in records_domain.THROW_RULES:
+        pairs.append(("THROW_RULES.statement", rule["statement"], rule["statement_ja"]))
+    for label, english, japanese in pairs:
+        english_numbers = {n for m in DIGITS.finditer(english) for n in re.split(r"[/:,]", m.group(0)) if n}
+        japanese_numbers = {n for m in DIGITS.finditer(japanese) for n in re.split(r"[/:,]", m.group(0)) if n}
+        assert english_numbers <= japanese_numbers, (
+            f"{label}: {sorted(english_numbers - japanese_numbers)} missing from {japanese!r}"
+        )
+
+
+def test_preset_payloads_expose_the_catalogue_japanese_strings():
+    """The API must serve the very same Japanese text the catalogue holds."""
+    listed = {payload["key"]: payload for payload in records_domain.list_presets()}
+    assert set(listed) == {entry.key for entry in records_domain.RECORD_PRESET_CATALOGUE}
+    for entry in records_domain.RECORD_PRESET_CATALOGUE:
+        for payload in (listed[entry.key], records_domain.preset_payload(entry.key)):
+            assert payload["name_ja"] == entry.name_ja
+            assert payload["notes_ja"] == entry.notes_ja
+            assert payload["achievement"]["holder_ja"] == entry.achievement.holder_ja
+            assert payload["achievement"]["aircraft_name_ja"] == entry.achievement.aircraft_name_ja
+            assert payload["achievement"]["notes_ja"] == entry.achievement.notes_ja
+            assert payload["throw"]["technique_ja"] == entry.throw.technique_ja
+    rules = {rule["key"]: rule for rule in records_domain.THROW_RULES}
+    for served in records_domain.preset_payload("unite_31s")["throw_rules"]:
+        assert served["label_ja"] == rules[served["key"]]["label_ja"]
+        assert served["statement_ja"] == rules[served["key"]]["statement_ja"]
+    competitions = {rule.key: rule for rule in records_domain.COMPETITION_RULES}
+    for served in records_domain.competition_rules():
+        assert served["label_ja"] == competitions[served["key"]].label_ja
+        assert served["statement_ja"] == competitions[served["key"]].statement_ja
 

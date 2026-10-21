@@ -7,7 +7,7 @@
 >
 > - 対象ブランチ: `genetic-project`（保護ブランチ `master`/`main` への操作は厳禁）
 > - 基準コミット: `b5329f4`（`39bb795` の aero_kernel / gpu_dynamics 導入 → `b5329f4` の論文レジストリ記録）
-> - 検証状態: `pytest tests` = **866 passed / 0 failed** / `ruff` 0 件 / `mypy` 0 件 / `smoke_test` 13/13
+> - 検証状態: `pytest tests` = **866 passed / 0 failed** / `ruff` 0 件 / `mypy` 0 件 / `smoke_test` 14/14
 > - 最終更新: 2026-10-20
 > - 2026-10-20 追記: 折り紙3Dジオメトリ刷新の残件（据え置き A-13〜A-19／繰延 G-1〜G-8）
 > - 2026-10-20 追記 2: **2026-10-19 マルチエージェントレビュー（13 名 / 374 指摘）**由来の残課題を
@@ -39,7 +39,7 @@
 
 | 項目 | 現状 | 据え置きの理由 |
 |---|---|---|
-| `KAPPA_SIGMA = 9.0e-6` | `physics/stress_domain.py:87` | Beam 理論の断面係数に**経験的スケーリング係数**を掛けたもの。実紙・実折面の材料定数（引裂強度・折れ面の残留断面）に対する出典が**監査済み範囲のどの論文にも存在しない**。値を直すと全応力値と失敗判定が同時に変わるため、**根拠を得るまで数値改动を行わない** |
+| `KAPPA_SIGMA = 9.0e-6` | `physics/stress_domain.py:87` | Beam 理論の断面係数に**経験的スケーリング係数**を掛けたもの。実紙・実折面の材料定数（引裂強度・折れ面の残留断面）に対する出典が**監査済み範囲のどの論文にも存在しない**。値を直すと全応力値と失敗判定が同時に変わるため、**根拠を得るまで数値改定を行わない** |
 | 折り断面の深さ未使用 | `section_modulus_batch` は `b·t²/6`（矩形板の断面係数） | 折り機体の残存断面は「折れで材料が失われた」形状で、`t²` スケーリングは定性的に正しいが定量的に誤る。実断面形状（折れ半径・折れ線の数）を持つモデルが必要 |
 | 圧縮側をクリップ | `physics/stress_domain.py:827` `stress = xp.maximum(stress, 0.0)` | **薄板の座屈（支配的な破壊モード）が構造的に見えない**。座屈は非線形板モデル（Snap / Denney 系）が必要で、線形曲げの枠組みでは表現できない |
 
@@ -225,7 +225,10 @@
 | GPU batch の風場時刻 | **全ケース共通時刻**（アクティブケースの平均時刻） | ケース間の時刻ずれが風場評価に混入。風は Case 間で同一の空間場を使うため影響は小さい |
 | GPU batch の慣性テンソル | **対角項のみ**（`inertia_xy/xz/yz` を 0 とする）。参照経路は `body_inertia_tensor` で非対角項を許す | 参照経路の非対角項も既定 0 のため、現状の実害はゼロ |
 | GPU batch の接地 | 機体ステーション判定＋衝撃 G。CCD とクランプ弾性係数は簡略化 | A-10 と同一 |
-| **GPU 性能** | 13 状態 RK4 は 1 状態評価あたり約 200 演算。Windows/WDDM では CuPy の 1 kernel launch に約 100 µs かかるため 1 状態評価 21 ms（CPU/NumPy は 1.5 ms）→ **この環境では GPU の方が遅い**。Linux/CI では launch overhead が約 1/10 で、N が大きい批量で GPU が有利 | `tests/test_issue28_gpu_duration.py` が 8.5 分を要する。**融合（`cupy.fuse` / CUDA Graph）またはステップ数削減が次の一手** |
+| **GPU 性能** | 13 状態 RK4 は 1 状態評価あたり約 200 演算。Windows/WDDM では CuPy の 1 kernel launch に約 100 µs かかるため 1 状態評価 21 ms（CPU/NumPy は 1.5 ms）→ **この環境では GPU の方が遅い**。Linux/CI では launch overhead が約 1/10 で、N が大きい批量で GPU が有利 | `tests/test_issue28_gpu_duration.py` が 8.5 分を要する。**GA v2 の Stage 1 は CUDA Graph で 1 ステップを捕捉済み**（`physics/ga2/stage1.py`。捕捉条件: H2D 禁止・cuBLAS 禁止・`begin_capture(mode=2)`。3 ケース 1200 ステップで 113 s → 1.3 s）。既存経路は未融合のまま |
+| GA v2 の Stage 1 は固定ステップ | CUDA Graph はデータ依存ステップ数を持てないため、スクリーンの刻みは固定（`ScalingProfile.stage1_max_steps`）で、折り畳まれた機体は剛性が高く適応刻みが小さいため**飛行の被覆率（coverage）が 1 を下回りうる** | 被覆率は `Stage1Result.coverage` として報告され、**順位は Stage 2 の参照再評価で決まる**。スクリーンはroughness の篩いにのみ使う |
+| GA v2 の Stage 3（局所DNS）の絶対係数 | D3Q19+浸漬境界+モーダル構造の連成は**流れの形**を解く。粗い格子・簡略化したラスタライズ・巻き上げ境界のため、揚力係数・抗力係数の絶対値は未検証 | 係数は紙翼の物理範囲にクランプし、Stage 3 の出力は**形状指標とラUHNK補正モデルの入力**にのみ使う。**空力の正本は 6DoF 参照経路** |
+| GA v2 の検索用投擲モデル | 検索ハーネスは 8 m/s / 25° / 1.5 m の**室内ロフト投擲**を使う。既定の平投擲（12 m/s / 12° / 1.2 m）は滑翔前に床へ衝突し、全設計が crash 判定となって検索に信号が残らない | 投擲は**ハーネスの設定**であり物理ではない（`flight_sim` / `gpu_dynamics` は未変更）。`EvolutionRunner(launch=...)` で上書き可能 |
 | 6DoF 空力評価の定数倍 | カーネル共通化により `evaluate_aero` が 68〜84 µs → 約 120 µs（≈1.5 倍） | 6DoF 全体では数 % の増。単一実装の優先性を重視した結果として**明示的に受け入れ** |
 
 ---
@@ -317,22 +320,25 @@
 スクリーンショットで確認済み。
 
 
-### 4.6 無作為折り方遺伝子（Step 2・G9 系・5 件・2026-10-20 由来）
+### 4.6 無作為折り方遺伝子（Step 2・G9 系・5 件・2026-10-20 由来／G9-3・G9-4 は 2026-10-21 解決）
 
 > `physics/origami_genome.py` は折り操作のシーケンスを遺伝子として表現し、
 > `tests/test_origami_genome.py`（22 件）で固定化した。残るのは**設計判断が未確定**な項目。
 
 | # | 残課題 | 残存の証拠 | 影響 | 次の手順 |
 |---|---|---|---|---|
-| **G9-1** | **持ち手フィルタの閾値は人体工学の出典が無い** | `GripThresholds` の既定（最低高さ 8 mm / 前後長 30 mm / 2 層 / CG 許容 15 mm）は推定値 | 「指で挟める」の判定が主観 | 手指の把持寸法の文献（成人平均の指幅・ピンチ幅）を根拠に閾値を再設定し、参考文献を `docs/SPECIFICATION.md` に記す |
-| **G9-2** | **`layer_order` は共面層のタイブレークのみ** | `assign_layers(faces, group_order)` の group rank は「深さが同じ」ときの順序付けにだけ効く | 「この折りはこの面の下へ回す」という指定が、層が重なっていない場合には効かない | group rank を「層インデックスへの拘束」として DAG の辺拘束へ拡張する（重なり保証を保ったまま） |
-| **G9-3** | **ランダム個体の適合率が低い** | `strategy="families"` の 50 個体で grip 合格は 12 個体（24 %）。`"free"` はほぼ 0 % | GA の初期集団としては，多数が即死する | 適合率を上げた突然変異オペレータ（角度の連続変異・crease の微小移動）と「親个体の和集合」的交叉を追加する |
-| **G9-4** | **レシピの SVG / 手順表がブラウザに未表示** | API は `/api/v1/origami/genome/recipe` で Markdown と SVG を返すだけ。UI は折り手順スライダ（`genome_step`）のみ | 「どう折るか」をブラウザでは確認できない | 折り紙パネルに展開図プレビュー（SVG）と手順表を追加する |
-| **G9-5** | **遺伝子個体の翼寸法は `wingspan_m` 設定と独立** | `genome_to_aircraft_config` は実測スパンを使うが、UI の `wingspan_m` スライダとは無関係 | 見た目のスパンと計算のスパンがずれる（G-1 と同根） | G-1 の 2 段スケーリング（生成 → 実スパン → 再スケール）を遺伝子経路にも適用する |
+| **G9-1** | **持ち手フィルタの閾値は人体工学の出典が無い**（**部分解決**） | `GripThresholds` の既定（最低高さ 8 mm / 前後長 30 mm / 2 層 / CG 許容 15 mm）は推定値。閾値は端から端まで設定可能になったが、**根拠となる人体工学の出典はいまだ無い** | 「指で挟める」の判定が主観。**閾値は依然として推定値** | 手指の把持寸法（成人平均の指幅・ピンチ幅）の文献を入手し閾値を再設定、参考文献を `docs/SPECIFICATION.md` に記す。**出典が無いままの数値変更はしない** |
+| **G9-2** | **`layer_order` は共面層のタイブレークのみ**（**未解決**） | `assign_layers(faces, group_order)` の group rank は「深さが同じ」ときの順序付けにだけ効く | 「この折りはこの面の下へ回す」という指定が、層が重なっていない場合には効かない | group rank を「層インデックスへの拘束」として DAG の辺拘束へ拡張する（重なり保証を保ったまま） |
+| **G9-3** | ~~**ランダム個体の適合率が低い**~~（**解決済み**） | 実測: `strategy="families"` の 50 個体で grip 合格は 12 個体（**24 %**）、`"free"` は**ほぼ 0 %**。完全無作為の世代0は成立しない | 解消: GA は既知の適合アーキタイプ（`genome_from_archetype` の classic dart / nakamura / sky_king。3 機体とも grip フィルタ合格）で初期集団をシードし、適合性を保つ修復・攪乱オペレータを併用する | 完了。実測値は `.agents/Knowledge.md`「Procedural Origami Genome」に記録（正本ではなく参照） |
+| **G9-4** | ~~**レシピの SVG / 手順表がブラウザに未表示**~~（**解決済み**） | API は `/api/v1/origami/genome/recipe` で Markdown と SVG を返していたのに、UI は折り手順スライダ（`genome_step`）しか無かった | 解消: 折り紙パネルに展開図プレビュー（SVG。**山=赤実線 / 谷=青破線**＋符号付き角度）と手順表を実装し、3D スライダと連動 | 完了。実装は `static/js/ga_research.js`（`renderCreasePattern` / `requestOrigamiRecipe` は `static/js/origami.js`） |
+| **G9-5** | **遺伝子個体の翼寸法は `wingspan_m` 設定と独立**（**未解決**） | `genome_to_aircraft_config` は実測スパンを使うが、UI の `wingspan_m` スライダとは無関係 | 見た目のスパンと計算のスパンがずれる（G-1 と同根） | G-1 の 2 段スケーリング（生成 → 実スパン → 再スケール）を遺伝子経路にも適用する |
 
 **検証状態（遺伝子系のみ）**: `tests/test_origami_genome.py` = **22 passed**
 （無作為 1000 個体の幾何変換・持ち手判定・6DoF 受け渡し、3 定型機体の grip 合格、
 折り角の範囲、JSON 往復、手順表・Markdown・展開図 SVG・段階メッシュ、API 6 系統）。
+往復・風高度・評価status の回帰固定化テストは `tests/test_origami_genome_roundtrip.py` /
+`tests/test_wind_height_parity.py` / `tests/test_gpu_kernel_parity.py`。
+
 
 
 ## 5. 次のフェーズで着手する順序（推奨）
@@ -404,6 +410,8 @@
 | **解消済み** | `_local_aero` の操作権限4.3倍乖離 | `_local_aero` は削除済み（`flight_sim.py` に残るのは `_local_wind` のみ） |
 | **解消済み** | `aero_kernel._finite` のスカラー `nan_to_num` で3.6倍減速 | `physics/aero_kernel.py` `_finite` に `isinstance(value, float)` の早期分岐がある（docstring もスカラー優先を明記） |
 | **解消済み** | 未追跡モジュールでクリーンチェックアウト不能 | `aero_kernel.py` / `origami_domain.py` / `gpu_dynamics.py` / `api/routes/origami.py` / `static/js/origami.js` / `tools/branch_guard.py` / `tools/work_report.py` / `tools/mcp_call.py` / `tools/verify_mcp_servers.py` / `.kilo/kilo.jsonc` は **全て追跡済み**。残る未追跡は 4 件のみ（§7.1 P0-1） |
+| **解消済み** | master への push で CI が全滅（branch guard がセッションを abort） | 両 WF に workflow レベル `PAPER_AIRCRAFT_BRANCH_GUARD: warn` を明示。加えて `tools/branch_guard.py` が CI イベント checkout（`GITHUB_REF` ベース）を識別し、push checkout のローカル branch 名を**違反根拠にしない**（detached HEAD 基準）。ローカル clone の master 保護は維持（§7.1 P0-2） |
+| **解消済み** | `records_domain.py` の日本語93行の U+FFFD 化（P0-12 / 旧 §8 F-1） | 往復で消滅した元文字は復号せず、**ギネス記録の原文出典から日本語を再記述**。`tools/check_mojibake.py` でリポジトリ全体を走査し文字化け 0 件、`tests/test_no_mojibake.py` が回帰を固定化（保留中の除外指定は 0 件）。cp932 往復の再現を許す変換は追加しない |
 | **要再検証** | 上記以外で、個別に現状を採取していない指摘 | §7.2 以降の「判定」欄が「要再検証」のもの。着手時に 1 回現状確認してから lestimate すること |
 
 > **運用ルール**: §7 の各行の「判定」欄は **2026-10-20 の現状採取結果**。以後の実装で状況が変わった場合は、
@@ -414,7 +422,7 @@
 | ID | 残課題 | 場所 | 判定 |
 |---|---|---|---|
 | **P0-1** | **未追跡ファイル4件**が追跡外のまま（`no-finish-physics-supplement.md` / `physics/origami_genome.py` / `tests/test_origami_genome.py` / `tools/show_run_logs.py`）。うち `physics/origami_genome.py` は import される可能性が高く、**未追跡のまま commit すると master を破壊**する | `git ls-files --others --exclude-standard` | 検証済（残存） |
-| **P0-2** | **master への push で CI が全滅**。branch guard の session-scope autouse fixture が `severity=="error"` で pytest 自体を中断するが、`actions/checkout` は push 時に**ローカル branch を作る**ため `master` と判定される。両 WF とも `PAPER_AIRCRAFT_BRANCH_GUARD=warn` を**設定していない**（WF 内の設定 0 件） | `conftest.py:44-50` / `tools/branch_guard.py:66-69,119-122` / `.github/workflows/ci.yml`, `verify.yml` | 検証済（残存） |
+| **P0-2** | **master への push で CI が全滅**。branch guard の session-scope autouse fixture が `severity=="error"` で pytest 自体を中断するが、`actions/checkout` は push 時に**ローカル branch を作る**ため `master` と判定される（実測: `git checkout --force -B <branch> refs/remotes/origin/<branch>`）。両 WF とも `PAPER_AIRCRAFT_BRANCH_GUARD=warn` を**設定していない**（WF 内の設定 0 件） | `conftest.py:44-50` / `tools/branch_guard.py:66-69,119-122` / `.github/workflows/ci.yml`, `verify.yml` | **解消済み**（2026-10-20 修正）。両 WF に workflow レベル `PAPER_AIRCRAFT_BRANCH_GUARD: warn` を設定し、guard 側は CI イベント checkout（`GITHUB_REF`）を識別して push checkout のローカル branch 名を違反根拠にしない（detached HEAD 基準）。`PAPER_AIRCRAFT_BRANCH_GUARD` の `warn`/`off`/`error` セマンティクスとローカル clone の master 保護は維持。回帰テスト: `tests/test_branch_guard.py`（37件） |
 | **P0-3** | **風洞モードで機体が後ろ向きに吹かれる**。風洞流は `+x`（`stream[:,0]=v_eff`）だが、ベンチ姿勢は `quaternion_from_euler(0.0, alpha, -beta)`（yaw=0）でノーズも `+x`。相対流が `(−V,0,0)` となり `atan2(w,u)` が 180°+α を返す（ベンチ 4° → **α_eff = −176°**）。`/simulation/step` はこの反転流で積分する | `physics/wind_domain.py:897,913` / `physics/flight_sim.py:1883,2957` | 検証済（残存・要計測） |
 | **P0-4** | **折り畳み crease の Bézier が発散**。2パネルがほぼ平行になると交点 `v` が不定距離に飛び、既定UI値（`elevon_deg=2, fold_trailing_deg=15`）で**機首前方に302mm**のスパイク（スライダ全域で最大7.5m）。退化判定は `denom <= 1e-20`（≈1e-10 rad）で、実失敗角は 1e-8 rad | `physics/origami_domain.py:1044-1048,1052-1078` | 構造未変（要再計測） |
 | **P0-5** | **「採用」ボタン2つが嘘**。①「推奨セッティングを機体に適用」→ `store.set(["aircraft",k], v)` は4引数APIに配列を渡すため `undefined===undefined` で早期 return し**何も書かず**に成功トースト。②「1位の投げ方を設定に反映」→ 対象スライダー `quick-slide-*` が `index.html` に不在で、**ハードコード 10 m/s / 12° / 0°** を store へ書いてサーバへ push（トーストは实际问题を表示） | `static/js/investigator.js:298,304` / `static/js/app.js:1158-1174,1230-1246` | 検証済（残存） |
@@ -424,7 +432,7 @@
 | **P0-9** | **Guinness「公式検証レポート」が同義反復**。`verification_report` が**適合済み較正レシピ**で飛行するため乖離は常に ≈0%。payload 自身が `method` に "is **not evidence of validated performance**" / `performance_validated=False` と記載しながら、UI はその文字列を表示せず「再現率」として提示。「一括検証マトリクス」は `alert()` | `physics/records_domain.py:2260,2292` / `static/js/app.js:3141-3150` | 要再検証 |
 | **P0-10** | **記録プリセットのトリム契約が死**。`RECORD_TRIM_ALPHA_DEG=3.0` の `setdefault` は `LaunchConfig` が常に値を持つため発火せず、**12プリセット中9個が `release_pitch_deg=0.0` を明示**。`GET /records/presets/<key>` は 3.0、`POST /records/apply` は 0.0 を返す（**同一プリセットが2エンドポイントで矛盾**） | `physics/records_domain.py:670,1009,1155,1249,1335,1419,1499,1574,1639,1706,1769` | 検証済（残存） |
 | **P0-11** | **応力ヒートマップが転置**。サーバ grid は `[spanwise][chordwise]`、メッシュ UV は `(uSpan, t)` = (スパン, 弦) だが、サンプリングは `fy = v*ny`（行=弦）/ `fx = u*nx`（列=スパン）。**根翼前縁のピークが弦方向の帯**として描画される | `physics/stress_domain.py:825,862` / `static/js/airframe.js:277-282,474-486` | 検証済（残存） |
-| **P0-12** | **`records_domain.py` の日本語93行が U+FFFD 化**（UTF-8→cp932→UTF-8 往復）。`/api/v1/records/presets` で直接公開され、UI の機体モデル dropdown に出る。**原文は復元不能**（§8 F-1） | `physics/records_domain.py`（U+FFFD 93行 / 276文字） | 検証済（残存） |
+| **P0-12** | **`records_domain.py` の日本語93行が U+FFFD 化**（UTF-8→cp932→UTF-8 往復）。`/api/v1/records/presets` で直接公開され、UI の機体モデル dropdown に出る | `physics/records_domain.py`（U+FFFD 93行 / 276文字） | **解消済み**（2026-10-21 修正）。日本語93行は**ギネス記録の原文出典から再記述**。併せてレジストリ（`search/`）のバイト列欠陥と Markdown 全文の文字化けも修復。**再発防止**は `tools/check_mojibake.py`（検出）と `tests/test_no_mojibake.py`（回帰固定化）。旧 §8 F-1 も解消済みに移行（§7.0 対照表） |
 
 ### 7.2 P1 — 高（18 件）
 
@@ -509,11 +517,14 @@
 
 ## 8. F. レビュー由来・あえて解決しない（意図的維持／復元不能／環境制約）
 
-### 8.1 復元不能 — 機械的修正をしない
+### 8.1 復元不能 — 機械的修正をしない（**該当なし**）
 
-| ID | 項目 | 理由 / 再オープンの条件 |
+唯一この節に置いていた **F-1** は**解決済み**のため、未解決の「復元不能」項目としては**該当なし**。
+記録は §7.0 の対照表へ移した（§10 の運用ルール「解消済みは §7.0 へ移動、行は消さない」に従う）。
+
+| ID | 項目 | 解決の記録 |
 |---|---|---|
-| **F-1** | `physics/records_domain.py` の日本語93行の U+FFFD 化 | UTF-8→cp932→UTF-8 の往復で**元文字は物理的に消滅**している。自動復号・部分復元は不可能。**正本（ギネス記録の原文出典）から再記述するしかない**ため、P0-12 は「再記述」として着手する。cp932 往復の再現を許す変換を追加しないこと |
+| **F-1**（**解消済み**・§7.0 へ移行） | `physics/records_domain.py` の日本語93行の U+FFFD 化 | UTF-8→cp932→UTF-8 の往復で**元文字が物理的に消滅**していたため、自動復号・部分復元は不可能であった。**正本（ギネス記録の原文出典）から日本語93行を再記述**して解決。`tools/check_mojibake.py` でリポジトリ全体の文字化け 0 件を検証し、`tests/test_no_mojibake.py` が再発を固定化。**cp932 往復の再現を許す変換を追加しないこと**という運用方針は引き続き有効 |
 
 ### 8.2 意図的維持 — 物理的・工学的理由（検出したが直さない）
 
@@ -538,7 +549,7 @@
 | ID | 項目 | 理由 / 再オープンの条件 |
 |---|---|---|
 | **F-15** | **i18n 層が無い**（日本語ハードコード、CDN 2 種依存でオフライン起動不可） | 対象は**単一言語（日本語）・単一マシン運用**。多言語化・オフライン化は導入時にまとめて行う方が効率的 |
-| **F-16** | **プリセットの永続はブラウザ localStorage**（サーバの StorageManager は API から到達不能） | 単一ブラウザでの利用が前提。サーバ共有が必要になった時点で §P2-22 と 함께再設計 |
+| **F-16** | **プリセットの永続はブラウザ localStorage**（サーバの StorageManager は API から到達不能） | 単一ブラウザでの利用が前提。サーバ共有が必要になった時点で §P2-22 とともに再設計 |
 | **F-17** | **実 CuPy 経路の CI カバレッジが 0** | GitHub runner に GPU が無い以上、**自動検証は原理的に不可能**。`tools/check_gpu_parity.py` / `check_aero_kernel_parity.py` を手動実行する運用で代替（既存 C の GPU 性能欄も同根） |
 | **F-18** | `test_tunneling_ccd.py` の負荷依存フレーク | 既存 **A-11** と同一。原因未特定のまま残す |
 | **F-19** | レビュー中の一部の指摘は**監査スナップショットの陳腐化**により解消済み | §7.0 の対照表を参照。**再検証で消えるものは「残課題」ではなく「記録の訂正」**（§10） |

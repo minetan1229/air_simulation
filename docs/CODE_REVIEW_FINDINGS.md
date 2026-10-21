@@ -53,9 +53,9 @@
 | 2 | GPUバッチの応力正規化係数が 120 kPa 固定 | `physics/parallel_engine.py:107`, `:1639`, `:1643`, `:1662` | `allowable_pa` を計算して捨て、`_STRESS_LIMIT_PA=1.2e5` を使用。6DoF は `stress_domain.paper_allowable_stress`≈2.2 kPa。約54倍のスケール差。`crashed` 判定も無効化され応力クラッシュが死に分岐化 |
 | 3 | GPUバッチが失速角・トリムAoAをハードコード | `physics/parallel_engine.py:1541`, `:1602`, `:1604` | `0.244 rad` 固定。`AircraftConfig.stall_alpha_deg` は GPU系で一切参照されず、UIでの失速角設定が最適化に無効 |
 | 4 | GPU経路のHelmbold式がCPU経路と不一致 | `physics/parallel_engine.py:866`, `:1447` vs `physics/flight_sim.py:555-560` | GPU は `2πAR/(2+√(AR²+4))`、CPU は正準 `2πAR/(2+√(AR²(1+λ)+4AR/π))`。+8〜12% の揚力傾き差 |
-| 5 | `records_domain.py` に U+FFFD 276個 / 93行 | `physics/records_domain.py:175`, `:438`, `:448`, `:777`, `:1262`, `:1853` (+87行) | UTF-8→cp932→UTF-8 往復で破壊された日本語。`/api/v1/records/presets` でユーザに露出。復元不能 |
+| 5 | `records_domain.py` に U+FFFD 276個 / 93行 | `physics/records_domain.py:175`, `:438`, `:448`, `:777`, `:1262`, `:1853` (+87行) | UTF-8→cp932→UTF-8 往復で破壊された日本語。`/api/v1/records/presets` でユーザに露出。**修正済み**: 往復で消滅した元文字は復号せず、ギネス記録の原文出典から日本語93行を再記述。`tools/check_mojibake.py` と `tests/test_no_mojibake.py` が再発を検出 |
 | 6 | CPUフォールバックが「発散」を「着地成功」と報告 | `physics/parallel_engine.py:1366-1368` vs `physics/flight_sim.py:145-167` | `EVALUATE_KEYS` に `landed`/`crashed` が無く既定式が採用。`status=="diverged"` でも `landed=True` になり最適化のランキングに混入 |
-| 7 | 最適化がエラー/発散評価を正当な 0m 飛行として採点 | `physics/optimizer_domain.py:185-201`, `:304-305`, `:429` / `physics/flight_sim.py:3289-3303` | `objective_value()` が `status` を見ない。`flight_sim` は「0m として報告してはならない」と明記しているのに、优化側は 0.0 として Pareto archive に投入 |
+| 7 | 最適化がエラー/発散評価を正当な 0m 飛行として採点 | `physics/optimizer_domain.py:185-201`, `:304-305`, `:429` / `physics/flight_sim.py:3289-3303` | `objective_value()` が `status` を見ない。`flight_sim` は「0m として報告してはならない」と明記しているのに、最適化側は 0.0 として Pareto archive に投入 |
 | 8 | 最適化1回内で2つの物理モデルが混在 | `physics/optimizer_domain.py:399`, `:415-417` | 候補1個=6DoF RK4、2個以上=3DoF 近似。比較不能なスコアを同一トーナメントで比較 |
 
 ### Medium
@@ -127,7 +127,7 @@
 | 17 | プリセット削除に確認なし、削除ボタンが常時有効 | `static/js/datapanel.js:158-164,166-191` | 誤クリックで不可逆。選択なしでも押せる |
 | 18 | 「既定へ」がサーバ設定の消去（確認なし） | `static/js/app.js:1554,1887-1900` | 空バンドル送信でサーバ側 aircraft/launch/environment が工場既定に |
 | 19 | `notify(..., "success")` のトーンが未定義 | `static/js/investigator.js:185,308` | CSS は `error`/`warn`/`ok` のみ定義 |
-| 20 | 外部CDN 2종依存（アイコン31個 + three.js） | `templates/index.html:10-18` | オフラインで起動不可、供給網リスク、Chart.jsのみSRI |
+| 20 | 外部CDN 2種依存（アイコン31個 + three.js） | `templates/index.html:10-18` | オフラインで起動不可、供給網リスク、Chart.jsのみSRI |
 
 ### Low（11件・要点のみ）
 
@@ -196,7 +196,7 @@
 
 | # | タイトル | 場所 | 内容 |
 |---|---|---|---|
-| 1 | master への CI が全滅（branch guard がセッション全体abort） | `conftest.py:34-53` / `tools/branch_guard.py:119-193` / `.github/workflows/ci.yml:4-5`, `verify.yml:4-5` | `PROTECTED_BRANCHES=("master","main")`, 既定 `severity="error"`。`actions/checkout` は push 時にローカル branch master を作るため必ず fatal。両WFとも `PAPER_AIRCRAFT_BRANCH_GUARD=warn` 未設定。`smoke_test.py:841-847` も同問題。毎回 master push で偽の「CI Failure」Issue が起票される |
+| 1 | master への CI が全滅（branch guard がセッション全体abort） | `conftest.py:34-53` / `tools/branch_guard.py:119-193` / `.github/workflows/ci.yml:4-5`, `verify.yml:4-5` | `PROTECTED_BRANCHES=("master","main")`, 既定 `severity="error"`。`actions/checkout` は push 時にローカル branch master を作るため必ず fatal。両WFとも `PAPER_AIRCRAFT_BRANCH_GUARD=warn` 未設定。`smoke_test.py:841-847` も同問題。毎回 master push で偽の「CI Failure」Issue が起票される<br>**→ 解消済み（2026-10-20）**: 両 WF に workflow レベル `PAPER_AIRCRAFT_BRANCH_GUARD: warn` を設定。`tools/branch_guard.py` は CI イベント checkout（`GITHUB_REF`）を識別し、push checkout のローカル branch 名を違反根拠にしない（detached HEAD 基準）。ローカル clone の master 保護は維持 |
 | 2 | git に未追跡だが import 必須のモジュール5件 → クローン不能 | `physics/aero_domain.py:78`, `conftest.py:42`, `app.py:36`, `smoke_test.py:841`, `tools/notify_discord.py:86`, `tools/verify_mcp_servers.py:30` | `physics/aero_kernel.py`, `physics/origami_domain.py`, `tools/branch_guard.py`, `tools/work_report.py`, `tools/mcp_call.py`, `tools/verify_mcp_servers.py` が未追跡。新クローンで `import physics` が ImportError。部分コミットは master を恒久的に破壊 |
 
 ### High
@@ -276,7 +276,7 @@
 | F-10 | Polhamus 分岐の失速アンカーが Polhamus 式でない | `physics/aero_kernel.py:360-363` | kp>0 で曲線が失速点で不連続。`:356` に `if True:` 残留 |
 | F-11 | メッシュパネル法が**第4の空力モデル** | `physics/mesh_domain.py:1512,1519,1532` | 2次元揚力傾斜 6.28/rad（正準の2.22倍）、`2sinαcosα`、`0.02qA`（SPEC は `cos²α`）。`panel_aerodynamics` は呼び出し元なし |
 | F-12 | 既定機体の翼面積が文献値より**3〜7倍小さい** | `physics/config_schema.py:237-239` | S=0.015 m²（翼荷重 333 g/m² vs 文献 50-100）。高速dart化。設計変数レンジも同.Identity |
-| F-13 | 記録プリセットが**非物理的AR/CD0**で_duration に合わせ拟合 | `physics/records_domain.py` | AR 7.0-7.4（文献 2-3）、L/D 19-20（物理上限 4-10）。29-31秒は「導出」ではなく「合わせ込み」 |
+| F-13 | 記録プリセットが**非物理的AR/CD0**で_duration に合わせ込む | `physics/records_domain.py` | AR 7.0-7.4（文献 2-3）、L/D 19-20（物理上限 4-10）。29-31秒は「導出」ではなく「合わせ込み」 |
 | F-14 | GPU経路が圧縮性・Reynolds補正・ABL/突風/熱流を**全て欠落** | `physics/parallel_engine.py` | Mach補正なし、cd0 の Re 補正なし（Re≈4e4 で15%抗力誤差）、風は定数ベクトル |
 | F-15 | `max_ld_ratio` は**瞬間ピーク**であり滑空比ではない | `physics/flight_sim.py:3137-3138` | _MAIN KPI が構造的に楽観的。実滑空比（水平距離/高度損失）が未計算 |
 
@@ -326,7 +326,7 @@
 | 6 | 狭幅で左右レールが**キーボード到達不能**かつ invisible なままフォーカス可能 | `static/css/console.css:1695-1717` / `static/js/app.js:470-478` | 開閉は `<div class="rail-head">` のクリックのみ（tabindex/role/キー処理なし）。`transform` .off-canvas なので60個のコントロールが tab order に残る |
 | 7 | トグル状態が**色のみ**で表現、aria 状態なし | `static/css/console.css:800-804` | `.chip[data-on="1"]` にアイコン/下線/`aria-pressed` なし。`.chip.active` は CSS ルール 0 件 |
 | 8 | モーダルに `role="dialog"` なし・フォーカス罠なし・focus 復元なし・Escape 不可 | `templates/index.html:763,886,946,966` / `static/js/app.js:1596-1601,1202-1213,2597` | Escape は `#help`/`#gpu-modal` のみ。自動表示される `#flight-result-modal` は不可 |
-| 9 | 5つの canvas/WebGL 视图に**テキスト代替なし** | `templates/index.html:233,339,389,403,563` / `static/js/telemetry.js:283` | チャート値は `ctx.fillText` で描画されるのみ。`aria-live` は `#toasts` のみ |
+| 9 | 5つの canvas/WebGL ビューに**テキスト代替なし** | `templates/index.html:233,339,389,403,563` / `static/js/telemetry.js:283` | チャート値は `ctx.fillText` で描画されるのみ。`aria-live` は `#toasts` のみ |
 | 10 | ゲージが**色のみ**で重症度を表現し、AAコントラスト違反 | `static/css/console.css:649-651,13-21` | warn `#fbbc04`=**1.71:1**, ok `#34a853`=3.06:1, bad `#ea4335`=3.92:1（4.5:1 必要） |
 
 ### Medium（要点のみ・全29件のタイトルと場所）
@@ -441,7 +441,7 @@
 
 | # | タイトル | 場所 | 内容 |
 |---|---|---|---|
-| 1 | branch guard が **master への全 CI を abort** | `conftest.py:34-50` / `tools/branch_guard.py:66-69,119-122` | `actions/checkout` は push 時にローカル branch を作るため `master` と判定。両WFが `PAPER_AIRCRAFT_BRANCH_GUARD=warn` 未設定。AGENTS.md Phase6 の "master push" が必ず失敗し、偽の CI Failure Issue が起票され自動クローズも不可 |
+| 1 | branch guard が **master への全 CI を abort** | `conftest.py:34-50` / `tools/branch_guard.py:66-69,119-122` | `actions/checkout` は push 時にローカル branch を作るため `master` と判定。両WFが `PAPER_AIRCRAFT_BRANCH_GUARD=warn` 未設定。AGENTS.md Phase6 の "master push" が必ず失敗し、偽の CI Failure Issue が起票され自動クローズも不可<br>**→ 解消済み（2026-10-20）**: 両 WF に workflow レベル `PAPER_AIRCRAFT_BRANCH_GUARD: warn` を設定。guard 側は CI イベント checkout（`GITHUB_REF` ベース）を検出し、push checkout の branch 名を違反根拠にしない |
 | 2 | Discord bridge が**既定で全許可**、無認証で特権 agent を実行 | `tools/discord_bridge.py:379-385,742-748,1004-1010,1138` / `.env.example:7-8` | `ALLOWED_USER_IDS` 空なら全員許可。チャットが `agy -p <prompt> --dangerously-skip-permissions` に素通し。`!chrome <url>` も無制限 |
 
 ### High
@@ -568,7 +568,7 @@
 
 | # | タイトル | 場所 | 内容 |
 |---|---|---|---|
-| 5 | 「風座標変換」監査テストが**テスト内演算のみ** | `tests/test_security_and_frames_audit.py:70-87` | `atan2(2.0,10.0)>0` は定理。製品コード未呼出し。Issue#30 の违背を検出できない |
+| 5 | 「風座標変換」監査テストが**テスト内演算のみ** | `tests/test_security_and_frames_audit.py:70-87` | `atan2(2.0,10.0)>0` は定理。製品コード未呼出し。Issue#30 の違反を検出できない |
 | 6 | **共有グローバル状態の競合を検証するテストが無い** | `api/core.py:267,257-264` | 並行 HTTP リクエストのテスト 0 |
 | 7 | 最適化が**偽の surrogate のみ**をテスト | `tests/test_optimizer.py:72-76` | 11/37 関数が `surrogate_path` fixture 使用。全5アルゴリズムが偽モデル |
 | 8 | suite 全体が**git ブランチ名でゲート** | `conftest.py:34-52` | ambient な git 状態で「テストが実行されるか」が決まる |
@@ -610,7 +610,7 @@
 
 `origami_domain.py` 0.007 / `api/` 0.009 / `storage_domain.py` 0.012 / `records_domain.py` 0.012 / `optimizer_domain.py` 0.023 / `mesh_domain.py` 0.020 / `aero_kernel.py` 0.021 / `gpu_dynamics.py` 0.027 / `flight_sim.py` 0.041 / `wind_domain.py` 0.111 / `aero_domain.py` **0.179**（最良）
 
-**総合判定**: 「物理カーネルICTIONには，我們のテストは**本物**。だが置Fusionに** 잘못 놓여 있다**」。緑CIOバッジは**アプリケーションについての主張ではない**。物理テストは信頼してよい。
+**総合判定**: 「物理カーネル実装には、私たちのテストは**本物**。だが**結論がCIバッジに誤って置かれている**」。緑CIバッジは**アプリケーションについての主張ではない**。物理テストは信頼してよい。
 
 ## R3-e2e-journey — E2Eプロダクト/ジャーニー (40件: C6/H6/M22/L6)
 
@@ -621,7 +621,7 @@
 | 1 | 「1位の投げ方を設定に反映」が**ハードコード値を書き込み**セッションを破壊 | `static/js/app.js:1230-1246,1158-1174` | 対象スライダー `quick-slide-*` が `index.html` に不在 → フォールバック 10/12/0 を store へ書き込み**サーバへ push**。トーストは_processorの値を主張 |
 | 2 | 「推奨セッティングを機体に適用しました！」が**何も適用しない** | `static/js/investigator.js:296-306` vs `static/js/state.js:53-59` | 4引数 API に2引数で呼び、`undefined === undefined` で `set()` が早期 return |
 | 3 | Guinness「公式検証レポート」が**同義反復**（tautology） | `physics/records_domain.py:2226-2292` vs `static/js/app.js:3141-3150` | 適合済み較正レシピで飛行 → 必ず ≈0% 乖離。payload の `method` は "not evidence of validated performance" と明記するが **UI は表示しない** |
-| 4 | 日本語の**世界記録名が文字化け**し左レール dropdown に出る | `physics/records_domain.py` (93行/276文字) / `static/js/app.js:2745-2751` | `展開面穁E` `総質釁E` 等 |
+| 4 | 日本語の**世界記録名が文字化け**し左レール dropdown に出る | `physics/records_domain.py` (93行/276文字) / `static/js/app.js:2745-2751` | **修正済み**: 日本語93行をギネス記録の原文出典から再記述し、`tools/check_mojibake.py` と `tests/test_no_mojibake.py` が再発を検出する |
 | 5 | **クリーンチェックアウトで起動しない** | `physics/origami_domain.py`, `aero_kernel.py`, `gpu_dynamics.py`, `api/routes/origami.py`, `static/js/origami.js`, `tools/branch_guard.py` が未追跡 | モジュールレベル import 済み → `ModuleNotFoundError` |
 | 6 | 100機リーダーボードが**3DoF近似を公式結果として提示** | `physics/parallel_engine.py:1448-1454` vs `static/js/app.js:1050-1110` | `approximate`/`limitations` を UI が一切読まない |
 
@@ -631,7 +631,7 @@
 |---|---|---|---|
 | 7 | 調査 advice の**エレボン符号とピッチングモーメント方向が逆** | `physics/investigate/advice.py:26-31` vs `physics/aero_kernel.py:462-469` | 「+X°上向きに反らせば上向きモーメント」だが物理はTE-down でノーズダウン。**推奨値は正しく指示が逆** |
 | 8 | 最適化が自分の**誠実性メタデータ（approximate/limitations/verified_candidates）を破棄** | `physics/optimizer_domain.py:714-719` vs `static/js/optimizer.js:426-542` | UI は objectives のみ読む |
-| 9 | Guinness ペインが「公式生数値 時速約100km」と称しつつ**93.6km/h**・A4 아닌0.05m²用紙で飛行 | `templates/index.html:588` vs `records_domain.py:1072-1100`, `config_schema.py:251` | 質量も A4 規定 6.24g に対し 5.00g。`provenance: RECONSTRUCTED` も非表示 |
+| 9 | Guinness ペインが「公式生数値 時速約100km」と称しつつ**93.6km/h**・A4 でない0.05m²用紙で飛行 | `templates/index.html:588` vs `records_domain.py:1072-1100`, `config_schema.py:251` | 質量も A4 規定 6.24g に対し 5.00g。`provenance: RECONSTRUCTED` も非表示 |
 | 10 | 全記録プリセットの**トリム契約が死んでいる** | `records_domain.py:1002-1009,670` vs プリセット群 | 12プリセット中9個が `release_pitch_deg=0.0` を明示。`GET /presets/ninomiya_n424`=3.0 だが `apply`=0.0（**2エンドポイントが矛盾**） |
 | 11 | シミュレーション**エラー表示面が死** | `static/js/app.js:1848` / `templates/index.html` | `sim-error-*` id 不在で早期 return → `RUN=ERROR` も・エラーピルも出ない |
 | 12 | 既定最適化アルゴリズムは **DE**、NSGA-II は**UI が常に出す重みを無視** | `static/js/optimizer.js:164,205` vs `physics/optimizer_domain.py:1354-1363` | README は NSGA-II を広告 |
@@ -789,7 +789,7 @@
 | ID | 問題 | 主な証拠 |
 |---|---|---|
 | T-01 | **クリーンチェックアウトで起動不可**（未追跡6モジュール） | R1-C-2, R3-C-5, R2-ops-4 |
-| T-02 | **master への CI が全滅**（branch guard） | R1-C-1, R2-ops-1, R3-H-8 |
+| T-02 | **master への CI が全滅**（branch guard）→ **解消済み（2026-10-20）** | R1-C-1, R2-ops-1, R3-H-8 |
 | T-03 | **「採用」ボタン2つが嘘**（推奨適用 no-op / チャンピオン 10m/s 固定値 push） | R1-C-1, R2-a11y-2, R3-C-1, R3-C-2 |
 | T-04 | **GPU経路の deg/rad 取り違え**（αが57.3倍過小、GPU は失速しない） | R2-conf-F-01 |
 | T-05 | **GPU密度が18.6%不足**（湿度に virtual温度補正） | R2-conf-F-06 |
@@ -798,7 +798,7 @@
 | T-08 | **共有シミュレータをロック外で launch**（並行 request で軌跡が破壊される） | R1-H-3, R2-perf-5, R2-perf-18 |
 | T-09 | **Guinness「検証」が同義反復**（UI が fitted 値を公式検証として提示） | R3-C-3, R2-conf-F-13 |
 | T-10 | **研究者 advice のエレボン符号が逆** | R3-H-7 |
-| T-11 | **records_domain の日本語93行が文字化け**（API/UI 露出） | R1-H-5, R3-C-4 |
+| T-11 | **records_domain の日本語93行が文字化け**（API/UI 露出）→ **解消済み（2026-10-21）** | R1-H-5, R3-C-4 |
 | T-12 | **最適化が評価モデルள機器依存**（GPU=近似 / CPU=6DoF） | R1-H-8, R2-conf-F-03, R3-H-6 |
 
 ## P1 — 高（正確性・UX・運用）

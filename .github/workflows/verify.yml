@@ -8,6 +8,15 @@ on:
   pull_request:
     branches: [ "master" ]
 
+# The branch guard refuses to run the suite on a protected branch.  Inside CI
+# the checkout is the triggering ref - ``actions/checkout`` creates a local
+# branch on push and a detached HEAD on a pull request - so the branch name
+# says nothing about where the work was authored and the suite must not abort
+# there.  The protection of a local clone is untouched: this setting only
+# applies to this workflow's environment.
+env:
+  PAPER_AIRCRAFT_BRANCH_GUARD: warn
+
 jobs:
   verify:
     name: Lint, Type Check & Test

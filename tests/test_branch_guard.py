@@ -27,9 +27,13 @@ from tools.branch_guard import (  # noqa: E402
     PROTECTED_BRANCHES,
     BranchViolation,
     assert_branch_allowed,
+    ci_event_branch,
+    ci_event_ref,
     current_branch,
     describe_status,
+    enforce_branch_policy,
     guard_status,
+    is_ci_event_checkout,
 )
 
 
@@ -64,12 +68,16 @@ def _clean_guard_env(monkeypatch: pytest.MonkeyPatch) -> None:
     The CI markers are removed as well.  A GitHub runner exports
     ``GITHUB_ACTIONS`` and ``CI``, and the guard downgrades itself to a
     warning there - without this, every strict-policy assertion below would
-    depend on where the suite happens to run.  The downgrade is exercised
-    explicitly by ``test_a_ci_runner_downgrades_the_guard_to_a_warning``.
+    depend on where the suite happens to run.  ``GITHUB_REF`` is removed for
+    the same reason: it names the ref the runner checked out, and the throw-away
+    repositories of these tests must not be mistaken for a CI event checkout.
+    The downgrade is exercised explicitly by
+    ``test_a_ci_runner_downgrades_the_guard_to_a_warning``.
     """
     monkeypatch.delenv(branch_guard.GUARD_ENV_VAR, raising=False)
     monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
     monkeypatch.delenv("CI", raising=False)
+    monkeypatch.delenv(branch_guard.CI_EVENT_REF_VAR, raising=False)
 
 
 # ---------------------------------------------------------------------------
@@ -240,3 +248,177 @@ def test_cli_entry_point_reports_the_status(capsys: pytest.CaptureFixture[str]) 
 def test_guard_env_var_name_is_stable() -> None:
     assert branch_guard.GUARD_ENV_VAR == "PAPER_AIRCRAFT_BRANCH_GUARD"
     assert os.environ.get(branch_guard.GUARD_ENV_VAR, "error") in ("error", "warn", "off")
+
+
+# ---------------------------------------------------------------------------
+# The CI event checkout
+#
+# ``actions/checkout`` checks the triggering ref out: on a push it creates a
+# local branch named after the pushed branch, on a pull request it checks the
+# merge ref out as a detached HEAD.  The branch name of such a checkout says
+# nothing about where the work was authored, so it must not be judged as a
+# branch-isolation violation (the root cause of "a push to master kills the
+# whole CI pipeline").
+# ---------------------------------------------------------------------------
+def _workflow_env_block(path: Path) -> list[str]:
+    """The lines of the workflow-level ``env:`` block (a key in column 0)."""
+    lines = path.read_text(encoding="utf-8").splitlines()
+    for index, line in enumerate(lines):
+        if line.rstrip() != "env:":
+            continue
+        block: list[str] = []
+        for follow in lines[index + 1:]:
+            if follow.strip() and not follow.startswith((" ", "\t")):
+                break
+            block.append(follow)
+        return block
+    return []
+
+
+@pytest.mark.parametrize("workflow", ["ci.yml", "verify.yml"])
+def test_the_workflows_declare_the_ci_branch_guard_policy(workflow: str) -> None:
+    """CI must not depend on the implicit CI-marker heuristic."""
+    path = ROOT / ".github" / "workflows" / workflow
+    block = _workflow_env_block(path)
+    assert any(
+        line.strip() == f"{branch_guard.GUARD_ENV_VAR}: warn" for line in block
+    ), f"{workflow} must declare {branch_guard.GUARD_ENV_VAR}: warn at workflow level"
+
+
+def test_ci_event_ref_is_read_from_the_runner(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv(branch_guard.CI_EVENT_REF_VAR, "refs/heads/master")
+    assert ci_event_ref() == "refs/heads/master"
+    assert ci_event_branch() == "master"
+
+
+def test_a_pull_request_merge_ref_has_no_branch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A pull request is checked out as a detached merge commit."""
+    monkeypatch.setenv(branch_guard.CI_EVENT_REF_VAR, "refs/pull/12/merge")
+    assert ci_event_ref() == "refs/pull/12/merge"
+    assert ci_event_branch() is None
+
+
+def test_no_event_ref_outside_a_runner(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv(branch_guard.CI_EVENT_REF_VAR, raising=False)
+    assert ci_event_ref() is None
+    assert ci_event_branch() is None
+    assert is_ci_event_checkout("master") is False
+
+
+def test_a_local_master_checkout_aborts_the_session(repo: Path) -> None:
+    """The local protection must survive every CI fix."""
+    with pytest.raises(BranchViolation):
+        enforce_branch_policy(repo_root=repo)
+
+
+def test_a_local_master_checkout_is_authoritative(repo: Path) -> None:
+    status = guard_status(repo_root=repo)
+    assert status["ci_event_checkout"] is False
+    assert status["event_ref"] is None
+    assert status["branch_authoritative"] is True
+
+
+def test_a_ci_event_checkout_does_not_abort_the_session(
+    repo: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The push checkout of ``master`` must not stop the pipeline."""
+    monkeypatch.setenv("GITHUB_ACTIONS", "true")
+    monkeypatch.setenv(branch_guard.CI_EVENT_REF_VAR, "refs/heads/master")
+    status = enforce_branch_policy(repo_root=repo)
+    assert status["severity"] != "error"
+    assert status["ok"] is True
+    assert status["ci_event_checkout"] is True
+    assert status["event_ref"] == "refs/heads/master"
+    assert status["branch_authoritative"] is False
+
+
+def test_a_ci_event_checkout_is_recognised_for_a_detached_head(
+    repo: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A pull request checkout is detached: the runner still made it."""
+    head = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=str(repo),
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    _git(repo, "checkout", "--detach", head)
+    monkeypatch.setenv("GITHUB_ACTIONS", "true")
+    monkeypatch.setenv(branch_guard.CI_EVENT_REF_VAR, "refs/heads/master")
+    status = guard_status(repo_root=repo)
+    assert status["branch"] is None
+    assert status["ci_event_checkout"] is True
+    assert status["branch_authoritative"] is False
+    assert status["severity"] == "none"
+
+
+def test_a_branch_that_is_not_the_event_branch_stays_judged(
+    repo: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Only the event's own branch is excused, not every branch of the runner."""
+    _git(repo, "checkout", "-b", "feat/other")
+    monkeypatch.setenv("GITHUB_ACTIONS", "true")
+    monkeypatch.setenv(branch_guard.CI_EVENT_REF_VAR, "refs/heads/master")
+    status = guard_status(repo_root=repo)
+    assert status["ci_event_checkout"] is False
+    assert status["branch_authoritative"] is True
+
+
+@pytest.mark.parametrize(
+    "mode,expected_severity",
+    [(None, "error"), ("warn", "warning"), ("off", "none")],
+)
+def test_the_documented_guard_modes_on_a_local_master_checkout(
+    repo: Path, monkeypatch: pytest.MonkeyPatch, mode: str | None, expected_severity: str
+) -> None:
+    """``PAPER_AIRCRAFT_BRANCH_GUARD`` keeps its documented semantics."""
+    if mode is None:
+        monkeypatch.delenv(branch_guard.GUARD_ENV_VAR, raising=False)
+    else:
+        monkeypatch.setenv(branch_guard.GUARD_ENV_VAR, mode)
+    status = guard_status(repo_root=repo)
+    assert status["mode"] == (mode or "error")
+    assert status["severity"] == expected_severity
+    if expected_severity == "error":
+        with pytest.raises(BranchViolation):
+            enforce_branch_policy(repo_root=repo)
+    else:
+        assert enforce_branch_policy(repo_root=repo)["severity"] == expected_severity
+
+
+@pytest.mark.parametrize(
+    "mode,expected_severity",
+    [(None, "none"), ("warn", "none"), ("off", "none")],
+)
+def test_the_documented_guard_modes_on_a_ci_event_checkout(
+    repo: Path, monkeypatch: pytest.MonkeyPatch, mode: str | None, expected_severity: str
+) -> None:
+    """No documented mode may abort the session on a CI event checkout."""
+    monkeypatch.setenv("GITHUB_ACTIONS", "true")
+    monkeypatch.setenv(branch_guard.CI_EVENT_REF_VAR, "refs/heads/master")
+    if mode is None:
+        monkeypatch.delenv(branch_guard.GUARD_ENV_VAR, raising=False)
+    else:
+        monkeypatch.setenv(branch_guard.GUARD_ENV_VAR, mode)
+    status = enforce_branch_policy(repo_root=repo)
+    assert status["severity"] == expected_severity
+    assert status["ok"] is True
+
+
+def test_an_explicit_error_mode_still_fails_on_a_ci_event_checkout(
+    repo: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The environment variable stays the last word."""
+    monkeypatch.setenv("GITHUB_ACTIONS", "true")
+    monkeypatch.setenv(branch_guard.CI_EVENT_REF_VAR, "refs/heads/master")
+    monkeypatch.setenv(branch_guard.GUARD_ENV_VAR, "error")
+    status = guard_status(repo_root=repo)
+    assert status["mode"] == "error"
+    assert status["severity"] == "error"
+    with pytest.raises(BranchViolation):
+        enforce_branch_policy(repo_root=repo)

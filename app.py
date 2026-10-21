@@ -31,6 +31,7 @@ from api.core import (
     domain,
 )
 from api.routes import (
+    ga_research_bp,
     jobs_bp,
     mesh_bp,
     meta_bp,
@@ -158,7 +159,10 @@ def _check_authentication() -> Optional[Tuple[Response, int]]:
     elif request.headers.get("X-API-Key"):
         token = request.headers.get("X-API-Key", "").strip()
 
-    if not token or not hmac.compare_digest(token, api_key):
+    # Compare the UTF-8 bytes: hmac.compare_digest rejects non-ASCII str
+    # arguments with a TypeError, which would turn a malformed client token
+    # into a 500 instead of a 401.  The digest itself stays constant time.
+    if not token or not hmac.compare_digest(token.encode("utf-8"), api_key.encode("utf-8")):
         return api_error("Unauthorized: invalid or missing API Key / Bearer token", 401, category="security")
     return None
 
@@ -267,6 +271,7 @@ app.register_blueprint(sim_bp)
 app.register_blueprint(mesh_bp)
 app.register_blueprint(jobs_bp)
 app.register_blueprint(records_bp)
+app.register_blueprint(ga_research_bp)
 
 
 # ---------------------------------------------------------------------------
