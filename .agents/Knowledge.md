@@ -1,80 +1,80 @@
 # Knowledge Base (On-Demand Reference)
 <!-- 警告: 全文読み込み禁止。grepやキーワード検索で必要な箇所のみ部分抽出すること。 -->
 <!-- 記述形式: ## [Category] Topic / 検証済みの確定事実のみを簡潔に記述 -->
-
 ## [Architecture & Specs]
-- ルート `agents.md` は「常駐コア（規約・ガードレール）+ 参照索引」であり、詳細技術仕様は `docs/SPECIFICATION.md` に集約・遅延読み込み化されている。過去知見・現在地・定型手順の正本は `.agents/` 配下（`Knowledge.md` / `Project.md` / `skills/`）が持ち、`agents.md` へ重複長文を常駐させない。
+- ルート `AGENTS.md` は「常駐コア（規約・ガードレール）+ 参照索引」であり、詳細技術仕様は `docs/SPECIFICATION.md` に集約・遅延読み込み化されている。過去知見・現在地・定型手順の正本は `.agents/` 配下（`Knowledge.md` / `Project.md` / `skills/`）が持ち、`AGENTS.md` へ重複長文を常駐させない。
 - MCP実行基盤は `.kilo/mcp/`（`launch.mjs` が各サーバーのエントリポイントをcwd非依存に解決）、登録先は `.kilo/kilo.jsonc` の `mcp` キー。外部APIキーは不要。`fetch` のみ専用venv (`.kilo/mcp/venv`) で Python 実行。
 - GPUバッチシミュレーション (`gpu_batch_evaluate_cases`) は非GPU環境（CI/Linux）で `parallel_evaluate` を安全なフォールバックとし、同一のスキーマ（`landed`, `crashed`, `status`, `horizontal_range_m`）を返却する。 飛行シミュレータの世界座標系はNED (+z下向き) であり、風場 (+z上向き) との鉛直風変換（$v_{rel} = v_{aircraft} - wind_{ned}$）を整合させている。外部メッシュ取得の `validate_url_safe` はプライベートIP/ループバック/クラウドメタデータ/非標準ポート/リダイレクトを遮断する。APIエラーハンドラはクライアントにスタックトレースを返さず、一意な `error_id` のみを返却する。
-
 ## [Verified Solutions & Troubleshooting]
 - CI環境（GPU非搭載環境）でGPUバッチを呼び出すテストは、暗黙的例外送出ではなく安全なNumPy/CPUフォールバックとスキーマ互換性が必要。GitHub Actions の Windows runner では PowerShell が既定シェルのため、bash スクリプトを実行するワークフローには `defaults: run: shell: bash` の指定が必須。 全監査課題（#28〜#37）は対応完了し、新規監査テスト10件および既存700+件のテストが全パスして master (82d48ea) に反映済み。自律ループプロトコルに Phase 6 [Finalize & Terminate]（正常終了）、リトライ上限3回、不一致時ロールバック規約を導入し、ループ制御の完全性を担保。
 - MCP導入（2026-10-19）: context7 / sequential-thinking / fetch / memory / playwright の5サーバーを local stdio で登録し、`kilo mcp list` で全5件 `connected`、`tools/verify_mcp_servers.py` で initialize→tools/list→実ツールコールまで全件PASS。playwright は既存Chromiumを再利用し、成果物は `.kilo/mcp/playwright/` へ出力される。
-
-## [Paper-Conformance Audit] (2026-10-19, commit 60fdef6)
-- 正本は `PHYSICS_PAPER_CONFORMANCE_AUDIT.md`（高20 / 中34 / 低30 / 非論文系8）。**修正前の実測値**であり、物理計算経路の3系統分裂（正規6DoF RK4 / GPUアンサンブル / GPU最適化バッチ。実測で `max_stress_pa` が 1261 倍乖離）、Helmbold式4系統分裂、応力許容3系統分裂、接地の75%強制散逸、風符号3経路不一致などが記されている。 正規6DoF経路自体は健全（真RK4・Quaternion積・Euler方程式・SO(3)整合・CCDSLERP・エネルギー収支3%以内・真空放物線1e-4一致）。修正は GPU 代理経路と接地・応力・慣性の散了箇所に限定された。
-
-## [Paper-Conformance Fix Pass] (2026-10-19 → 2026-10-20)
-- 修正実施記録: `PHYSICS_PAPER_CONFORMANCE_AUDIT.md` 付録B。高重要度20件すべてに着手、中重要度から17件を実施。
-- **失速後揚力ノッチは解消**（旧 `max(raw,0)` のゼロ床を廃し Hoerner平板極限への単調遷移へ。α=41/45° の `C_L≡0` は消滅、α≥45° でHoernerと完全一致。旧ブレンドは30°で谷を生んでいたので**固定ターゲット**へ）と **翼端/負側の失速は対称化**（`neg_stall = max(stall+15,30)` は廃止。`stall_blend_weight` は失速角以下で**厳密に0**、上方は logistic^4 を0.0625で正規化。付着分岐は `cl_max` でクリップ）。
-- **接地は接触インパルスへ**: `v += J/m`, `ω += I⁻¹(r×J)`。法線 `J_n=-(1+e) m_eff v_n`、Coulomb円錐 `|J_t|≤μ|J_n|`。角運動量が構成的に保存され、翼端カートホイールは幾何と衝突エネルギーに比例。**キール線接触（重心直下）を追加**。エネルギー上限は `E_post ≤ E_pre`（`max(rest²,0.25)` の下限は削除）、翼端の反発係数クランプ0.5も廃止し `tip_restitution` を新設。 **応力尺度は単一化**: `paper_allowable_stress` のみ。heat-map は `σ/σ_allow`（failure_index と同一）。`flight_sim` の[0,1]クランプ・GPUの120kPa尺度を廃止 → **過応力クラッシュ判定が蘇生**。
-- **慣性テンソルに平行軸項を復元**: 正解 `b²[(1+3λ)/(6(1+λ)) − (1+2λ)²/(9(1+λ)²)]`（三角翼 b²/18、矩形 b²/12）。旧式はλ≠1で過小。
-- **GPU経路**: `gpu_dynamics.simulate_batch`（6-DoF GPU積分器）へ移行、旧3-DoF代理は `model: "reduced_surrogate"` で明示。GPU/CPUの係数カーネルは `aero_domain` と同一式（Helmbold/失速/Hoerner）。
-- **CuPy固有の非互換2件**: `np.asarray(cupy_array)`（gpu_dynamics.wind_batch）と `xp.where(python_bool, ...)`（gpu_dynamics.atmosphere_batch）は CuPy で例外。`positions.get()` / Python `if` に変更。
-- テストで更新した契約: 翼端反発の旧0.5クランプ前提、側力の線形定義、非対称失速閾値、`g_load` のresultant定義、`error`/`error_id` キー、optimizer の `verified` キー、front の重複設計除去。
-- **残課題台帳の正本は `no-finish.md`**（§A あえて未解決 / §B 仕様主張の是正 / §C 解決済みだが残る限定 / §D 次フェーズ繰延 / §4.5 折り紙 G系 / §4.6 遺伝子 G9系）＋ 追補 `no-finish-physics-supplement.md`。修正後の検証は全866テスト PASS（24分、GPU経路が実6DoF積分器へ移行したため基準比2倍）。
-
+## [Paper-Conformance Audit & Fixes] (2026-10-19 → 2026-10-20, commit 60fdef6 → 9538f8b)
+- 正本は `PHYSICS_PAPER_CONFORMANCE_AUDIT.md`（高20 / 中34 / 低30 / 非論文系8）。**§0.0 の進捗表が修正の正本**、付録B が修正実施記録。§0.0 に無い指摘は**残課題台帳の正本 `no-finish.md`**（ルート。§A あえて未解決 / §B 仕様主張の是正 / §C 解決済みだが残る限定 / §D 次フェーズ繰延 / §4.5 折り紙 G系 / §4.6 遺伝子 G9系 / §E マルチエージェントレビュー由来 / §F レビュー由来・あえて解決しない / §9 統合推奨順序）＋ 追補 `no-finish-physics-supplement.md`。**P0〜P3 は完了・コミット済み**（`9538f8b`）。回帰固定化テストは P0/P1 が `tests/test_paper_conformance_p0_p1.py`、P2/P3 が `tests/test_ga_physics_readiness.py`。
+- **失速後揚力ノッチ解消**（旧 `max(raw,0)` のゼロ床を廃し Hoerner平板極限への単調遷移。α=41/45° の `C_L≡0` は消滅、α≥45° でHoernerと完全一致）＋**翼端/負側の失速は対称化**（`stall_blend_weight` は失速角以下で**厳密に0**、上方は logistic^4 を0.0625で正規化。付着分岐は `cl_max` でクリップ）。**接地は接触インパルスへ**（`v += J/m`, `ω += I⁻¹(r×J)`、法線 `J_n=-(1+e) m_eff v_n`、Coulomb円錐 `|J_t|≤μ|J_n|`、**キール線接触**を追加、エネルギー上限 `E_post ≤ E_pre`、翼端反発係数クランプ0.5を廃止し `tip_restitution` を新設）。**応力尺度は単一化**（`paper_allowable_stress` のみ。既定 2.2 kPa。25 kPa / 120 kPa / 2.0e4·gsm の 3 系統は廃止 → **過応力クラッシュ判定が蘇生**）。**慣性テンソルに平行軸項を復元**（正解 `b²[(1+3λ)/(6(1+λ)) − (1+2λ)²/(9(1+λ)²)]`、三角翼 b²/18・矩形 b²/12）。
+- **経路の偽表示を防ぐ 2 つの model タグ**: `rigid_body_6dof`（6DoF RK4。GPU 最適化バッチも 13 状態 RK4 へ書き換え済み）と `reduced_surrogate`（`model_detail` に `gpu_ensemble_3dof` / `analytical_glide_surrogate`）。`approximate=true` の縮約経路は `physics_verification_eligible=false`。**応力インデックスの分母は 1 つ**。
+- **風符号は 1 つ**（`wind_domain.wind_flow_components(deg)` = `-(sinθ, cosθ)`、方位角は「風が吹く來的」方位、north=+y / east=+x。旧 GPU 経路の 90°回転は廃止）かつ **Helmbold 式も 1 つ**（`physics/aero_kernel.helmbold_cl_alpha` が正体。SPEC の `+4` & `tan²(Λ_c/2)` 表記も `4AR/π` へ修正済み）。**失速後揚力ブレンドの非対称バグ**（目標値に `sign * blend_angle` を使うと負側のみ磁力が 0.690→0.553 へ沈む。目標値は `abs(plate(blend_angle))` で左右対称化）と **Polhamus 公開式** `K_p sinα cos²α + K_v sin²α cosα` の `K_v` 項は偶関数（α 対称でない）なので「奇関数」テストには使えない（90°超で `K_v` 項が負になること＝copysign 符号強制の禁止のみ検証）。**CuPy固有の非互換2件**（`np.asarray(cupy_array)`・`xp.where(python_bool, ...)` は CuPy で例外 → `positions.get()` / Python `if` へ）と、**最適化器の実行不可能判定**（`status` が `error` / `failed` の設計は `optimizer_domain.INFEASIBLE_SCORE`（-1e12）＋最悪値目的関数ベクトルで扱い、パレート点・ incumbent に入れない。`evaluate_flight` は例外を `status="error"`（`error` / `error_id` 付き）で返す）。
 ## [Discord Bridge] (2026-10-19, commit 9e4b24c → master 50f5330)
 - `tools/discord_bridge.py` は `agy` CLI を `--output-format stream-json` で駆動する。会話 ID は UUID で brain ディレクトリ名と一致し、`--print-timeout` 超過時は stderr に "print timeout" を出して部分出力を返す（終了コード0の正常終了扱い）。
-- ガードレール: stderr 常時ドレイン（パイプ詰まりによる子プロセス停止を防止）/ CLI と監視の二重タイムアウト / チャンネル・全体の同時実行上限 / タスク ID 一意化 / プロンプト長・URL・モデル・セッション ID 検証 / 内部例外は Error ID のみ Discord 送出 / 起動時に永続ビュー再登録。 `discord.py` 2.7 では `Select`/`Button`/`TextInput` への `callback` 直接代入は型エラーとなるため**サブクラス化**が正（`discord.ui.Select[discord.ui.View]`）。同ファイルは mypy 52件 → 0件。POSIX でプロセスツリーを kill する時は子プロセスが専用セッション（`start_new_session=True`）に属することが前提（親と同じグループのまま `killpg` するとテストランナーごと死ぬ）。
-- 正本仕様は `docs/discord-bridge.md`、テストは `tests/test_discord_bridge.py`（57件・スタブCLI結合テスト込み）。
-
+- ガードレール: stderr 常時ドレイン（パイプ詰まりによる子プロセス停止を防止）/ CLI と監視の二重タイムアウト / チャンネル・全体の同時実行上限 / タスク ID 一意化 / プロンプト長・URL・モデル・セッション ID 検証 / 内部例外は Error ID のみ Discord 送出 / 起動時に永続ビュー再登録。 `discord.py` 2.7 では `Select`/`Button`/`TextInput` への `callback` 直接代入は型エラーとなるため**サブクラス化**が正（`discord.ui.Select[discord.ui.View]`）。同ファイルは mypy 52件 → 0件。POSIX でプロセスツリーを kill する時は子プロセスが専用セッション（`start_new_session=True`）に属することが前提（親と同じグループのまま `killpg` するとテストランナーごと死ぬ）。正本仕様は `docs/discord-bridge.md`、テストは `tests/test_discord_bridge.py`（57件・スタブCLI結合テスト込み）。
 ## [Paper Registry Pipeline] (2026-10-20, commit a578f08 → master b2cbfc4)
-- 学術論文2,000件（5カテゴリ×400件）を `search/` に構造化して収録。仕様は `docs/PAPER_REGISTRY_PIPELINE.md`、検証結果は `search/validation_report.json`（レジストリ再照合 2000/2000、URL解決 2000/2000、構造エラー 0）。
-- 出典は Crossref（DOI・抄録・媒体）と DataCite（arXiv 接頭辞 10.48550、240件のプレプリントを含む）。**記憶情報での論文生成は禁止**し、全件をレジストリ API で実在確認した。
-- 本環境では arXiv / OpenAlex / Semantic Scholar API が共有IP由来で HTTP 429 となる。代替として Crossref + DataCite + `doi.org` コンテンツネゴシエーション（CSL-JSON）で抄録を回復できる（回復率は低いため抄録未登録件は標題・媒体からの要約と明記）。
-- 抄録カバレッジは Crossref 由来で約 25%、arXiv 経由を含めると 60%。抄録の無い論文は「抄録未登録（標題と掲載媒体から要約）」と明示し、支配方程式・手法はタイトルと分類情報からの推定である旨を併記する。選定は「標題にコア語 + （コア語2件以上 or 補完語2件以上）」の標題基点ルール。機械翻訳は標題のみを日本語化し原題は保持（要約の生成ではない）。
+- 学術論文2,000件（5カテゴリ×400件）を `search/` に構造化して収録。仕様は `docs/PAPER_REGISTRY_PIPELINE.md`、検証結果は `search/validation_report.json`（レジストリ再照合 2000/2000、URL解決 2000/2000、構造エラー 0）。出典は Crossref（DOI・抄録・媒体）と DataCite（arXiv 接頭辞 10.48550、240件のプレプリントを含む）。**記憶情報での論文生成は禁止**し、全件をレジストリ API で実在確認した。
+- 本環境では arXiv / OpenAlex / Semantic Scholar API が共有IP由来で HTTP 429 となる。代替は Crossref + DataCite + `doi.org` コンテンツネゴシエーション（CSL-JSON）。抄録カバレッジは Crossref 由来で約 25%、arXiv 経由を含めると 60%。抄録の無い論文は「抄録未登録（標題と掲載媒体から要約）」と明示し、支配方程式・手法はタイトルと分類情報からの推定である旨を併記する。選定は「標題にコア語 + （コア語2件以上 or 補完語2件以上）」の標題基点ルール。機械翻訳は標題のみを日本語化し原題は保持（要約の生成ではない）。
 
 ## [Origami Geometry] (2026-10-20)
 - 正本実装は `physics/origami_domain.py`（純幾何、飛行力学に非依存）。展開図→三次元ヒンジ列→多層ソリッド生成までを一括で持つ。
 - **用紙は正方形でない**ため、(u,v) 平面の法線は三次元で折り目に直交しない。折り目は実寸の紙面（210×297 mm）で定義し、side normal は紙面内で三次元直交Directions として再構築する（flat そのまま使うと折れ目の向きが 45°ずれる）。
 - 折り目は**現在位置**を軸に回す（`T' = F ∘ T`）。flat 定義のまま回すと、folded 済み層で crease がずれ、層が千切れる。折り目定義は「その折り目が実際に切る面」を単位とする group スコープで分離する（スコープ無しだと先に折った flap を後続 crease が貫通する）。
-- **Z-Fighting 排除**: 面インデックスは「平行かつ投影重なり」クラスタの最長路（重なりDAG）で決める。重なった任意2面は ≥1 レイヤーピッチ（0.42 mm）離れるので、紙厚 0.30 mm に対して構造的に共面になり得ない。オフセットは α に比例（α=0 は平たい紙）。
-- 折れ目は 3 次ベジエのロール（両パネルに接線連続）で閉じ、境界が skin と roll で完全に一致する。flat 面法線をそのまま使うと法線が不連続になる。A4 斜辺は 45° ではない（1:√2 のため）。45° 相当は**紙面（三次元）での角度**で定義する。
-- テストは `tests/test_origami.py`（39件）、Z-Fighting 判定は「重なり面の中間面距離 + 層差×ピッチ > 紙厚」。残課題の正本は `no-finish.md`（A-13〜A-19 据え置きと D §4.5 の G-1〜G-8 繰延）。
+- **Z-Fighting 排除**: 面インデックスは「平行かつ投影重なり」クラスタの最長路（重なりDAG）で決める。重なった任意2面は ≥1 レイヤーピッチ（0.42 mm）離れるので、紙厚 0.30 mm に対して構造的に共面になり得ない。オフセットは α に比例（α=0 は平たい紙）。折れ目は 3 次ベジエのロール（両パネルに接線連続）で閉じ、境界が skin と roll で完全に一致する。flat 面法線をそのまま使うと法線が不連続になる。A4 斜辺は 45° ではない（1:√2 のため）。45° 相当は**紙面（三次元）での角度**で定義する。テストは `tests/test_origami.py`（39件）、Z-Fighting 判定は「重なり面の中間面距離 + 層差×ピッチ > 紙厚」。残課題の正本は `no-finish.md`（A-13〜A-19 据え置きと D §4.5 の G-1〜G-8 繰延）。
 
-## [Paper-Conformance Fixes] (2026-10-20)
-- 監査の修正は `PHYSICS_PAPER_CONFORMANCE_AUDIT.md` §0.0 の進捗表が正本。回帰固定化テストは `tests/test_paper_conformance_p0_p1.py`。
-- **経路の偽表示を防ぐ 2 つの model タグ**: `rigid_body_6dof`（6DoF RK4。GPU 最適化バッチも 13 状態 RK4 へ書き換え済み）と `reduced_surrogate`（`model_detail` に `gpu_ensemble_3dof` / `analytical_glide_surrogate`）。`approximate=true` の縮約経路は `physics_verification_eligible=false`。**応力インデックスの分母は 1 つ**（`stress_domain.paper_allowable_stress(gsm, stiffness)`、既定 2.2 kPa）。25 kPa / 120 kPa / 2.0e4·gsm の 3 系統は廃止、`flight_sim.allowable_stress_pa()` のフォールバックも同じ閉形式。
-- **風符号は 1 つ**（`wind_domain.wind_flow_components(deg)` = `-(sinθ, cosθ)`、方位角は「風が吹く來的」方位、north=+y / east=+x。旧 GPU 経路の 90°回転は廃止）かつ **Helmbold 式も 1 つ**（`physics/aero_kernel.helmbold_cl_alpha` が正体。SPEC の `+4` & `tan²(Λ_c/2)` 表記も `4AR/π` へ修正済み）。
-- **失速後揚力ブレンドの非対称バグ**（ブレンド目標に `sign * blend_angle` を使うと負側のみ磁力が 0.690→0.553 へ沈む。目標値は `abs(plate(blend_angle))` で左右対称にする）と **Polhamus 公開式** `K_p sinα cos²α + K_v sin²α cosα` の `K_v` 項が偶関数である（α 対称でない）ため「奇関数」テストには使えない（90°超で `K_v` 項が負になること＝copysign 符号強制の禁止のみ検証）。
-- **最適化器の実行不可能判定**: `status` が `error` / `failed` の設計は `optimizer_domain.INFEASIBLE_SCORE`（-1e12）＋最悪値目的関数ベクトルで扱い、パレート点・ incumbent に入れない。`evaluate_flight` は例外を `status="error"`（`error` / `error_id` 付き）で返す。
-
-## [Genetic-Project Phase & Branch Guard] (2026-10-20)
-- **ブランチ隔離が現在の開発フェーズ**: `genetic-project` ブランチで GA 実装前の物理健全性（P0〜P3）を固めるフェーズ。`master`/`main` へのコミット・マージ・チェリーピック・PR は**厳禁**（`agents.md` §2 Branch Isolation）。
-- 保護ブランチ実行停止の正本は `tools/branch_guard.py`。`guard_status()` が `severity` を `error`/`warning`/`none` で返し、`master`/`main` は `error`、他ブランチは `warning`、detached HEAD・非 git ディレクトリは判定不能（`none`）。`PAPER_AIRCRAFT_BRANCH_GUARD=off|warn` で緩和可。CI は検出会うため `warn`（既定で CI 自動検出）。
-- 組み込み先: `conftest.py` の session スコープ autouse fixture（保護ブランチなら**pytest 自体の実行を中断**）、`app.py` の `main()`（`--allow-protected-branch` で上書き可）、`smoke_test.py` の `main()`（ステージ実行前、ステージ数は 13 のまま）。
-- **`flight_sim._local_aero` は削除済み**（監査 H14）。6DoF 経路の空力は upstream `aero_domain` の単一実装になり、upstream が落ちた場合は `RuntimeError` で**即座に失敗**する（沈黙のフォールバックは「別の物理で飛ぶ」ため致命的）。`active_backends()["aero"]` は `upstream` / `unavailable` のみ。
-- **固定刻み収束テストは「解決済み領域」で評価する**: 4g ダート（I_pitch=3.5e-6 kg m²）は |ω|≈100 rad/s でカオス的に転がり、点 wise な収束は成立しない。旧刻み段差 0.02/0.01/0.005 s は**すべて**剛性安定限界より大きかった。検証済み刻み段差 0.0025/0.00125/0.000625 s では差分が 3.0e-2 → 8.9e-10 に単調減少する。
-- **最適化器の最終候補は 6DoF で再検証**（監査 H05 / P3-20）。`optimizer_domain.revalidate_candidate_6dof()` が `flight_sim.evaluate_flight` を直接呼び、`model="rigid_body_6dof"` と検証済み目的関数を返す（縮約経路で評価した run のみ最大3件を再検証し `verified_candidates` / `best_verified` に公開）。同じベクトルは互いを支配しない（`dominates(a,a)` は False）ため前線に重複し得るが、`_unique_front()` で除去済み。
+## [Genetic-Project Phase & Branch Guard] (2026-10-20 → 2026-10-21)
+- **ブランチ隔離が現在の開発フェーズ**: `genetic-project` ブランチで物理健全性（P0〜P3）と GA 基盤を固めるフェーズ。`master`/`main` へのコミット・マージ・チェリーピック・PR は**厳禁**（`AGENTS.md` §2 Branch Isolation）。**master は非汚染を確認**: master の最新コミットは `7c87b1b`（2026-10-19 20:52 UTC）で本フェーズ以前。本フェーズの全コミットは `genetic-project` 上にある。
+- 保護ブランチ実行停止の正本は `tools/branch_guard.py`。`guard_status()` が `severity` を `error`/`warning`/`none` で返し、`master`/`main` は `error`、他ブランチは `warning`、detached HEAD・非 git ディレクトリは判定不能（`none`）。`PAPER_AIRCRAFT_BRANCH_GUARD=off|warn` で緩和可。CI は検出して `warn`（既定で CI 自動検出）。組み込み先: `conftest.py` の session スコープ autouse fixture（`tools.branch_guard.enforce_branch_policy()` ＝唯一の判定点。保護ブランチなら**pytest 自体の実行を中断**）、`app.py` の `main()`（`--allow-protected-branch` で上書き可）、`smoke_test.py` の `main()`（ステージ実行前）。**`smoke_test.py` は 14 ステージ**（折り紙ステージ追加）。13 ステージと書いた旧記述は outdated。固定化テスト: ブランチガードは `tests/test_branch_guard.py`（37件: ローカル master 保護 / CI イベント checkout / `PAPER_AIRCRAFT_BRANCH_GUARD` の 3 モード / 両 WF の宣言）。
+- **CI イベント checkout は branch 名を違反根拠にしない**（2026-10-20 実測・修正）。`actions/checkout` は push 時に `git checkout --force -B <branch> refs/remotes/origin/<branch>` でローカル branch を作る（PR は detached）。従って CI の branch 名は「イベント」であり「作業された branch」ではない。`GITHUB_REF` からイベント ref を読み、`is_ci_event_checkout()` が真なら detached HEAD 基準（`severity="none"`）で判定する。両 WF に workflow レベル `PAPER_AIRCRAFT_BRANCH_GUARD: warn` を明示し、CI は暗黙の CI 検出へ依存しない。ローカル clone の master 保護は不変。**`flight_sim._local_aero` は削除済み**（監査 H14）。6DoF 経路の空力は upstream `aero_domain` の単一実装になり、upstream が落ちた場合は `RuntimeError` で**即座に失敗**する（沈黙のフォールバックは「別の物理で飛ぶ」ため致命的）。`active_backends()["aero"]` は `upstream` / `unavailable` のみ。
+- **固定刻み収束テストは「解決済み領域」で評価する**: 4g ダート（I_pitch=3.5e-6 kg m²）は |ω|≈100 rad/s でカオス的に転がり、点 wise な収束は成立しない。旧刻み段差 0.02/0.01/0.005 s は**すべて**剛性安定限界より大きかった。検証済み刻み段差 0.0025/0.00125/0.000625 s では差分が 3.0e-2 → 8.9e-10 に単調減少する。**最適化器の最終候補は 6DoF で再検証**（監査 H05 / P3-20）。`optimizer_domain.revalidate_candidate_6dof()` が `flight_sim.evaluate_flight` を直接呼び、`model="rigid_body_6dof"` と検証済み目的関数を返す（縮約経路で評価した run のみ最大3件を再検証し `verified_candidates` / `best_verified` に公開）。同じベクトルは互いを支配しない（`dominates(a,a)` は False）ため前線に重複し得るが、`_unique_front()` で除去済み。
 - **GPU バッチ経路は物理的には正しいが起動オーバーヘッドが支配的**: `gpu_dynamics.simulate_batch` は 13 状態 RK4 の実6DoF。3 ケース 2.5/6/15 s のバッチで約 690 s、N=32 で 3 s 飛行が約 100 s。計算量は**ステップ数×カーネル起動回数**で決まるため小バッチでは CPU 6DoF より遅い。GA 導入前に `cupy.fuse` / CUDA Graph による融合かステップ数削減が必要。
-- 固定化テスト: P0/P1 は `tests/test_paper_conformance_p0_p1.py`、P2/P3 は `tests/test_ga_physics_readiness.py`（21件）、ブランチガードは `tests/test_branch_guard.py`（20件）。
 
-## [Shared Physics Kernel] (2026-10-20)
-- **空力モデルと構造モデルの実装は 1 つに統一された**: `physics/aero_kernel.py`（係数・力・モーメント）と `physics/stress_domain.peak_root_stress_pa`（翼根曲げ応力のスカラー reduction）。`aero_domain` は `aero_kernel` へ、`parallel_engine` の GPU 経路も `aero_kernel` へ委譲する。カーネルは `ScalarMath`（純 `math`）と NumPy/CuPy の2バックエンドを持ち、**式は同一**で `tools/check_aero_kernel_parity.py` が 9856 状態×8 構成で**ビット一致**（rel=0.0）を検証する。
+## [Shared Physics Kernel] (2026-10-20 → 2026-10-21)
+- **空力モデルと構造モデルの実装は 1 つに統一された**: `physics/aero_kernel.py`（係数・力・モーメント）と `physics/stress_domain.peak_root_stress_pa`（翼根曲げ応力のスカラー reduction）。`aero_domain` は `aero_kernel` へ、`parallel_engine` の GPU 経路も `aero_kernel` へ委譲する。カーネルは `ScalarMath`（純 `math`）と NumPy/CuPy の2バックエンドを持ち、**式は同一**。**カーネル並列はビット一致**: `python tools/check_aero_kernel_parity.py` が 9856 状態 × 8 構成を走査し、cl / cd / cy / cm / cl_roll / cm_roll / cn_roll / lift_n / drag_n / side_n / rolling_nm / yawing_nm / stall_margin の最大相対差は**全て 0.000e+00**、pitching_nm のみ `5.875e-16`。検証は `tools/check_aero_kernel_parity.py` / `tools/check_gpu_parity.py` / `tests/test_gpu_kernel_parity.py`。
 - **NumPy 0-d 配列を経由すると 6DoF 積分器が空力評価で約 30 倍遅くなる**（1 ステップ 4 状態評価）。調査パイプラインが停止する原因。`ScalarMath` は専用にこのため用意した。**共通化のために scalar 経路を Array 版へ戻してはならない**。
-- **GPU batch と 6DoF 参照経路の実測一致**: `max_stress_pa` は 5 ケースすべてで**比 1.000**（ビット一致）、`status` 一致、`distance_m` 差 ≤1.4 %、`flight_time_s` 差 ≤0.4 %。検証は `tools/check_gpu_parity.py` と `tests/test_gpu_kernel_parity.py`。
-- **参照経路の `max_ld_ratio` は接地インパルスに汚染されていた**: 接地衝突直後のサンプルも L/D 統計に入り、best glide 7.8 の glider が 13.8 を報告していた。`_is_contact_sample()` で接触終了飛行の最終サンプルを除外し、GPU batch と同じ意味に揃えた。
-- **GPU 性能は launch overhead 支配**: 13状態 RK4 は 1 状態評価あたり約200演算。Windows/WDDM では CuPy の 1 launch が約100 µs あり 1 状態評価 21 ms（CPU/numpy は 1.5 ms）→ **この環境では GPU の方が遅い**。Linux/CI では launch overhead が 1/10 で N が大きいと GPU が有利。
+- **GPU batch と 6DoF 参照経路の実測一致**: `max_stress_pa` は 5 ケースすべてで**比 1.000**（ビット一致）、`status` 一致、`distance_m` 差 ≤1.4 %、`flight_time_s` 差 ≤0.4 %。**参照経路の `max_ld_ratio` は接地インパルスに汚染されていた**: 接地衝突直後のサンプルも L/D 統計に入り、best glide 7.8 の glider が 13.8 を報告していた。`_is_contact_sample()` で接触終了飛行の最終サンプルを除外し、GPU batch と同じ意味に揃えた。**GPU 性能は launch overhead 支配**: 13状態 RK4 は 1 状態評価あたり約200演算。Windows/WDDM では CuPy の 1 launch が約100 µs あり 1 状態評価 21 ms（CPU/numpy は 1.5 ms）→ **この環境では GPU の方が遅い**。Linux/CI では launch overhead が 1/10 で N が大きいと GPU が有利。
 
-## [Procedural Origami Genome] (2026-10-20)
-- 遺伝子は折り操作の**シーケンス**（`physics/origami_genome.py`）。各 `FoldStep` は `crease_line`（紙面正規化座標）・`fold_angle_deg`（-180..+180、符号で山/谷）・`symmetry`（対称/片側）・`layer_order`（重なり順）・`target_face_ids`（対象パネル）を持つ。折れ線リストが `origami_domain` の折れ線そのものなので、**3D空間で順番に**切断・回転する（頂点座標の変位は無い）。
-- 世代0は `strategy="free"`（線・角度・対称とも完全無作為）、`"families"` は折り族群（キール/ノーズ斜線/横折/後縁トリム）だけ選ぶ。折れ線は group スコープで木構造になり、折れない個体は弾かれる。
-- **持ち手フィルタ**は中央帯（|z| ≤ 12 mm）を前後方向の station に切り、**2枚以上**の紙が被さる station を grip とする。grip の鉛直高さ・前後長・層数と CG の grip 内包で判定し、不合格は penalty（fitness = 1/(1+penalty)）として 6DoF の前に弾く。閾値は `GripThresholds` で変更可。定型3機体（dart/nakamura/sky_king）はすべて合格する（回帰ガード）。
-- **自己貫通の判定は「一方が他方の内部」**（点を含む判定）のみ。折り線が交差するのは同じ紙の折れ線同士なので貫通ではない（classic dart の機首/翼交差で誤検出していた）。層は `LAYER_PITCH` で分離してから判定する。
-- レシピ出力: `recipe_steps`（手順表・角度・山/谷・対象パネル）、`recipe_markdown`（印刷用）、`crease_pattern_svg`（山=赤/谷=青の展開図）、`step_meshes`（Step 0 の平らな紙から完成形までの各段階メッシュ）。API は `GET/POST /api/v1/origami/genome`、`/genome/recipe`、`/genome/steps`、UI は折り手順スライダ（`genome_step`）。残課題は `no-finish.md` §4.6（G9系）。
-## [Remaining Work Ledger] (2026-10-20)
+## [Wind Altitude Convention] (2026-10-21)
+- **風プロファイル高度の規約は 1 つ**: 風は**地表面からの高度**（`z_up = -z_ned`）でサンプルする。正規6DoF 経路（`physics/flight_sim.py`）と GPU バッチ経路（`physics/gpu_dynamics.py`）は**同一規約**でなければならない（GA の tier 昇格は CPU-6DoF と GPU-batch の一致に依存する）。
+- **欠陥と修正**: バッチ経路が `params.ground_level_m - z_ned` で**世界原点**を基準にしていたため、既定 `ground_level_m=0` では不可視だが `ground_level_m=100`・`z=-105`（地表面から 5 m）・`wind_speed=8` で参照 `|v|=9.8056 m/s` に対しバッチ `|v|=13.2212 m/s`（**35 % の不一致**）になっていた。`z_up = -z_ned` へ修正。回帰テスト `tests/test_wind_height_parity.py` は 0.0 / 9.81 / 13.22 m/s の 3 規約を判別する。
+
+## [Infeasible Status Forwarding] (2026-10-21)
+- **失敗した評価を飛行に偽装しない**: `physics/parallel_engine.py::gpu_batch_evaluate_cases` の CPU フォールバックが `status="error"` を `"timeout"`、`"failed"` を `"crashed"` へ**リラベル**していた。`physics/optimizer_domain.is_infeasible_flight` は status 文字列だけで判定（`INFEASIBLE_STATUSES = ("error", "failed")`）するため、**壊れた設計が正当な 0 m 飛行**としてパレート前線・ incumbent に入り得た（報酬ハッキング経路）。status は**無変換で転送**する。回帰テストは `tests/test_gpu_kernel_parity.py::test_a_failed_evaluation_keeps_its_failure_status_in_the_batch_fallback`。
+
+## [Procedural Origami Genome] (2026-10-20 → 2026-10-21)
+- 遺伝子は折り操作の**シーケンス**（`physics/origami_genome.py`）。各 `FoldStep` は `crease_line`（紙面正規化座標）・`fold_angle_deg`（-180..+180、符号で山/谷）・`symmetry`（対称/片側）・`layer_order`（重なり順）・`target_face_ids`（対象パネル）を持つ。折れ線リストが `origami_domain` の折れ線そのものなので、**3D空間で順番に**切断・回転する（頂点座標の変位は無い）。世代0は `random_genome`（`strategy="free"` は線・角度・対称とも完全無作為、`"families"` は折り族群＝キール/ノーズ斜線/横折/後縁トリムのみから選ぶ）。折れ線は group スコープで木構造になり、折れない個体は弾かれる。
+- **実測した grip 適合率**: `strategy="families"` の 50 個体で grip 合格は 12 個体（**24 %**）、`"free"` は**ほぼ 0 %**。⇒ **完全無作為の世代0は成立しない**。GA は既知の適合アーキタイプ（`genome_from_archetype`: classic dart / nakamura / sky_king。3 機体とも grip フィルタ合格）で初期集団をシードし、適合性を保つ修復・攪乱オペレータを併用する。
+- **持ち手フィルタ**は中央帯（|z| ≤ 12 mm）を前後方向の station に切り、**2枚以上**の紙が被さる station を grip とする。grip の鉛直高さ・前後長・層数と CG の grip 内包で判定し、不合格は penalty（fitness = 1/(1+penalty)）として 6DoF の前に弾く。閾値は `GripThresholds` で変更可。定型3機体（dart/nakamura/sky_king）はすべて合格する（回帰ガード）。**自己貫通の判定は「一方が他方の内部」**（点を含む判定）のみ。折り線が交差するのは同じ紙の折れ線同士なので貫通ではない。層は `LAYER_PITCH` で分離してから判定する。
+- レシピ出力: `recipe_steps`（手順表・角度・山/谷・対象パネル）、`recipe_markdown`（印刷用）、`crease_pattern_svg`（山=赤/谷=青の展開図）、`step_meshes`（Step 0 の平らな紙から完成形までの各段階メッシュ）。API は `GET/POST /api/v1/origami/genome`、`/genome/recipe`、`/genome/steps`。残課題は `no-finish.md` §4.6（G9系）。
+- **遺伝子往復（JSON）の欠陥を修正**: `genome_from_dict` が `fold_type` の**文字列** `"mountain"/"valley"` を `bool()` で評価していたため `bool("valley")` が True となり、**谷折りが全て山折りに復元**されていた（seed=7 families: 幾何 bounds y −0.010/0.194 → −0.174/0.063、CG y 71.3 mm → −29.9 mm）。POST した機体と返ってきた機体が別物になり、谷折りを含む GA チェックポイントも折りが反転して再開する。`fold_type` を明示的に解析し、符号付き角度と決定した sense を整合させて修正。回帰テストは `tests/test_origami_genome_roundtrip.py`。
+
+## [GA Research Engine] (2026-10-21)
+- 自律研究 GA エンジンの正本は `physics/ga_domain.py`（実行統括・tier0→tier3 のマルチフィデリティ・統計・島・メタ制御・ジャーナル・進捗コールバック）、`physics/ga_cma.py`（CMA-ES 共分散適応）、`physics/ga_config.py`（**正規の設定**と YAML-subset ローダ。**PyYAML は依存ではない**）、`config/genetic_research.yaml`（文書化された既定値）、`tools/run_ga_research.py`（CLI。ブランチガードを呼ぶ）、`api/routes/ga_research.py`（blueprint。`app.py` に登録）、`tests/test_ga_engine.py`。
+- **目的関数は分離**（`distance` と `airtime`）。参照値は `physics/records_domain.py` の世界記録レジストリ（距離 **88.318 m** / 滞空 **29.2 s**）で、**適合度は記録で正規化**されるので記録は適合度 **1.0** に乗る。**試行回数のハードコードは無い**: すべての試行回数は `physics/ga_config.py` の宣言済み既定値で、YAML / CLI / ランタイム API / チェックポイント再開のいずれからも上書きできる（ハードコード監査で探索ロジック内の試行回数ゼロを確認）。ジャーナルは 1 行 1 JSON オブジェクト（`timestamp`/`generation`/`island`/`decision`/`trigger`/`changes`）で、再開時は上書きした `max_trials`/`top_k` をジャーナルに記録する。
+
+## [Research Console] (2026-10-21)
+- 研究コンソールの実装は `static/js/ga_research.js` / `static/css/ga-research.css` / `templates/index.html` と `static/js/{app,origami,api,state,viewport}.js`。シミュレーションモード ⇄ GA研究モードの切替、動的パラメータ表つき研究ワークベンチ、**3連動の折りビューアパネル**（3D ステップスライダ ⇄ 展開図 SVG（山=赤実線 / 谷=青破線＋符号付き角度）⇄ 手順カード（JSON/Markdown/SVG 出力））、CG とキール位置のマーカー、世代チャート（記録基準線つき）、島の多様性表、ライブジャーナル、チェックポイントの保存・再開（`max_trials` / `top_k` 上書き可）。展開図レンダラは `static/js/origami.js` の `renderCreasePattern` / `requestOrigamiRecipe`。**G9-4 の修正**: レシピの Markdown と SVG は API が返していたのに**ブラウザには表示されず**、折り紙パネルには折り手順スライダしか無かった。折り紙パネルに展開図と手順表を実装して解決（`no-finish.md` §4.6 G9-4）。
+
+## [Remaining Work Ledger] (2026-10-20 → 2026-10-21)
 - **残課題の正本は `no-finish.md`**（ルート）。A=あえて未解決（A-1〜A-19）/ B=仕様主張の是正（3件）/ C=解決済みだが残る限定（6件）/ D=次フェーズ繰延（高2・中16・低10・非論文系8、§4.5 折り紙 G系、§4.6 遺伝子 G9系）/ **E=§7 2026-10-19 マルチエージェントレビュー（13名・374指摘）由来の残課題** / **F=§8 レビュー由来・あえて解決しない** / **§9=統合推奨順序**。`.agents/Knowledge.md` からは参照リンクだけを張り、詳細を二重保管しない。
 - D の要点: H-11（実材料の断面モデル）/ H-19（折り後縁の空力接続）/ M-30（static_margin の空力接続）はいずれも**根拠となる論文が無い、または trim 状態の定義が未確定**のため着手できない。A-1 と同じ「出典なき係数」を増やさない原則で据え置いている。**未特定のフレーク**: `test_tunneling_ccd.py` の 1 件が CPU 競合下で 1 回だけ失敗（部分集合 10 通りの再現は無し）。原因特定は未了。
+- **遺伝子系 G9 の残存**: G9-2（`layer_order` の group rank は共面層のタイブレークのみ）と G9-5（遺伝子個体の翼寸法は `wingspan_m` 設定と独立）は**未解決のまま**。G9-1（持ち手閾値の人体工学出典）は閾値が端から端まで設定可能になっただけで**出典は無く、閾値は依然として推定値**。G9-3 / G9-4 は解決済み。
 
+## [Process Hygiene / 常駐プロセス回収] (2026-10-21)
+- 判定基準の正本は `.agents/skills/process-hygiene.md`、実装は `tools/process_hygiene.py`。KEEP = K1 セッション基盤(`kilo serve`)・K2 ホスト所有MCPプール・K3 明示指定、STOP = S1 並列ワーカー・S2 オーケストレータ・S3 孤児MCPプール・S4 残存実行物・S5 孤児ブラウザ。**4軸（所有/進行/冗長/接続）は全て機械実測**し、理由文字列に実測値を付す（進行=CPU 2点サンプル差分、冗長=正規化コマンド署名の重複数、接続=netstat の LISTEN/ESTABLISHED 数）。**`--policy`** は `in-use-stop`（既定: 使用中も停止）/`keep`（進行中は保護、S1/S2 は停止のまま）。
+- **事実（2026-10-21 観測）**: セッション/ワーカーごとに MCP一式（launch.mjs 5本 + 実サーバ 5本≒500MB）が起動し、終了時に回収されず**5世代が並存**。`kilo run --auto` ワーカー5本（各≒700MB）が `supervisor.ps1` により自動再生成され、pytest / GA実行（`run_ga_research.py`）/`app.py` 開発サーバが計8本以上残存していた（合計 ≒11.7 GB）。
+- **先行記録（不可逆操作の事前申告）**: ユーザー指示「無駄なタスクを閉じてメモリーを開放」「使用しているタスクはやめてほしい」に基づき、STOP 判定 84 プロセス / 想定 11694 MB を停止対象として宣言。**成果物（レポート・チェックポイント・GA成果物）はディスク上に残り再実行で再開可能**。停止後 `--list` で STOP=0 を確認するのが合否基準。
+- **回収結果（2026-10-21 10:32〜13:45 JST）**: 3回の `--apply` で **計 103 プロセス / ≒13.6 GB** を停止（内訳: ワーカー5本・MCPプール5世代・オーケストレータ/監視スクリプト12本・pytest/GA実行15本以上・孤児chromium13本・`app.py` 開発サーバ）。残存は `kilo serve`（IDE拡張ホスト）とその所有MCPプールのみ（**STOP=0 / KEEP=8**）。システム総プロセス数 5055 → 731、空闲物理メモリ 13.0 GB → **17.4 GB**。
+- **2巡目（2026-10-21 13:25〜14:05 JST）**: 事前記録の上、4軸実測（所有=全候補が `kilo serve` 直下／進行=CPU 差分／冗長=同一コマンド4重複／接続=5099 は LISTEN のみ ESTABLISHED 0）で **進行中の pytest 4本も停止対象に含め**、計 5 回の `--apply` で **63 プロセス / ≒9.3 GB** を停止。最終 `STOP=0 / KEEP=19`（K1 + K2 プール + そのブラウザ）、総プロセス 724、空闲物理メモリ **18.9 GB**。**基準実装の欠陥2件を修正**: ①MCP マーカーが `/` 固定で Windows の `@playwright\mcp\cli.js` を捕捉できず、MCP 所有ブラウザを「孤児」と誤判定（区切り文字を正規化して K2 継承で保護）②`--keep-pid` が子孫を保護せず、ラッパー指定時に子プロセスが停止対象になる欠陥（子孫継承を追加）。回帰固定化は `tests/test_process_hygiene.py`（16件）。
+- **残存の再発火**: 回収中も **IDE拡張ホスト直下の別チャットセッション**が `pytest` フル実行・GA実行・`serve_bench.ps1` 相当の検証を連続投入し続けた（1分に4〜8シェル）。プロセス側は回収できるが**セッションの停止はIDE側の操作が必要**。基準S2/S4で毎回の掃討が可能。**MCP の再生成**: `kilo serve` が MCP を需要時に自動再生成する（実測: 孤立 context7 サーバの自動再起動）ため、MCP プールを停止してもツールは失われない。
 
+## [GA v2: 超大規模GA・マルチGPU DNS/FSI] (2026-10-21)
+- 新GA（第2世代）の正本は `physics/ga2/`（scaling / genome / stage0〜stage3 / lbm / archive / surrogate / vram / checkpoint / runner）、仕様は `docs/GA_V2_ARCHITECTURE.md`。物理コアは既存（`aero_kernel` / `stress_domain` / `gpu_dynamics`）を共用し、**変わるのは予算だけ**（`ScalingProfile` の3ティア: small_long 1万個体/5M格子・workstation 3万/25M・cluster_20m 10万/1.5億セル、4〜8 GPU は 1 GPU=1個体 のタスク並列、MPI禁止）。
+- **CUDA Graph 捕捉の3条件**: ①H2D転送禁止（`xp.array([1,0,0,0])` はデバイス生成へ置換）②**cuBLAS禁止**（`xp.einsum` は cuBLAS 化されるので `gpu_dynamics` の回転を要素 wise 化和）③`begin_capture(mode=2)`（relaxed）。1ステップ再生は eager 比で約80倍（3ケース1200ステップ: 113 s→1.3 s）。
+- **D3Q19 の重みは w0=1/3・6軸=1/18・12稜=1/36**（4/9・1/36・1/9 は誤りで密度が毎ステップ4倍に発散）。衝突→流れの順、固体隣接は移動バウンスバック、格子速度 0.1（Ma≈0.17）。紙面座標→格子は**弦=流れ方向**、三角形は重心座標判定でラスタライズ（境界箱充填は流路を塞いで発散）。構造は 1 曲げ + 1 ねじりモード。
+## [Mojibake Repair / 文字化け] (2026-10-21)
+- **文字化けの署名は 4 種**: ① U+FFFD 置換文字 ② 漢字と漢字の間に挟まれた Latin の literal `'E'`（CP932 の trail byte 0x45 の残骸）③ CP932 の trail byte 側にしか現れない希少な漢字 ④ 日本語文に貼り込まれた外部スクリプト断片（ハングル・キリル文字）。**検出は `tools/check_mojibake.py`、回帰固定化は `tests/test_no_mojibake.py`**（保留中の除外指定 0 件）。`physics/records_domain.py` の日本語93行はギネス記録の原文出典から再記述済み（`no-finish.md` §7.0 P0-12 / 旧 F-1）。cp932 往復の再現を許す変換は追加しない。
