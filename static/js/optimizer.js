@@ -6,17 +6,17 @@
 
 import { clockFmt, clear, fmt, isNum, make, sig } from "./lib.js";
 
-const POLL_MS = 700;
+const POLL_MS = 2000;
 const JOBS_MS = 2000;
 
 const OBJECTIVE_LABELS = {
-  max_distance: { label: "最大水平距離", unit: "m", dir: " maximise" },
-  max_flight_time: { label: "最大滞空時間", unit: "s", dir: " maximise" },
-  max_ld_ratio: { label: "最大 L/D", unit: "", dir: " maximise" },
-  min_max_stress: { label: "最小最大応力", unit: "Pa", dir: " minimise" },
-  max_stall_margin: { label: "最大失速マージン", unit: "", dir: " maximise" },
-  min_launch_speed: { label: "最小発射初速", unit: "m/s", dir: " minimise" },
-  max_stability: { label: "最大静的安定性", unit: "", dir: " maximise" },
+  max_distance: { label: "最大水平距離", unit: "m", dir: "最大化" },
+  max_flight_time: { label: "最大滞空時間", unit: "s", dir: "最大化" },
+  max_ld_ratio: { label: "最大 L/D", unit: "", dir: "最大化" },
+  min_max_stress: { label: "最小最大応力", unit: "Pa", dir: "最小化" },
+  max_stall_margin: { label: "最大失速マージン", unit: "", dir: "最大化" },
+  min_launch_speed: { label: "最小発射初速", unit: "m/s", dir: "最小化" },
+  max_stability: { label: "最大静的安定性", unit: "", dir: "最大化" },
 };
 
 const ALGORITHM_LABELS = {
@@ -428,6 +428,12 @@ export class OptimizerPanel {
     const xName = names[0] || "objective";
     const yName = names[1] || names[0] || "objective";
     this.dom.frontAxes.textContent = `${OBJECTIVE_LABELS[xName]?.label || xName} × ${OBJECTIVE_LABELS[yName]?.label || yName}`;
+    // モデル由来の表示：縮約代理 (reduced_surrogate) を公式結果と区別して提示
+    const modelTag = result.model || (result.approximate ? "reduced_surrogate" : "");
+    const approxTag = result.approximate ? "近似" : "公式";
+    if (modelTag) {
+      this.dom.frontAxes.textContent += `  [${modelTag} / ${approxTag}]`;
+    }
     const points = result.pareto_front
       .map((entry) => {
         const x = Number(entry.objectives[xName]);
@@ -534,6 +540,23 @@ export class OptimizerPanel {
         make("tr", {}, [
           make("td", { text: OBJECTIVE_LABELS[name]?.label || name }),
           make("td", { class: "obj-val", text: isNum(value) ? sig(value, 4) : "—" }),
+        ])
+      );
+    }
+    // 誠実性メタデータ：approximate / model_detail / physics_models / limitations / best_verified など
+    const metaRows = [];
+    if (result.model !== undefined) metaRows.push(["モデル", String(result.model)]);
+    if (result.approximate !== undefined) metaRows.push(["近似モデル", String(!!result.approximate)]);
+    if (result.model_detail !== undefined) metaRows.push(["モデル詳細", String(result.model_detail)]);
+    if (result.physics_models !== undefined) metaRows.push(["物理モデル", Array.isArray(result.physics_models) ? result.physics_models.join("、") : String(result.physics_models)]);
+    if (result.limitations && result.limitations.length) metaRows.push(["制限事項", result.limitations.join("、")]);
+    if (result.best_verified !== undefined) metaRows.push(["検証済ベスト", String(!!result.best_verified)]);
+    if (result.verified_candidates !== undefined) metaRows.push(["検証済候補数", String(result.verified_candidates)]);
+    for (const [label, value] of metaRows) {
+      body.append(
+        make("tr", {}, [
+          make("td", { text: label, style: "font-size:11px; color:var(--ink-2);" }),
+          make("td", { text: value, style: "font-size:11px;" }),
         ])
       );
     }

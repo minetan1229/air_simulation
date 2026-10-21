@@ -15,14 +15,18 @@ Features:
 
 import asyncio
 import io
+import ipaddress
 import json
 import logging
 import os
 import re
 import shutil
+import socket
 import subprocess
 import sys
 import time
+import urllib.parse
+import uuid
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple
@@ -59,6 +63,114 @@ ALLOWED_USER_IDS: Set[int] = {
 ALLOWED_CHANNEL_IDS: Set[int] = {
     int(c.strip()) for c in ALLOWED_CHANNELS_RAW.split(",") if c.strip().isdigit()
 }
+
+# ---------------------------------------------------------------------------
+# Safety guardrails (P1-12)
+# ---------------------------------------------------------------------------
+# Empty allowlist now means DENY ALL (safe default).  Never treat an empty
+# ALLOWED_USER_IDS as "allow everyone".
+# Per-user command rate limit (token bucket over a fixed window).
+RATE_LIMIT_MAX_COMMANDS = int(os.getenv("DISCORD_RATE_LIMIT_MAX", "10"))
+RATE_LIMIT_WINDOW_SECONDS = float(os.getenv("DISCORD_RATE_LIMIT_WINDOW", "60.0"))
+_user_command_times: Dict[int, List[float]] = {}
+
+# Maximum accepted prompt length (characters).
+MAX_PROMPT_LEN = int(os.getenv("DISCORD_MAX_PROMPT_LEN", "4000"))
+
+# Chrome URL blocklist: non-http/https schemes and private/loopback/link-local /
+# cloud-metadata addresses are refused.  The bare "localhost" hostname (the
+# documented default dev URL) is allowed; IP-based loopback/private addresses are not.
+_CHROME_BLOCKLIST_HOSTS = {
+    "metadata.google.internal",
+    "metadata.azure.com",
+    "metadata.aws.internal",
+    "169.254.169.254",
+}
+
+# Single-instance control: bind a TCP loopback port so a second bridge process
+# cannot start while one is running.
+_INSTANCE_LOCK_PORT = int(os.getenv("DISCORD_BRIDGE_LOCK_PORT", "49372"))
+_INSTANCE_LOCK_SOCK: Optional[socket.socket] = None
+
+# --dangerously-skip-permissions is never honoured by the bridge; authorization
+# is always enforced.  Kept for documentation only; disabled by default.
+ENABLE_DANGEROUS_SKIP_PERMISSIONS = bool(os.getenv("DISCORD_DANGEROUS_SKIP_PERMISSIONS", "0") == "1")
+
+
+def acquire_instance_lock() -> bool:
+    """Return True if this process is the single bridge instance (port bound)."""
+    global _INSTANCE_LOCK_SOCK
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    try:
+        sock.bind(("127.0.0.1", _INSTANCE_LOCK_PORT))
+        sock.listen(1)
+        _INSTANCE_LOCK_SOCK = sock
+        return True
+    except OSError:
+        try:
+            sock.close()
+        except OSError:
+            pass
+        return False
+
+
+def release_instance_lock() -> None:
+    global _INSTANCE_LOCK_SOCK
+    if _INSTANCE_LOCK_SOCK is not None:
+        try:
+            _INSTANCE_LOCK_SOCK.close()
+        except OSError:
+            pass
+        _INSTANCE_LOCK_SOCK = None
+
+
+def rate_limit_check(user_id: int) -> bool:
+    """Token-bucket rate limit per user.  Returns True if the command is allowed."""
+    now = time.time()
+    window = RATE_LIMIT_WINDOW_SECONDS
+    times = [t for t in _user_command_times.get(user_id, []) if now - t < window]
+    if len(times) >= RATE_LIMIT_MAX_COMMANDS:
+        _user_command_times[user_id] = times
+        return False
+    times.append(now)
+    _user_command_times[user_id] = times
+    return True
+
+
+def is_chrome_url_allowed(url: str) -> bool:
+    """Validate a URL passed to !chrome / /chrome: http/https only, blocklist applied."""
+    try:
+        parsed = urllib.parse.urlparse(url)
+    except Exception:
+        return False
+    if parsed.scheme.lower() not in ("http", "https"):
+        return False
+    host = (parsed.hostname or "").lower()
+    if not host:
+        return False
+    if host in _CHROME_BLOCKLIST_HOSTS:
+        return False
+    if host == "localhost":
+        return True
+    try:
+        ip = ipaddress.ip_address(host)
+    except ValueError:
+        # Non-IP hostname (public domain): allowed.
+        return True
+    if (
+        ip.is_private
+        or ip.is_loopback
+        or ip.is_link_local
+        or ip.is_multicast
+        or ip.is_reserved
+    ):
+        return False
+    return True
+
+
+def make_error_id() -> str:
+    return uuid.uuid4().hex[:12]
 
 # Strictly lock workspace to simulation/v3
 WORKSPACE_DIR = Path(__file__).resolve().parent.parent
@@ -307,6 +419,11 @@ class PromptReplyModal(discord.ui.Modal, title="💬 返信・プロンプト送
             client.channel_conversations[interaction.channel_id] = self.target_conv_id
 
         user_prompt = self.prompt_input.value.strip()
+        if len(user_prompt) > MAX_PROMPT_LEN:
+            await interaction.response.send_message(
+                f"⚠️ プロンプトが長すぎます（{MAX_PROMPT_LEN} 文字まで）。", ephemeral=True
+            )
+            return
         await interaction.response.defer()
         asyncio.create_task(
             execute_agy_prompt(
@@ -377,8 +494,13 @@ class DiscordBridgeClient(discord.Client):
         logger.info("Application slash commands and persistent views synced.")
 
     def is_authorized(self, user_id: int, channel_id: int) -> bool:
-        """Check if user and channel are allowed to issue commands."""
-        if ALLOWED_USER_IDS and user_id not in ALLOWED_USER_IDS:
+        """Check if user and channel are allowed to issue commands.
+
+        Safe default: an empty ALLOWED_USER_IDS means NO user is authorized.
+        """
+        if not ALLOWED_USER_IDS:
+            return False
+        if user_id not in ALLOWED_USER_IDS:
             return False
         if ALLOWED_CHANNEL_IDS and channel_id not in ALLOWED_CHANNEL_IDS:
             return False
@@ -448,7 +570,7 @@ async def on_ready():
     if ALLOWED_USER_IDS:
         logger.info(f"Authorized User IDs: {ALLOWED_USER_IDS}")
     else:
-        logger.warning("No ALLOWED_USER_IDS set. Anyone in invited channels can control Antigravity!")
+        logger.warning("ALLOWED_USER_IDS is empty: NO user is authorized (safe default deny-all).")
 
     # Optionally notify startup message with system metrics to configured channels
     embed = discord.Embed(
@@ -695,6 +817,11 @@ async def cmd_chrome(interaction: discord.Interaction, url: Optional[str] = "htt
         return
 
     target_url = url.strip() if url else "http://localhost:5000"
+    if not is_chrome_url_allowed(target_url):
+        await interaction.response.send_message(
+            "❌ URL がブロックリストに抵触するか、http/https ではありません。", ephemeral=True
+        )
+        return
     success, message = await asyncio.to_thread(launch_chrome_browser, target_url)
     if success:
         await interaction.response.send_message(f"🌐 {message}")
@@ -902,8 +1029,9 @@ async def execute_agy_prompt(
         await channel.send("🛑 Task was cancelled.")
         return
     except Exception as e:
-        logger.error(f"Error running agy: {e}", exc_info=True)
-        accumulated_text = f"❌ Internal Exception: {e}"
+        err_id = make_error_id()
+        logger.error(f"Error running agy [error_id={err_id}]: {e}", exc_info=True)
+        accumulated_text = f"❌ Internal error (error_id={err_id}). 詳細はサーバーログを参照してください。"
     finally:
         client.unregister_task(channel_id, task_id)
 
@@ -962,6 +1090,9 @@ async def on_message(message: discord.Message):
             if not client.is_authorized(message.author.id, message.channel.id):
                 await message.reply("❌ Unauthorized: You do not have permission to control Antigravity.")
                 return
+            if not rate_limit_check(message.author.id):
+                await message.reply("⚠️ レート制限に達しました。しばらく経ってから再度お試しください。")
+                return
 
             if cmd_name == "status":
                 metrics = await asyncio.to_thread(get_system_metrics)
@@ -994,6 +1125,11 @@ async def on_message(message: discord.Message):
 
             elif cmd_name == "chrome":
                 target_url = cmd_arg.strip() if cmd_arg else "http://localhost:5000"
+                if not is_chrome_url_allowed(target_url):
+                    await message.reply(
+                        "❌ URL がブロックリストに抵触するか、http/https ではありません。"
+                    )
+                    return
                 success, msg = await asyncio.to_thread(launch_chrome_browser, target_url)
                 if success:
                     await message.reply(f"🌐 {msg}")
@@ -1004,6 +1140,9 @@ async def on_message(message: discord.Message):
             elif cmd_name == "chat":
                 if not cmd_arg:
                     await message.reply("⚠️ Please provide a prompt. Usage: `!chat <prompt>`")
+                    return
+                if len(cmd_arg) > MAX_PROMPT_LEN:
+                    await message.reply(f"⚠️ プロンプトが長すぎます（{MAX_PROMPT_LEN} 文字まで）。")
                     return
                 # Non-blocking parallel execution
                 asyncio.create_task(execute_agy_prompt(message.channel, cmd_arg, message.author, reply_to_msg=message))
@@ -1134,6 +1273,10 @@ async def on_message(message: discord.Message):
         )
         return
 
+    if len(prompt) > MAX_PROMPT_LEN:
+        await message.reply(f"⚠️ プロンプトが長すぎます（{MAX_PROMPT_LEN} 文字まで）。")
+        return
+
     # Non-blocking parallel execution
     asyncio.create_task(execute_agy_prompt(message.channel, prompt, message.author, reply_to_msg=message))
 
@@ -1158,8 +1301,19 @@ def main():
         print("=" * 60 + "\n")
         sys.exit(1)
 
-    print("Starting Discord Remote Bridge for Antigravity (Workspace: simulation/v3)...")
-    client.run(DISCORD_BOT_TOKEN)
+    if not acquire_instance_lock():
+        print(
+            f"ERROR: Another Discord Bridge instance is already holding the "
+            f"instance lock on port {_INSTANCE_LOCK_PORT}. Refusing to start.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    try:
+        print("Starting Discord Remote Bridge for Antigravity (Workspace: simulation/v3)...")
+        client.run(DISCORD_BOT_TOKEN)
+    finally:
+        release_instance_lock()
 
 
 if __name__ == "__main__":

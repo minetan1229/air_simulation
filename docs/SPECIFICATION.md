@@ -219,6 +219,12 @@ uniform として紙シェーダに渡し、翼端で $\mathrm{elastic}^2$ に�
 6. **Sutherland (1893)**: 気体の動粘性係数の温度依存性式。
 7. **AeroSandbox (Bremwand et al.)**: 6DoF 飛行力学および微小擾乱安定微係数の定式化。
 
+### 5.1 把持フィルタ閾値の根拠（G9-1、補足）
+
+`physics/origami_genome.py` の `GripThresholds` 既定（最低高さ 8 mm / 前後長 30 mm / 最小 2 層 / CG 許容 15 mm / グリップ半幅 12 mm）は、成人指の把持を模した**動的見積もり**である。人体工学・人体計測の出典は**未取得**（§5 の文献レジストリに該当する論文・番号なし）であり、閾値は推定値のまま据え置く。出典のない係数を新たに作成しない（AGENTS.md §1.2 / 1.5）。
+
+**再オープン条件**: 成人指幅・ピンチ接触幅・把持可能スラブ深さ等を記した公開文献を入手し、その値に `min_grip_height_m` / `min_grip_length_m` を合わせた上で、当節に論文名・番号を記載する。出典が無いままの数値変更は行わない。すべての閾値はコンストラクタおよび API から変更可能。
+
 ---
 
 ## 6. 監査課題解決履歴 (Audit Resolutions)
@@ -253,7 +259,7 @@ uniform として紙シェーダに渡し、翼端で $\mathrm{elastic}^2$ に�
 │   └── skills/                # 定型作業手順 (loop-handover.md など)
 ├── docs/                      # 設計書・学術調査・詳細仕様
 │   ├── SPECIFICATION.md       # 本仕様書 (詳細物理モデル・API・セキュリティ)
-│   └── research/              # 航空力学・紙飛行機論文調査レポート (20件)
+│   └── discord-bridge.md      # Discord リモートブリッジ仕様
 ├── api/                       # 分割された REST API パッケージ
 │   ├── __init__.py
 │   ├── core.py                # Session 状態・共通ヘルパー・エラー応答 (トレースバック秘匿)
@@ -262,7 +268,15 @@ uniform として紙シェーダに渡し、翼端で $\mathrm{elastic}^2$ に�
 ├── tests/                     # 総合テストスイート (700+ テスト)
 ├── tools/                     # 開発・運用・検証用ツール群 (notify_discord, discord_bridge 等)
 ├── templates/index.html       # Google Clean UI コンソール
-└── static/                    # Three.js 3D ビューア & UI スクリプト群
+├── static/                    # Three.js 3D ビューア & UI スクリプト群
+├── requirements.txt           # 実行時依存 (CPU 既定、gpu / bridge は extras)
+├── pyproject.toml             # プロジェクトメタデータ・オプション依存
+├── setup.sh                   # 環境ブートストラップスクリプト
+├── app.py                     # Flask アプリケーション エントリポイント
+├── smoke_test.py              # エンドツーエンドスモークテスト (14 ステージ)
+├── config/                    # 遺伝的調査設定 (genetic_research.yaml 等)
+├── no-finish.md               # 残課題台帳
+└── README.md                  # プロジェクト概要
 ```
 
 ---

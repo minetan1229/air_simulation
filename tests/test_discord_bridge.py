@@ -34,10 +34,47 @@ class TestDiscordBridge(unittest.TestCase):
         self.assertIn("claude-opus-4-6-thinking", AVAILABLE_MODELS)
 
     def test_authorization_logic_empty(self):
-        # When ALLOWED_USER_IDS is empty, any user is allowed
+        # When ALLOWED_USER_IDS is empty, NO user is authorized (safe default deny-all)
         with patch("tools.discord_bridge.ALLOWED_USER_IDS", set()), \
              patch("tools.discord_bridge.ALLOWED_CHANNEL_IDS", set()):
-            self.assertTrue(self.client.is_authorized(12345, 67890))
+            self.assertFalse(self.client.is_authorized(12345, 67890))
+
+    def test_authorization_logic_empty_denies_channel_only(self):
+        # Empty user allowlist denies even when channel allowlist is set
+        with patch("tools.discord_bridge.ALLOWED_USER_IDS", set()), \
+             patch("tools.discord_bridge.ALLOWED_CHANNEL_IDS", {888}):
+            self.assertFalse(self.client.is_authorized(111, 888))
+
+    def test_rate_limit_allows_burst_then_denies(self):
+        from tools.discord_bridge import rate_limit_check
+        with patch("tools.discord_bridge.RATE_LIMIT_MAX_COMMANDS", 3), \
+             patch("tools.discord_bridge._user_command_times", {}):
+            self.assertTrue(rate_limit_check(1))
+            self.assertTrue(rate_limit_check(1))
+            self.assertTrue(rate_limit_check(1))
+            self.assertFalse(rate_limit_check(1))
+            self.assertFalse(rate_limit_check(1))
+
+    def test_rate_limit_window_expires(self):
+        from tools.discord_bridge import rate_limit_check
+        with patch("tools.discord_bridge.RATE_LIMIT_MAX_COMMANDS", 1), \
+             patch("tools.discord_bridge.RATE_LIMIT_WINDOW_SECONDS", 0.01), \
+             patch("tools.discord_bridge._user_command_times", {}), \
+             patch("tools.discord_bridge.time.time", side_effect=[0.0, 0.0, 0.02]):
+            self.assertTrue(rate_limit_check(1))
+            self.assertFalse(rate_limit_check(1))
+            self.assertTrue(rate_limit_check(1))
+
+    def test_chrome_url_validation(self):
+        from tools.discord_bridge import is_chrome_url_allowed
+        self.assertTrue(is_chrome_url_allowed("http://localhost:5000"))
+        self.assertTrue(is_chrome_url_allowed("https://example.com/page"))
+        self.assertFalse(is_chrome_url_allowed("ftp://example.com"))
+        self.assertFalse(is_chrome_url_allowed("http://127.0.0.1/evil"))
+        self.assertFalse(is_chrome_url_allowed("http://10.0.0.1/evil"))
+        self.assertFalse(is_chrome_url_allowed("http://169.254.169.254/meta"))
+        self.assertFalse(is_chrome_url_allowed("http://metadata.google.internal/x"))
+        self.assertFalse(is_chrome_url_allowed("not-a-url"))
 
     def test_authorization_logic_restricted_user(self):
         # When ALLOWED_USER_IDS is set, only authorized user is allowed
@@ -47,11 +84,12 @@ class TestDiscordBridge(unittest.TestCase):
             self.assertFalse(self.client.is_authorized(333, 999))
 
     def test_authorization_logic_restricted_channel(self):
-        # When ALLOWED_CHANNEL_IDS is set, only authorized channel is allowed
-        with patch("tools.discord_bridge.ALLOWED_USER_IDS", set()), \
+        # When ALLOWED_USER_IDS is set and channel allowlist is set, only authorized user+channel allowed
+        with patch("tools.discord_bridge.ALLOWED_USER_IDS", {111}), \
              patch("tools.discord_bridge.ALLOWED_CHANNEL_IDS", {888}):
             self.assertTrue(self.client.is_authorized(111, 888))
-            self.assertFalse(self.client.is_authorized(111, 999))
+            self.assertFalse(self.client.is_authorized(111, 999))  # wrong channel
+            self.assertFalse(self.client.is_authorized(333, 888))  # wrong user
 
     def test_model_switching_per_channel(self):
         channel_a = 1001

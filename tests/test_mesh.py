@@ -1193,3 +1193,19 @@ def test_mesh_security_ssrf_and_path_traversal(tmp_path):
     with pytest.raises(ValueError, match="escapes base directory"):
         parse_gltf(evil_gltf, base_dir=str(tmp_path / "subdir"))
 
+
+def test_mesh_domain_star_import_has_no_undefined_names():
+    """P3-1: ``from physics.mesh_domain import *`` must not raise AttributeError
+    (ruff F822): every name in ``__all__`` must be defined in the module, and
+    the previously-undefined ``PANEL_INCIDENCE_DRAG_K`` / ``paper_sheet_thickness_m``
+    must not be listed."""
+    import importlib
+
+    mod = importlib.import_module("physics.mesh_domain")
+    ns: dict = {}
+    exec("from physics.mesh_domain import *", ns)
+    for name in mod.__all__:
+        assert name in ns, f"{name!r} is in __all__ but undefined"
+    assert "PANEL_INCIDENCE_DRAG_K" not in mod.__all__
+    assert "paper_sheet_thickness_m" not in mod.__all__
+

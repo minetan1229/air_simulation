@@ -18,6 +18,7 @@
 > - 2026-10-21 追記 4: **K2 台帳再統合**（`.agents/Knowledge.md` 80 行化 / `.agents/Project.md` 40 行化）に
 >   際して 2026-10-21 に実測した残課題 **P0-1〜P0-9 / P1**（§4.7 の 4 件を統合し、GA エンジンの審査
 >   P0 4 件と未実装 2 件を追加）を **§4.8** に追加。統合順序は **§9** に反映。
+> - 2026-10-21 追記 5: **K3 台帳（追記のみ）**で 2026-10-21 の再実測結果を **§4.9** に追加（P0-1〜P0-7 / P1 の判定更新。§4.7 / §4.8 と同一系統で、既存行は 1 文字も書き換えていない）。
 
 ---
 
@@ -403,6 +404,28 @@ K2-P0-1 / K2-P0-2 は**再現済み（FAILED）**、K2-P0-3 は **PASS**（解�
 K2-P0-4〜K2-P0-7 は Y2 により作業ツリー上は修正済み（**未コミット**・CI 未確認）、
 K2-P0-8 / K2-P0-9 は**未実装**（コード側対応が要る）である。
 
+
+### 4.9 2026-10-21 K3 再実測で更新した残課題（K3 台帳: P0-1〜P0-7 / P1）
+
+> 出典: K3 指示台帳（2026-10-19 コミット監査＋GA エンジン審査の残件）＋ **2026-10-21 の K3 再実測**。
+> §4.7（`K1-P0-1`〜`K1-P0-3` / `K1-P1`）および §4.8（`K2-P0-1`〜`K2-P0-9` / `K2-P1`）と**同一の不具合系統**であり、
+> 本節は §4.8 の判定を**再実測結果で更新**した優先 ID（`K3-P0-N` ≡ 指示の `P0-N` ≡ §4.8 の `K2-P0-N`）である。
+> 既存行は書き換えず、新規行の追加のみ。事実の正本は `.agents/Knowledge.md`。
+
+| ID | 残課題 | 場所（file:line） | 再現コマンド | 判定・担当 |
+|---|---|---|---|---|
+| **K3-P0-1** | **GPU/バッチ経路と 6DoF 参照経路の数値不一致**。`distance_m` 5.2577409 対 5.2613846（`tests/test_optimizer.py::test_map_evaluate_is_order_preserving`）および 1.9218516 対 1.9239000（`::test_parallel_evaluate_matches_serial_and_reports_progress`）が許容 1e-6 を超過。`tests/test_ga_audit.py::test_the_batch_path_agrees_with_the_canonical_6dof_on_ga_individuals` は `max_stress_pa` 差 1.9e-4 > 許容 1e-6、reference 側が `status='crashed'` になる | `physics/gpu_dynamics.py:547,705,709`（`altitude = -position[:,2] - params.ground_level_m` の AGL 事前減算）/ `physics/wind_domain.py:852`（`heights_agl = P[:,2] - ground_level_m`）/ `physics/flight_sim.py:877`（参照経路の `height = -position[2]`） | `python -m pytest "tests/test_optimizer.py::test_map_evaluate_is_order_preserving" "tests/test_optimizer.py::test_parallel_evaluate_matches_serial_and_reports_progress" "tests/test_ga_audit.py::test_the_batch_path_agrees_with_the_canonical_6dof_on_ga_individuals" -q` | **2026-10-21 K3 再実測: 3 passed**（作業ツリーの未コミット差分で解消）。§4.8 の根因候補「バッチ経路の実効 AGL 502 m」は**再現せず**（`tests/test_wind_height_parity.py` 3 passed＝風サンプルは一致）→ 差分箇所の特定が必要 → 担当 **W9** |
+| **K3-P0-2** | **水平 100 km 境界でのクラッシュ判定が働かない**。境界の 0.034 m 手前（`position_m.x = 99999.9657`）でも `crashed=False` のまま | `tests/test_world_bounds.py::test_simulation_crashes_and_freezes_when_crossing_horizontal_boundary` / 水平リミット判定（`physics/flight_sim.py`） | `python -m pytest "tests/test_world_bounds.py::test_simulation_crashes_and_freezes_when_crossing_horizontal_boundary" -q` | **2026-10-21 K3 再実測: 1 passed**（作業ツリーの未コミット差分で解消・コミット単位では未確認）→ 担当 **W9** |
+| **K3-P0-3** | **GA2 の Stage-0 幾何フィルタが既知設計を偽陽性で不合格にする**。既知設計が `reasons=['paper would tear']` で落ちる | `tests/test_ga2_stages.py::test_the_geometry_filter_accepts_the_known_designs` / `physics/ga2/stage0.py` | `python -m pytest "tests/test_ga2_stages.py::test_the_geometry_filter_accepts_the_known_designs" -q` | **2026-10-21 K3 再実測: 1 passed**。`_segments_overlap()` は**平行判定のみ**で共線性を検査せず、137–185 mm 離れている crease を重なりと誤算していた（hot_spot 9 → 正 5）。`MAX_FOLDS_AT_ONE_SPOT` の masking ではなく**共線性検査の追加**で解消 → 担当 **W10** |
+| **K3-P0-4〜P0-7** | **GA エンジンの審査 P0 4 件**。① 適合度式に出典無しの重み `grip_penalty_weight=0.01` / `max_secondary_weight=0.25` と基準値 `max_ld_ratio: 8.0` / `max_altitude_m: 10.0` ② 公開 payload に `model` / `approximate` / `physics_verification_eligible` / `limitations` が無い ③ **代理経路（`reduced_surrogate`）が「最適機体」として公開され得る** ④ **世代 0 の初期母集団が未評価で feasible 扱い**（−1.0 は INFEASIBLE −1e12 より 1e12 倍高い）。審査 verdict は **REJECT**。設計一致率は 12 一致 / 21 不一致 / 9 未実装 / 5 過剰実装、決定論性は同一シード 2 回で完全一致（合格） | `physics/ga_config.py` / `physics/ga_domain.py::_result_payload` / `api/routes/ga_research.py`（Y1 レポート `Y1_ga_engine_review.md` が正本。修正は `Y2_ga_p0_fixes.md`） | `python -m pytest tests/test_ga_engine.py -q -k "payload or provenance or limitations or surrogate or generation0 or bootstrap"` | **Y2 修正済み（作業ツリー・未コミット・CI 未確認）**。旧重み付きの成果物 `artifacts/ga_audit/**` は現行設定と不整合（引用不可）→ 再生成 or 生成時 config ハッシュの埋め込みが必要 → 担当 **GA 担当** |
+| **K3-P1** | **3 ファイルが 120 s を超えており、タイムアウトなのか単に遅いだけかが未確認** | `tests/test_investigate.py` / `tests/test_issue28_gpu_duration.py` / `tests/test_payload_contract.py` | `python -m pytest tests/test_investigate.py tests/test_issue28_gpu_duration.py tests/test_payload_contract.py -q --durations=10` | **未確認**（K3 は時間予算で未実測。§4.8 の `K2-P1` と同件）→ 担当 **W6** |
+
+**K3 再実測（2026-10-21）の記録**: 上記 5 テストは **5 passed**（264.50 s）。§4.8 が記録した
+「K2-P0-1 / K2-P0-2 は FAILED」は**作業ツリーの未コミット差分（他アクターの進行中修正）により解消**した実測であり、
+コミット単位では未確認。`K2-P0-8`（`wind_tunnel_bench_quaternion` 未実装）・`K2-P0-9`
+（`torque_rate[1] *= 0.10` 残存）は §4.8 のとおり**未実装**。K3 実測では
+`physics/flight_sim.py` に `wind_tunnel_bench_quaternion` が無く、`physics/flight_sim.py:1517` に
+`torque_rate[1] *= 0.10` が残存している。
 
 ## 5. 次のフェーズで着手する順序（推奨）
 

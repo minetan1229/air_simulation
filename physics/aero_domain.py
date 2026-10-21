@@ -134,6 +134,15 @@ AERO_BACKEND: str = "numpy"
 #: Reference Reynolds number of the ``cd0`` correlation.
 RE_REFERENCE: float = 1.0e5
 
+#: Versioned default Reynolds number for the published drag polar.
+#: This is the order-of-magnitude of the best-glide (vertex) condition
+#: (``V approx 2 m/s``), not the cruise operating point (``V approx 8-12 m/s``).
+#: The default is intentionally kept at ``1.0e4`` so the published polar's
+#: numeric contract is stable across versions; callers operating off the vertex
+#: should pass ``reynolds`` explicitly.  Changing this default is a versioned,
+#: next-phase decision (see ``no-finish.md`` section A-6).
+DRAG_POLAR_DEFAULT_REYNOLDS: float = 1.0e4
+
 #: Exponent of the logistic stall blend.  The plain logistic
 #: ``1 / (1 + exp(-k d))`` is numerically indistinguishable from the linear
 #: branch only about 15 deg below the stall, which is not enough to reproduce
@@ -150,7 +159,9 @@ ELEVON_LIFT_PER_DEG: float = 0.020
 ELEVON_MOMENT_PER_DEG: float = 0.030
 #: Mechanical travel limit applied when a trim solution would need an
 #: impossible elevon angle; a clamped solution reports ``trimmed = False``.
-ELEVON_MAX_DEG: float = 180.0
+#: Matches the physical +/-45 deg elevon travel limit (the guard is the
+#: constraint, not the configured trim authority).
+ELEVON_MAX_DEG: float = 45.0
 
 #: Mach number at which the transonic wave-drag increment switches on.
 MACH_TRANSONIC: float = 0.75
@@ -516,7 +527,7 @@ def separated_pressure_drag_coefficient(
 def drag_coefficient(
     alpha_deg: float,
     cfg: AircraftConfig,
-    reynolds: float = 1.0e4,
+    reynolds: float = DRAG_POLAR_DEFAULT_REYNOLDS,
     ground_height_m: Optional[float] = None,
     mach: float = 0.0,
     compressible: bool = True,
@@ -527,6 +538,11 @@ def drag_coefficient(
     ``ground_height_m=None`` evaluates the free-air polar; a height attenuates
     the **induced** part only, because a ground effect does not change the
     profile drag.
+
+    ``reynolds`` defaults to the versioned :data:`DRAG_POLAR_DEFAULT_REYNOLDS`
+    (the vertex/best-glide condition).  Callers operating off that point should
+    pass ``reynolds`` explicitly; the default is intentionally fixed so the
+    published polar's numeric contract is stable across versions.
     """
     te_fold = trailing_edge_fold_effects(cfg)
     cl = lift_coefficient(alpha_deg, cfg, compressible=compressible, mach=mach, cl_offset=cl_offset)
@@ -614,7 +630,7 @@ def trailing_edge_fold_effects(cfg: AircraftConfig) -> Dict[str, float]:
 # --------------------------------------------------------------------------
 def drag_polar_minima(
     cfg: AircraftConfig,
-    reynolds: float = 1.0e4,
+    reynolds: float = DRAG_POLAR_DEFAULT_REYNOLDS,
     cl_zero_lift: Optional[float] = None,
     slope_per_rad: Optional[float] = None,
 ) -> Dict[str, float]:
@@ -654,7 +670,7 @@ def drag_polar(
     alpha_min_deg: float = -8.0,
     alpha_max_deg: float = 20.0,
     points: int = 57,
-    reynolds: float = 1.0e4,
+    reynolds: float = DRAG_POLAR_DEFAULT_REYNOLDS,
 ) -> Dict[str, Any]:
     """Sweep the free-air drag polar over ``[alpha_min_deg, alpha_max_deg]``.
 
@@ -968,6 +984,9 @@ def evaluate_aero(
     # batch agree on the lift, the drag and the moments of the *same*
     # airframe instead of evaluating two look-alike models.
     params = aero_kernel.params_from_config(cfg, env)
+    # §A-4: expose whether lift_scale / drag_scale are actively calibrating the
+    # forces (non-neutral values must be visible in the response payload).
+    calibration_active = bool(params.lift_scale != 1.0 or params.drag_scale != 1.0)
     p_rate, q_rate, r_rate = (float(component) for component in vec3(angular_rate))
     coefficients = aero_kernel.evaluate_coefficients(
         _SCALAR,
@@ -1056,6 +1075,7 @@ def evaluate_aero(
         cp_x_m=float(cp_x),
         aeroelastic_dihedral_deg=float(aeroelastic_dihedral),
         aeroelastic_twist_deg=float(aeroelastic_twist),
+        calibration_active=calibration_active,
     )
 
 

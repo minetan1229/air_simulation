@@ -106,12 +106,28 @@ The screen flies the population in one batch.  Three rules apply:
   than the eager loop, because a step is about forty kernel launches and the
   launch overhead dominates the arithmetic.
 
-The graph capture needed three changes in the shared kernel
-(`physics/gpu_dynamics.py`): the identity quaternion is built on the device
-(a host side array would be an implicit copy, and a copy is forbidden during
-a capture), and the rotation of a vector is written out element by element
-instead of with `einsum` (CuPy lowers `einsum` to cuBLAS, and a cuBLAS call
-cannot be captured).  Both changes keep the numbers identical.
+The graph capture needed three things:
+
+* **no host to device copy inside the capture** - the identity quaternion of
+  `physics/gpu_dynamics.py` is built on the device now (a host side array
+  would be an implicit copy, and a copy is forbidden during a capture).  The
+  numbers are unchanged.
+* **no cuBLAS call inside the capture** - CuPy lowers `einsum`, `matmul`
+  and `tensordot` to cuBLAS, and a cuBLAS call cannot be captured.  The
+  *shared* kernel is **not** changed: the rotation of the capture is
+  contracted element by element instead, and the two forms differ by at most
+  one unit in the last place.  The chaotic 4g dart of the project
+  amplifies that difference into the existing parity tests, so the shared
+  physics wins over the speed: the elementwise form is used by the captured
+  graph alone, and the ranking of the search is decided by the reference
+  re-flight of the survivors, which uses the shared kernel.
+* **the relaxed capture mode** - `begin_capture(mode=2)` is the mode that
+  tolerates the asynchronous copies CuPy emits.
+
+Every accumulator of the step is updated **in place**.  A graph replays the
+kernels it captured, so a summary that was bound to a new array inside the
+step would only ever hold the value of the capture: the distance of a flight
+would be the distance of one step.
 
 The screen reports the coverage of the flight: the folded airframes are
 stiff, so the adaptive step of the reference integrator is small and a

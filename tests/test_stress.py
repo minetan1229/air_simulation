@@ -24,7 +24,7 @@ import numpy as np
 import pytest
 
 from physics.config_schema import AircraftConfig, EnvironmentConfig, clamp
-from physics import stress_domain as sd
+from physics import stress_domain as sd, mesh_domain as md
 
 # --------------------------------------------------------------------------
 # fixtures / helpers
@@ -461,14 +461,13 @@ def test_peak_stress_is_linear_in_load_factor(cfg):
 # ==========================================================================
 # 10. dihedral: outboard shift, roll couple and left/right asymmetry
 # ==========================================================================
-def test_dihedral_increases_left_right_asymmetry(cfg):
-    metrics = []
+def test_dihedral_preserves_left_right_symmetry(cfg):
+    # Dihedral tilts both wings equally, so in symmetric flight (beta = 0) it
+    # bends both wingtips by the same amount and must not create a port/starboard
+    # load split.  The former y_signed dependence broke this symmetry.
     for degrees in (0.0, 1.0, 2.0, 5.0, 10.0, 20.0, 30.0):
         out = sd.stress_field(replace(cfg, dihedral_deg=degrees), 88.2, 1.0)
-        metrics.append(_left_right_asymmetry(out))
-    assert metrics[0] < 1.0e-12  # zero dihedral -> perfectly symmetric field
-    for previous, current in zip(metrics, metrics[1:]):
-        assert current > previous
+        assert _left_right_asymmetry(out) < 1.0e-9
 
 
 def test_dihedral_is_antisymmetric_in_sign_but_opposed_in_roll_moment(cfg):
@@ -841,8 +840,49 @@ def test_uniform_cantilever_root_stress_matches_si_section_modulus(cfg):
     assert field["wing_root_moment_nm"] == pytest.approx(moment, rel=1e-12)
     assert field["max_stress_pa"] == pytest.approx(expected, rel=1e-12)
     grid = np.array(field["stress_pa"])
-    assert np.all(grid[:, [0,-1]] == 0.0)
+    assert np.all(grid[:, [0, -1]] == 0.0)
     assert field["material_model_validated"] is False
+
+
+def test_root_moment_and_peak_stress_share_the_single_tip_gain(cfg):
+    # M-28: the tip-fold moment gain is applied exactly once, so the reported
+    # root moment and the peak stress scale identically (stress-derived moment
+    # == reported moment).  No double application of TIP_MOMENT_GAIN.
+    base = replace(
+        cfg, taper_ratio=1.0, dihedral_deg=0.0, fold_trailing_deg=0.0, elevon_deg=0.0
+    )
+    flat = sd.stress_field(replace(base, fold_tip_deg=0.0), 100.0, 2.0, spanwise=3)
+    folded = sd.stress_field(replace(base, fold_tip_deg=30.0), 100.0, 2.0, spanwise=3)
+    tf = abs(math.sin(math.radians(30.0)))
+    expected = 1.0 + sd.TIP_MOMENT_GAIN * tf
+    assert folded["wing_root_moment_nm"] == pytest.approx(
+        flat["wing_root_moment_nm"] * expected, rel=1e-9
+    )
+    assert folded["max_stress_pa"] == pytest.approx(
+        flat["max_stress_pa"] * expected, rel=1e-9
+    )
+
+
+def test_aeroelastic_compliance_has_physical_units_and_standard_gravity(cfg):
+    # M-32: norm_scale replaced by a physical compliance (deg/Pa) and gravity
+    # comes from the single source of truth config_schema.STANDARD_GRAVITY.
+    assert sd.AEROELASTIC_COMPLIANCE_DEG_PER_PA > 0.0
+    assert sd.STANDARD_GRAVITY == pytest.approx(9.80665)
+    res = sd.aeroelastic_deformations(cfg, dynamic_pressure=100.0, nz=2.0)
+    assert np.all(np.isfinite([res["delta_dihedral_deg"], res["washout_twist_deg"]]))
+
+
+def test_open_mesh_inertia_is_shape_based_not_cone_volume():
+    # M-15: an open (folded-sheet) mesh encloses no usable volume, so its
+    # inertia must come from mesh_domain shape analysis (thin-plate second
+    # moments), never a cone-volume approximation.
+    verts = np.array([[0, 0, 0], [1, 0, 0], [0.5, 1, 0]], float)
+    faces = np.array([[0, 1, 2]], int)
+    metrics = md.compute_metrics(verts, faces, name="open-sheet", paper_gsm=100.0)
+    tensor = np.asarray(metrics.inertia_tensor).reshape(3, 3)
+    assert np.all(np.isfinite(tensor))
+    assert float(np.trace(tensor)) > 0.0  # shape-derived, not a zero/cone placeholder
+    assert tuple(metrics.inertia_tensor) != (0.0,) * 9
 
 
 def test_peak_stress_independent_of_grid(cfg):

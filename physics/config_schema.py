@@ -33,6 +33,7 @@ __all__ = [
     "derived_properties", "default_config_bundle",
     "FLIGHT_LOG_COLUMNS", "MESH_METRIC_KEYS", "OBJECTIVE_DIRECTIONS",
     "AIRCRAFT_SCHEMA", "ENVIRONMENT_SCHEMA", "LAUNCH_SCHEMA",
+    "SIMULATION_SCHEMA",
     "ALGORITHM_NAMES", "DESIGN_VARIABLE_CATALOGUE", "OptimizerDomain",
     "MeshStatus", "ThrowStyle", "THROW_STYLE_CATALOGUE", "throw_style",
     "THROW_SPEED_SOURCES",
@@ -391,64 +392,92 @@ class AircraftConfig:
                 ixz = clamp(ixz, -max_xz, max_xz)
                 iyz = clamp(iyz, -max_yz, max_yz)
 
+        mean_chord = float(self.wing_area_m2) / max(float(self.wingspan_m), 1.0e-6)
+
         return _replace(
             self,
-            mass_kg=clamp(self.mass_kg, 1.0e-4, 1.0),
-            paper_gsm=clamp(self.paper_gsm, 10.0, 600.0),
-            paper_stiffness=clamp(self.paper_stiffness, 0.0, 1.0),
-            sheet_area_m2=clamp(self.sheet_area_m2, 1.0e-4, 2.0),
-            wing_area_m2=clamp(self.wing_area_m2, 1.0e-4, 1.0),
-            wingspan_m=clamp(self.wingspan_m, 0.01, 5.0),
-            taper_ratio=clamp(self.taper_ratio, 0.01, 2.0),
-            dihedral_deg=clamp(self.dihedral_deg, -45.0, 45.0),
-            aspect_ratio=clamp(self.aspect_ratio, 0.0, 30.0),
-            fold_leading_deg=clamp(self.fold_leading_deg, -90.0, 90.0),
-            fold_trailing_deg=clamp(self.fold_trailing_deg, -90.0, 90.0),
-            fold_tip_deg=clamp(self.fold_tip_deg, -90.0, 90.0),
-            fold_center_deg=clamp(self.fold_center_deg, -90.0, 90.0),
-            elevon_deg=clamp(self.elevon_deg, -45.0, 45.0),
-            elevon_chord_ratio=clamp(self.elevon_chord_ratio, 0.01, 0.9),
-            aileron_deg=clamp(self.aileron_deg, -45.0, 45.0),
-            asymmetry_cl=clamp(self.asymmetry_cl, -0.5, 0.5),
-            rudder_deg=clamp(self.rudder_deg, -45.0, 45.0),
-            cL0=clamp(self.cL0, -1.0, 2.0),
-            cd0=clamp(self.cd0, 0.001, 1.0),
-            oswald_e=clamp(self.oswald_e, 0.1, 1.0),
-            cl_max=clamp(self.cl_max, 0.1, 3.0),
-            stall_alpha_deg=clamp(self.stall_alpha_deg, 2.0, 45.0),
-            stall_sharpness=clamp(self.stall_sharpness, 0.1, 10.0),
-            re_cd0_exponent=clamp(self.re_cd0_exponent, 0.0, 1.0),
-            static_margin=clamp(self.static_margin, -1.0, 1.0),
-            cg_offset_x=clamp(self.cg_offset_x, -1.0, 1.0),
-            polhamus_kv=clamp(self.polhamus_kv, 0.0, 5.0),
-            polhamus_kp=clamp(self.polhamus_kp, 0.0, 12.0),
-            step_trip_ratio=clamp(self.step_trip_ratio, 0.0, 0.05),
-            cp_shift_gain=clamp(self.cp_shift_gain, 0.0, 2.0),
-            aeroelastic_flex=clamp(self.aeroelastic_flex, 0.0, 5.0),
-            aeroelastic_twist=clamp(self.aeroelastic_twist, 0.0, 5.0),
-            aeroelastic_compliance=clamp(self.aeroelastic_compliance, 0.0, 5.0),
-            aeroelastic_morph_exponent=clamp(self.aeroelastic_morph_exponent, 0.5, 12.0),
-            aeroelastic_pressure_scale_pa=clamp(self.aeroelastic_pressure_scale_pa, 1.0, 1.0e4),
-            paper_grain_angle_deg=clamp(self.paper_grain_angle_deg, -90.0, 90.0),
-            paper_anisotropy_ratio=clamp(self.paper_anisotropy_ratio, 1.0, 5.0),
+            mass_kg=clamp(self.mass_kg, *AIRCRAFT_RANGES["mass_kg"]),
+            paper_gsm=clamp(self.paper_gsm, *AIRCRAFT_RANGES["paper_gsm"]),
+            paper_stiffness=clamp(self.paper_stiffness, *AIRCRAFT_RANGES["paper_stiffness"]),
+            sheet_area_m2=clamp(self.sheet_area_m2, *AIRCRAFT_RANGES["sheet_area_m2"]),
+            wing_area_m2=clamp(self.wing_area_m2, *AIRCRAFT_RANGES["wing_area_m2"]),
+            wingspan_m=clamp(self.wingspan_m, *AIRCRAFT_RANGES["wingspan_m"]),
+            taper_ratio=clamp(self.taper_ratio, *AIRCRAFT_RANGES["taper_ratio"]),
+            dihedral_deg=clamp(self.dihedral_deg, *AIRCRAFT_RANGES["dihedral_deg"]),
+            aspect_ratio=clamp(self.aspect_ratio, *AIRCRAFT_RANGES["aspect_ratio"]),
+            fold_leading_deg=clamp(self.fold_leading_deg, *AIRCRAFT_RANGES["fold_leading_deg"]),
+            fold_trailing_deg=clamp(self.fold_trailing_deg, *AIRCRAFT_RANGES["fold_trailing_deg"]),
+            fold_tip_deg=clamp(self.fold_tip_deg, *AIRCRAFT_RANGES["fold_tip_deg"]),
+            fold_center_deg=clamp(self.fold_center_deg, *AIRCRAFT_RANGES["fold_center_deg"]),
+            elevon_deg=clamp(self.elevon_deg, *AIRCRAFT_RANGES["elevon_deg"]),
+            elevon_chord_ratio=clamp(self.elevon_chord_ratio, *AIRCRAFT_RANGES["elevon_chord_ratio"]),
+            aileron_deg=clamp(self.aileron_deg, *AIRCRAFT_RANGES["aileron_deg"]),
+            asymmetry_cl=clamp(self.asymmetry_cl, *AIRCRAFT_RANGES["asymmetry_cl"]),
+            rudder_deg=clamp(self.rudder_deg, *AIRCRAFT_RANGES["rudder_deg"]),
+            cL0=clamp(self.cL0, *AIRCRAFT_RANGES["cL0"]),
+            cd0=clamp(self.cd0, *AIRCRAFT_RANGES["cd0"]),
+            oswald_e=clamp(self.oswald_e, *AIRCRAFT_RANGES["oswald_e"]),
+            cl_max=clamp(self.cl_max, *AIRCRAFT_RANGES["cl_max"]),
+            stall_alpha_deg=clamp(self.stall_alpha_deg, *AIRCRAFT_RANGES["stall_alpha_deg"]),
+            stall_sharpness=clamp(self.stall_sharpness, *AIRCRAFT_RANGES["stall_sharpness"]),
+            re_cd0_exponent=clamp(self.re_cd0_exponent, *AIRCRAFT_RANGES["re_cd0_exponent"]),
+            static_margin=clamp(self.static_margin, *AIRCRAFT_RANGES["static_margin"]),
+            cg_offset_x=clamp(self.cg_offset_x, *AIRCRAFT_RANGES["cg_offset_x"]),
+            polhamus_kv=clamp(self.polhamus_kv, *AIRCRAFT_RANGES["polhamus_kv"]),
+            polhamus_kp=clamp(self.polhamus_kp, *AIRCRAFT_RANGES["polhamus_kp"]),
+            step_trip_ratio=clamp(self.step_trip_ratio, *AIRCRAFT_RANGES["step_trip_ratio"]),
+            cp_shift_gain=clamp(self.cp_shift_gain, *AIRCRAFT_RANGES["cp_shift_gain"]),
+            aeroelastic_flex=clamp(self.aeroelastic_flex, *AIRCRAFT_RANGES["aeroelastic_flex"]),
+            aeroelastic_twist=clamp(self.aeroelastic_twist, *AIRCRAFT_RANGES["aeroelastic_twist"]),
+            aeroelastic_compliance=clamp(self.aeroelastic_compliance, *AIRCRAFT_RANGES["aeroelastic_compliance"]),
+            aeroelastic_morph_exponent=clamp(self.aeroelastic_morph_exponent, *AIRCRAFT_RANGES["aeroelastic_morph_exponent"]),
+            aeroelastic_pressure_scale_pa=clamp(self.aeroelastic_pressure_scale_pa, *AIRCRAFT_RANGES["aeroelastic_pressure_scale_pa"]),
+            paper_grain_angle_deg=clamp(self.paper_grain_angle_deg, *AIRCRAFT_RANGES["paper_grain_angle_deg"]),
+            paper_anisotropy_ratio=clamp(self.paper_anisotropy_ratio, *AIRCRAFT_RANGES["paper_anisotropy_ratio"]),
             added_mass_enabled=bool(self.added_mass_enabled),
-            ground_pitch_coupling=clamp(self.ground_pitch_coupling, 0.0, 5.0),
-            ground_cushion_lift=clamp(self.ground_cushion_lift, 0.0, 5.0),
-            cm0=clamp(self.cm0, -1.0, 1.0),
-            cm_alpha=clamp(self.cm_alpha, -10.0, 5.0),
-            cm_q=clamp(self.cm_q, -50.0, 5.0),
-            cy_beta=clamp(self.cy_beta, -5.0, 5.0),
-            cl_beta=clamp(self.cl_beta, -5.0, 5.0),
-            cn_beta=clamp(self.cn_beta, -5.0, 5.0),
-            cl_roll_rate=clamp(self.cl_roll_rate, -10.0, 0.0),
-            cm_roll_rate=clamp(self.cm_roll_rate, -5.0, 5.0),
-            cn_roll_rate=clamp(self.cn_roll_rate, -5.0, 5.0),
-            cl_pitch_rate=clamp(self.cl_pitch_rate, -5.0, 5.0),
-            cm_pitch_rate=clamp(self.cm_pitch_rate, -5.0, 5.0),
-            cn_pitch_rate=clamp(self.cn_pitch_rate, -5.0, 5.0),
-            cl_yaw_rate=clamp(self.cl_yaw_rate, -5.0, 5.0),
-            cm_yaw_rate=clamp(self.cm_yaw_rate, -5.0, 5.0),
-            cn_yaw_rate=clamp(self.cn_yaw_rate, -10.0, 0.0),
+            ground_pitch_coupling=clamp(self.ground_pitch_coupling, *AIRCRAFT_RANGES["ground_pitch_coupling"]),
+            ground_cushion_lift=clamp(self.ground_cushion_lift, *AIRCRAFT_RANGES["ground_cushion_lift"]),
+            cm0=clamp(self.cm0, *AIRCRAFT_RANGES["cm0"]),
+            cm_alpha=clamp(self.cm_alpha, *AIRCRAFT_RANGES["cm_alpha"]),
+            cm_q=clamp(self.cm_q, *AIRCRAFT_RANGES["cm_q"]),
+            cy_beta=clamp(self.cy_beta, *AIRCRAFT_RANGES["cy_beta"]),
+            cl_beta=clamp(self.cl_beta, *AIRCRAFT_RANGES["cl_beta"]),
+            cn_beta=clamp(self.cn_beta, *AIRCRAFT_RANGES["cn_beta"]),
+            cl_roll_rate=clamp(self.cl_roll_rate, *AIRCRAFT_RANGES["cl_roll_rate"]),
+            cm_roll_rate=clamp(self.cm_roll_rate, *AIRCRAFT_RANGES["cm_roll_rate"]),
+            cn_roll_rate=clamp(self.cn_roll_rate, *AIRCRAFT_RANGES["cn_roll_rate"]),
+            cl_pitch_rate=clamp(self.cl_pitch_rate, *AIRCRAFT_RANGES["cl_pitch_rate"]),
+            cm_pitch_rate=clamp(self.cm_pitch_rate, *AIRCRAFT_RANGES["cm_pitch_rate"]),
+            cn_pitch_rate=clamp(self.cn_pitch_rate, *AIRCRAFT_RANGES["cn_pitch_rate"]),
+            cl_yaw_rate=clamp(self.cl_yaw_rate, *AIRCRAFT_RANGES["cl_yaw_rate"]),
+            cm_yaw_rate=clamp(self.cm_yaw_rate, *AIRCRAFT_RANGES["cm_yaw_rate"]),
+            cn_yaw_rate=clamp(self.cn_yaw_rate, *AIRCRAFT_RANGES["cn_yaw_rate"]),
+            shape_flag=int(clamp(float(self.shape_flag), *AIRCRAFT_RANGES["shape_flag"])),
+            post_stall_slope=clamp(self.post_stall_slope, *AIRCRAFT_RANGES["post_stall_slope"]),
+            cLalpha_per_rad=clamp(self.cLalpha_per_rad, *AIRCRAFT_RANGES["cLalpha_per_rad"]),
+            ref_area_m2=(
+                0.0
+                if float(self.ref_area_m2) <= 0.0
+                else clamp(
+                    float(self.ref_area_m2),
+                    0.2 * float(self.wing_area_m2),
+                    3.0 * float(self.wing_area_m2),
+                )
+            ),
+            ref_length_m=(
+                0.0
+                if float(self.ref_length_m) <= 0.0
+                else clamp(float(self.ref_length_m), 0.1 * mean_chord, 5.0 * mean_chord)
+            ),
+            ref_span_m=(
+                0.0
+                if float(self.ref_span_m) <= 0.0
+                else clamp(
+                    float(self.ref_span_m),
+                    0.5 * float(self.wingspan_m),
+                    2.0 * float(self.wingspan_m),
+                )
+            ),
             roll_inertia_kgm2=r,
             pitch_inertia_kgm2=p,
             yaw_inertia_kgm2=y,
@@ -514,39 +543,49 @@ class EnvironmentConfig:
     def clamp_ranges(self) -> "EnvironmentConfig":
         """Return a copy with every scalar forced inside its legal range."""
         return EnvironmentConfig(
-            temperature_K=clamp(self.temperature_K, 180.0, 400.0),
-            pressure_Pa=clamp(self.pressure_Pa, 1.0e3, 3.0e5),
-            humidity_rel=clamp(self.humidity_rel, 0.0, 1.0),
+            temperature_K=clamp(self.temperature_K, *ENVIRONMENT_RANGES["temperature_K"]),
+            pressure_Pa=clamp(self.pressure_Pa, *ENVIRONMENT_RANGES["pressure_Pa"]),
+            humidity_rel=clamp(self.humidity_rel, *ENVIRONMENT_RANGES["humidity_rel"]),
             isa_mode=bool(self.isa_mode),
-            altitude_m=clamp(self.altitude_m, -500.0, 20000.0),
-            sea_level_temperature_K=clamp(self.sea_level_temperature_K, 180.0, 340.0),
-            sea_level_pressure_Pa=clamp(self.sea_level_pressure_Pa, 1.0e3, 3.0e5),
-            lapse_rate_K_per_m=clamp(self.lapse_rate_K_per_m, -0.02, 0.02),
-            wind_speed=clamp(self.wind_speed, 0.0, 120.0),
-            wind_direction_deg=clamp(self.wind_direction_deg, 0.0, 360.0),
-            gust_intensity=clamp(self.gust_intensity, 0.0, 1.0),
-            thermal_strength=clamp(self.thermal_strength, 0.0, 25.0),
-            turbulence_scale=clamp(self.turbulence_scale, 0.0, 5.0),
+            altitude_m=clamp(self.altitude_m, *ENVIRONMENT_RANGES["altitude_m"]),
+            sea_level_temperature_K=clamp(
+                self.sea_level_temperature_K, *ENVIRONMENT_RANGES["sea_level_temperature_K"]
+            ),
+            sea_level_pressure_Pa=clamp(
+                self.sea_level_pressure_Pa, *ENVIRONMENT_RANGES["sea_level_pressure_Pa"]
+            ),
+            lapse_rate_K_per_m=clamp(self.lapse_rate_K_per_m, *ENVIRONMENT_RANGES["lapse_rate_K_per_m"]),
+            wind_speed=clamp(self.wind_speed, *ENVIRONMENT_RANGES["wind_speed"]),
+            wind_direction_deg=clamp(self.wind_direction_deg, *ENVIRONMENT_RANGES["wind_direction_deg"]),
+            gust_intensity=clamp(self.gust_intensity, *ENVIRONMENT_RANGES["gust_intensity"]),
+            thermal_strength=clamp(self.thermal_strength, *ENVIRONMENT_RANGES["thermal_strength"]),
+            turbulence_scale=clamp(self.turbulence_scale, *ENVIRONMENT_RANGES["turbulence_scale"]),
             turbulence_seed=int(self.turbulence_seed),
             boundary_layer_enabled=bool(self.boundary_layer_enabled),
-            surface_roughness_m=clamp(self.surface_roughness_m, 1.0e-6, 1.0),
-            reference_height_m=clamp(self.reference_height_m, 0.01, 100.0),
+            surface_roughness_m=clamp(self.surface_roughness_m, *ENVIRONMENT_RANGES["surface_roughness_m"]),
+            reference_height_m=clamp(self.reference_height_m, *ENVIRONMENT_RANGES["reference_height_m"]),
             ground_level_m=float(self.ground_level_m),
-            gravity=clamp(self.gravity, 0.1, 50.0),
-            ground_friction=clamp(self.ground_friction, 0.0, 2.0),
-            drag_scale=clamp(self.drag_scale, 0.0, 5.0),
-            lift_scale=clamp(self.lift_scale, 0.0, 5.0),
+            gravity=clamp(self.gravity, *ENVIRONMENT_RANGES["gravity"]),
+            ground_friction=clamp(self.ground_friction, *ENVIRONMENT_RANGES["ground_friction"]),
+            drag_scale=clamp(self.drag_scale, *ENVIRONMENT_RANGES["drag_scale"]),
+            lift_scale=clamp(self.lift_scale, *ENVIRONMENT_RANGES["lift_scale"]),
             ground_effect_enabled=bool(self.ground_effect_enabled),
             compressibility_enabled=bool(self.compressibility_enabled),
             wind_tunnel_enabled=bool(self.wind_tunnel_enabled),
-            wind_tunnel_speed=clamp(self.wind_tunnel_speed, 0.0, 200.0),
-            wind_tunnel_alpha_deg=clamp(self.wind_tunnel_alpha_deg, -90.0, 90.0),
-            wind_tunnel_blockage=clamp(self.wind_tunnel_blockage, 0.5, 2.0),
-            wind_tunnel_turbulence_intensity=clamp(self.wind_tunnel_turbulence_intensity, 0.0, 0.5),
-            wind_tunnel_radius_m=clamp(self.wind_tunnel_radius_m, 0.1, 50.0),
-            wind_tunnel_wall_thickness_m=clamp(self.wind_tunnel_wall_thickness_m, 1.0e-3, 5.0),
+            wind_tunnel_speed=clamp(self.wind_tunnel_speed, *ENVIRONMENT_RANGES["wind_tunnel_speed"]),
+            wind_tunnel_alpha_deg=clamp(self.wind_tunnel_alpha_deg, *ENVIRONMENT_RANGES["wind_tunnel_alpha_deg"]),
+            wind_tunnel_blockage=clamp(self.wind_tunnel_blockage, *ENVIRONMENT_RANGES["wind_tunnel_blockage"]),
+            wind_tunnel_turbulence_intensity=clamp(
+                self.wind_tunnel_turbulence_intensity,
+                *ENVIRONMENT_RANGES["wind_tunnel_turbulence_intensity"],
+            ),
+            wind_tunnel_radius_m=clamp(self.wind_tunnel_radius_m, *ENVIRONMENT_RANGES["wind_tunnel_radius_m"]),
+            wind_tunnel_wall_thickness_m=clamp(
+                self.wind_tunnel_wall_thickness_m,
+                *ENVIRONMENT_RANGES["wind_tunnel_wall_thickness_m"],
+            ),
             wind_tunnel_boundary_correction=bool(self.wind_tunnel_boundary_correction),
-            wind_tunnel_beta_deg=clamp(self.wind_tunnel_beta_deg, -90.0, 90.0),
+            wind_tunnel_beta_deg=clamp(self.wind_tunnel_beta_deg, *ENVIRONMENT_RANGES["wind_tunnel_beta_deg"]),
         )
 
 
@@ -921,33 +960,40 @@ class LaunchConfig:
         """Return a copy with every throw/launch scalar forced into range."""
         from dataclasses import replace as _replace
 
+        allowed_throw_styles = {style.key for style in THROW_STYLE_CATALOGUE}
+        if str(self.throw_style) not in allowed_throw_styles:
+            raise ValueError(
+                f"unknown throw_style '{self.throw_style}'; "
+                f"expected one of {', '.join(sorted(allowed_throw_styles))}"
+            )
+
         return _replace(
             self,
-            launch_speed=clamp(self.launch_speed, 0.0, 150.0),
-            launch_angle_deg=clamp(self.launch_angle_deg, -89.0, 89.0),
-            launch_roll_deg=clamp(self.launch_roll_deg, -180.0, 180.0),
-            launch_yaw_deg=clamp(self.launch_yaw_deg, -360.0, 360.0),
-            launch_height_m=clamp(self.launch_height_m, 0.0, 200.0),
+            launch_speed=clamp(self.launch_speed, *LAUNCH_RANGES["launch_speed"]),
+            launch_angle_deg=clamp(self.launch_angle_deg, *LAUNCH_RANGES["launch_angle_deg"]),
+            launch_roll_deg=clamp(self.launch_roll_deg, *LAUNCH_RANGES["launch_roll_deg"]),
+            launch_yaw_deg=clamp(self.launch_yaw_deg, *LAUNCH_RANGES["launch_yaw_deg"]),
+            launch_height_m=clamp(self.launch_height_m, *LAUNCH_RANGES["launch_height_m"]),
             throw_speed_source=(
                 self.throw_speed_source
                 if self.throw_speed_source in THROW_SPEED_SOURCES
                 else "direct"
             ),
-            throw_force_n=clamp(self.throw_force_n, 0.0, 5.0),
-            throw_duration_s=clamp(self.throw_duration_s, 0.005, 1.0),
-            throw_force_pitch_deg=clamp(self.throw_force_pitch_deg, -90.0, 90.0),
-            throw_force_yaw_deg=clamp(self.throw_force_yaw_deg, -90.0, 90.0),
-            throw_grip_x=clamp(self.throw_grip_x, -1.0, 1.0),
-            throw_grip_y=clamp(self.throw_grip_y, -1.0, 1.0),
-            throw_grip_z=clamp(self.throw_grip_z, -0.5, 0.5),
-            throw_torque_efficiency=clamp(self.throw_torque_efficiency, 0.0, 1.0),
-            throw_runup_m=clamp(self.throw_runup_m, 0.0, 3.04),
-            throw_wrist_spin_radps=clamp(self.throw_wrist_spin_radps, -60.0, 60.0),
-            throw_pitch_rate_radps=clamp(self.throw_pitch_rate_radps, -12.0, 12.0),
-            throw_yaw_rate_radps=clamp(self.throw_yaw_rate_radps, -20.0, 20.0),
-            release_pitch_deg=clamp(self.release_pitch_deg, -90.0, 90.0),
-            release_yaw_deg=clamp(self.release_yaw_deg, -90.0, 90.0),
-            release_roll_deg=clamp(self.release_roll_deg, -180.0, 180.0),
+            throw_force_n=clamp(self.throw_force_n, *LAUNCH_RANGES["throw_force_n"]),
+            throw_duration_s=clamp(self.throw_duration_s, *LAUNCH_RANGES["throw_duration_s"]),
+            throw_force_pitch_deg=clamp(self.throw_force_pitch_deg, *LAUNCH_RANGES["throw_force_pitch_deg"]),
+            throw_force_yaw_deg=clamp(self.throw_force_yaw_deg, *LAUNCH_RANGES["throw_force_yaw_deg"]),
+            throw_grip_x=clamp(self.throw_grip_x, *LAUNCH_RANGES["throw_grip_x"]),
+            throw_grip_y=clamp(self.throw_grip_y, *LAUNCH_RANGES["throw_grip_y"]),
+            throw_grip_z=clamp(self.throw_grip_z, *LAUNCH_RANGES["throw_grip_z"]),
+            throw_torque_efficiency=clamp(self.throw_torque_efficiency, *LAUNCH_RANGES["throw_torque_efficiency"]),
+            throw_runup_m=clamp(self.throw_runup_m, *LAUNCH_RANGES["throw_runup_m"]),
+            throw_wrist_spin_radps=clamp(self.throw_wrist_spin_radps, *LAUNCH_RANGES["throw_wrist_spin_radps"]),
+            throw_pitch_rate_radps=clamp(self.throw_pitch_rate_radps, *LAUNCH_RANGES["throw_pitch_rate_radps"]),
+            throw_yaw_rate_radps=clamp(self.throw_yaw_rate_radps, *LAUNCH_RANGES["throw_yaw_rate_radps"]),
+            release_pitch_deg=clamp(self.release_pitch_deg, *LAUNCH_RANGES["release_pitch_deg"]),
+            release_yaw_deg=clamp(self.release_yaw_deg, *LAUNCH_RANGES["release_yaw_deg"]),
+            release_roll_deg=clamp(self.release_roll_deg, *LAUNCH_RANGES["release_roll_deg"]),
         )
 
     @property
@@ -984,22 +1030,22 @@ class SimulationSettings:
         """Return a copy with simulation parameters constrained to safe numerical limits."""
         from dataclasses import replace as _replace
 
-        dt_min = clamp(self.dt_min, 1.0e-7, 0.1)
-        dt_max = clamp(self.dt_max, dt_min, 1.0)
+        dt_min = clamp(self.dt_min, *SIMULATION_RANGES["dt_min"])
+        dt_max = clamp(self.dt_max, dt_min, SIMULATION_RANGES["dt_max"][1])
         return _replace(
             self,
             dt_min=dt_min,
             dt_max=dt_max,
-            max_substeps=int(clamp(self.max_substeps, 1, 1024)),
-            duration_s=clamp(self.duration_s, 0.1, 600.0),
-            ring_buffer_capacity=int(clamp(self.ring_buffer_capacity, 10, 100000)),
-            record_interval_s=clamp(self.record_interval_s, 1.0e-4, 1.0),
-            time_scale=clamp(self.time_scale, 0.01, 100.0),
+            max_substeps=int(clamp(self.max_substeps, *SIMULATION_RANGES["max_substeps"])),
+            duration_s=clamp(self.duration_s, *SIMULATION_RANGES["duration_s"]),
+            ring_buffer_capacity=int(clamp(self.ring_buffer_capacity, *SIMULATION_RANGES["ring_buffer_capacity"])),
+            record_interval_s=clamp(self.record_interval_s, *SIMULATION_RANGES["record_interval_s"]),
+            time_scale=clamp(self.time_scale, *SIMULATION_RANGES["time_scale"]),
             adaptive=bool(self.adaptive),
             collision_enabled=bool(self.collision_enabled),
-            restitution=clamp(self.restitution, 0.0, 1.0),
-            tip_restitution=clamp(self.tip_restitution, -1.0, 1.0),
-            ground_crush_stroke_m=clamp(self.ground_crush_stroke_m, 1.0e-4, 1.0),
+            restitution=clamp(self.restitution, *SIMULATION_RANGES["restitution"]),
+            tip_restitution=clamp(self.tip_restitution, *SIMULATION_RANGES["tip_restitution"]),
+            ground_crush_stroke_m=clamp(self.ground_crush_stroke_m, *SIMULATION_RANGES["ground_crush_stroke_m"]),
         )
 
 
@@ -1068,6 +1114,7 @@ class AeroResult:
     cp_x_m: float = 0.0
     aeroelastic_dihedral_deg: float = 0.0
     aeroelastic_twist_deg: float = 0.0
+    calibration_active: bool = False
 
 
 # --------------------------------------------------------------------------
@@ -1456,12 +1503,142 @@ def _field_entry(spec, default) -> Dict[str, Any]:
     return entry
 
 
+#: Canonical clamp bounds shared by :meth:`AircraftConfig.clamp_ranges` and the
+#: ``ranges`` served by ``GET /api/v1/meta/schemas``.  Keeping them in one place
+#: guarantees the server contract and the UI sliders can never diverge.
+AIRCRAFT_RANGES: Dict[str, Tuple[float, float]] = {
+    "mass_kg": (1.0e-4, 1.0),
+    "paper_gsm": (10.0, 600.0),
+    "paper_stiffness": (0.0, 1.0),
+    "sheet_area_m2": (1.0e-4, 2.0),
+    "wing_area_m2": (1.0e-4, 1.0),
+    "wingspan_m": (0.01, 5.0),
+    "taper_ratio": (0.01, 2.0),
+    "dihedral_deg": (-45.0, 45.0),
+    "aspect_ratio": (0.0, 30.0),
+    "fold_leading_deg": (-90.0, 90.0),
+    "fold_trailing_deg": (-90.0, 90.0),
+    "fold_tip_deg": (-90.0, 90.0),
+    "fold_center_deg": (-90.0, 90.0),
+    "elevon_deg": (-45.0, 45.0),
+    "elevon_chord_ratio": (0.01, 0.9),
+    "aileron_deg": (-45.0, 45.0),
+    "asymmetry_cl": (-0.5, 0.5),
+    "rudder_deg": (-45.0, 45.0),
+    "cL0": (-1.0, 2.0),
+    "cd0": (0.001, 1.0),
+    "oswald_e": (0.1, 1.0),
+    "cl_max": (0.1, 3.0),
+    "stall_alpha_deg": (2.0, 45.0),
+    "stall_sharpness": (0.1, 10.0),
+    "re_cd0_exponent": (0.0, 1.0),
+    "static_margin": (-1.0, 1.0),
+    "cg_offset_x": (-1.0, 1.0),
+    "polhamus_kv": (0.0, 5.0),
+    "polhamus_kp": (0.0, 12.0),
+    "step_trip_ratio": (0.0, 0.05),
+    "cp_shift_gain": (0.0, 2.0),
+    "aeroelastic_flex": (0.0, 5.0),
+    "aeroelastic_twist": (0.0, 5.0),
+    "aeroelastic_compliance": (0.0, 5.0),
+    "aeroelastic_morph_exponent": (0.5, 12.0),
+    "aeroelastic_pressure_scale_pa": (1.0, 1.0e4),
+    "paper_grain_angle_deg": (-90.0, 90.0),
+    "paper_anisotropy_ratio": (1.0, 5.0),
+    "ground_pitch_coupling": (0.0, 5.0),
+    "ground_cushion_lift": (0.0, 5.0),
+    "cm0": (-1.0, 1.0),
+    "cm_alpha": (-10.0, 5.0),
+    "cm_q": (-50.0, 5.0),
+    "cy_beta": (-5.0, 5.0),
+    "cl_beta": (-5.0, 5.0),
+    "cn_beta": (-5.0, 5.0),
+    "cl_roll_rate": (-10.0, 0.0),
+    "cm_roll_rate": (-5.0, 5.0),
+    "cn_roll_rate": (-5.0, 5.0),
+    "cl_pitch_rate": (-5.0, 5.0),
+    "cm_pitch_rate": (-5.0, 5.0),
+    "cn_pitch_rate": (-5.0, 5.0),
+    "cl_yaw_rate": (-5.0, 5.0),
+    "cm_yaw_rate": (-5.0, 5.0),
+    "cn_yaw_rate": (-10.0, 0.0),
+    "shape_flag": (0.0, 2.0),
+    "post_stall_slope": (-0.5, 0.0),
+    "cLalpha_per_rad": (0.0, 12.0),
+}
+
+ENVIRONMENT_RANGES: Dict[str, Tuple[float, float]] = {
+    "temperature_K": (180.0, 400.0),
+    "pressure_Pa": (1.0e3, 3.0e5),
+    "humidity_rel": (0.0, 1.0),
+    "altitude_m": (-500.0, 20000.0),
+    "sea_level_temperature_K": (180.0, 340.0),
+    "sea_level_pressure_Pa": (1.0e3, 3.0e5),
+    "lapse_rate_K_per_m": (-0.02, 0.02),
+    "wind_speed": (0.0, 120.0),
+    "wind_direction_deg": (0.0, 360.0),
+    "gust_intensity": (0.0, 1.0),
+    "thermal_strength": (0.0, 25.0),
+    "turbulence_scale": (0.0, 5.0),
+    "surface_roughness_m": (1.0e-6, 1.0),
+    "reference_height_m": (0.01, 100.0),
+    "gravity": (0.1, 50.0),
+    "ground_friction": (0.0, 2.0),
+    "drag_scale": (0.0, 5.0),
+    "lift_scale": (0.0, 5.0),
+    "wind_tunnel_speed": (0.0, 200.0),
+    "wind_tunnel_alpha_deg": (-90.0, 90.0),
+    "wind_tunnel_blockage": (0.5, 2.0),
+    "wind_tunnel_turbulence_intensity": (0.0, 0.5),
+    "wind_tunnel_radius_m": (0.1, 50.0),
+    "wind_tunnel_wall_thickness_m": (1.0e-3, 5.0),
+    "wind_tunnel_beta_deg": (-90.0, 90.0),
+}
+
+SIMULATION_RANGES: Dict[str, Tuple[float, float]] = {
+    "dt_max": (1.0e-7, 1.0),
+    "dt_min": (1.0e-7, 0.1),
+    "max_substeps": (1.0, 1024.0),
+    "duration_s": (0.1, 600.0),
+    "ring_buffer_capacity": (10.0, 100000.0),
+    "record_interval_s": (1.0e-4, 1.0),
+    "time_scale": (0.01, 100.0),
+    "restitution": (0.0, 1.0),
+    "tip_restitution": (-1.0, 1.0),
+    "ground_crush_stroke_m": (1.0e-4, 1.0),
+}
+
+LAUNCH_RANGES: Dict[str, Tuple[float, float]] = {
+    "launch_speed": (0.0, 150.0),
+    "launch_angle_deg": (-89.0, 89.0),
+    "launch_roll_deg": (-180.0, 180.0),
+    "launch_yaw_deg": (-360.0, 360.0),
+    "launch_height_m": (0.0, 200.0),
+    "throw_force_n": (0.0, 5.0),
+    "throw_duration_s": (0.005, 1.0),
+    "throw_force_pitch_deg": (-90.0, 90.0),
+    "throw_force_yaw_deg": (-90.0, 90.0),
+    "throw_grip_x": (-1.0, 1.0),
+    "throw_grip_y": (-1.0, 1.0),
+    "throw_grip_z": (-0.5, 0.5),
+    "throw_torque_efficiency": (0.0, 1.0),
+    "throw_runup_m": (0.0, 3.04),
+    "throw_wrist_spin_radps": (-60.0, 60.0),
+    "throw_pitch_rate_radps": (-12.0, 12.0),
+    "throw_yaw_rate_radps": (-20.0, 20.0),
+    "release_pitch_deg": (-90.0, 90.0),
+    "release_yaw_deg": (-90.0, 90.0),
+    "release_roll_deg": (-180.0, 180.0),
+}
+
+
 AIRCRAFT_SCHEMA: Dict[str, Any] = {
     "group": "aircraft",
     "fields": {
         f.name: _field_entry(f, AircraftConfig.__dataclass_fields__[f.name].default)
         for f in fields(AircraftConfig)
     },
+    "ranges": {name: list(bounds) for name, bounds in AIRCRAFT_RANGES.items()},
     "design_variables": [
         as_dict(v) for v in DESIGN_VARIABLE_CATALOGUE
     ],
@@ -1473,44 +1650,7 @@ ENVIRONMENT_SCHEMA: Dict[str, Any] = {
         f.name: _field_entry(f, EnvironmentConfig.__dataclass_fields__[f.name].default)
         for f in fields(EnvironmentConfig)
     },
-    "ranges": {
-        "temperature_K": [180.0, 400.0],
-        "pressure_Pa": [1000.0, 300000.0],
-        "humidity_rel": [0.0, 1.0],
-        "wind_speed": [0.0, 120.0],
-        "wind_direction_deg": [0.0, 360.0],
-        "gust_intensity": [0.0, 1.0],
-        "thermal_strength": [0.0, 25.0],
-        "gravity": [0.1, 50.0],
-        "ground_friction": [0.0, 2.0],
-        "drag_scale": [0.0, 5.0],
-        "lift_scale": [0.0, 5.0],
-    },
-}
-
-#: Slider ranges for the launch / throw panel.  The UI reads these instead of
-#: hard-coding limits, which keeps the browser and the server in step when the
-#: contract changes.
-LAUNCH_RANGES: Dict[str, Tuple[float, float]] = {
-    "launch_speed": (0.0, 40.0),
-    "launch_angle_deg": (-45.0, 85.0),
-    "launch_roll_deg": (-90.0, 90.0),
-    "launch_yaw_deg": (-90.0, 90.0),
-    "launch_height_m": (0.0, 30.0),
-    "throw_force_n": (0.0, 1.2),
-    "throw_duration_s": (0.02, 0.6),
-    "throw_force_pitch_deg": (-60.0, 80.0),
-    "throw_force_yaw_deg": (-80.0, 80.0),
-    "throw_grip_x": (-0.5, 1.0),
-    "throw_grip_y": (-1.0, 1.0),
-    "throw_torque_efficiency": (0.0, 1.0),
-    "throw_runup_m": (0.0, 3.04),
-    "throw_wrist_spin_radps": (-40.0, 40.0),
-    "throw_pitch_rate_radps": (-8.0, 8.0),
-    "throw_yaw_rate_radps": (-12.0, 12.0),
-    "release_pitch_deg": (-45.0, 45.0),
-    "release_yaw_deg": (-45.0, 45.0),
-    "release_roll_deg": (-90.0, 90.0),
+    "ranges": {name: list(bounds) for name, bounds in ENVIRONMENT_RANGES.items()},
 }
 
 LAUNCH_SCHEMA: Dict[str, Any] = {
@@ -1532,6 +1672,15 @@ LAUNCH_SCHEMA: Dict[str, Any] = {
         for style in THROW_STYLE_CATALOGUE
     ],
     "speed_sources": list(THROW_SPEED_SOURCES),
+}
+
+SIMULATION_SCHEMA: Dict[str, Any] = {
+    "group": "simulation",
+    "fields": {
+        f.name: _field_entry(f, SimulationSettings.__dataclass_fields__[f.name].default)
+        for f in fields(SimulationSettings)
+    },
+    "ranges": {name: list(bounds) for name, bounds in SIMULATION_RANGES.items()},
 }
 
 

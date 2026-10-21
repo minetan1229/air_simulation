@@ -39,11 +39,6 @@ prerequisites:
 | :--- | :--- | :--- | :---: |
 | **`verification-pipeline`** | [`skill/verification-pipeline/SKILL.md`](./verification-pipeline/SKILL.md) | 構文チェック、E2Eスモークテスト、Pytest実行、CI検証 | **実装済 (コア)** |
 | **`flight-physics-tuning`** | [`skill/flight-physics-tuning/SKILL.md`](./flight-physics-tuning/SKILL.md) | 6DoF力学、空力モデル診断、モーフィング調整、プリセット評価 | **実装済 (コア)** |
-| **`git-workflow`** | `skill/git-workflow/SKILL.md` | ブランチ運用、コミット規約 (`feat`, `fix`, `refactor`)、マージ、PR作成 | 提案中 (Phase 2) |
-| **`discord-bridge-ops`** | `skill/discord-bridge-ops/SKILL.md` | Discord Webhook通知運用、リモートブリッジ起動・コマンド疎通 | 提案中 (Phase 2) |
-| **`mesh-pipeline`** | `skill/mesh-pipeline/SKILL.md` | 3Dモデル (glTF, OBJ, STL) パース、幾何特性算出、パネル分割検証 | 提案中 (Phase 2) |
-| **`optimizer-tuning`** | `skill/optimizer-tuning/SKILL.md` | NSGA-II, Nelder-Mead, DE等の最適化ジョブ、ETA計算、Pareto front確認 | 提案中 (Phase 2) |
-| **`gpu-frontend-ui`** | `skill/gpu-frontend-ui/SKILL.md` | Three.js シェーダー、GPGPU風粒子、UI計器パネル、Web Worker | 提案中 (Phase 2) |
 
 ---
 

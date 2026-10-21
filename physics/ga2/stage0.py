@@ -76,9 +76,18 @@ MIN_CREASE_CHORD_M: float = 0.020
 MIN_CREASE_LENGTH_M: float = 0.004
 
 #: How often the paper may be creased at the same spot before it tears.
+#: A nose that is creased five times is still foldable by hand and a spot
+#: with seven creases is not, so six is the last count the paper survives;
+#: the criterion itself is written out in the docstring of
+#: ``GeometryFilter._hot_spot_count``.  The nose lock of the Nakamura
+#: design gathers five creases, the most of the known designs.
 MAX_FOLDS_AT_ONE_SPOT: int = 6
 
 #: The radius of the neighbourhood that counts as "the same spot".
+#: The folding engine weights a vertex by the creases of its own face
+#: within a radius of 4 mm (``physics.origami_domain._crease_weight``);
+#: two creases are folded into the same spot of paper once their crease
+#: influences meet, which is twice that radius.
 HOT_SPOT_RADIUS_M: float = 0.008
 
 #: The quarter chord point of a thin wing, as a fraction of the chord.
@@ -234,11 +243,23 @@ def _segments_overlap(
     b0: Tuple[float, float],
     b1: Tuple[float, float],
 ) -> Optional[Tuple[float, float]]:
-    """The middle of the overlap of two collinear segments, if they overlap."""
-    ax = a1[0] - a0[0]
-    ay = a1[1] - a0[1]
-    bx = b1[0] - b0[0]
-    by = b1[1] - b0[1]
+    """The middle of the overlap of two segments that lie on the same line.
+
+    Two segments overlap only when they lie on the *same* line: segments
+    that run parallel to each other but are offset from each other do not
+    touch, and reporting them as overlapping would invent a junction where
+    the paper has none.  The lengths and the projection are computed in
+    metres, because the sheet is 210 x 297 mm and a normalised length is
+    not a length.
+    """
+    a0m = (a0[0] * SHEET_WIDTH_M, a0[1] * SHEET_LENGTH_M)
+    a1m = (a1[0] * SHEET_WIDTH_M, a1[1] * SHEET_LENGTH_M)
+    b0m = (b0[0] * SHEET_WIDTH_M, b0[1] * SHEET_LENGTH_M)
+    b1m = (b1[0] * SHEET_WIDTH_M, b1[1] * SHEET_LENGTH_M)
+    ax = a1m[0] - a0m[0]
+    ay = a1m[1] - a0m[1]
+    bx = b1m[0] - b0m[0]
+    by = b1m[1] - b0m[1]
     la = math.hypot(ax, ay)
     lb = math.hypot(bx, by)
     if la < 1.0e-12 or lb < 1.0e-12:
@@ -246,13 +267,22 @@ def _segments_overlap(
     ux, uy = ax / la, ay / la
     if abs(bx * uy - by * ux) > 1.0e-9:
         return None
-    offset = (b0[0] - a0[0]) * ux + (b0[1] - a0[1]) * uy
-    start = max(0.0, offset)
-    end = min(la, offset + lb)
+    du = b0m[0] - a0m[0]
+    dv = b0m[1] - a0m[1]
+    if abs(du * -uy + dv * ux) > 1.0e-9:
+        return None
+    along = bx * ux + by * uy
+    t0 = du * ux + dv * uy
+    t1 = t0 + along
+    start = max(0.0, min(t0, t1))
+    end = min(la, max(t0, t1))
     if end <= start:
         return None
     middle = 0.5 * (start + end)
-    return (a0[0] + ux * middle, a0[1] + uy * middle)
+    return (
+        (a0m[0] + ux * middle) / SHEET_WIDTH_M,
+        (a0m[1] + uy * middle) / SHEET_LENGTH_M,
+    )
 
 
 # --------------------------------------------------------------------------

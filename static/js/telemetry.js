@@ -6,6 +6,9 @@
 
 import { clear, clamp, fmt, isNum, make, sig } from "./lib.js";
 
+const _root = typeof document !== "undefined" ? getComputedStyle(document.documentElement) : null;
+const _cssColor = (name, fallback) => (_root ? (_root.getPropertyValue(name).trim() || fallback) : fallback);
+
 /* ------------------------------------------------------------------ gauges */
 
 const GAUGE_SPECS = [
@@ -94,10 +97,10 @@ export class Gauges {
 /* ------------------------------------------------------------- strip chart */
 
 const CHART_ROWS = [
-  { key: "alt", label: "高度", unit: "m", colour: "#2f6fb5", digits: 2 },
-  { key: "spd", label: "速度", unit: "m/s", colour: "#2f7d4f", digits: 2 },
-  { key: "aoa", label: "迎角", unit: "°", colour: "#ad6a05", digits: 2 },
-  { key: "stress", label: "応力", unit: "Pa", colour: "#bf3b2b", digits: 0 },
+  { key: "alt", label: "高度", unit: "m", colour: _cssColor("--color-alt", "#2f6fb5"), digits: 2 },
+  { key: "spd", label: "速度", unit: "m/s", colour: _cssColor("--color-spd", "#2f7d4f"), digits: 2 },
+  { key: "aoa", label: "迎角", unit: "°", colour: _cssColor("--color-aoa", "#ad6a05"), digits: 2 },
+  { key: "stress", label: "応力", unit: "kPa", colour: _cssColor("--color-stress", "#bf3b2b"), digits: 2, scale: 1e-3 },
 ];
 
 const PAD = { left: 52, right: 46, top: 8, bottom: 18 };
@@ -209,7 +212,7 @@ export class StripChart {
         if (value > high) high = value;
       }
       const span = Math.max(high - low, Math.abs(high) * 0.08, 1e-6);
-      return { spec, lane, low: low - span * 0.12, high: high + span * 0.18 };
+      return { spec, lane, dataLow: low, dataHigh: high, low: low - span * 0.12, high: high + span * 0.18 };
     });
     return rows;
   }
@@ -273,14 +276,15 @@ export class StripChart {
       ctx.fillText(`${row.spec.label} ${row.spec.unit}`, plotLeft - 6, top + rowH / 2 - 6);
       ctx.fillStyle = "#a9a49b";
       ctx.font = '8.5px ui-monospace, Consolas, monospace';
-      ctx.fillText(this.ring.size ? sig(row.high, 3) : "—", plotLeft - 6, top + rowH / 2 + 6);
+      const scale = row.spec.scale || 1;
+      ctx.fillText(this.ring.size ? sig(row.dataHigh * scale, 3) : "—", plotLeft - 6, top + rowH / 2 + 6);
 
       if (this.ring.size < 2) return;
       const value = this.ring.get(this.ring.size - 1, row.lane + 1);
       ctx.textAlign = "left";
       ctx.fillStyle = row.spec.colour;
       ctx.font = '10px ui-monospace, Consolas, monospace';
-      ctx.fillText(fmt(value, row.spec.digits), plotRight + 5, top + rowH / 2);
+      ctx.fillText(fmt(value * (row.spec.scale || 1), row.spec.digits), plotRight + 5, top + rowH / 2);
 
       ctx.strokeStyle = row.spec.colour;
       ctx.lineWidth = 1.1;
@@ -417,10 +421,14 @@ export class PolarChart {
     cdMin = Math.max(0, cdMin - cdPad);
     cdMax += cdPad;
 
+    const ldValues = payload.ld_ratio.filter((v) => isNum(v));
+    const ldMin = ldValues.length ? Math.min(...ldValues) : 0;
+    const ldMax = ldValues.length ? Math.max(...ldValues) : 0;
+
     const px = (cl) => left + ((cl - clMin) / (clMax - clMin || 1)) * (right - left);
     const py = (cd) => bottom - ((cd - cdMin) / (cdMax - cdMin || 1)) * (bottom - top);
 
-    this._axes(left, right, top, bottom, clMin, clMax, cdMin, cdMax);
+    this._axes(left, right, top, bottom, clMin, clMax, cdMin, cdMax, ldMin, ldMax);
 
     // C_D(C_L)
     ctx.strokeStyle = "#2f6fb5";
@@ -435,9 +443,6 @@ export class PolarChart {
     ctx.stroke();
 
     // (L/D) on the right-hand axis
-    const ldValues = payload.ld_ratio.filter((v) => isNum(v));
-    const ldMin = Math.min(...ldValues);
-    const ldMax = Math.max(...ldValues);
     ctx.strokeStyle = "#2f7d4f";
     ctx.lineWidth = 1;
     ctx.setLineDash([3, 2]);
@@ -485,7 +490,7 @@ export class PolarChart {
     ctx.lineWidth = 1;
   }
 
-  _axes(left, right, top, bottom, clMin, clMax, cdMin, cdMax) {
+  _axes(left, right, top, bottom, clMin, clMax, cdMin, cdMax, ldMin, ldMax) {
     const ctx = this.ctx;
     ctx.strokeStyle = "#dedad1";
     ctx.beginPath();
@@ -498,14 +503,20 @@ export class PolarChart {
     ctx.font = '8px ui-monospace, Consolas, monospace';
     ctx.textAlign = "center";
     ctx.textBaseline = "top";
+    // 左軸：C_D（抗力係数）
     for (let i = 0; i <= 3; i += 1) {
       const cd = cdMin + ((cdMax - cdMin) * i) / 3;
       const y = bottom - (i / 3) * (bottom - top);
       ctx.fillText(cd.toFixed(3), left - 4, y - 4);
-      ctx.textAlign = "right";
-      ctx.fillText((cdMin + ((cdMax - cdMin) * i) / 3).toFixed(1), right + 4, y - 4);
-      ctx.textAlign = "center";
     }
+    // 右軸：L/D（滑空比）。描画曲線と同一軸にするため C_D ではなく L/D 目盛を並べる
+    ctx.textAlign = "right";
+    for (let i = 0; i <= 3; i += 1) {
+      const ld = ldMin + ((ldMax - ldMin) * i) / 3;
+      const y = bottom - (i / 3) * (bottom - top);
+      ctx.fillText(ld.toFixed(1), right + 4, y - 4);
+    }
+    ctx.textAlign = "center";
     for (let i = 0; i <= 4; i += 1) {
       const cl = clMin + ((clMax - clMin) * i) / 4;
       const x = left + (i / 4) * (right - left);
@@ -513,5 +524,7 @@ export class PolarChart {
     }
     ctx.textAlign = "right";
     ctx.fillText("C_L →", right, bottom + 4);
+    ctx.textAlign = "left";
+    ctx.fillText("L/D →", right + 6, top - 10);
   }
 }

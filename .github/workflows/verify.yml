@@ -39,6 +39,9 @@ jobs:
           python -m pip install --upgrade pip
           pip install ruff mypy pytest
           if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+          # discord.py はオプション extras (bridge) 経由だが、CI では discord テストを
+          # スキップさせないためここに明示インストールする（テスト実行時のみ）。
+          pip install "discord.py>=2.7.0"
 
       - name: 構文・スタイル検証 (Ruff)
         run: ruff check .
@@ -49,6 +52,9 @@ jobs:
       - name: 自動テストの実行 (Pytest)
         id: pytest_step
         run: python tools/run_ci_tests.py
+
+      - name: エンドツーエンドスモークテスト
+        run: python smoke_test.py
 
       - name: テスト失敗時のIssue起票
         if: failure() && steps.pytest_step.outcome == 'failure'

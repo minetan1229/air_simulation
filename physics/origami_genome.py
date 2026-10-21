@@ -71,6 +71,9 @@ __all__ = [
     "detect_penetrations",
     "adjacent_panel_pairs",
     "genome_to_aircraft_config",
+    "mutate_genome",
+    "crossover_genomes",
+    "repair_by_mutation",
     "recipe_steps",
     "recipe_markdown",
     "crease_pattern_svg",
@@ -266,9 +269,22 @@ class GenomeGeometry:
 class GripThresholds:
     """The minimum conditions a folded sheet has to meet to be throwable.
 
-    The defaults describe an adult finger: a pinch needs roughly 8 mm of
-    keel depth, 30 mm of fore/aft length and at least two layers of paper
-    to be rigid enough to push against.
+    The defaults are working estimates for an adult finger pinch: roughly
+    8 mm of keel depth, 30 mm of fore/aft length and at least two layers
+    of paper to be rigid enough to push against, with the centre of
+    gravity allowed 15 mm off the grip centre and a 12 mm grip half-width.
+
+    SOURCE STATUS: no ergonomic / anthropometric reference has been
+    obtained for these values, so they are estimates, not measured limits.
+    They must not be changed on authority alone and no new undocumented
+    coefficient may be introduced here.
+
+    Re-open condition: obtain a published adult finger / pinch dimension
+    source (fingertip width, pinch contact width, graspable slab depth)
+    and re-set ``min_grip_height_m`` / ``min_grip_length_m`` accordingly,
+    recording the reference in docs/SPECIFICATION.md section 5.  Until a
+    source is obtained the values remain estimates; all of them stay
+    configurable via the constructor and the API.
     """
 
     min_grip_height_m: float = 0.008
@@ -481,6 +497,162 @@ def random_genome(
         strategy=strategy,
         meta={"families": list(families), "step_count": total},
     )
+
+
+def mutate_genome(
+    genome: OrigamiGenome,
+    rng: Optional[random.Random] = None,
+    mutation_rate: float = 0.5,
+    angle_sigma_deg: float = 8.0,
+    crease_sigma: float = 0.03,
+) -> OrigamiGenome:
+    """Return a mutated copy of ``genome``.
+
+    Two systematic, small disturbances that keep the programme structure
+    (step count, symmetry, group tree) intact:
+
+    * angle mutation - a fold angle is nudged by a zero-mean Gaussian
+      (degrees) and clamped to the physical range;
+    * crease micro-movement - a crease endpoint is nudged within the sheet
+      and clamped back into ``[0, 1]``.
+
+    The random-generation distribution of :func:`random_genome` is not
+    touched; this only produces a neighbouring individual of an existing
+    one, which a genetic algorithm uses for hill-climbing and repair.
+    """
+    rng = rng or random.Random()
+    steps: List[FoldStep] = []
+    for step in genome.steps:
+        fa = step.fold_angle_deg
+        (u0, v0), (u1, v1) = step.crease_line
+        if rng.random() < mutation_rate:
+            if rng.random() < 0.5:
+                fa = _clamp(fa + rng.gauss(0.0, angle_sigma_deg), MIN_FOLD_ANGLE_DEG, MAX_FOLD_ANGLE_DEG)
+            else:
+                u0 = _clamp(u0 + rng.gauss(0.0, crease_sigma), 0.0, 1.0)
+                v0 = _clamp(v0 + rng.gauss(0.0, crease_sigma), 0.0, 1.0)
+                u1 = _clamp(u1 + rng.gauss(0.0, crease_sigma), 0.0, 1.0)
+                v1 = _clamp(v1 + rng.gauss(0.0, crease_sigma), 0.0, 1.0)
+        steps.append(
+            FoldStep(
+                step_index=step.step_index,
+                crease_line=((u0, v0), (u1, v1)),
+                fold_angle_deg=fa,
+                symmetry=step.symmetry,
+                layer_order=step.layer_order,
+                target_face_ids=step.target_face_ids,
+                group=step.group,
+                set_group=step.set_group,
+                set_group_pair=step.set_group_pair,
+                level=step.level,
+                residual_deg=step.residual_deg,
+                mountain=step.mountain,
+                label=step.label,
+            )
+        )
+    return OrigamiGenome(
+        steps=steps,
+        sheet=genome.sheet,
+        key=genome.key,
+        label=genome.label,
+        seed=genome.seed,
+        strategy=genome.strategy,
+        meta=dict(genome.meta),
+    )
+
+
+def crossover_genomes(
+    a: OrigamiGenome, b: OrigamiGenome, rng: Optional[random.Random] = None
+) -> OrigamiGenome:
+    """Union crossover: the child's crease set is the union of the parents'.
+
+    Every distinct crease line carried by either parent appears once in the
+    child, ordered by first appearance, with the angle of the parent that
+    carried it.  All steps cut the base sheet so no dangling group
+    references survive; the result is always a foldable programme.  This is
+    the "parents' union" crossover: the child inherits the union of the
+    parents' folds rather than blending a single shared template.
+    """
+    rng = rng or random.Random()
+    seen: set = set()
+    steps: List[FoldStep] = []
+    order = (a, b) if rng.random() < 0.5 else (b, a)
+    index = 1
+    for parent in order:
+        for step in parent.steps:
+            (p0, p1) = step.crease_line
+            key = (round(p0[0], 6), round(p0[1], 6), round(p1[0], 6), round(p1[1], 6))
+            if key in seen:
+                continue
+            seen.add(key)
+            steps.append(
+                FoldStep(
+                    step_index=index,
+                    crease_line=step.crease_line,
+                    fold_angle_deg=step.fold_angle_deg,
+                    symmetry=SYMMETRY_SYMMETRIC,
+                    layer_order=LAYER_ORDER_AUTO,
+                    target_face_ids=(),
+                    group=(),
+                    set_group="base",
+                    mountain=step.mountain,
+                    label=f"union step {index}",
+                )
+            )
+            index += 1
+    if not steps:
+        # Both parents empty: fall back to a single flat crease so the
+        # child stays foldable instead of degenerate.
+        steps = [
+            FoldStep(
+                step_index=1,
+                crease_line=((0.5, 0.0), (0.5, 1.0)),
+                fold_angle_deg=180.0,
+                symmetry=SYMMETRY_SYMMETRIC,
+                layer_order=LAYER_ORDER_AUTO,
+                target_face_ids=(),
+                group=(),
+                set_group="base",
+                mountain=True,
+                label="fallback flat fold",
+            )
+        ]
+    return OrigamiGenome(
+        steps=steps,
+        sheet=a.sheet,
+        key="crossover",
+        label="union crossover of two genomes",
+        seed=0,
+        strategy="crossover",
+        meta={"parents": [a.key, b.key], "step_count": len(steps)},
+    )
+
+
+def repair_by_mutation(
+    genome: OrigamiGenome,
+    rng: Optional[random.Random] = None,
+    max_attempts: int = 8,
+    paper_gsm: float = 100.0,
+) -> OrigamiGenome:
+    """Repair an individual by repeated mutation until it passes the grip filter.
+
+    ``genome`` is returned as-is when it already passes.  Otherwise
+    :func:`mutate_genome` is applied up to ``max_attempts`` times and the
+    first mutant that passes :func:`evaluate_grip` is returned.  If no
+    mutant passes, the last mutant is returned.  This systematic
+    disturbance operator raises the acceptance rate of the initial
+    population without altering the random-generation distribution.
+    """
+    rng = rng or random.Random()
+    if evaluate_grip(fold_genome(genome, paper_gsm=paper_gsm)).valid:
+        return genome
+    best = genome
+    for _ in range(max(1, int(max_attempts))):
+        mutant = mutate_genome(genome, rng=rng)
+        if evaluate_grip(fold_genome(mutant, paper_gsm=paper_gsm)).valid:
+            return mutant
+        best = mutant
+    return best
 
 
 def genome_from_creases(
@@ -1247,6 +1419,7 @@ def genome_to_aircraft_config(
     geometry: GenomeGeometry,
     paper_gsm: float = 100.0,
     base: Optional[Any] = None,
+    wingspan_m: Optional[float] = None,
 ) -> Any:
     """Build the ``AircraftConfig`` that matches a folded genome.
 
@@ -1254,6 +1427,14 @@ def genome_to_aircraft_config(
     planform area and the span of the solid, the paper areal density for the
     mass and the inertia tensor of the folded sheet about its centre of
     gravity.
+
+    ``wingspan_m`` applies the same two-stage fit used by the origami API
+    (``api/routes/origami.py``): the fold is first generated on the
+    sheet-width basis and the real span is measured, then every linear
+    dimension is re-scaled so the folded wing span matches ``wingspan_m``.
+    Areas scale with ``fit**2``, mass with ``fit**2`` (fixed areal density)
+    and the inertia tensor with ``fit**4`` (mass ``fit**2`` times length
+    squared ``fit**2``).  When omitted the measured span is used as-is.
     """
     import dataclasses
 
@@ -1266,21 +1447,35 @@ def genome_to_aircraft_config(
     span = max(float(geometry.span_m), 1.0e-6)
     length = max(float(geometry.length_m), 1.0e-6)
     area = max(float(geometry.wing_area_m2), 1.0e-9)
-    aspect = max((span * span) / area, 1.0e-3)
-    taper = 0.5
+    total_area = max(float(geometry.total_area_m2), 1.0e-9)
 
-    config.wingspan_m = span
-    config.wing_area_m2 = area
+    fit = 1.0
+    if wingspan_m is not None:
+        wingspan_target = float(wingspan_m)
+        if not math.isfinite(wingspan_target) or wingspan_target <= 0.0:
+            raise ValueError(f"wingspan_m must be a finite positive number, got {wingspan_m!r}")
+        fit = wingspan_target / span
+
+    span_s = span * fit
+    length_s = length * fit
+    area_s = area * fit * fit
+    total_area_s = total_area * fit * fit
+    aspect = max((span_s * span_s) / area_s, 1.0e-3)
+    taper = 0.5
+    fit4 = fit * fit * fit * fit
+
+    config.wingspan_m = span_s
+    config.wing_area_m2 = area_s
     config.aspect_ratio = aspect
     config.taper_ratio = taper
-    config.mass_kg = max(areal_density * max(float(geometry.total_area_m2), 1.0e-9), 1.0e-9)
-    config.sheet_area_m2 = max(float(geometry.total_area_m2), 1.0e-9)
-    config.roll_inertia_kgm2 = max(float(geometry.roll_inertia_kgm2), 1.0e-12)
-    config.pitch_inertia_kgm2 = max(float(geometry.pitch_inertia_kgm2), 1.0e-12)
-    config.yaw_inertia_kgm2 = max(float(geometry.yaw_inertia_kgm2), 1.0e-12)
-    config.inertia_xy_kgm2 = float(geometry.inertia_tensor_kgm2[0][1])
-    config.inertia_xz_kgm2 = float(geometry.inertia_tensor_kgm2[0][2])
-    config.inertia_yz_kgm2 = float(geometry.inertia_tensor_kgm2[1][2])
+    config.mass_kg = max(areal_density * total_area_s, 1.0e-9)
+    config.sheet_area_m2 = total_area_s
+    config.roll_inertia_kgm2 = max(float(geometry.roll_inertia_kgm2) * fit4, 1.0e-12)
+    config.pitch_inertia_kgm2 = max(float(geometry.pitch_inertia_kgm2) * fit4, 1.0e-12)
+    config.yaw_inertia_kgm2 = max(float(geometry.yaw_inertia_kgm2) * fit4, 1.0e-12)
+    config.inertia_xy_kgm2 = float(geometry.inertia_tensor_kgm2[0][1]) * fit4
+    config.inertia_xz_kgm2 = float(geometry.inertia_tensor_kgm2[0][2]) * fit4
+    config.inertia_yz_kgm2 = float(geometry.inertia_tensor_kgm2[1][2]) * fit4
     return config
 
 

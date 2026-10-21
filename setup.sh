@@ -43,8 +43,13 @@ else
     "$VENV_PYTHON" -m pip install -e ".[dev]"
 fi
 
-echo "[SETUP] Verifying CUDA GPU acceleration..."
+echo "[SETUP] Verifying CUDA GPU acceleration (optional; CPU-only environments continue)..."
 "$VENV_PYTHON" -c "
+import importlib.util
+spec = importlib.util.find_spec('cupy')
+if spec is None:
+    print('[WARN] cupy is not installed; running in CPU-only mode. CUDA acceleration is disabled.')
+    raise SystemExit(0)
 import cupy as cp
 dev = cp.cuda.runtime.getDevice()
 props = cp.cuda.runtime.getDeviceProperties(dev)

@@ -15,6 +15,8 @@ from __future__ import annotations
 import math
 from dataclasses import fields, replace
 
+import inspect
+
 import numpy as np
 import pytest
 
@@ -891,7 +893,9 @@ def test_trim_solution_by_alpha(cfg: AircraftConfig, env: EnvironmentConfig) -> 
 
 
 def test_trim_solution_by_elevon(cfg: AircraftConfig, env: EnvironmentConfig) -> None:
-    for alpha in (-2.0, 2.0, 6.0, 10.0):
+    # Elevon travel is limited to +/-45 deg (ELEVON_MAX_DEG); only alpha targets
+    # reachable within that travel are trim-solvable without hitting the guard.
+    for alpha in (0.0, 2.0, 6.0):
         solution = trim_solution(cfg, env, 9.0, target_alpha_deg=alpha)
         assert solution["method"] == "elevon_trim"
         assert solution["alpha_deg"] == pytest.approx(alpha, rel=1e-12)
@@ -1297,6 +1301,36 @@ def test_drag_polar_accounts_for_trailing_edge_fold(cfg: AircraftConfig) -> None
     minima_zero = drag_polar_minima(cfg_zero)
     minima_fold = drag_polar_minima(cfg_fold)
     assert minima_fold["cd_min"] - minima_zero["cd_min"] == pytest.approx(expected_dcd, rel=1e-9)
+
+
+def test_drag_polar_default_reynolds_is_versioned_unchanged():
+    """The published polar's default Reynolds is versioned at 1.0e4 (the
+    vertex/best-glide condition).  The public default is intentionally fixed so
+    the numeric contract is stable across versions; callers off the vertex pass
+    ``reynolds`` explicitly (see no-finish.md section A-6 / M-31)."""
+    assert aero_domain.DRAG_POLAR_DEFAULT_REYNOLDS == pytest.approx(1.0e4)
+    for fn in (drag_coefficient, drag_polar_minima, drag_polar):
+        default = inspect.signature(fn).parameters["reynolds"].default
+        assert default == pytest.approx(1.0e4)
+    assert drag_polar(AircraftConfig())["reynolds"] == pytest.approx(1.0e4)
+    assert drag_polar_minima(AircraftConfig())["reynolds"] == pytest.approx(1.0e4)
+
+
+def test_evaluate_aero_reports_calibration_active_flag():
+    """§A-4 / M-18: when lift_scale or drag_scale deviate from 1.0 the response
+    must expose that calibration is active."""
+    neutral = evaluate_aero(AircraftConfig(), EnvironmentConfig(), 9.0, 5.0)
+    assert neutral.calibration_active is False
+    lifted = evaluate_aero(AircraftConfig(), EnvironmentConfig(lift_scale=2.0), 9.0, 5.0)
+    assert lifted.calibration_active is True
+    dragged = evaluate_aero(AircraftConfig(), EnvironmentConfig(drag_scale=3.0), 9.0, 5.0)
+    assert dragged.calibration_active is True
+
+
+def test_elevon_max_deg_matches_physical_travel_limit():
+    """L-10: the elevon travel guard must match the physical +/-45 deg setting
+    range (180 deg is geometrically impossible)."""
+    assert aero_domain.ELEVON_MAX_DEG == pytest.approx(45.0)
 
 
 

@@ -53,7 +53,12 @@ const SERVERS = {
   memory: () => ({
     command: process.execPath,
     args: [npmEntry("@modelcontextprotocol/server-memory", path.join("dist", "index.js"))],
-    env: { MEMORY_FILE_PATH: path.join(HERE, "memory.jsonl") },
+    env: {
+      MEMORY_FILE_PATH: path.join(HERE, "memory.jsonl"),
+      // 記憶ストアの無制限成長を防ぐ上限（件数 / バイト）。
+      MEMORY_MAX_ENTRIES: "10000",
+      MEMORY_MAX_SIZE_MB: "50",
+    },
   }),
   fetch: () => ({
     command: VENV_PYTHON,

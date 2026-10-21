@@ -245,7 +245,7 @@ export class ParameterPanels {
     const top = make("div", { class: "field-top" }, [label, unit, value]);
 
     if (spec.kind === "toggle") {
-      const input = make("input", { type: "checkbox" });
+      const input = make("input", { type: "checkbox", "aria-label": spec.label });
       input.checked = Boolean(this.store.get(section, spec.key));
       input.addEventListener("change", () => {
         this.store.set(section, spec.key, input.checked, "ui");
@@ -256,7 +256,7 @@ export class ParameterPanels {
       const toggle = make("label", { class: "switch", style: "margin-top:2px" }, [
         input,
         box,
-        make("span", { class: "switch-label muted", text: spec.hint || "有効" }),
+        make("span", { class: "switch-label muted", text: spec.hint || spec.label || "有効" }),
       ]);
       field.append(top, toggle);
       this.controls.push({ spec, section, input, value, kind: "toggle" });

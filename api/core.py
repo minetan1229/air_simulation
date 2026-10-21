@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib
+import json
 import logging
 import threading
 from typing import Any, Dict, Optional, Tuple
@@ -18,6 +19,7 @@ from physics.config_schema import (
     as_dict,
     from_dict,
 )
+from physics.atmosphere_domain import isa_pressure, isa_temperature
 from physics.error_domain import ERROR_LOGGER
 
 log = logging.getLogger("paper_airplane")
@@ -171,7 +173,14 @@ def build(cfg_cls: Any, payload: Optional[Dict[str, Any]], base: Any = None) -> 
 
 
 def merge_environment(payload: Optional[Dict[str, Any]], base: EnvironmentConfig) -> EnvironmentConfig:
-    """Merge a partial environment update onto ``base`` and clamp the result."""
+    """Merge a partial environment update onto ``base`` and clamp the result.
+
+    When ``isa_mode`` is true the temperature/pressure sliders are disabled:
+    their values are derived from the ISA profile at ``altitude_m`` regardless
+    of what the payload (or the previous session state) carried, so an
+    ``isa_mode=True`` payload can never force a non-ISA temperature or pressure
+    into the session.
+    """
     payload = dict(payload or {})
     merged = as_dict(base)
     if not payload.get("isa_mode") and (
@@ -183,6 +192,19 @@ def merge_environment(payload: Optional[Dict[str, Any]], base: EnvironmentConfig
         env = from_dict(EnvironmentConfig, merged, strict=False)
     except Exception as exc:
         raise BadRequest(f"invalid EnvironmentConfig payload: {exc}") from exc
+    if env.isa_mode:
+        temperature = isa_temperature(
+            env.altitude_m, env.sea_level_temperature_K, env.lapse_rate_K_per_m
+        )
+        pressure = isa_pressure(
+            env.altitude_m,
+            env.sea_level_pressure_Pa,
+            env.sea_level_temperature_K,
+            env.lapse_rate_K_per_m,
+        )
+        env = EnvironmentConfig(
+            **{**as_dict(env), "temperature_K": temperature, "pressure_Pa": pressure}
+        )
     return env.clamp_ranges()
 
 
@@ -354,3 +376,25 @@ SESSION = Session()
 RESULT_CACHE: Dict[str, Dict[str, Any]] = {}
 RESULT_CACHE_LIMIT = 32
 RESULT_CACHE_LOCK = threading.RLock()
+#: Byte ceiling for the optimizer / investigation result cache.  The oldest
+#: entries are evicted first once either the entry count or the byte total
+#: exceeds its limit, so a runaway optimiser cannot pin the process in RAM.
+RESULT_CACHE_BYTES_LIMIT = 64 * 1024 * 1024
+_RESULT_CACHE_BYTES: Dict[str, int] = {}
+
+
+def result_cache_put(job_id: str, result: Dict[str, Any]) -> None:
+    """Insert ``result`` into :data:`RESULT_CACHE`, evicting the oldest entries
+    while the entry count or the total byte size exceeds its limit."""
+    size = len(json.dumps(result, ensure_ascii=False, default=str))
+    with RESULT_CACHE_LOCK:
+        RESULT_CACHE[job_id] = result
+        _RESULT_CACHE_BYTES[job_id] = size
+        total_bytes = sum(_RESULT_CACHE_BYTES.values())
+        while (
+            len(RESULT_CACHE) > RESULT_CACHE_LIMIT
+            or total_bytes > RESULT_CACHE_BYTES_LIMIT
+        ):
+            oldest = next(iter(RESULT_CACHE))
+            RESULT_CACHE.pop(oldest, None)
+            total_bytes -= _RESULT_CACHE_BYTES.pop(oldest, 0)

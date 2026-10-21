@@ -861,42 +861,59 @@ def _unique_front(front: Sequence[Dict[str, Any]]) -> List[Dict[str, Any]]:
 
 
 def non_dominated_sort(objectives: Sequence[str], value_matrix: Any) -> List[List[int]]:
-    """Fast non-dominated sort (Deb et al.) returning the ordered fronts."""
+    """Fast non-dominated sort (Deb et al.) returning the ordered fronts.
+
+    The dominance relation is computed in vectorised form (C speed) instead of
+    one NumPy call per ``(i, j)`` pair, which collapses the constant factor of
+    the O(n^2) dominance scan while keeping the **exact same** front
+    decomposition and within-front ordering as the reference Deb algorithm:
+    front members are discovered in ascending index order and each next front
+    is appended in the order its members' domination counts reach zero.
+    """
     matrix = _as_rows(objectives, value_matrix)
     size = matrix.shape[0]
     if size == 0:
         return []
     directions = _directions(objectives)
-    dominated = np.zeros(size, dtype=bool)
-    domination_count = np.zeros(size, dtype=int)
-    front: List[int] = []
-    for dominator in range(size):
-        for other in range(size):
-            if other == dominator:
-                continue
-            delta = directions * (matrix[dominator] - matrix[other])
-            if np.all(delta >= 0.0) and np.any(delta > 0.0):
-                dominated[other] = True
-                domination_count[other] += 1
-    for index in range(size):
-        if not dominated[index]:
-            front.append(index)
+    # i dominates j  <=>  all(directions * (matrix[i] - matrix[j]) >= 0)
+    #                         and any(directions * (matrix[i] - matrix[j]) > 0)
+    dominates = _dominance_matrix(matrix, directions)
+    domination_count = dominates.sum(axis=0).astype(int)
+    dominated = domination_count > 0
+    front = [index for index in range(size) if not dominated[index]]
+    dominated_by = [np.nonzero(dominates[index])[0].tolist() for index in range(size)]
 
     fronts: List[List[int]] = []
     while front:
         fronts.append(list(front))
         nxt: List[int] = []
         for index in front:
-            for other in range(size):
-                if other == index:
-                    continue
-                delta = directions * (matrix[index] - matrix[other])
-                if np.all(delta >= 0.0) and np.any(delta > 0.0):
-                    domination_count[other] -= 1
-                    if domination_count[other] == 0:
-                        nxt.append(other)
+            for other in dominated_by[index]:
+                domination_count[other] -= 1
+                if domination_count[other] == 0:
+                    nxt.append(other)
         front = nxt
     return fronts
+
+
+def _dominance_matrix(matrix: np.ndarray, directions: np.ndarray) -> np.ndarray:
+    """Boolean (n, n) matrix; entry ``[i, j]`` is True when row ``i`` dominates row ``j``.
+
+    Rows are processed in chunks to bound memory (the full (n, n, m) broadcast
+    would otherwise allocate gigabytes for large populations).
+    """
+    size = matrix.shape[0]
+    dominates = np.zeros((size, size), dtype=bool)
+    # Diff of every ordered pair: (n, n, m) where [i, j] = matrix[i] - matrix[j].
+    chunk = max(1, min(size, 512))
+    for start in range(0, size, chunk):
+        stop = min(start + chunk, size)
+        diff = directions[None, None, :] * (matrix[start:stop, None, :] - matrix[None, :, :])
+        ge = (diff >= 0.0).all(axis=2)
+        gt = (diff > 0.0).any(axis=2)
+        dominates[start:stop] = ge & gt
+    np.fill_diagonal(dominates, False)
+    return dominates
 
 
 def pareto_front(objectives: Sequence[str], value_matrix: Any) -> List[int]:

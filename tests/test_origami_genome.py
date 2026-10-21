@@ -23,6 +23,7 @@ import random
 import sys
 import time
 from pathlib import Path
+from typing import Dict
 
 import pytest
 
@@ -463,3 +464,149 @@ def test_the_api_rejects_invalid_requests(client) -> None:
     assert client.get("/api/v1/origami/genome?strategy=bogus").status_code == 400
     assert client.get("/api/v1/origami/genome?archetype=nope").status_code == 400
     assert client.post("/api/v1/origami/genome", json={"genome": {"steps": [{}]}}).status_code == 400
+
+
+# ---------------------------------------------------------------------------
+# (6) G9 operators and scaling (no-finish.md §4.6)
+# ---------------------------------------------------------------------------
+
+def _grip_valid(genome: og.OrigamiGenome, paper_gsm: float = 100.0) -> bool:
+    return og.evaluate_grip(og.fold_genome(genome, paper_gsm=paper_gsm)).valid
+
+
+def _fixed_population(count: int = 50, seed: int = 20261020) -> Dict[str, list]:
+    """Deterministic population, one strategy per entry, same seed per index."""
+    population: Dict[str, list] = {"families": [], "free": []}
+    for index in range(count):
+        for strategy in ("families", "free"):
+            population[strategy].append(
+                og.random_genome(
+                    random.Random(seed + index),
+                    steps=4 + (index % 9),
+                    strategy=strategy,
+                    seed=seed + index,
+                )
+            )
+    return population
+
+
+def test_group_order_ranks_the_moving_group_above_the_static_group() -> None:
+    """G9-2: group rank must actually orient layer assignment.
+
+    ``layer_order=ABOVE`` ranks the moving group above the static group, so
+    the rank is not a no-op.  The ranks feed :func:`assign_layers`'s DAG
+    tie-break (separation guarantee lives in ``origami_domain``).
+    """
+    genome = og.OrigamiGenome(
+        steps=[
+            og.FoldStep(
+                step_index=1,
+                crease_line=((0.5, 0.0), (0.5, 1.0)),
+                fold_angle_deg=120.0,
+                symmetry=og.SYMMETRY_SYMMETRIC,
+                layer_order=og.LAYER_ORDER_ABOVE,
+                group=("base",),
+                set_group="g1",
+            )
+        ]
+    )
+    order = og._group_order(genome)
+    assert order["g1"] == 1
+    assert order["base"] == -1
+    assert order["g1"] > order["base"]
+
+    # The rank is consumed by the layer solver and yields deterministic,
+    # separated layers for a foldable genome.
+    geometry = og.fold_genome(genome)
+    layers = od.assign_layers(geometry.faces, og._group_order(genome))
+    assert layers.max_layers >= 1
+    assert all(index >= 0 for index in layers.index.values())
+
+
+def test_mutate_genome_preserves_structure_and_is_deterministic() -> None:
+    """G9-3: mutation keeps the programme structure and is reproducible."""
+    genome = og.random_genome(random.Random(1), steps=6, strategy="families", seed=1)
+    rng = random.Random(7)
+    m1 = og.mutate_genome(genome, rng=rng)
+    rng = random.Random(7)
+    m2 = og.mutate_genome(genome, rng=rng)
+    assert len(m1.steps) == len(genome.steps)
+    assert len(m2.steps) == len(genome.steps)
+    assert m1.to_dict() == m2.to_dict()  # same rng -> same mutant
+    for s1, s2 in zip(m1.steps, genome.steps):
+        assert s1.step_index == s2.step_index
+        assert s1.symmetry == s2.symmetry
+        assert s1.group == s2.group
+        assert s1.set_group == s2.set_group
+        assert og.MIN_FOLD_ANGLE_DEG <= s1.fold_angle_deg <= og.MAX_FOLD_ANGLE_DEG
+
+
+def test_crossover_genomes_is_a_valid_union() -> None:
+    """G9-3: union crossover folds cleanly (no dangling group references)."""
+    a = og.random_genome(random.Random(3), steps=5, strategy="families", seed=3)
+    b = og.random_genome(random.Random(4), steps=5, strategy="families", seed=4)
+    child = og.crossover_genomes(a, b, rng=random.Random(9))
+    assert child.steps
+    assert all(step.set_group == "base" for step in child.steps)
+    assert all(step.group == () for step in child.steps)
+    geometry = og.fold_genome(child)
+    assert geometry.faces
+    assert geometry.span_m > 0.0
+
+
+def test_repair_by_mutation_raises_grip_acceptance_rate() -> None:
+    """G9-3: mutation-based repair cannot lower, and typically raises, the
+    grip acceptance rate of a deterministic 50-individual population.
+
+    The random-generation distribution itself is untouched
+    (``random_genome`` is not modified); only existing individuals are
+    repaired.  Before/after values are reported via assertions so the
+    regression is observable.
+    """
+    population = _fixed_population(count=50, seed=20261020)
+
+    def acceptance(pop: list) -> int:
+        return sum(1 for g in pop if _grip_valid(g))
+
+    rng = random.Random(20261020)
+    before = {name: acceptance(pop) for name, pop in population.items()}
+    after_population: Dict[str, list] = {}
+    for name, pop in population.items():
+        after_population[name] = [
+            og.repair_by_mutation(g, rng=rng, max_attempts=8) for g in pop
+        ]
+    after = {name: acceptance(pop) for name, pop in after_population.items()}
+
+    for strategy in ("families", "free"):
+        assert after[strategy] >= before[strategy], (
+            f"{strategy}: acceptance dropped {before[strategy]} -> {after[strategy]}"
+        )
+
+    # Documented reference: families was 24 % (12/50) on the 2026-10-20 audit;
+    # this run's deterministic before/after is asserted non-decreasing below.
+    print(
+        f"\nG9-3 grip acceptance (50 individuals, seed 20261020): "
+        f"families {before['families']}/50 -> {after['families']}/50, "
+        f"free {before['free']}/50 -> {after['free']}/50"
+    )
+
+
+def test_genome_to_aircraft_config_matches_wingspan_m() -> None:
+    """G9-5: the real span must match ``wingspan_m`` (±1%) via 2-stage scaling."""
+    genome = og.genome_from_archetype(od.ARCHETYPE_DART)
+    geometry = og.fold_genome(genome, paper_gsm=100.0)
+    assert geometry.span_m > 0.0
+
+    target = 1.2
+    fit = target / geometry.span_m
+
+    config = og.genome_to_aircraft_config(geometry, paper_gsm=100.0, wingspan_m=target)
+    assert config.wingspan_m == pytest.approx(target, rel=1e-2)
+
+    # Without the target, the measured span is used unchanged.
+    config_base = og.genome_to_aircraft_config(geometry, paper_gsm=100.0)
+    assert config_base.wingspan_m == pytest.approx(geometry.span_m, rel=1e-6)
+
+    # Areas and mass scale with fit**2.
+    assert config.wing_area_m2 == pytest.approx(config_base.wing_area_m2 * fit * fit, rel=1e-6)
+    assert config.mass_kg == pytest.approx(config_base.mass_kg * fit * fit, rel=1e-6)

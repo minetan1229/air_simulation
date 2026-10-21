@@ -16,6 +16,7 @@ from physics.config_schema import (
     ENVIRONMENT_SCHEMA,
     LAUNCH_SCHEMA,
     OBJECTIVE_DIRECTIONS,
+    SIMULATION_SCHEMA,
     as_dict,
     utc_now_iso,
 )
@@ -35,6 +36,7 @@ def meta_schemas():
             "aircraft": AIRCRAFT_SCHEMA,
             "environment": ENVIRONMENT_SCHEMA,
             "launch": LAUNCH_SCHEMA,
+            "simulation": SIMULATION_SCHEMA,
             "objectives": [
                 {"name": name, "direction": direction}
                 for name, direction in OBJECTIVE_DIRECTIONS.items()

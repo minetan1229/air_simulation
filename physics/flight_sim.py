@@ -701,15 +701,19 @@ def _local_atmosphere(env: EnvironmentConfig, altitude_m: float, chord_m: float)
     }
 
 
-#: Cache for :func:`atmosphere_state`.  Air density falls by ~12% per km, i.e.
-#: ~1.2e-5 % per millimetre, while a 20 ms integration step moves the airframe
-#: far less than a millimetre vertically.  Quantising the altitude to 1 mm
-#: therefore makes the four RK4 stages of a step (and the step-rejection
-#: retries) share one evaluation, removing ~75% of the atmosphere work from the
-#: inner loop without any loss of accuracy.
+#: Cache for :func:`atmosphere_state`.  The memo is keyed on the **exact**
+#: altitude, so a resolved atmosphere is a pure function of the query: it never
+#: depends on which other altitudes were resolved before it.  That matters
+#: because the 6-DoF glide is chaotic -- a density difference of 1e-8 relative
+#: grows into a 1e-3 relative difference of the integrated distance over a
+#: second of flight -- so a memo that returned "the density of whichever
+#: altitude of a 1 mm bucket was queried first" would make the flight depend
+#: on the history of the process: a warm parent process and a freshly spawned
+#: worker would then integrate different trajectories for the same airframe.
+#: The remaining hits are the step-rejection retries, which re-evaluate the
+#: very same altitudes.
 _ATMOSPHERE_CACHE: "OrderedDict[tuple, Dict[str, Any]]" = OrderedDict()
 _ATMOSPHERE_CACHE_LIMIT = 256
-_ATMOSPHERE_QUANTUM_M = 1.0e-3
 _ATMOSPHERE_LOCK = threading.Lock()
 
 
@@ -728,13 +732,14 @@ def atmosphere_state(
     Primary path: ``atmosphere_domain.evaluate_atmosphere``; fallback: the local
     ISA / humidity / Sutherland implementation :func:`_local_atmosphere`.
 
-    Results are memoised on a quantised (altitude, chord, environment) key --
-    see :data:`_ATMOSPHERE_CACHE`.
+    Results are memoised on an (altitude, chord, environment) key -- see
+    :data:`_ATMOSPHERE_CACHE`.  The altitude is part of the key *exactly*, so
+    the memo never returns the atmosphere of a neighbouring altitude.
     """
     altitude = _finite(altitude_m) + _finite(getattr(env, "altitude_m", 0.0))
     chord = max(abs(_finite(reference_chord_m)), 1.0e-4)
     key = (
-        round(altitude / _ATMOSPHERE_QUANTUM_M),
+        altitude,
         round(chord, 9),
         _finite(env.temperature_K),
         _finite(env.pressure_Pa),
@@ -2329,6 +2334,83 @@ class FlightSimulator:
             return False
         return math.hypot(float(state.position_m[0]), float(state.position_m[1])) <= HARD_HORIZONTAL_LIMIT_M
 
+    def _world_wall_contact(
+        self, start: StateVector, end: StateVector
+    ) -> Optional[StateVector]:
+        """Resolve the contact with the horizontal world boundary.
+
+        The 100 km limit is the **wall** of the world domain, not a numerical
+        rejection criterion: an airframe that reaches it is lost, so the
+        contact is resolved the way the ground contact is.  The crossing
+        instant is the ray-circle intersection of the swept horizontal segment
+        (the same continuous-collision idea the ground plane uses), the
+        position is clamped onto the boundary and the state vector is frozen
+        there with the ``crashed`` flag latched.
+
+        The rule is independent of the underground rule: the wall is a
+        *horizontal* domain limit and never turns a flight into a ground
+        contact.
+
+        Parameters
+        ----------
+        start, end
+            The two ends of the swept segment.  ``end`` is the integrated
+            candidate of a sub-step, or the straight-line projection of the
+            state over the requested step.
+
+        Returns
+        -------
+        Optional[StateVector]
+            The frozen state on the boundary, or ``None`` when the segment
+            does not reach the wall.
+        """
+        x0 = float(start.position_m[0])
+        y0 = float(start.position_m[1])
+        x1 = float(end.position_m[0])
+        y1 = float(end.position_m[1])
+        radius0 = math.hypot(x0, y0)
+        if radius0 >= HARD_HORIZONTAL_LIMIT_M:
+            # Already on (or outside) the wall: the contact is now.
+            tau = 0.0
+        else:
+            dx = x1 - x0
+            dy = y1 - y0
+            a = dx * dx + dy * dy
+            if a <= 0.0:
+                return None
+            b = 2.0 * (x0 * dx + y0 * dy)
+            c = radius0 * radius0 - HARD_HORIZONTAL_LIMIT_M * HARD_HORIZONTAL_LIMIT_M
+            discriminant = b * b - 4.0 * a * c
+            if discriminant < 0.0:
+                return None
+            tau = (-b + math.sqrt(discriminant)) / (2.0 * a)
+            if tau < 0.0 or tau > 1.0:
+                return None
+        # The crossing point of the segment, clamped onto the boundary circle.
+        px = x0 + tau * (x1 - x0)
+        py = y0 + tau * (y1 - y0)
+        radius = math.hypot(px, py)
+        if radius > 0.0:
+            scale = HARD_HORIZONTAL_LIMIT_M / radius
+            px *= scale
+            py *= scale
+        pz = float(start.position_m[2]) + tau * (float(end.position_m[2]) - float(start.position_m[2]))
+        vx = float(start.velocity_mps[0]) + tau * (float(end.velocity_mps[0]) - float(start.velocity_mps[0]))
+        vy = float(start.velocity_mps[1]) + tau * (float(end.velocity_mps[1]) - float(start.velocity_mps[1]))
+        vz = float(start.velocity_mps[2]) + tau * (float(end.velocity_mps[2]) - float(start.velocity_mps[2]))
+        t_hit = float(start.time_s) + tau * (float(end.time_s) - float(start.time_s))
+        return StateVector(
+            time_s=t_hit,
+            position_m=(px, py, pz),
+            velocity_mps=(vx, vy, vz),
+            quaternion=start.quaternion,
+            angular_velocity_radps=start.angular_velocity_radps,
+            acceleration_mps2=(0.0, 0.0, 0.0),
+            angular_accel_radps2=(0.0, 0.0, 0.0),
+            landed=False,
+            crashed=True,
+        )
+
     def _step_is_acceptable(self, previous: StateVector, candidate: StateVector) -> bool:
         """Local truncation-error guard applied to every integrated sub-step.
 
@@ -2935,6 +3017,11 @@ class FlightSimulator:
         exhausted the previous state is restored, ``diverged`` is latched and the
         airframe is frozen as a crash.
 
+        The horizontal world boundary is *not* a rejection criterion: it is a
+        wall, so a candidate that reaches it resolves the contact (clamped
+        position, frozen state, ``crashed``) instead of halving the step.  See
+        :meth:`_world_wall_contact`.
+
         Every rejection increments :attr:`_step_rejections` so that a
         numerically-artefacted trajectory can be told apart from a physical one.
         """
@@ -2948,6 +3035,15 @@ class FlightSimulator:
             # scale the observed jump is judged against.
             self._predicted_rate_jump = float(np.linalg.norm(vec3(k1[10:13]))) * step
             self._predicted_speed_jump = float(np.linalg.norm(vec3(k1[3:6]))) * step
+            wall = self._world_wall_contact(previous, candidate)
+            if wall is not None:
+                # The airframe reached the wall of the world domain: it is
+                # lost, so the position is clamped onto the boundary and the
+                # state is frozen there.
+                self._state = wall
+                self._diverged = True
+                self._diagnostics_cache = None
+                return False
             if self._within_limits(candidate) and self._step_is_acceptable(previous, candidate):
                 candidate.time_s = time_s + step
                 self._state = candidate
@@ -2997,6 +3093,30 @@ class FlightSimulator:
             self._diagnostics_cache = None
             self._record_sample()
             return self._build_packet(self._diagnostics(), total, 1)
+        # The horizontal world boundary is judged against the **whole** requested
+        # step: the adaptive sub-steps can be far too small to reach the wall
+        # within the sub-step budget, and an airframe that leaves the world
+        # domain during this step is lost.  The contact is therefore resolved
+        # on the swept horizontal segment (see :meth:`_world_wall_contact`): the
+        # position is clamped onto the boundary, the state vector is frozen
+        # there and the flight ends.
+        start_time = float(self._state.time_s)
+        px, py, pz = (float(value) for value in self._state.position_m)
+        vx, vy, vz = (float(value) for value in self._state.velocity_mps)
+        projected = replace(
+            self._state,
+            position_m=(px + vx * total, py + vy * total, pz + vz * total),
+            time_s=start_time + total,
+        )
+        wall = self._world_wall_contact(self._state, projected)
+        if wall is not None:
+            self._state = wall
+            self._diverged = True
+            self._diagnostics_cache = None
+            self._record_sample()
+            return self._build_packet(
+                self._diagnostics(), float(self._state.time_s) - start_time, 0
+            )
         budget = max(1, int(self.settings.max_substeps) if substeps is None else int(substeps))
         travelled = 0.0
         used = 0

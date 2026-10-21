@@ -469,7 +469,12 @@ def post_stall_lift_coefficient(
     airframe's own lift capability.
     """
     alpha = _finite(xp, alpha_deg, 0.0)
-    sign = xp.where(alpha >= 0.0, 1.0, -1.0)
+    # The condition is built on the array module: a plain Python float would
+    # make ``alpha >= 0.0`` a Python ``bool``, and ``cupy.where`` rejects a
+    # Python condition (``AttributeError: 'bool' object has no attribute
+    # 'astype'``) while NumPy and :class:`ScalarMath` accept it.  The kernel
+    # has to behave the same on all three backends.
+    sign = xp.where(xp.asarray(alpha) >= 0.0, 1.0, -1.0)
     abs_alpha = xp.abs(alpha)
     stall_alpha = xp.abs(_finite(xp, stall_alpha_deg, 14.0))
     reference = xp.abs(_finite(xp, ref_cl, 0.0))

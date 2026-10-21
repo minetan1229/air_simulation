@@ -88,6 +88,11 @@ CONFIG_SUFFIX = ".config.json"
 RESULT_SUFFIX = ".result.json"
 FLIGHT_SUFFIX = ".csv"
 
+#: Schema version of the persisted configuration bundle.  A bundle written by
+#: an older codebase lacks this key; :meth:`StorageManager.load_config`
+#: migrates such legacy bundles and rejects unrecognised future versions.
+CONFIG_SCHEMA_VERSION = 1
+
 #: Sections of a configuration bundle and the dataclass that validates each.
 CONFIG_SECTIONS: Tuple[Tuple[str, Any], ...] = (
     ("aircraft", AircraftConfig),
@@ -883,8 +888,12 @@ class StorageManager:
     def _write_text(path: Path, text: str) -> Path:
         # newline="" keeps the CRLF terminators of csv.writer byte-exact on
         # Windows; utf-8 without BOM keeps the JSON round-trip lossless.
-        with open(path, "w", encoding="utf-8", newline="") as handle:
+        # Write to a sibling temp file and atomically replace so a crash mid
+        # write can never leave a partially written (corrupt) artefact behind.
+        tmp = path.with_name(f"{path.name}.tmp.{os.getpid()}")
+        with open(tmp, "w", encoding="utf-8", newline="") as handle:
             handle.write(text)
+        os.replace(tmp, path)
         return path
 
     @staticmethod
@@ -896,18 +905,47 @@ class StorageManager:
     def save_config(self, bundle: Any, name: str = "preset") -> str:
         """Validate and persist a configuration bundle as ``<name>.config.json``."""
         validated = validate_config_bundle(bundle)
+        validated["_schema_version"] = CONFIG_SCHEMA_VERSION
         with self._lock:
             path = self._path_for(name, CONFIG_SUFFIX, kind="configuration name")
             self._write_text(path, json.dumps(validated, ensure_ascii=False, indent=2) + "\n")
             return str(path)
 
     def load_config(self, name: str) -> Dict[str, Any]:
-        """Read a configuration bundle back; :class:`KeyError` when absent."""
+        """Read a configuration bundle back; :class:`KeyError` when absent.
+
+        Bundles written without a schema version (pre-``CONFIG_SCHEMA_VERSION``)
+        are migrated: missing sections are filled from the contract defaults.
+        A bundle whose version is newer than this codebase understands is
+        rejected explicitly rather than silently misread.
+        """
         with self._lock:
             path = self._path_for(name, CONFIG_SUFFIX, kind="configuration name")
             if not path.is_file():
                 raise KeyError(f"no configuration named '{name}' under {self.root}")
-            return validate_config_bundle(parse_json(self._read_text(path)))
+            try:
+                payload = parse_json(self._read_text(path))
+            except ValueError as exc:
+                raise ValueError(
+                    f"configuration '{name}' is unreadable (corrupt or truncated): {exc}"
+                ) from exc
+            version = payload.get("_schema_version")
+            if version is None:
+                # Legacy bundle: no version marker.  Migrate by validating
+                # against the current contract, which fills missing sections
+                # and fields from their defaults.
+                pass
+            elif isinstance(version, bool) or not isinstance(version, (int, float)):
+                raise ValueError(
+                    f"configuration '{name}' has an invalid schema version {version!r}"
+                )
+            elif int(version) > CONFIG_SCHEMA_VERSION:
+                raise ValueError(
+                    f"configuration '{name}' was written by a newer schema "
+                    f"version {version}; this codebase supports up to "
+                    f"{CONFIG_SCHEMA_VERSION}"
+                )
+            return validate_config_bundle(payload)
 
     def list_configs(self) -> List[Dict[str, Any]]:
         """Metadata for every stored configuration, sorted by name."""

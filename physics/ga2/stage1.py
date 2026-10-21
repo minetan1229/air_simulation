@@ -33,6 +33,7 @@ the survivors are re-simulated with the adaptive reference integrator.
 from __future__ import annotations
 
 import math
+from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
@@ -65,6 +66,57 @@ _IMPACT_DISTANCE_M = 0.031
 
 #: The capture mode that tolerates the asynchronous copies CuPy emits.
 _CAPTURE_MODE_RELAXED = 2
+
+
+def _contract3(xp: Any, rotation: Any, vector: Any) -> Any:
+    """Contract an ``(N, 3, 3)`` matrix with an ``(N, 3)`` vector.
+
+    The contraction is written out element by element instead of with
+    ``einsum``: CuPy lowers ``einsum`` to cuBLAS, and a cuBLAS call cannot be
+    captured into a CUDA graph.
+    """
+    v0 = vector[:, 0]
+    v1 = vector[:, 1]
+    v2 = vector[:, 2]
+    return xp.stack(
+        (
+            rotation[:, 0, 0] * v0 + rotation[:, 0, 1] * v1 + rotation[:, 0, 2] * v2,
+            rotation[:, 1, 0] * v0 + rotation[:, 1, 1] * v1 + rotation[:, 1, 2] * v2,
+            rotation[:, 2, 0] * v0 + rotation[:, 2, 1] * v1 + rotation[:, 2, 2] * v2,
+        ),
+        axis=-1,
+    )
+
+
+@contextmanager
+def _capture_safe_rotation() -> Any:
+    """Use a capture safe rotation while a CUDA graph is captured.
+
+    The shared kernel contracts the rotation with ``einsum``, which CuPy
+    lowers to cuBLAS, and a cuBLAS call cannot be captured.  During the
+    capture the contraction is therefore written out element by element.  The
+    two forms differ by at most one unit in the last place, which the
+    chaotic 4g dart of the project amplifies -- the shared kernel is *not*
+    changed, only the captured graph uses the elementwise form.  The graph
+    keeps the kernels it captured, so the patch can be taken back right
+    after the capture.
+    """
+    original_body = gpu_dynamics.body_to_world_batch
+    original_world = gpu_dynamics.world_to_body_batch
+
+    def body_to_world(xp: Any, rotation: Any, vector_body: Any) -> Any:
+        return _contract3(xp, rotation, vector_body)
+
+    def world_to_body(xp: Any, rotation: Any, vector_world: Any) -> Any:
+        return _contract3(xp, xp.swapaxes(rotation, 1, 2), vector_world)
+
+    gpu_dynamics.body_to_world_batch = body_to_world
+    gpu_dynamics.world_to_body_batch = world_to_body
+    try:
+        yield
+    finally:
+        gpu_dynamics.body_to_world_batch = original_body
+        gpu_dynamics.world_to_body_batch = original_world
 
 
 @dataclass
@@ -312,10 +364,11 @@ class BatchScreener:
             import cupy as cp
 
             stream = cp.cuda.Stream(non_blocking=True)
-            with stream:
-                stream.begin_capture(mode=_CAPTURE_MODE_RELAXED)
-                step()
-                graph = stream.end_capture()
+            with _capture_safe_rotation():
+                with stream:
+                    stream.begin_capture(mode=_CAPTURE_MODE_RELAXED)
+                    step()
+                    graph = stream.end_capture()
             graph.launch(stream)
             stream.synchronize()
             self._graphs[key] = graph
@@ -482,19 +535,19 @@ def _seed_accumulators(
 ) -> None:
     """Seed the summary with the launch state."""
     acc["allowable"] = params.allowable_pa
-    acc["peak_q"] = xp.maximum(acc["peak_q"], core["dynamic_pressure"])
-    acc["peak_g"] = xp.maximum(acc["peak_g"], core["g_load"])
+    acc["peak_q"][...] = xp.maximum(acc["peak_q"], core["dynamic_pressure"])
+    acc["peak_g"][...] = xp.maximum(acc["peak_g"], core["g_load"])
     stress = _stress(xp, core, params)
-    acc["peak_stress"] = xp.maximum(acc["peak_stress"], stress)
+    acc["peak_stress"][...] = xp.maximum(acc["peak_stress"], stress)
     fast = core["speed"] >= gpu_dynamics.SPEED_STAT_FLOOR_MPS
     candidate = xp.where(fast, xp.abs(core["ld_ratio"]), 0.0)
     better = candidate > acc["max_ld"]
-    acc["max_ld"] = xp.where(better, candidate, acc["max_ld"])
-    acc["trim_alpha"] = xp.where(better, core["alpha"], acc["trim_alpha"])
-    acc["trim_speed"] = xp.where(better, core["speed"], acc["trim_speed"])
-    acc["trim_altitude"] = xp.where(better, core["altitude"], acc["trim_altitude"])
-    acc["trim_cl"] = xp.where(better, core["cl"], acc["trim_cl"])
-    acc["trim_cd"] = xp.where(better, core["cd"], acc["trim_cd"])
+    acc["max_ld"][...] = xp.where(better, candidate, acc["max_ld"])
+    acc["trim_alpha"][...] = xp.where(better, core["alpha"], acc["trim_alpha"])
+    acc["trim_speed"][...] = xp.where(better, core["speed"], acc["trim_speed"])
+    acc["trim_altitude"][...] = xp.where(better, core["altitude"], acc["trim_altitude"])
+    acc["trim_cl"][...] = xp.where(better, core["cl"], acc["trim_cl"])
+    acc["trim_cd"][...] = xp.where(better, core["cd"], acc["trim_cd"])
 
 
 def _stress(xp: Any, core: Dict[str, Any], params: Any) -> Any:
@@ -568,21 +621,22 @@ def _make_step(
         y_next = gpu_dynamics._rk4(xp, params, y, size, wind)
         core_next = gpu_dynamics._evaluate_state(xp, params, y_next, wind)
 
+        # Every accumulator is updated *in place*.  A CUDA graph replays the
+        # kernels it captured, so a summary that was bound to a new array
+        # inside the step would only ever hold the value of the capture.
         travelled = xp.sqrt(
             (y_next[:, 0] - y[:, 0]) ** 2 + (y_next[:, 1] - y[:, 1]) ** 2
         )
-        acc["distance"] = acc["distance"] + xp.where(active, travelled, 0.0)
-        acc["time"] = acc["time"] + size
+        acc["distance"] += xp.where(active, travelled, 0.0)
+        acc["time"] += size
 
-        acc["peak_q"] = xp.maximum(acc["peak_q"], core_next["dynamic_pressure"])
-        acc["peak_g"] = xp.maximum(acc["peak_g"], core_next["g_load"])
+        acc["peak_q"][...] = xp.maximum(acc["peak_q"], core_next["dynamic_pressure"])
+        acc["peak_g"][...] = xp.maximum(acc["peak_g"], core_next["g_load"])
         stress = _stress(xp, core_next, params)
         worse = active & (stress > acc["peak_stress"])
-        acc["peak_stress"] = xp.where(worse, stress, acc["peak_stress"])
-        acc["stall_events"] = acc["stall_events"] + xp.where(
-            active & core_next["stalled"], 1.0, 0.0
-        )
-        acc["stall_margin"] = xp.where(
+        acc["peak_stress"][...] = xp.where(worse, stress, acc["peak_stress"])
+        acc["stall_events"] += xp.where(active & core_next["stalled"], 1.0, 0.0)
+        acc["stall_margin"][...] = xp.where(
             active,
             xp.minimum(acc["stall_margin"], core_next["stall_margin"]),
             acc["stall_margin"],
@@ -590,13 +644,15 @@ def _make_step(
         fast = core_next["speed"] >= gpu_dynamics.SPEED_STAT_FLOOR_MPS
         candidate = xp.where(fast, xp.abs(core_next["ld_ratio"]), 0.0)
         better = active & (candidate > acc["max_ld"])
-        acc["max_ld"] = xp.where(better, candidate, acc["max_ld"])
-        acc["trim_alpha"] = xp.where(better, core_next["alpha"], acc["trim_alpha"])
-        acc["trim_speed"] = xp.where(better, core_next["speed"], acc["trim_speed"])
-        acc["trim_altitude"] = xp.where(better, core_next["altitude"], acc["trim_altitude"])
-        acc["trim_cl"] = xp.where(better, core_next["cl"], acc["trim_cl"])
-        acc["trim_cd"] = xp.where(better, core_next["cd"], acc["trim_cd"])
-        acc["flight_time"] = xp.where(active, acc["time"], acc["flight_time"])
+        acc["max_ld"][...] = xp.where(better, candidate, acc["max_ld"])
+        acc["trim_alpha"][...] = xp.where(better, core_next["alpha"], acc["trim_alpha"])
+        acc["trim_speed"][...] = xp.where(better, core_next["speed"], acc["trim_speed"])
+        acc["trim_altitude"][...] = xp.where(
+            better, core_next["altitude"], acc["trim_altitude"]
+        )
+        acc["trim_cl"][...] = xp.where(better, core_next["cl"], acc["trim_cl"])
+        acc["trim_cd"][...] = xp.where(better, core_next["cd"], acc["trim_cd"])
+        acc["flight_time"][...] = xp.where(active, acc["time"], acc["flight_time"])
 
         stations = gpu_dynamics._ground_stations(xp, params, y_next)
         touching = stations["min_alt"] <= 0.0
@@ -622,8 +678,8 @@ def _make_step(
             (impact_index >= 1.0)
             | (impact_speed > gpu_dynamics.CRASH_IMPACT_SPEED_MPS)
         )
-        acc["landed"] = acc["landed"] | (touching & ~failed)
-        acc["crashed"] = acc["crashed"] | failed
+        acc["landed"] |= touching & ~failed
+        acc["crashed"] |= failed
         y[...] = xp.where(active[:, xp.newaxis], y_next, y)
 
     return step

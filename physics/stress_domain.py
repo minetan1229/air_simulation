@@ -20,7 +20,12 @@ the port tip (column 0) through the wing root (the centre column for an odd
 starboard tip.  The cantilever peak therefore belongs to the wing-root
 leading edge, i.e. ``grid[0][(spanwise - 1) // 2]``.  The contract is
 spelled out in :data:`STRESS_GRID_AXES` and checked at every call, so a
-silent transpose cannot reach the payload.
+silent transpose cannot reach the payload: the published shape is verified
+against the requested resolution, and the peak is additionally required to
+sit on the wing-root column of the span axis -- a check that also catches a
+transpose of a *square* grid, where the shape alone is ambiguous.  The
+reported peak station is read from the true stress field, so a saturated
+(failed) airframe still reports the root and not a wing tip.
 """
 
 from __future__ import annotations
@@ -38,8 +43,9 @@ from .config_schema import (
     rad2deg,
     derived_properties,
     safe_div,
+    STANDARD_GRAVITY,
 )
-from .aero_domain import helmbold_cl_alpha
+from .aero_domain import elevon_effects, helmbold_cl_alpha
 from .geometry_utils import cross, normalize, vec3
 
 __all__ = [
@@ -168,6 +174,14 @@ TIP_SPAN_REDUCTION: float = 0.20        # span removed by a folded winglet tip
 DIHEDRAL_ROLL_DERIVATIVE: float = 0.08  # rolling moment dC_l / d tan(Lambda)
 Z_SCALE_OFFSET: float = 0.55            # folded section modulus gain
 Z_SCALE_GAIN: float = 0.9
+
+#: Aeroelastic compliance: bend/twist angle (deg) per unit bending stress (Pa).
+#: Basis: a thin sheet cantilever of semispan ``b/2`` under end moment ``M``
+#: rotates by ``theta = M * (b/2) / (E I)``; approximating flexural rigidity
+#: as ``eff_stiff * t^3`` makes ``moment / denominator`` a stress in Pa, so
+#: the gain converts pascals to degrees.  Units: deg / Pa.  The value is an
+#: unvalidated empirical calibration, retained without retuning.
+AEROELASTIC_COMPLIANCE_DEG_PER_PA: float = 1.0e-10
 
 _TILT_LIMIT = 0.6                       # tan(31 deg) clamp on dihedral / beta
 _EPS = 1.0e-12
@@ -348,14 +362,14 @@ def lift_curve_slope(cfg: AircraftConfig, derived: Optional[Dict[str, float]] = 
 
 
 def _elevon_pitching_increment(cfg: AircraftConfig) -> float:
-    """``dC_m`` contributed by the elevon, or 0.0 when aero is unavailable."""
-    try:
-        from physics import aero_domain
+    """``dC_m`` contributed by the elevon.
 
-        effects = aero_domain.elevon_effects(_finite_or(float(cfg.elevon_deg), 0.0), cfg)
-        return _finite_or(float(effects.get("dcm", 0.0)), 0.0)
-    except Exception:  # pragma: no cover - aero_domain is optional here
-        return 0.0
+    ``aero_domain`` is imported at module load, so it is always available here;
+    a pitch moment increment is never silently dropped behind a swallowed
+    exception.
+    """
+    effects = elevon_effects(_finite_or(float(cfg.elevon_deg), 0.0), cfg)
+    return _finite_or(float(effects.get("dcm", 0.0)), 0.0)
 
 
 def trim_alpha_deg(cfg: AircraftConfig, derived: Optional[Dict[str, float]] = None) -> float:
@@ -543,12 +557,19 @@ def aeroelastic_deformations(
     t3 = max(thickness ** 3, 1.0e-18)
     denom = max(eff_stiff * t3, 1.0e-18)
 
-    # Empirical compliance [deg*m^2/N]; paper_stiffness is dimensionless.
+    # Empirical compliance [deg/Pa]; paper_stiffness is dimensionless.
     # nz already carries dynamic pressure through L/W, so use force only once.
-    norm_scale = 1.0e-10
-    normal_force = max(cfg.mass_kg, 0.0) * 9.80665 * load
-    delta_dihedral = clamp((normal_force * (span * 0.5) * flex_gain * norm_scale) / denom, -30.0, 30.0)
-    washout_twist = clamp((q * area * c_mac * twist_gain * norm_scale) / denom, -20.0, 20.0)
+    normal_force = max(cfg.mass_kg, 0.0) * STANDARD_GRAVITY * load
+    delta_dihedral = clamp(
+        (normal_force * (span * 0.5) * flex_gain * AEROELASTIC_COMPLIANCE_DEG_PER_PA) / denom,
+        -30.0,
+        30.0,
+    )
+    washout_twist = clamp(
+        (q * area * c_mac * twist_gain * AEROELASTIC_COMPLIANCE_DEG_PER_PA) / denom,
+        -20.0,
+        20.0,
+    )
 
     return {
         "delta_dihedral_deg": float(delta_dihedral),
@@ -762,6 +783,12 @@ def stress_field(
     resolve the layout without guessing; the contract itself is
     :data:`STRESS_GRID_AXES`.
 
+    The peak station is read from the true stress field, not from the
+    clipped ``stress_index`` grid, so an airframe whose utilisation
+    saturates (index >= 1, ``status`` ``"failed"``) still reports the wing
+    root; and an unloaded wing, whose field is identically zero and has no
+    peak at all, reports the nominal wing-root leading edge.
+
     load_factor is the prescribed aircraft normal load divided by m*g.
     Dynamic pressure is metadata here; it is not multiplied into nz again.
     Accelerated on CUDA GPU via CuPy when available.
@@ -812,6 +839,10 @@ def stress_field(
 
     # --- root moment -------------------------------------------------------
     root_moment = wing_root_bending_moment(q, area, span, nz, cfg, gravity)
+    # A folded winglet raises the moment carried by the root section; the
+    # reported root moment uses the same tip-gain moment as the stress field
+    # so that stress-derived moment and reported moment stay consistent.
+    root_moment_with_tip = root_moment * (1.0 + TIP_MOMENT_GAIN * tip_factor)
 
     # --- local chord -------------------------------------------------------
     chord_root = _root_chord(area, span, taper)
@@ -842,8 +873,14 @@ def stress_field(
     moment = moment * (1.0 + TIP_MOMENT_GAIN * tip_factor)
 
     # dihedral roll couple + span load transfer + sideslip side load
-    load_mult = 1.0 - DIHEDRAL_LOAD_COUPLING * tilt * y_signed
-    couple_mult = 1.0 + DIHEDRAL_MOMENT_COUPLING * tilt * y_signed
+    # Dihedral tilts the wing, so the lift normal to the surface projects onto
+    # the body vertical by cos(delta) -- identical on both wings.  The spanwise
+    # load is therefore symmetric in symmetric flight: dihedral bends both
+    # wingtips equally instead of splitting load port/starboard.  The former
+    # ``tilt * y_signed`` terms broke symmetry and are removed; the dihedral
+    # roll moment is reported separately by dihedral_roll_couple().
+    load_mult = 1.0 / math.sqrt(1.0 + tilt * tilt)
+    couple_mult = 1.0
     side_mult = 1.0 + SIDELOAD_COUPLING * side * y_signed
     moment = moment * xp.maximum(load_mult, 0.05) * xp.maximum(couple_mult, 0.05) * xp.maximum(
         side_mult, 0.05
@@ -905,13 +942,38 @@ def stress_field(
     # over the chordwise axis (axis 0) leaves the spanwise profile, whose
     # largest entry is the spanwise station of the peak; reducing that
     # column over the spanwise axis (axis 1) gives its chordwise station.
-    span_index = int(np.argmax(index_grid.max(axis=0)))
-    chord_index = int(np.argmax(index_grid[:, span_index]))
-    # ``critical_spanwise_frac`` is the unsigned distance from the wing root
-    # (0 = root, 1 = tip); ``critical_chordwise_frac`` runs from the leading
-    # edge (0) to the trailing edge (1).
-    critical_span = clamp(abs(span_index - centre) / half_index, 0.0, 1.0)
-    critical_chord = clamp(chord_index / max(nc - 1, 1), 0.0, 1.0)
+    #
+    # The station is read from the *true* stress field, never from the
+    # clipped utilisation grid.  A saturated (failed) airframe has a whole
+    # band of cells at index 1.0, and the first of them in row-major order
+    # lies outboard of the wing root, so reading the peak from the clipped
+    # grid would report the peak stress at a wing tip instead of at the root.
+    if max_stress > 0.0:
+        span_index = int(np.argmax(stress_np.max(axis=0)))
+        chord_index = int(np.argmax(stress_np[:, span_index]))
+        # Orientation contract: the cantilever peak belongs to the wing-root
+        # column of the span axis.  The shape check above cannot see a
+        # transpose when the grid is square (``spanwise == chordwise``), but
+        # the peak station can: a transposed grid puts the peak at a chord
+        # station, which is off the root line.
+        if abs(span_index - centre) > 0.5:
+            raise RuntimeError(
+                "stress grid axis contract violated: the peak stress must sit on the "
+                f"wing-root column of the span axis (within half a station of "
+                f"{centre}), got column {span_index} of {ns}"
+            )
+        # ``critical_spanwise_frac`` is the unsigned distance from the wing root
+        # (0 = root, 1 = tip); ``critical_chordwise_frac`` runs from the leading
+        # edge (0) to the trailing edge (1).
+        critical_span = clamp(abs(span_index - centre) / half_index, 0.0, 1.0)
+        critical_chord = clamp(chord_index / max(nc - 1, 1), 0.0, 1.0)
+    else:
+        # An unloaded wing carries no stress at all, so the field has no
+        # peak.  The nominal cantilever station -- the wing-root leading
+        # edge -- is published instead of the first cell of the array, which
+        # sits on a wing tip.
+        critical_span = 0.0
+        critical_chord = 0.0
 
     status = status_for_failure_index(fi)
 
@@ -931,7 +993,7 @@ def stress_field(
         "min_stress_index": float(index_grid.min()),
         "max_stress_pa": max_stress,
         "mean_stress_pa": mean_stress,
-        "wing_root_moment_nm": float(root_moment),
+        "wing_root_moment_nm": float(root_moment_with_tip),
         "load_factor": float(nz),
         "dynamic_pressure_pa": float(q),
         "allowable_stress_pa": float(allowable),

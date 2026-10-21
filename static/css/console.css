@@ -10,16 +10,29 @@
   --surface-2:  #f1f3f4;
   --ink:        #202124;
   --ink-2:      #5f6368;
-  --muted:      #80868b;
+  --muted:      #5f6368;
   --line:       #dadce0;
   --line-2:     #bdc1c6;
   --accent:     #1a73e8;
   --accent-dk:  #1557b0;
   --accent-bg:  #e8f0fe;
-  --ok:         #34a853;
-  --warn:       #fbbc04;
+  --ok:         #1a7a34;
+  --warn:       #b06000;
   --bad:        #ea4335;
   --stage-bg:   #e8eaed;
+
+  /* P2-11: 3Dシーンとチャートで同義色を共通トークンに統一 */
+  --color-stress: #bf3b2b;
+  --color-alt:    #2f6fb5;
+  --color-spd:    #2f7d4f;
+  --color-aoa:    #ad6a05;
+
+  --color-traj-rank1: #ffb300;
+  --color-traj-worst: #e53935;
+  --color-traj-rank2: #b0bec5;
+  --color-traj-rank3: #cd7f32;
+  --color-traj-mid:   #5c9eff;
+  --color-traj-mean:  #00e5ff;
 
   --rail-l: 306px;
   --rail-r: 330px;
@@ -1553,6 +1566,8 @@ input[type="range"]:focus-visible { outline: 2px solid var(--accent); outline-of
 .toast[data-tone="error"] { border-left-color: var(--bad); }
 .toast[data-tone="warn"] { border-left-color: var(--warn); }
 .toast[data-tone="ok"] { border-left-color: var(--ok); }
+.toast[data-tone="success"] { border-left-color: var(--ok); }
+.toast[data-tone="info"] { border-left-color: var(--accent); }
 
 .modal {
   position: fixed;

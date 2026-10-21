@@ -122,24 +122,35 @@ def environment_current():
 
 @physics_bp.post("/api/v1/environment/config")
 def environment_config():
-    """Persist the airframe / launch / integrator configuration."""
+    """Persist the airframe / launch / integrator configuration.
+
+    Every section is validated before any of it is applied, so a failure in one
+    section leaves the session configuration untouched (no partial apply).
+    """
     payload = body()
     if not payload:
         return jsonify(SESSION.current_snapshot())
+    from physics.config_schema import AircraftConfig, LaunchConfig, SimulationSettings
+
+    aircraft_cfg = environment_cfg = launch_cfg = settings_cfg = None
+    if "aircraft" in payload:
+        aircraft_cfg = build(AircraftConfig, payload["aircraft"])
+    if "environment" in payload:
+        environment_cfg = merge_environment(payload["environment"], SESSION.environment)
+    if "launch" in payload:
+        launch_cfg = build(LaunchConfig, payload["launch"])
+    if "simulation" in payload:
+        settings_cfg = build(SimulationSettings, payload["simulation"])
+
     with SESSION.lock:
-        if "aircraft" in payload:
-            from physics.config_schema import AircraftConfig, LaunchConfig, SimulationSettings
-            SESSION.set_aircraft(build(AircraftConfig, payload["aircraft"]))
-        if "environment" in payload:
-            SESSION.set_environment(
-                merge_environment(payload["environment"], SESSION.environment)
-            )
-        if "launch" in payload:
-            from physics.config_schema import LaunchConfig
-            SESSION.set_launch(build(LaunchConfig, payload["launch"]))
-        if "simulation" in payload:
-            from physics.config_schema import SimulationSettings
-            SESSION.set_settings(build(SimulationSettings, payload["simulation"]))
+        if aircraft_cfg is not None:
+            SESSION.set_aircraft(aircraft_cfg)
+        if environment_cfg is not None:
+            SESSION.set_environment(environment_cfg)
+        if launch_cfg is not None:
+            SESSION.set_launch(launch_cfg)
+        if settings_cfg is not None:
+            SESSION.set_settings(settings_cfg)
         return jsonify(SESSION.current_snapshot())
 
 
