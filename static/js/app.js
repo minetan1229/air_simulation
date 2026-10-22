@@ -572,10 +572,51 @@ class ConsoleApp {
       head.addEventListener("click", (event) => {
         if (event.target.closest("button") || event.target.closest(".pill")) return;
         if (window.innerWidth > 900) return;
-        const isOpen = rail.classList.toggle("is-open");
-        if (body) body.inert = !isOpen;
-        rail.setAttribute("aria-hidden", String(!isOpen));
+        this._setRailOpen(rail, !rail.classList.contains("is-open"));
       });
+    }
+    // Below 900 px the rails are off-canvas drawers and their header leaves
+    // the viewport with them, so the drawer needs a trigger that stays
+    // visible.  Without it the whole configuration panel is unreachable on a
+    // tablet or a phone.
+    for (const button of document.querySelectorAll(".rail-toggle")) {
+      const rail = document.getElementById(button.getAttribute("aria-controls"));
+      if (!rail) continue;
+      button.addEventListener("click", () => {
+        if (window.innerWidth > 900) return;
+        this._setRailOpen(rail, !rail.classList.contains("is-open"));
+      });
+    }
+  }
+
+  /**
+   * Open or close one of the off-canvas rails.
+   *
+   * Only one drawer fits on a narrow viewport, so opening one closes the
+   * other.  The state is mirrored into ``aria-expanded`` of the trigger and
+   * into ``aria-hidden`` / ``inert`` of the rail, so a screen reader is told
+   * about the change as well.
+   */
+  _setRailOpen(rail, open) {
+    rail.classList.toggle("is-open", open);
+    const body = rail.querySelector(".rail-body");
+    if (body) body.inert = !open;
+    rail.setAttribute("aria-hidden", String(!open));
+    for (const button of document.querySelectorAll(".rail-toggle")) {
+      const target = document.getElementById(button.getAttribute("aria-controls"));
+      if (target === rail) {
+        button.setAttribute("aria-expanded", String(open));
+      } else if (open) {
+        // The other drawer has to give way: it would cover the open one.
+        target.classList.remove("is-open");
+        const otherBody = target.querySelector(".rail-body");
+        if (otherBody) otherBody.inert = true;
+        target.setAttribute("aria-hidden", "true");
+        const otherButton = document.querySelector(
+          `.rail-toggle[aria-controls="${target.id}"]`,
+        );
+        if (otherButton) otherButton.setAttribute("aria-expanded", "false");
+      }
     }
   }
 
@@ -2267,7 +2308,7 @@ class ConsoleApp {
           statusEl.style.color = "#ea4335";
         } else {
           statusEl.textContent = "動的空力バフェッティング";
-          statusEl.style.color = "#1a73e8";
+          statusEl.style.color = "#1557b0";
         }
       }
       this._updateTunnelPose();
@@ -2392,7 +2433,7 @@ class ConsoleApp {
       btn.classList.toggle("active", isActive);
       if (isActive) {
         btn.style.borderColor = "#1a73e8";
-        btn.style.color = "#1a73e8";
+        btn.style.color = "#1557b0";
       } else {
         btn.style.borderColor = "";
         btn.style.color = "";
@@ -2690,7 +2731,7 @@ class ConsoleApp {
     if (this.dom["f-hud-phase"]) {
       let phaseLabel = "待機中";
       let phaseBg = "#e8f0fe";
-      let phaseColor = "#1a73e8";
+      let phaseColor = "#1557b0";
 
       if (time > 0.05) {
         if (alt <= 0.04 && time > 0.5) {
@@ -3219,7 +3260,7 @@ class ConsoleApp {
     if (techEl) techEl.textContent = throwInfo.technique_ja || throwInfo.technique || "公認投擲フォーム";
     if (citEl) {
       const cits = (p.citations || []).map(c => `・${escapeHtml(c.title || c.citation || c.key || "")}`).join("<br>");
-      citEl.innerHTML = `<strong>【公認ルール・出処】</strong><br>${cits || "Guinness World Records 公認レギュレーション"}<br><span style="color:#1a73e8; margin-top:4px; display:inline-block;">${escapeHtml(p.notes_ja || p.notes || "")}</span>`;
+      citEl.innerHTML = `<strong>【公認ルール・出処】</strong><br>${cits || "Guinness World Records 公認レギュレーション"}<br><span style="color:#1557b0; margin-top:4px; display:inline-block;">${escapeHtml(p.notes_ja || p.notes || "")}</span>`;
     }
   }
 

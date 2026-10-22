@@ -111,7 +111,11 @@ button, input, select, textarea {
      explicit ``minmax(0, 1fr)`` lets the column shrink to the viewport and
      hands the overflow to the rail's own horizontal scroller. */
   grid-template-columns: minmax(0, 1fr);
-  grid-template-rows: var(--top-h) minmax(0, 1fr) auto var(--dock-h);
+  /* The transport row is ``--dock-h`` tall, but its content needs a little
+     more once the narrow-viewport rules hide the badges: the last five
+     pixels of the footer were clipped and the body cannot scroll.  The row
+     grows with its content instead. */
+  grid-template-rows: var(--top-h) minmax(0, 1fr) auto minmax(var(--dock-h), auto);
   height: 100vh;
   height: 100dvh;
 }
@@ -216,6 +220,13 @@ button, input, select, textarea {
   display: flex;
   align-items: center;
   justify-content: flex-end;
+  /* When the actions do not fit, a plain ``flex-end`` pushes the *first*
+     group out of the box on the left: the overflow lands on the readouts,
+     the rail drawer trigger ends up underneath them and is unclickable.
+     ``safe flex-end`` keeps the right alignment as long as it fits and
+     falls back to the start edge otherwise, so the overflow goes to the
+     right where the horizontal scroller can reach it. */
+  justify-content: safe flex-end;
   gap: 8px;
   padding: 0 12px 0 8px;
   border-left: 1px solid #2c2f34;
@@ -225,6 +236,13 @@ button, input, select, textarea {
   scrollbar-width: none;
 }
 .toprail-actions::-webkit-scrollbar {
+  display: none;
+}
+
+/* The rails become off-canvas drawers below 900 px.  Their header moves out
+   of the viewport with them, so the drawer needs a trigger that stays
+   visible -- otherwise the whole configuration panel is unreachable. */
+.rail-toggle {
   display: none;
 }
 
@@ -1378,7 +1396,12 @@ input[type="range"]:focus-visible { outline: 2px solid var(--accent); outline-of
   background: var(--ink);
   color: #e9e7e2;
   border-top: 1px solid #000;
-  height: var(--dock-h);
+  /* The transport row is ``--dock-h`` tall, but the narrow-viewport rules
+     hide the badge and the rate buttons and what is left needs a little
+     more: the last five pixels were clipped and the body cannot scroll.
+     The bar grows with its content instead. */
+  height: auto;
+  min-height: var(--dock-h);
   overflow: hidden;
 }
 
@@ -1691,6 +1714,7 @@ input[type="range"]:focus-visible { outline: 2px solid var(--accent); outline-of
 
 @media (max-width: 900px) {
   .stage { grid-template-columns: minmax(0, 1fr); }
+  .rail-toggle { display: inline-flex; }
   .rail {
     position: absolute;
     top: var(--top-h);

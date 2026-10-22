@@ -63,6 +63,18 @@
     </div>
 
     <div class="toprail-actions">
+      <!-- 狭幅 (900 px 以下) では設定 / 計器のレールは画面外へ退避する。
+           引き出しを開くトリガは画面上にある必要があるため、
+           レールヘッダーのクリックだけでは到達できない。 -->
+      <div class="toprail-group toprail-rail-group">
+        <button class="btn btn-icon rail-toggle" id="btn-rail-left" type="button"
+                title="設定パネルを開く" aria-label="設定パネルを開く"
+                aria-expanded="false" aria-controls="rail-left"><svg class="ui-icon" viewBox="0 0 24 24" fill="currentColor"><path d="M3 18h18v-2H3zm0-5h18v-2H3zm0-7v2h18V6z"/></svg></button>
+        <button class="btn btn-icon rail-toggle" id="btn-rail-right" type="button"
+                title="計器パネルを開く" aria-label="計器パネルを開く"
+                aria-expanded="false" aria-controls="rail-right"><svg class="ui-icon" viewBox="0 0 24 24" fill="currentColor"><path d="M3 17v2h6v-2H3zM3 5v2h10V5H3zm10 16v-2h8v-2h-8v-2h-2v6h2zM7 9v2H3v2h4v2h2V9H7zm14 4v-2H11v2h10zm-6-4h2V7h4V5h-4V3h-2v6z"/></svg></button>
+      </div>
+
       <div class="header-eta" id="eta-widget" title="計算完了予想時間 (ETA)">
         <span class="eta-key">完了予想</span>
         <span class="eta-val num" id="eta-clock">—</span>
@@ -332,12 +344,12 @@
             <div>
               <div style="color:var(--muted); font-size:9.5px;">高度</div>
               <div style="font-weight:700; font-size:13px; color:var(--ink);"><span id="f-hud-alt" class="num">0.00</span> <small style="font-size:10px; font-weight:normal;">m</small></div>
-              <div style="font-size:9.5px; color:var(--accent); font-weight:500;">最高: <span id="f-hud-alt-peak" class="num">0.00</span> m</div>
+              <div style="font-size:9.5px; color:var(--accent-ink); font-weight:500;">最高: <span id="f-hud-alt-peak" class="num">0.00</span> m</div>
             </div>
             <div>
               <div style="color:var(--muted); font-size:9.5px;">速度</div>
               <div style="font-weight:700; font-size:13px; color:var(--ink);"><span id="f-hud-spd" class="num">0.00</span> <small style="font-size:10px; font-weight:normal;">m/s</small></div>
-              <div style="font-size:9.5px; color:var(--accent); font-weight:500;">最高: <span id="f-hud-spd-peak" class="num">0.00</span> m/s</div>
+              <div style="font-size:9.5px; color:var(--accent-ink); font-weight:500;">最高: <span id="f-hud-spd-peak" class="num">0.00</span> m/s</div>
             </div>
             <div>
               <div style="color:var(--muted); font-size:9.5px;">水平距離</div>
@@ -1191,7 +1203,7 @@
         <strong><img src="https://api.iconify.design/material-symbols/warning.svg?color=%23f29900" class="ui-icon" alt=""> なぜ 3D描画 (RENDER) だけ Intel 内蔵GPUになるのか？</strong>
         <p>Windows ノートPC (Optimus) では、バッテリー節約のためブラウザの WebGL 描画に自動で Intel 内蔵GPU が割り当てられます。<br>
         さらに、<strong>Chrome がバックグラウンドで起動しっぱなしになっている場合、Windows の設定変更後も古い GPU プロセスが居座り続ける</strong>ため、Intel のままになってしまいます。</p>
-        <p style="margin-top: 6px; font-weight: 600; color: #1a73e8;">上記の「RTX 4060 強制モードで開く」ボタンを押すか、プロジェクト内の <code>launch_gpu_render.bat</code> を実行すると、確実に RTX 4060 で描画されます。</p>
+        <p style="margin-top: 6px; font-weight: 600; color: #1557b0;">上記の「RTX 4060 強制モードで開く」ボタンを押すか、プロジェクト内の <code>launch_gpu_render.bat</code> を実行すると、確実に RTX 4060 で描画されます。</p>
       </div>
 
       <div class="gpu-guide-accordion">
