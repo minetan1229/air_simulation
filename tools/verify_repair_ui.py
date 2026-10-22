@@ -10,6 +10,7 @@ import os
 import shutil
 import sys
 import threading
+import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -38,6 +39,24 @@ def _find_chrome_executable() -> str | None:
         if candidate.is_file():
             return str(candidate)
     return None
+
+
+def _wait_until(page, expression: str, timeout_ms: int = 60000) -> None:
+    """Poll a page expression until it becomes truthy.
+
+    ``page.wait_for_function`` with a *string* predicate is evaluated with
+    ``eval`` inside the page.  The console serves a Content-Security-Policy
+    without ``unsafe-eval``, so the browser refuses that evaluation and the
+    check dies with a CSP violation instead of a verdict.  ``page.evaluate``
+    runs the expression through the debugger protocol, which the policy does
+    not cover, so the wait is polled here instead.
+    """
+    deadline = time.perf_counter() + timeout_ms / 1000.0
+    while time.perf_counter() < deadline:
+        if page.evaluate(expression):
+            return
+        page.wait_for_timeout(100)
+    raise TimeoutError(f"the page expression never became true: {expression}")
 
 
 def main() -> int:
@@ -79,7 +98,14 @@ def main() -> int:
             page.route("**/api/v1/simulation/launch", cap_duration)
             page.route("**/api/v1/guinness/simulate", cap_duration)
             page.goto(base, wait_until="domcontentloaded", timeout=60000)
-            page.wait_for_function("window.consoleApp?.viewport?.renderer && window.consoleApp?.recordPresetsMap?.size > 0", timeout=60000)
+            _wait_until(
+                page,
+                "Boolean(window.consoleApp && window.consoleApp.viewport"
+                " && window.consoleApp.viewport.renderer"
+                " && window.consoleApp.recordPresetsMap"
+                " && window.consoleApp.recordPresetsMap.size > 0)",
+                timeout_ms=60000,
+            )
             report["gpu"] = page.evaluate("""() => {
                 const v=consoleApp.viewport, gl=v.renderer.getContext();
                 const extension=gl.getExtension('WEBGL_debug_renderer_info');
@@ -178,7 +204,13 @@ def main() -> int:
             software_browser = playwright.chromium.launch(**sw_args)
             fallback_page = software_browser.new_page(viewport={"width": 1400, "height": 900})
             fallback_page.goto(base, wait_until="domcontentloaded", timeout=60000)
-            fallback_page.wait_for_function("window.consoleApp?.viewport?.renderer?.info.render.calls > 0", timeout=60000)
+            _wait_until(
+                fallback_page,
+                "Boolean(window.consoleApp && window.consoleApp.viewport"
+                " && window.consoleApp.viewport.renderer"
+                " && window.consoleApp.viewport.renderer.info.render.calls > 0)",
+                timeout_ms=60000,
+            )
             software = fallback_page.evaluate("""() => {
                 const v=consoleApp.viewport,gl=v.renderer.getContext(),ext=gl.getExtension('WEBGL_debug_renderer_info');
                 return {renderer:ext?gl.getParameter(ext.UNMASKED_RENDERER_WEBGL):gl.getParameter(gl.RENDERER),
