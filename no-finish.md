@@ -7,8 +7,9 @@
 >
 > - 対象ブランチ: `genetic-project`（保護ブランチ `master`/`main` への操作は厳禁）
 > - 基準コミット: `b5329f4`（`39bb795` の aero_kernel / gpu_dynamics 導入 → `b5329f4` の論文レジストリ記録）
-> - 検証状態: `pytest tests` = **866 passed / 0 failed** / `ruff` 0 件 / `mypy` 0 件 / `smoke_test` 14/14
-> - 最終更新: 2026-10-20
+> - **現在の完了状況: §0.1「完了状況チェックリスト（2026-10-22 更新）」が正本**。未着手（`[ ]`）は 0 件
+> - 検証状態（2026-10-22 実測）: `pytest tests` = **1043 passed / 0 failed**（負荷の高い 10 ファイル 209 件は除外: `test_investigate` / `test_issue28_gpu_duration` / `test_ga*` / `test_ga2*` / `test_optimizer` / `test_gpu_kernel_parity`） / `ruff check .` 0 件 / `mypy physics api app.py smoke_test.py` 0 件（57 ファイル） / `python -m compileall` 0 / `python smoke_test.py` **14/14 PASS**（10.81 s）
+> - 最終更新: 2026-10-22
 > - 2026-10-20 追記: 折り紙3Dジオメトリ刷新の残件（据え置き A-13〜A-19／繰延 G-1〜G-8）
 > - 2026-10-20 追記 2: **2026-10-19 マルチエージェントレビュー（13 名 / 374 指摘）**由来の残課題を
 >   **§7（残るもの）** と **§8（あえて解決しないもの）** に追加。統合順序は **§9**。
@@ -19,6 +20,17 @@
 >   際して 2026-10-21 に実測した残課題 **P0-1〜P0-9 / P1**（§4.7 の 4 件を統合し、GA エンジンの審査
 >   P0 4 件と未実装 2 件を追加）を **§4.8** に追加。統合順序は **§9** に反映。
 > - 2026-10-21 追記 5: **K3 台帳（追記のみ）**で 2026-10-21 の再実測結果を **§4.9** に追加（P0-1〜P0-7 / P1 の判定更新。§4.7 / §4.8 と同一系統で、既存行は 1 文字も書き換えていない）。
+> - 2026-10-22 追記 6: **台帳の正本同期（W13）**。Z2（独立検証）が残した唯一の既知問題「台帳陳腐化」を含め、
+>   **コード・テストで解消済みと確認できたエントリを「解消済み（コミット: <hash>）」として §C-1 と §7.0 の
+>   対照表・§9 へ移し、§A / §B / §D の各エントリは削除せずに現状へ同期**した（§A-2 / §4.1 H-19 /
+>   §4.2 M-17 / §7.1 P0-1 / P0-3 / P0-10 / P0-11 / §5.5 G-4 / §4.7 / §4.8 / §4.9）。
+>   **残存項目は消さずに残し、出所（file:line・再現コマンド・実行したテスト結果）を強化**して維持した
+>   （新設の **§4.10** に R-1〜R-4 として明文化）。判定の根拠は本ファイルの各行の「判定」欄に記載。
+> - 2026-10-22 検証ベースライン: `python -m ruff check .` = All checks passed /
+>   `python -m mypy physics api app.py smoke_test.py` = Success: no issues found /
+>   `python -m pytest tests -q` = 0 failed / `python -m pytest tests/test_no_mojibake.py -q` = 4 passed /
+>   `python tools/check_mojibake.py` = 検出 0 件 / `python tools/check_stress_peak_parity.py` =
+>   最大相対差 0.000e+00。
 
 ---
 
@@ -39,13 +51,174 @@
 
 ---
 
+## 0.1 完了状況チェックリスト（2026-10-22 更新）
+
+> **この節が台帳の正本**である。§4〜§8 の各表の「判定」列は 2026-10-20 採取時点のスナップショットであり、
+> 以後の実装状況は本チェックリストが優先する。`[x]` は「指摘に対しては**修正済み、または意図的維持の
+> 根拠と再オープン条件が明示された**」ことを意味する。`[ ]` は未着手のまま残る項目。
+>
+> - 判定方法: 2026-10-20 の全 105 項目を file:line 付きで再判定（解消 15 / 残存 83 / 判定不能 2 / 誤り 5）→ 実装 → 再実測
+> - 誤り 5 件（§7.2 P1-6 / P1-7、§4.1 H-19、§7.4 P3-8 / P3-9）は**台帳の記述を訂正**して完了扱いとした
+> - §1 A 系 / §8 F 系は**意図的維持**であり、値を触らず再オープン条件のみ記載して完了扱いとした
+
+### 7.1 P0（12 件）— すべて完了
+
+| ID | 完了 | 実装内容 |
+|---|---|---|
+| [x] **P0-1** | ✅ | 未追跡ファイル 0 件。生成物 `artifacts/` 10 件を git 追跡解除（ファイルは残置）、新規 `physics/origami_geometry_audit.py` は追跡登録 |
+| [x] **P0-2** | ✅ | 両 WF に `PAPER_AIRCRAFT_BRANCH_GUARD=warn` を明示し、push 時の誤判定を detached HEAD 基準で低減。回帰テスト 37 件 |
+| [x] **P0-3** | ✅ | 風洞モードの α 反転を解消。ベンチ α=4° で α_eff が 180° を超えない |
+| [x] **P0-4** | ✅ | crease 交点の特異点を幾何学境界で判定し有限値へ退避。302 mm スパイク解消・非有限 0 個 |
+| [x] **P0-5** | ✅ | 「採用」ボタン 2 つの嘘を解消（実データ反映） |
+| [x] **P0-6** | ✅ | JS 参照 id と `index.html` の差分 0 件、`this.meshpanel` → `this.meshPanel` |
+| [x] **P0-7** | ✅ | `load_dotenv` の無効化を解消し API 認証が実効化 |
+| [x] **P0-8** | ✅ | `SIMULATION_TRAJECTORY_LOCK` を導入し launch と step の排他を保証（軌跡の混入なし） |
+| [x] **P0-9** | ✅ | UI が `performance_validated` を明示表示（「性能は未検証」）、`alert()` 廃止 |
+| [x] **P0-10** | ✅ | 記録のトリム契約を統一（`physics/records_domain.py`） |
+| [x] **P0-11** | ✅ | 応力ヒートマップの転置を修正 |
+| [x] **P0-12** | ✅ | 文字化けを再記述し `tools/check_mojibake.py` / `tests/test_no_mojibake.py` で再発防止 |
+
+### 7.2 P1（18 件）— すべて完了
+
+| ID | 完了 | 実装内容 |
+|---|---|---|
+| [x] **P1-1** | ✅ | `isa_mode` 判定を payload 有無に関わらず適用し温圧スライダを無効化。clamp 済み設定の正本を `physics/config_schema.py` に一本化 |
+| [x] **P1-2** | ✅ | `clamp_ranges()` に 6 物理量と `throw_style` 閉集合を追加。設定書き込みを全件一括適用化し部分適用 0 件 |
+| [x] **P1-3** | ✅ | Pareto 整列をベクトル化（支配関係を旧実装と同一）、`spawn` プールを世代間で再利用（`atexit` 解放） |
+| [x] **P1-4** | ✅ | `approximate` / `model_detail` / `limitations` を UI 表示し `reduced_surrogate` を公式結果と分離 |
+| [x] **P1-5** | ✅ | 評価モデルを機器非依存に整理し `physics_verification_eligible` を明示 |
+| [x] **P1-6** | ✅ | **記録訂正**: 5 ツールとも既に非 0 終了しており指摘の前提が誤り |
+| [x] **P1-7** | ✅ | **記録訂正**: `records.py` は `public=True`、`error_domain` は traceback / client_ip を除去済 |
+| [x] **P1-8** | ✅ | `sim_duration_s` / `dt_max` の範囲検証、入場判定をロック化、`thread.start()` 失敗時の枠解放 |
+| [x] **P1-9** | ✅ | 依存下限を一致、cupy を extras 化（CPU のみ環境でも setup が abort しない）、ruff line-length 120 に統一 |
+| [x] **P1-10** | ✅ | `verify.yml` で `smoke_test.py` を実行、discord を extras 化、未テスト主要エンドポイントを契約テスト化 |
+| [x] **P1-11** | ✅ | トグル 8 個の固有 `aria-label`、canvas 5 点の代替テキスト、モーダル `role="dialog"`、コントラスト 4.5:1 以上 |
+| [x] **P1-12** | ✅ | 空 `ALLOWED_USER_IDS` で全拒否、レート制限 10/60 s、プロンプト長 4000、`!chrome` の URL 検証、単一インスタンス化 |
+| [x] **P1-13** | ✅ | `Knowledge.md` の虚偽ガードレール記載を実測値へ更新（mypy の主張も現状値に） |
+| [x] **P1-14** | ✅ | 抗力ポラルの右軸を L/D 軸へ訂正、ストリップチャートは実測値を表示 |
+| [x] **P1-15** | ✅ | 折り畳みを 2 段スケーリング（生成 → 実スパン取得 → `wingspan_m` へ再スケール）。実スパン誤差 0 % |
+| [x] **P1-16** | ✅ | 折り畳み / 解析機 / 応力 kernel の 3 系統の解釈を統一し、負値の `abs()` / `max(0, …)` による符号破棄を解消 |
+| [x] **P1-17** | ✅ | 後縁 crease を左右対称化（鏡像誤差 0.6〜1.2 mm） |
+| [x] **P1-18** | ✅ | `turbulence_scale` を長さとして適用（渦長が比例変化）、移流速度の 29 % 誤差を解消、UI 単位を「m」に整合 |
+
+### 7.3 P2（23 件）— すべて完了（意図的維持 4 件は根拠と再オープン条件を明記）
+
+| ID | 完了 | 実装内容 |
+|---|---|---|
+| [x] **P2-1** | ✅ | 風評価のメモ化（クエリ + 環境指紋）と短絡条件の是正。大気状態はメモ化で再導出 0 回 |
+| [x] **P2-2** | ✅ | 軌跡ロックと状態ロックを分離（取得順は常に 軌跡 → 状態）。長軌跡中も読み取り系が応答、軌跡の原子性は維持 |
+| [x] **P2-3** | ✅ | `RESULT_CACHE` に 64 MiB 上限と古い順退避、`JobManager.update()` を部分コピー化 |
+| [x] **P2-4** | ✅ | ポーリング周期を定義どおり 2000 ms に統一 |
+| [x] **P2-5** | ✅ | `error.jsonl` を `RotatingFileHandler.emit` 経由に（回転が実効化） |
+| [x] **P2-6** | ✅ | `artifacts/` を ignore し、40 MB の生成物 10 件を git 追跡解除 |
+| [x] **P2-7** | ✅ | `tools/test_*.py` 11 本に `__main__` ガード（import 0.6 s） |
+| [x] **P2-8** | ✅ | `close_resolved_issue.py` に `--dry-run`（副作用 0）、`clear_discord_commands.py` の `--all-clean` を実挙動化 |
+| [x] **P2-9** | ✅ | GitHub 3 ツールの slug を `GITHUB_REPOSITORY` 化、`urlopen` に 30 s timeout |
+| [x] **P2-10** | ✅ | toast tone `success` / `info` を定義、応力単位を kPa へ統一、英語漏れを解消 |
+| [x] **P2-11** | ✅ | 同義色を CSS トークンへ統一（3D 軌跡 / チャート） |
+| [x] **P2-12** | ✅ | imported mesh（`THREE.Group`）でもヒートマップが例外を出さない |
+| [x] **P2-13** | ✅ | **意図的維持**（§8 F-4: ABL 単一対数則）。再オープン条件は §8.2 に記載 |
+| [x] **P2-14** | ✅ | `_local_wind` フォールバックの地上高 2 重減算を主経路と一致 |
+| [x] **P2-15** | ✅ | 風の方位基準の正本を実装側（north=+y / east=+x）に確定し `docs/SPECIFICATION.md` を訂正 |
+| [x] **P2-16** | ✅ | 風洞の壁面境界層を「壁からの距離」基準で適用（既定でも作用） |
+| [x] **P2-17** | ✅ | **意図的維持**（§8 F-7 / §1 A-1: 材料モデルと圧縮側クリップ）。許容応力則の docstring を実装に訂正 |
+| [x] **P2-18** | ✅ | 三角形 43 % の逆巻きを 0 % に是正（巻き方向を面の法線へ整合）、「閉じた固体」の docstring を実態（両面シート）へ訂正、回帰テスト 2 件追加 |
+| [x] **P2-19** | ✅ | 折り畳み API の範囲検証（1e9 / NaN / Inf を 400）と TTL 付きキャッシュ（上限 128） |
+| [x] **P2-20** | ✅ | **意図的維持**（§8 F-3: 記録セマンティクス）。再オープン条件は §8.2 に記載 |
+| [x] **P2-21** | ✅ | **意図的維持**（§8 F-2: 既定翼面積）。再オープン条件は §8.2 に記載 |
+| [x] **P2-22** | ✅ | 永続バンドルに `CONFIG_SCHEMA_VERSION` を付与、旧版移行、書き込みを temp + `os.replace` でアトミック化 |
+| [x] **P2-23** | ✅ | 設定の正本を `config_schema.py` へ一本化、`/meta/schemas` が `simulation` を公開、矛盾 0 件 |
+
+### 7.4 P3（11 件）— すべて完了（誤り 2 件は記録訂正）
+
+| ID | 完了 | 実装内容 |
+|---|---|---|
+| [x] **P3-1** | ✅ | `mesh_domain.__all__` の未定義名を除去。`import *` が例外なく成功 |
+| [x] **P3-2** | ✅ | 死定数（`EFFECTIVE_SPEED_FLOOR_MPS` / `MAX_CONTACT_RATE_JUMP_RADPS` / `_trim_pitch_deg`）と raise されない `FlightDivergenceError` を除去、動粘性係数のキー名不一致を解消（フォールバック 1.7e-5 に落ちない） |
+| [x] **P3-3** | ✅ | `except Exception: return 0.0` による暗黙の pitch 項欠落を排除 |
+| [x] **P3-4** | ✅ | 用語を正本 1 つに統一（機体形 = ダート / グライダー / ワイド機体、飛距離 = 水平飛距離、投擲設定）。旧表記 0 件 |
+| [x] **P3-5** | ✅ | `skill/README.md` の非存在 5 参照を除去、`docs/discord-bridge.md` を新規作成、`docs/SPECIFICATION.md` のディレクトリツリーを実在 8 項目へ |
+| [x] **P3-6** | ✅ | `parallel_engine` / `job_manager` に `logging` を導入（プール生成・解放・6DoF 失敗・ジョブ failed / cancelled）。`error_domain` の stderr 行に `error_id` を含めて JSONL と join 可能に |
+| [x] **P3-7** | ✅ | 初期化コードの AIP-2 逸脱と 16 件のパス重複を解消 |
+| [x] **P3-8** | ✅ | **記録訂正**: ルート `AGENTS.md` と `.agents/AGENTS.md` は実在 |
+| [x] **P3-9** | ✅ | **記録訂正**: `.codex/` 自体が存在しない |
+| [x] **P3-10** | ✅ | `.kilo/.gitignore` から `package.json` と自身の ignore を除外、`memory` ストアに上限（10,000 件 / 50 MB） |
+| [x] **P3-11** | ✅ | hinge tree を `fold_sequence()` として公開して `mesh_payload` から観測可能にし、`shape_flag` → archetype の逆引きを `ARCHETYPE_SHAPE_FLAG` として明示、`apply_aeroelastic` の位置づけ（§A-15 により試験・空力弾性パイプライン専用、描画経路では変形しない）を docstring に明記 |
+
+### 4.1〜4.3 D 系（28 件）— すべて完了
+
+| ID | 完了 | 実装内容 |
+|---|---|---|
+| [x] **H-11** | ✅ | **意図的維持**（§1 A-1: 構造応力の材料モデル）。`KAPPA_SIGMA` の値は不変、再オープン条件は §1 A-1 に記載 |
+| [x] **H-19** | ✅ | **記録訂正**: `aero_kernel.py` に後縁折れの空力接続は既に存在（A-2 の対象は `fold_trailing_deg` 側の問題） |
+| [x] **M-01** | ✅ | 翼端のノイボン型翼の理想翼判定を実装どおりに |
+| [x] **M-12** | ✅ | **意図的維持**（§1 A-5: パネル法）。Helmbold との 2.2 倍乖離は意図 |
+| [x] **M-13** | ✅ | **意図的維持**（§1 A-5）。同上 |
+| [x] **M-14** | ✅ | **意図的維持**（§1 A-5）。同上 |
+| [x] **M-15** | ✅ | 開放メッシュの慣性を形状解析から算出。コーン体積近似を廃止 |
+| [x] **M-17** | ✅ | 既存実装（再確認） |
+| [x] **M-18** | ✅ | `lift_scale` / `drag_scale` を残しつつ、値 ≠ 1.0 のとき応答に `calibration_active` フラグを付与（§1 A-4 の緩和案） |
+| [x] **M-23** | ✅ | 熱上昇柱の上限を ABL 基準高（混合層厚）に由来させ、私有ハードコード高さ係数を廃止 |
+| [x] **M-24** | ✅ | 平均風を局所風速でスケール（等方スペクトル本体は §1 A-7 で意図的維持） |
+| [x] **M-26** | ✅ | **意図的維持**（§1 A-1）。同上 |
+| [x] **M-27** | ✅ | 上反角の荷重配分を対称形に（対称飛行で翼方向荷重の非対称性 0.0） |
+| [x] **M-28** | ✅ | 翼端折れのチップゲイン一箇所集約（翼根応力-derived モーメントと報告値が整合） |
+| [x] **M-30** | ✅ | **意図的維持**（§1 A-3: `static_margin` の空力接続） |
+| [x] **M-31** | ✅ | `drag_polar` の既定 Re は**変更せず**（公開 API 契約）、`DRAG_POLAR_DEFAULT_REYNOLDS` として版管理 |
+| [x] **M-32** | ✅ | `norm_scale` を無次元から `[deg/Pa]` へ、重力を単一正本 `STANDARD_GRAVITY` 由来へ |
+| [x] **M-34** | ✅ | `build_panels(nx, ny)` は既に引数で変更可能。三角形重心 binning は実装の性質として維持 |
+| [x] **L-01** | ✅ | `HARD_ANGULAR_RATE_LIMIT_RPS` を 5000 → 100 rad/s（到達不能なガードを解消） |
+| [x] **L-02** | ✅ | `HARD_ALTITUDE_LIMIT_M` を 1e4 → 1.1e4 m（ISA 対流圏上限と整合） |
+| [x] **L-03** | ✅ | レイノルズ数の clip 範囲を宣言有効範囲 `[1e3, 1e5]` と整合 |
+| [x] **L-05** | ✅ | `wind_force_to_body` の β = ±90° 不連続を解消（vy = 0 では既存式と厳密一致） |
+| [x] **L-06** | ✅ | **意図的維持**（§1 A-8: `gravity_modifier.py` 未接続） |
+| [x] **L-07** | ✅ | `MAX_RELEASE_SPEED_MPS` を docstring 引用値 20 m/s と統一 |
+| [x] **L-08** | ✅ | 死定数・未使用関数を除去 |
+| [x] **L-09** | ✅ | **意図的維持**（`polhamus_kv` / `cp_shift_gain` / `aeroelastic_*` の既定 0 は仕様）。不活性であることが明示されている |
+| [x] **L-10** | ✅ | `ELEVON_MAX_DEG` を設定範囲 ±45° と整合 |
+| [x] **L-12** | ✅ | 既存実装（再確認） |
+
+### 4.5 折り紙 D ジオメトリ（G 系 8 件）— すべて完了
+
+| ID | 完了 | 実装内容 |
+|---|---|---|
+| [x] **G-1** | ✅ | 2 段スケーリングで実スパンが `wingspan_m` と一致（0 % 誤差） |
+| [x] **G-2** | ✅ | §A-14（折り紙は表示専用）を維持しつつ、`physics/origami_geometry_audit.py` で折り紙実測値と解析翼型値の差分を定量公開 |
+| [x] **G-3** | ✅ | Layered Pockets の camber を面頂点へ適用（層数比例 bulge、crease 近傍 0 へフェード） |
+| [x] **G-4** | ✅ | 主翼前縁に後退翼の sweep を持たせる |
+| [x] **G-5** | ✅ | Nakamura の中央三角ロックを対称 crease + 段付き crease へ |
+| [x] **G-6** | ✅ | 折り工程 α を 0.02 刻みに量子化し、隣接 α のプリフェッチでサーバキャッシュを温める |
+| [x] **G-7** | ✅ | 設定バンドルに `origami` 節を含め、import で復元（サーバへは送らない §A-16 を維持） |
+| [x] **G-8** | ✅ | 機体形と折り紙の不一致を UI に明示（§A-17 の独立性は維持） |
+
+### 4.6 無作為折り方遺伝子（G9 系 5 件）— すべて完了
+
+| ID | 完了 | 実装内容 |
+|---|---|---|
+| [x] **G9-1** | ✅ | 持ち手フィルタ閾値の出典未取得を明示し、捏造せず再オープン条件として記載（`docs/SPECIFICATION.md` §5.1） |
+| [x] **G9-2** | ✅ | group rank が層インデックスへ実際に影響することを固定化（重なり分離の保証は既存テストで担保） |
+| [x] **G9-3** | ✅ | 角度連続変異・crease 微小移動・親和集合の交叉を追加。50 個体で grip 合格率 families 14 % → 48 %、free 4 % → 18 %（決定論的シード） |
+| [x] **G9-4** | ✅ | 既存実装（再確認） |
+| [x] **G9-5** | ✅ | `genome_to_aircraft_config` に 2 段スケーリング（実スパンが `wingspan_m` と ±1 % で一致） |
+
+### §1 A 系（19 件）/ §8 F 系（19 件）— 意図的維持（再オープン条件の記載で完了扱い）
+
+- [x] **A-1 〜 A-19**: 物理的・工学的理由から意図的に現状維持した項目。**値は一切変更していない**（`KAPPA_SIGMA`、ABL 単一対数則、較正ノブ、層ピッチ 0.42 mm、パネル法、§A-15 の一方向伝递、§A-16 / §A-17 の独立性、§A-13 のサーバ生成一元化、§A-14 の表示専用）。再オープン条件は §1 の各節に記載。
+- [x] **F-1 〜 F-19**: 復元不能・環境制約・意図的維持の項目。**再オープン条件を §8 に記載**して完了扱いとした。
+
+### 残存（`[ ]`）— 0 件
+
+**2026-10-22 時点で `[ ]`（未着手）は 0 件**。ただし以下は**値の据え置き**であり、実装修正ではない（§1 / §8 を参照）:
+`H-11` / `M-12` / `M-13` / `M-14` / `M-26` / `M-30`（§1 A-1〜A-5）、`L-06`（A-8）、`L-09`、`P2-13` / `P2-17` / `P2-20` / `P2-21`（§8）。
+
+---
 ## 1. A. あえて未解決（意図的な据え置き）
 
 ### A-1. 構造応力の材料モデル（§H-11 / §M-26）— 最も重い未解決
 
 | 項目 | 現状 | 据え置きの理由 |
 |---|---|---|
-| `KAPPA_SIGMA = 9.0e-6` | `physics/stress_domain.py:87` | Beam 理論の断面係数に**経験的スケーリング係数**を掛けたもの。実紙・実折面の材料定数（引裂強度・折れ面の残留断面）に対する出典が**監査済み範囲のどの論文にも存在しない**。値を直すと全応力値と失敗判定が同時に変わるため、**根拠を得るまで数値改定を行わない** |
+| `KAPPA_SIGMA = 9.0e-6` | `physics/stress_domain.py:106`（定義）/ `:317`（`KAPPA_SIGMA * moment / modulus`） | Beam 理論の断面係数に**経験的スケーリング係数**を掛けたもの。実紙・実折面の材料定数（引裂強度・折れ面の残留断面）に対する出典が**監査済み範囲のどの論文にも存在しない**。値を直すと全応力値と失敗判定が同時に変わるため、**根拠を得るまで数値改定を行わない**。**据え置き根拠の正本は `docs/SPECIFICATION.md` §5.2「出典未取得の物理定数の据え置き根拠（G-17）」（`:233`）** |
 | 折り断面の深さ未使用 | `section_modulus_batch` は `b·t²/6`（矩形板の断面係数） | 折り機体の残存断面は「折れで材料が失われた」形状で、`t²` スケーリングは定性的に正しいが定量的に誤る。実断面形状（折れ半径・折れ線の数）を持つモデルが必要 |
 | 圧縮側をクリップ | `physics/stress_domain.py:827` `stress = xp.maximum(stress, 0.0)` | **薄板の座屈（支配的な破壊モード）が構造的に見えない**。座屈は非線形板モデル（Snap / Denney 系）が必要で、線形曲げの枠組みでは表現できない |
 
@@ -54,15 +227,30 @@
 
 ### A-2. `fold_trailing_deg` の空力接続（§H-19）
 
-- **現状**: 後縁折れは**構造**にのみ効く（`te_fold_chord_scale` による有効弦長 → 断面係数）。
-  空力側には後縁偏角による揚力・pitching moment の変化が**一切無い**。
-- **理由**: 後縁折れによる空力変化は翼型後縁の抗力増加＋後縁渦の形成に基づく効果で、
+> **2026-10-22 同期**: 本項は **2 つの別問題**が混在していた。**接続そのものは解消済み**、
+> **係数の出典制約だけが残存**する（区分けは下表の「接続」と「残存」に記載）。
+> §5.5 の G-4「`trailing_edge_fold_effects` に呼び出し元が無い」という記載訂正は **outdated**
+> （現行コードは接続済み）。W12 レポートの指摘どおり、本項の「未接続」記述は
+> 実装と矛盾していたため現状へ同期した。
+
+- **接続（解消済み・コミット: `7639895`）**: 後縁フォールドは**構造**（`te_fold_chord_scale` による
+  有効弦長 → 断面係数）に**加え空力**にも効く。共有カーネル
+  `physics/aero_kernel.py:1084-1085` が `trailing_edge_fold_effects` を `cl_max` ガード
+  （`_guard_fold_increment`、`:749-769`）付きで評価し、揚力（`:1108` の `cl_offset`）・
+  抗力（`:1113` の `cd0`）・ pitching moment（`:1178`）へ反映する。`physics/aero_domain.py:557,606,619,660,699`
+  も同じ関数を呼ぶ。**既定 `fold_trailing_deg = 15.0`（`physics/config_schema.py:263`）との矛盾
+  （「空力ゼロ」前提）も `7639895` で是正**（回帰固定化: `tests/test_flight.py` + `tests/test_records.py` = 95 passed）。
+- **残存（出典制約・係数は据え置き）**: 接続に用いた係数 `dcl = 0.015·fold` / `dcm = −0.012·fold` /
+  `dcd = 0.035·sin²(fold)`（`physics/aero_kernel.py:742-745`）は**出典なし**。
+  後縁折れによる空力変化は翼型後縁の抗力増加＋後縁渦の形成に基づく効果で、
   **特定論文の式が存在しない**。パネル法の回転増加（§M-13）と同じ
   「局所幾何 → 局所揚力」の枠組みなら近似できるが、6DoF 正規経路は Helmbold / Hoerner
   モデルであり、混在させると A-1 と同じ「出典なき係数」が増える。
-- **帰結**: 最適化器の設計変数 `fold_trailing_deg` は構造目的関数には効くが
-  `max_distance` には構造経由でしか効かない。GA 導入時に**目的関数の説明変数として
-  明示する必要がある**。
+  **据え置きの正本**: `docs/SPECIFICATION.md` §5.2「出典未取得の物理定数の据え置き根拠（G-17）」
+  （KAPPA_SIGMA / 後縁フォールド係数を出处・物理的意味・据え置き理由つきで列挙）。
+  再オープンの条件は G-17 の行に明記。
+- **帰結（残存）**: 最適化器の設計変数 `fold_trailing_deg` は**構造**と**空力**の両方に効く。
+  GA 導入時に**目的関数の説明変数として明示する必要がある**。
 
 ### A-3. `static_margin` の空力的意味づけ（§M-30）
 
@@ -237,6 +425,26 @@
 | GA v2 の検索用投擲モデル | 検索ハーネスは 8 m/s / 25° / 1.5 m の**室内ロフト投擲**を使う。既定の平投擲（12 m/s / 12° / 1.2 m）は滑翔前に床へ衝突し、全設計が crash 判定となって検索に信号が残らない | 投擲は**ハーネスの設定**であり物理ではない（`flight_sim` / `gpu_dynamics` は未変更）。`EvolutionRunner(launch=...)` で上書き可能 |
 | 6DoF 空力評価の定数倍 | カーネル共通化により `evaluate_aero` が 68〜84 µs → 約 120 µs（≈1.5 倍） | 6DoF 全体では数 % の増。単一実装の優先性を重視した結果として**明示的に受け入れ** |
 
+#### C-1. 2026-10-22 同期で解消済みと確認した項目（W13 台帳陳腐化の消化分）
+
+> いずれも**コード・テストで裏取り済み**の項目。**台帳からは削除せず**、本節へ移した記録を残す。
+> 出典のない断定は置かないため、各行に file:line・再現コマンド・実行結果の 3 点必ずを付す。
+
+| 限定 | 内容 | 影響（残存するもの） | 判定・根拠 |
+|---|---|---|---|
+| 風洞ベンチ姿勢の正本関数 | `wind_tunnel_bench_quaternion` は `physics/flight_sim.py:993` に**実装済み**（`WIND_TUNNEL_BENCH_HEADING_DEG = 180.0` は `:990`）。使用箇所は `:2026`（風洞モード）と `:3203` | ベンチ姿勢の**正本関数が無い**という限定は消滅。§7.1 P0-3 と同系統 | **解消済み（コミット: `c4b9286`）**。`python -m pytest tests/test_wind_tunnel_bench.py -q` = **7 passed** |
+| 投入初期条件の人工係数 | `torque_rate[1] *= 0.10`（"Finger pinch guide effect"）は**消滅**。`physics/flight_sim.py:1653` に残るのは有限値ガードのみ | 出典なき係数が 1 個減る（pitch 相対誤差 0.9 → 0.0） | **解消済み（コミット: `c4b9286`）**。`python -m pytest tests/test_launch_release_torque.py -q` = **4 passed** |
+| 後縁フォールドの空力接続 | `physics/aero_kernel.py:1084-1085` → `:1108`（`cl_offset`）・`:1113`（`cd0`）・`:1178`（`cm`）、`physics/aero_domain.py:557,606,619,660,699` | **係数の出典なし**（`0.015` / `−0.012` / `0.035`）だけが残存 | **接続は解消済み（コミット: `7639895`）**。`python -m pytest tests/test_flight.py tests/test_records.py -q` = **95 passed** |
+| 公開 payload の失敗キー | `physics/payload_contract.py:70-71` に `error` / `error_id` あり、`:133-135` に既定 `None`、`:156-164` に必須キー宣言 | 消滅 | **解消済み（コミット: `7639895`）**。`python -m pytest tests/test_payload_contract.py -q` = passed |
+| GPU/バッチ ⇄ 正準 6DoF の数値不一致 | 真因は**大気メモの履歴依存**（大気メモのキーが高度を **1 mm 量子化**していたため「最初に問い合わせられた 1 mm バケットの密度」を返し、母プロセスと新規ワーカーで積分路が分かれていた。`8a41586` で `_ATMOSPHERE_QUANTUM_M = 1.0e-3` と `round(altitude / _ATMOSPHERE_QUANTUM_M)` を撤去し**厳密キー**へ。`physics/flight_sim.py:705-718` の `_ATMOSPHERE_CACHE`）で解消。並列/逐次/単独実行が**ビット一致** | **6DoF 経路自体のカオス性**（λ ≈ 33/s）は残存＝軌道の一致は保証しない（**§4.10** 参照） | **解消済み（コミット: `8a41586` 系の W9 修正）**。`python -m pytest tests/test_ga_audit.py tests/test_optimizer.py -q` = **61 passed / 0 failed** |
+| 水平 100 km 境界でのクラッシュ未発火 | `physics/flight_sim.py:2462-2530` の `_world_wall_contact()` が水平壁を**壁として発火**させ、状態を凍結（`crashed=True` / `diverged=True` / `status='diverged'`） | 消滅 | **解消済み（コミット: `8a41586` 系の W9 修正）**。`python -m pytest tests/test_world_bounds.py -q` = **1 passed** |
+| GA2 Stage-0 の「paper would tear」偽陽性 | `physics/ga2/stage0.py` の `_segments_overlap()` に**共線性検査**を追加（平行判定のみだった誤判定を解消）。hot_spot 9 → 正 5 | **tear 判定そのものの出典**は別途要確認（§4.9 K3-P0-3 に記載） | **解消済み（コミット: `8a41586`）**。`python -m pytest tests/test_ga2_stages.py -q` = **14 passed** |
+| GA エンジンの審査 P0 4 件 | ①適合度式を**重みなしの積**へ（`physics/ga_domain.py:1807-1854`）②公開 payload に来歴 4 キー（`:2386-2400`, `:2459-2461`）③代理経路の公開遮断（`:968-983`）④世代 0 の初期母集団評価（`:1321`） | 消滅 | **解消済み（コミット: `d287af2`）**。`python -m pytest tests/test_ga_engine.py -q` = **51 passed / 0 failed** |
+| 記録プリセットの trim 契約 | `physics/records_domain.py:668-671` が `source["release_pitch_deg"] = RECORD_TRIM_ALPHA_DEG` の**無条件代入**へ、カタログの `"release_pitch_deg": 0.0` 明示 9 箇所を削除（`git blame` → `7639895`） | 消滅（GET / POST が 12 プリセット全て 3.0 で一致） | **解消済み（コミット: `7639895`）** |
+| 応力ヒートマップの軸反転 | サーバ grid は `[spanwise][chordwise]` の正順 | 消滅 | **解消済み（コミット: `7639895`、W6 で正本化）**。`python tools/check_stress_peak_parity.py` = 最大相対差 **0.000e+00** |
+| 記録ドメインの日本語 93 行 U+FFFD | ギネス記録の原文出典から再記述。**再発防止のガード**は `tools/check_mojibake.py`（検出）と `tests/test_no_mojibake.py`（回帰固定化） | 消滅 | **解消済み（コミット: `7639895`）**。`python tools/check_mojibake.py` = `OK: no mojibake detected` / `python -m pytest tests/test_no_mojibake.py -q` = **4 passed** |
+| 風場時間相関の絶対閾値 | `tests/test_advanced_physics_audit.py:151` の `diff_t_near < 0.5`（旧乱流振幅規格化 1.4 m/s 依存）を風スケール相対 `diff_t_near < 0.5 * env.wind_speed` へ | 相対的 decorrelation のアサーションは維持。**絶対値依存は消滅** | **解消済み（コミット: `7639895`、V1 で是正）**。`git show 7639895 -- tests/test_advanced_physics_audit.py` = 1 file changed |
+
 ---
 
 ## 4. D. 次フェーズへ繰延した残課題（重要度順）
@@ -246,7 +454,7 @@
 | ID | 指摘 | 現状 | 繰延理由 |
 |---|---|---|---|
 | **H-11** | 構造応力が Beam 理論値の 9×10⁻⁶ 倍。折り断面の深さが未使用 | 未着手 | A-1 と同一 |
-| **H-19** | 折り後縁の空力モデル未接続 | 未着手 | A-2 と同一 |
+| **H-19** | 折り後縁の空力モデル未接続 | **接続は解消済み（コミット: `7639895`）**。`physics/aero_kernel.py:1084-1085` → `cl_offset`（`:1108`）・`cd0`（`:1113`）・`cm`（`:1178`）へ反映、`physics/aero_domain.py:557,606,619,660,699` からも参照。**残存は係数の出典制約のみ** | A-2 と同一（据え置き根拠は `docs/SPECIFICATION.md` §5.2 G-17） |
 
 > 監査 §2 の H-01〜H-20 のうち **H-11 / H-19 のみ未着手**。他 18 件は完了。
 
@@ -259,7 +467,7 @@
 | **M-13** | パネル法の回転増分が「翼方向距離」ではなく「弦方向オフセット」 | A-5 |
 | **M-14** | パネル抗力が力ベクトルとして投入されず、モーメントに寄与しない | A-5 |
 | **M-15** | 開放メッシュ（折った紙）が「コーン体積」の慣性テンソルを受け入れる | メッシュ（中リスク） |
-| **M-17** | 投入時のピッチ角速度に説明されない 0.10 倍が掛かる（`physics/flight_sim.py:1498` `torque_rate[1] *= 0.10`） | 投入モデル（低リスク） |
+| **M-17** | 投入時のピッチ角速度に説明されない 0.10 倍が掛かる（旧 `physics/flight_sim.py:1498` `torque_rate[1] *= 0.10`） | **解消済み（コミット: `c4b9286`）**。`physics/flight_sim.py` に `torque_rate[1] *= 0.10` は**残存しない**（`:1653` は有限値ガードのみ）。回帰固定化 `tests/test_launch_release_torque.py:108-127`（`I⁻¹MΔt` の解析値と rel 1e-12 で一致、removed 係数の 1/10 を使わない）→ `python -m pytest tests/test_launch_release_torque.py -q` = **4 passed** | 投入モデル（**残存なし**。pitch 相対誤差 0.9 → 0.0） |
 | **M-18** | `lift_scale` / `drag_scale` が論文式を 0〜5 倍で上書き | A-4 |
 | **M-23** | 熱上昇柱が地表から 1.2〜1.6 m 浮いたガウシアン塊。σ / 高さ上限がハード | 風場（低リスク） |
 | **M-24** | 乱流が等方的。平均風は基準風速参照（局所 u(z) でスケールされない） | A-7 |
@@ -354,10 +562,10 @@
 
 | ID | 残課題 | 場所（file:line） | 再現コマンド | 判定・担当 |
 |---|---|---|---|---|
-| **K1-P0-1** | **GPU/バッチ経路と 6DoF 参照経路の数値不一致**。`distance_m` が 5.2577409 対 5.2613846（相対差 6.9e-4）／1.9218516 対 1.9239000（1.1e-3）、`max_stress_pa` 差 1.9e-4 が許容 1e-6 を超過し、reference 側が `status='crashed'` になる | `physics/gpu_dynamics.py:546,705,709`（`altitude = -position[:,2] - params.ground_level_m` による AGL の事前減算）/ `physics/wind_domain.py:852`（`heights_agl = P[:,2] - ground_level_m` での AGL 形成）/ `physics/flight_sim.py:877`（参照経路の `height = -position[2]`） | `python -m pytest "tests/test_optimizer.py::test_map_evaluate_is_order_preserving" "tests/test_optimizer.py::test_parallel_evaluate_matches_serial_and_reports_progress" "tests/test_ga_audit.py::test_the_batch_path_agrees_with_the_canonical_6dof_on_ga_individuals" -q` | 検証済（残存）。**根因候補はバッチ経路の実効 AGL 502 m**（参照経路 2.0 m が真値）→ 担当 **W9** |
-| **K1-P0-2** | **水平 100 km 境界でのクラッシュ判定が働かない**。境界の 0.034 m 手前（`position_m.x = 99999.9657`）でも `crashed=False` のまま | `tests/test_world_bounds.py::test_simulation_crashes_and_freezes_when_crossing_horizontal_boundary` / 水平リミットの判定実装（`physics/flight_sim.py`） | `python -m pytest "tests/test_world_bounds.py::test_simulation_crashes_and_freezes_when_crossing_horizontal_boundary" -q` | 検証済（残存）→ 担当 **W9** |
-| **K1-P0-3** | **GA2 の Stage-0 幾何フィルタが既知設計を偽陽性で不合格にする**。既知設計が `reasons=['paper would tear']` で落ちる | `tests/test_ga2_stages.py::test_the_geometry_filter_accepts_the_known_designs` / `physics/ga2/stage0.py` | `python -m pytest "tests/test_ga2_stages.py::test_the_geometry_filter_accepts_the_known_designs" -q` | 検証済（残存・偽陽性疑い）→ 担当 **W10** |
-| **K1-P1** | **3 ファイルが 120 s を超えており、タイムアウトなのか単に遅いだけかが未確認** | `tests/test_investigate.py` / `tests/test_issue28_gpu_duration.py` / `tests/test_payload_contract.py` | `python -m pytest tests/test_investigate.py tests/test_issue28_gpu_duration.py tests/test_payload_contract.py -q --durations=10` | **未確認**（タイムアウト未確認。長い可能性あり） |
+| **K1-P0-1** | **GPU/バッチ経路と 6DoF 参照経路の数値不一致**。`distance_m` が 5.2577409 対 5.2613846（相対差 6.9e-4）／1.9218516 対 1.9239000（1.1e-3）、`max_stress_pa` 差 1.9e-4 が許容 1e-6 を超過し、reference 側が `status='crashed'` になる | `physics/gpu_dynamics.py:546,705,709`（`altitude = -position[:,2] - params.ground_level_m` による AGL の事前減算）/ `physics/wind_domain.py:852`（`heights_agl = P[:,2] - ground_level_m` での AGL 形成）/ `physics/flight_sim.py:877`（参照経路の `height = -position[2]`） | `python -m pytest "tests/test_optimizer.py::test_map_evaluate_is_order_preserving" "tests/test_optimizer.py::test_parallel_evaluate_matches_serial_and_reports_progress" "tests/test_ga_audit.py::test_the_batch_path_agrees_with_the_canonical_6dof_on_ga_individuals" -q` | **解消済み（コミット: `8a41586`）**。真因は**大気メモの履歴依存**で、`physics/flight_sim.py:705-718` の `_ATMOSPHERE_CACHE` が高度を **1 mm 量子化**していた（`_ATMOSPHERE_QUANTUM_M = 1.0e-3` と `round(altitude / _ATMOSPHERE_QUANTUM_M)`）ため「最初に問い合わせられた 1 mm バケットの密度」を返していた。`8a41586` で量子化を撤去し**厳密キー**へ（`physics/gpu_dynamics.py:299-341` の風高度も `z_up = -z_ned` へ）。2026-10-22 再実測: `python -m pytest tests/test_ga_audit.py tests/test_optimizer.py -q` = **61 passed / 0 failed**。**残存は 6DoF 経路のカオス性**（§4.10） |
+| **K1-P0-2** | **水平 100 km 境界でのクラッシュ判定が働かない**。境界の 0.034 m 手前（`position_m.x = 99999.9657`）でも `crashed=False` のまま | `tests/test_world_bounds.py::test_simulation_crashes_and_freezes_when_crossing_horizontal_boundary` / 水平リミットの判定実装（`physics/flight_sim.py`） | `python -m pytest "tests/test_world_bounds.py::test_simulation_crashes_and_freezes_when_crossing_horizontal_boundary" -q` | **解消済み（コミット: `8a41586`）**。`physics/flight_sim.py:2462-2530` の `_world_wall_contact()` が水平壁を壁として発火し状態を凍結（`crashed=True` / `diverged=True` / `status='diverged'`）。2026-10-22 再実測: **1 passed** |
+| **K1-P0-3** | **GA2 の Stage-0 幾何フィルタが既知設計を偽陽性で不合格にする**。既知設計が `reasons=['paper would tear']` で落ちる | `tests/test_ga2_stages.py::test_the_geometry_filter_accepts_the_known_designs` / `physics/ga2/stage0.py` | `python -m pytest "tests/test_ga2_stages.py::test_the_geometry_filter_accepts_the_known_designs" -q` | **解消済み（コミット: `8a41586`）**。`_segments_overlap()` の**共線性検査の追加**で解消（hot_spot 9 → 正 5）。2026-10-22 再実測: `python -m pytest tests/test_ga2_stages.py -q` = **14 passed** |
+| **K1-P1** | **3 ファイルが 120 s を超えており、タイムアウトなのか単に遅いだけかが未確認** | `tests/test_investigate.py` / `tests/test_issue28_gpu_duration.py` / `tests/test_payload_contract.py` | `python -m pytest tests/test_investigate.py tests/test_issue28_gpu_duration.py tests/test_payload_contract.py -q --durations=10` | **2026-10-22 実測済み**（`--durations=15` の実測結果は §4.9 K3-P1 欄を参照。3 ファイル合計で **0 failed**） |
 
 **前提となる事実（2026-10-21）**: HEAD `54d556b` の `tests/test_flight.py` + `tests/test_records.py` は
 **9 failed / 68 passed** だったが、`7639895 fix(physics): restore the fold-integration contract and the payload keys`
@@ -386,16 +594,16 @@
 
 | ID | 残課題 | 場所（file:line） | 再現コマンド | 判定・担当 |
 |---|---|---|---|---|
-| **K2-P0-1** | **GPU/バッチ経路と 6DoF 参照経路の数値不一致**。`distance_m` が 5.2577409 対 5.2613846（`tests/test_optimizer.py::test_map_evaluate_is_order_preserving`）および 1.9218516 対 1.9239000（`::test_parallel_evaluate_matches_serial_and_reports_progress`）が許容 1e-6 を超過。`tests/test_ga_audit.py::test_the_batch_path_agrees_with_the_canonical_6dof_on_ga_individuals` は `max_stress_pa` 差 1.9e-4 > 許容 1e-6、reference 側が `status='crashed'` になる | `physics/gpu_dynamics.py:547,705,709`（`altitude = -position[:,2] - params.ground_level_m` の AGL 事前減算）/ `physics/wind_domain.py:852`（`heights_agl = P[:,2] - ground_level_m`）/ `physics/flight_sim.py:877`（参照経路の `height = -position[2]`） | `python -m pytest "tests/test_optimizer.py::test_map_evaluate_is_order_preserving" "tests/test_optimizer.py::test_parallel_evaluate_matches_serial_and_reports_progress" "tests/test_ga_audit.py::test_the_batch_path_agrees_with_the_canonical_6dof_on_ga_individuals" -q` | **検証済（残存）**。根因候補とされた「バッチ経路の実効 AGL 502 m」は、**2026-10-21 実測では再現せず**（`ground_level_m=500`・AGL 2 m で参照 `|v|=8.777626716693877` ≡ バッチ同値、`tests/test_wind_height_parity.py` 3 passed＝風サンプル自体は一致）＝差分箇所の特定が必要 → 担当 **W9** |
-| **K2-P0-2** | **水平 100 km 境界でのクラッシュ判定が働かない**。境界の 0.034 m 手前（`position_m.x = 99999.9657`）でも `crashed=False` のまま | `tests/test_world_bounds.py::test_simulation_crashes_and_freezes_when_crossing_horizontal_boundary` / 水平リミット判定（`physics/flight_sim.py`） | `python -m pytest "tests/test_world_bounds.py::test_simulation_crashes_and_freezes_when_crossing_horizontal_boundary" -q` | **検証済（残存）**（2026-10-21 再実測: `x=99999.9657` で `crashed=False`）→ 担当 **W9** |
-| **K2-P0-3** | **GA2 の Stage-0 幾何フィルタが既知設計を偽陽性で不合格にする**。既知設計が `reasons=['paper would tear']` で落ちる | `tests/test_ga2_stages.py::test_the_geometry_filter_accepts_the_known_designs` / `physics/ga2/stage0.py` | `python -m pytest "tests/test_ga2_stages.py::test_the_geometry_filter_accepts_the_known_designs" -q` | **2026-10-21 再実測: PASS**（他アクターの `physics/ga2/stage0.py` 差分で解消済み）。偽陽性ではなく**真の不合格**の可能性と tear 判定の出典を要確認 → 担当 **W10** |
-| **K2-P0-4** | **GA の適合度式に出典無しの係数が混入**。`grip_penalty_weight=0.01` / `max_secondary_weight=0.25` と基準値 `max_ld_ratio: 8.0` / `max_altitude_m: 10.0`（重み付き加算形。設計正本は grace factor の**積** `1/(1+P_grip)` であり `8.0`/`10.0` に出典なし） | `physics/ga_config.py` / `physics/ga_domain.py`（Y1 の **Y-02**） | `python -c "from physics.ga_config import GAConfig; c=GAConfig(); print(c.grip_penalty_weight, c.max_secondary_weight)"` | **修正済み（Y2 `Y2_ga_p0_fixes.md`・作業ツリー・未コミット）**。ただし**旧重み付き成果物 `artifacts/ga_audit/**` は現行設定と不整合**（Y1 の Y-19）のため引用不可 → 再生成 or 生成時 config ハッシュの埋め込みが要対応 → 担当 **GA 担当** |
-| **K2-P0-5** | **GA の公開 payload に `model` / `approximate` / `physics_verification_eligible` / `limitations` が無い**。`_result_payload` に 4 キーが無く、スカラー filter が `limitations`（非スカラー）を脱落させるため、公開 payload と HTTP 応答のいずれにも経路情報が 1 つも無い | `physics/ga_domain.py::_result_payload` / `api/routes/ga_research.py`（Y1 の **Y-06**） | `python -m pytest tests/test_ga_engine.py -q -k "payload or provenance or limitations"` | **修正済み（Y2・作業ツリー・未コミット）**（`physics/ga_domain.py:525,555` が `limitations` を保持）→ 担当 **GA 担当** |
-| **K2-P0-6** | **代理経路（`reduced_surrogate`）が「最適機体」として公開され得る**。ホール・オブ・ファームがティアを問わずに登録し、`_best_individual` が先頭を無条件公開するため tier-1 個体が「物理検証済みの最適機体」として出る | `physics/ga_domain.py`（Y1 の **Y-21**） | `python -m pytest tests/test_ga_engine.py -q -k "surrogate or publish"` | **修正済み（Y2・作業ツリー・未コミット）**（`physics/ga_domain.py:971-983` が代理経路の公開を遮断）→ 担当 **GA 担当** |
-| **K2-P0-7** | **世代 0 の初期母集団が一度も評価されない**（未評価個体が `feasible` 扱い）。世代ループが offspring だけを tier0→tier3 に通すため初期母集団は `tier=0, metric=0.0, result={}` のままで、`individual_structural_failure` が `result={}` に対し失敗条件を一つも満たさないため `False`（feasible）を返す | `physics/ga_domain.py`（Y1 の **Y-23**） | `python -m pytest tests/test_ga_engine.py -q -k "generation0 or bootstrap or feasible"` | **修正済み（Y2・作業ツリー・未コミット）** → 担当 **GA 担当** |
-| **K2-P0-8** | **風洞ベンチ姿勢の正本関数 `wind_tunnel_bench_quaternion` が未定義**。`7639895` の規約（ベンチは進行方向を向く heading 180°、4° ベンチの α は要求された正の α、旧実装は 180°+α で −176°）は docstring に明文化されているが、その関数を参照する実装が存在しない | `physics/flight_sim.py`（関数**未定義**）/ `physics/wind_domain.py:881,915`（docstring 参照のみ） | `python -c "import physics.flight_sim as f; print(hasattr(f, 'wind_tunnel_bench_quaternion'))"` → `False` | **検証済（未実装）**。§7.1 の P0-3（風洞モードで機体が後ろ向きに吹かれる）と同系統 → 担当 **W1** |
-| **K2-P0-9** | **投入初期条件の出典なき人工係数が残存**。`torque_rate[1] *= 0.10`（"Finger pinch guide effect"）が `physics/flight_sim.py:1512` に残り、pitch 相対誤差が 0.9（解析値 `I⁻¹MΔt` と不一致）。`7639895` の規約は撤去を要求 | `physics/flight_sim.py:1512` | `python -m pytest tests/test_flight.py -q`（現状 82 passed のため**係数除去の回帰固定テストが未整備**。撤去時は pitch 相対誤差 0.0 を固定するテストを新設する必要がある） | **検証済（未実装）**。`AGENTS.md` §1.5・A-1 と同じ「出典なき係数」原則の対象 → 担当 **W1** |
-| **K2-P1** | **3 ファイルが 120 s を超えており、タイムアウトなのか単に遅いだけかが未確認** | `tests/test_investigate.py` / `tests/test_issue28_gpu_duration.py` / `tests/test_payload_contract.py` | `python -m pytest tests/test_investigate.py tests/test_issue28_gpu_duration.py tests/test_payload_contract.py -q --durations=10` | **未確認**（タイムアウト未確認。長い可能性あり）→ 担当 **W6** |
+| **K2-P0-1** | **GPU/バッチ経路と 6DoF 参照経路の数値不一致**。`distance_m` が 5.2577409 対 5.2613846（`tests/test_optimizer.py::test_map_evaluate_is_order_preserving`）および 1.9218516 対 1.9239000（`::test_parallel_evaluate_matches_serial_and_reports_progress`）が許容 1e-6 を超過。`tests/test_ga_audit.py::test_the_batch_path_agrees_with_the_canonical_6dof_on_ga_individuals` は `max_stress_pa` 差 1.9e-4 > 許容 1e-6、reference 側が `status='crashed'` になる | `physics/gpu_dynamics.py:547,705,709`（`altitude = -position[:,2] - params.ground_level_m` の AGL 事前減算）/ `physics/wind_domain.py:852`（`heights_agl = P[:,2] - ground_level_m`）/ `physics/flight_sim.py:877`（参照経路の `height = -position[2]`） | `python -m pytest "tests/test_optimizer.py::test_map_evaluate_is_order_preserving" "tests/test_optimizer.py::test_parallel_evaluate_matches_serial_and_reports_progress" "tests/test_ga_audit.py::test_the_batch_path_agrees_with_the_canonical_6dof_on_ga_individuals" -q` | **解消済み（コミット: `8a41586`）**。真因は**大気メモの履歴依存**（`physics/flight_sim.py:705-718` で大気メモの高度 1 mm 量子化 `_ATMOSPHERE_QUANTUM_M = 1.0e-3` を撤去し**厳密キー**へ）／`physics/gpu_dynamics.py:299-341` で風高度を `z_up = -z_ned` へ。**「バッチ経路の実効 AGL 502 m」は真因ではなかった**（`tests/test_wind_height_parity.py` 3 passed＝風サンプルは一致）。2026-10-22 再実測: `python -m pytest tests/test_ga_audit.py tests/test_optimizer.py -q` = **61 passed / 0 failed**。**残存は 6DoF 経路のカオス性**（§4.10） |
+| **K2-P0-2** | **水平 100 km 境界でのクラッシュ判定が働かない**。境界の 0.034 m 手前（`position_m.x = 99999.9657`）でも `crashed=False` のまま | `tests/test_world_bounds.py::test_simulation_crashes_and_freezes_when_crossing_horizontal_boundary` / 水平リミット判定（`physics/flight_sim.py`） | `python -m pytest "tests/test_world_bounds.py::test_simulation_crashes_and_freezes_when_crossing_horizontal_boundary" -q` | **解消済み（コミット: `8a41586`）**。`physics/flight_sim.py:2462-2530` の `_world_wall_contact()` が水平壁を**壁として**発火させ、状態を凍結（`crashed=True` / `diverged=True` / `status='diverged'`）。2026-10-22 再実測: **1 passed** |
+| **K2-P0-3** | **GA2 の Stage-0 幾何フィルタが既知設計を偽陽性で不合格にする**。既知設計が `reasons=['paper would tear']` で落ちる | `tests/test_ga2_stages.py::test_the_geometry_filter_accepts_the_known_designs` / `physics/ga2/stage0.py` | `python -m pytest "tests/test_ga2_stages.py::test_the_geometry_filter_accepts_the_known_designs" -q` | **解消済み（コミット: `8a41586`）**。`_segments_overlap()` の**共線性検査の追加**で解消（平行判定のみだったため 137–185 mm 離れの crease を重なりと誤算／hot_spot 9 → 正 5）。2026-10-22 再実測: `python -m pytest tests/test_ga2_stages.py -q` = **14 passed**。**残存: tear 判定そのものの出典**（`MAX_FOLDS_AT_ONE_SPOT` / `HOT_SPOT_RADIUS_M` の根拠。許容応力の尺度は `physics/stress_domain.paper_allowable_stress` が正本で、`docs/SPECIFICATION.md` §1.3） |
+| **K2-P0-4** | **GA の適合度式に出典無しの係数が混入**。`grip_penalty_weight=0.01` / `max_secondary_weight=0.25` と基準値 `max_ld_ratio: 8.0` / `max_altitude_m: 10.0`（重み付き加算形。設計正本は grace factor の**積** `1/(1+P_grip)` であり `8.0`/`10.0` に出典なし） | `physics/ga_config.py` / `physics/ga_domain.py`（Y1 の **Y-02**） | `python -c "from physics.ga_config import GAConfig; c=GAConfig(); print(c.grip_penalty_weight, c.max_secondary_weight)"` | **解消済み（コミット: `d287af2`）**。`physics/ga_config.py` に `grip_penalty_weight` / `max_secondary_weight` / `max_ld_ratio` / `max_altitude_m` は**存在せず**、`physics/ga_domain.py:1807-1854` の `_individual_fitness` は `merit × 1/(1+P_grip) × 1/(1+max(0,σ_u−1))` の**重みなしの積**。回帰固定化 `tests/test_ga_engine.py::test_the_fitness_carries_no_free_coefficient` / `::test_the_grip_penalty_enters_the_fitness_as_a_grace_factor` → `python -m pytest tests/test_ga_engine.py -q` = **51 passed**。**残存**: 旧重み付き成果物 `artifacts/ga_audit/**` は現行設定と不整合（Y1 の Y-19）のため引用不可 → 再生成 or 生成時 config ハッシュの埋め込みが要対応 |
+| **K2-P0-5** | **GA の公開 payload に `model` / `approximate` / `physics_verification_eligible` / `limitations` が無い**。`_result_payload` に 4 キーが無く、スカラー filter が `limitations`（非スカラー）を脱落させるため、公開 payload と HTTP 応答のいずれにも経路情報が 1 つも無い | `physics/ga_domain.py::_result_payload` / `api/routes/ga_research.py`（Y1 の **Y-06**） | `python -m pytest tests/test_ga_engine.py -q -k "payload or provenance or limitations"` | **解消済み（コミット: `d287af2`）**。`physics/ga_domain.py:521-526` が `limitations` をリストとして保持、`:2386-2400` の来歴 dict に 4 キー、`:2459-2461` で公開 payload へ展開。回帰固定化 `tests/test_ga_engine.py::test_the_published_result_carries_its_provenance` / `::test_the_api_publishes_the_provenance_of_the_result` → **51 passed** |
+| **K2-P0-6** | **代理経路（`reduced_surrogate`）が「最適機体」として公開され得る**。ホール・オブ・ファームがティアを問わずに登録し、`_best_individual` が先頭を無条件公開するため tier-1 個体が「物理検証済みの最適機体」として出る | `physics/ga_domain.py`（Y1 の **Y-21**） | `python -m pytest tests/test_ga_engine.py -q -k "surrogate or publish"` | **解消済み（コミット: `d287af2`）**。`physics/ga_domain.py:968-983` の `_is_reference_result` が `model == "rigid_body_6dof"` かつ `approximate == False` のみ公開を許す。回帰固定化 `tests/test_ga_engine.py::test_the_published_optimum_is_never_a_surrogate_result` → **51 passed** |
+| **K2-P0-7** | **世代 0 の初期母集団が一度も評価されない**（未評価個体が `feasible` 扱い）。世代ループが offspring だけを tier0→tier3 に通すため初期母集団は `tier=0, metric=0.0, result={}` のままで、`individual_structural_failure` が `result={}` に対し失敗条件を一つも満たさないため `False`（feasible）を返す | `physics/ga_domain.py`（Y1 の **Y-23**） | `python -m pytest tests/test_ga_engine.py -q -k "generation0 or bootstrap or feasible"` | **解消済み（コミット: `d287af2`）**。`physics/ga_domain.py:1321` の `_evaluate_initial_population()` が全島の初期母集団を評価し、`:2610` で世代ループ前に実行、`:2632-2635` で `generation0_feasible_fraction` を公開。**未評価個体と失敗個体は `INFEASIBLE_SCORE`（−1e12）**（`:1843-1844`）→ **51 passed** |
+| **K2-P0-8** | **風洞ベンチ姿勢の正本関数 `wind_tunnel_bench_quaternion` が未定義**。`7639895` の規約（ベンチは進行方向を向く heading 180°、4° ベンチの α は要求された正の α、旧実装は 180°+α で −176°）は docstring に明文化されているが、その関数を参照する実装が存在しない | `physics/flight_sim.py`（関数**未定義**）/ `physics/wind_domain.py:881,915`（docstring 参照のみ） | `python -c "import physics.flight_sim as f; print(hasattr(f, 'wind_tunnel_bench_quaternion'))"` → `False` | **解消済み（コミット: `c4b9286`）**。`physics/flight_sim.py:993` に `wind_tunnel_bench_quaternion(alpha_deg, beta_deg)` を実装（`WIND_TUNNEL_BENCH_HEADING_DEG = 180.0` は `:990`）、風洞モード（`:2026`）と UI 経路（`:3203`）が呼称。`python -c "import physics.flight_sim as f; print(hasattr(f, 'wind_tunnel_bench_quaternion'))"` → **`True`**。回帰固定化 `tests/test_wind_tunnel_bench.py` → **7 passed**（§7.1 P0-3 と同系統） |
+| **K2-P0-9** | **投入初期条件の出典なき人工係数が残存**。`torque_rate[1] *= 0.10`（"Finger pinch guide effect"）が `physics/flight_sim.py:1512` に残り、pitch 相対誤差が 0.9（解析値 `I⁻¹MΔt` と不一致）。`7639895` の規約は撤去を要求 | `physics/flight_sim.py:1512` | `python -m pytest tests/test_flight.py -q`（現状 82 passed のため**係数除去の回帰固定テストが未整備**。撤去時は pitch 相対誤差 0.0 を固定するテストを新設する必要がある） | **解消済み（コミット: `c4b9286`）**。`physics/flight_sim.py` に `torque_rate[1] *= 0.10` は**残存しない**（`:1653` は有限値ガードのみ）。回帰固定化テスト `tests/test_launch_release_torque.py:108-127` が「produced rate ≡ 解析値 `I⁻¹(r×F)Δt`（rel 1e-12）を**全軸**で保証」を固定（removed 係数 1/10 を使わない）。`python -m pytest tests/test_launch_release_torque.py -q` = **4 passed** |
+| **K2-P1** | **3 ファイルが 120 s を超えており、タイムアウトなのか単に遅いだけかが未確認** | `tests/test_investigate.py` / `tests/test_issue28_gpu_duration.py` / `tests/test_payload_contract.py` | `python -m pytest tests/test_investigate.py tests/test_issue28_gpu_duration.py tests/test_payload_contract.py -q --durations=10` | **2026-10-22 実測済み**（`--durations=15` の実測結果は §4.9 K3-P1 欄を参照。3 ファイル合計で **0 failed**） |
 
 **2026-10-21 実測の検証ベースライン**: `python -m ruff check .` = All checks passed /
 `python -m compileall physics api tools app.py smoke_test.py` = 0 error / `python smoke_test.py` = **14/14 ステージ** /
@@ -403,6 +611,16 @@
 K2-P0-1 / K2-P0-2 は**再現済み（FAILED）**、K2-P0-3 は **PASS**（解消済み）、
 K2-P0-4〜K2-P0-7 は Y2 により作業ツリー上は修正済み（**未コミット**・CI 未確認）、
 K2-P0-8 / K2-P0-9 は**未実装**（コード側対応が要る）である。
+
+**2026-10-22 同期（W13 台帳陳腐化の消化）**: 上記の K2-P0-1〜K2-P0-9 は**すべて解消済み**へ更新した
+（内訳: K2-P0-1/2/3 = `8a41586`、K2-P0-4〜P0-7 = `d287af2`、K2-P0-8/9 = `c4b9286`）。
+**判定根拠は各行の「判定」欄に file:line・再現コマンド・実行したテスト結果を記載**した
+（2026-10-22 再実測: `tests/test_ga_audit.py`+`tests/test_optimizer.py` = 61 passed、
+`tests/test_ga_engine.py` = 51 passed、`tests/test_ga2_stages.py` = 14 passed、
+`tests/test_wind_tunnel_bench.py` = 7 passed、`tests/test_launch_release_torque.py` = 4 passed、
+`tests/test_world_bounds.py` = 1 passed）。
+**残存するもの**は各行の末尾に明記した（K2-P0-1: 6DoF 経路のカオス性／K2-P0-3: tear 判定の出典／
+K2-P0-4: 旧重み付き成果物 `artifacts/ga_audit/**` の不整合）。**台帳行は削除していない**。
 
 
 ### 4.9 2026-10-21 K3 再実測で更新した残課題（K3 台帳: P0-1〜P0-7 / P1）
@@ -414,11 +632,11 @@ K2-P0-8 / K2-P0-9 は**未実装**（コード側対応が要る）である。
 
 | ID | 残課題 | 場所（file:line） | 再現コマンド | 判定・担当 |
 |---|---|---|---|---|
-| **K3-P0-1** | **GPU/バッチ経路と 6DoF 参照経路の数値不一致**。`distance_m` 5.2577409 対 5.2613846（`tests/test_optimizer.py::test_map_evaluate_is_order_preserving`）および 1.9218516 対 1.9239000（`::test_parallel_evaluate_matches_serial_and_reports_progress`）が許容 1e-6 を超過。`tests/test_ga_audit.py::test_the_batch_path_agrees_with_the_canonical_6dof_on_ga_individuals` は `max_stress_pa` 差 1.9e-4 > 許容 1e-6、reference 側が `status='crashed'` になる | `physics/gpu_dynamics.py:547,705,709`（`altitude = -position[:,2] - params.ground_level_m` の AGL 事前減算）/ `physics/wind_domain.py:852`（`heights_agl = P[:,2] - ground_level_m`）/ `physics/flight_sim.py:877`（参照経路の `height = -position[2]`） | `python -m pytest "tests/test_optimizer.py::test_map_evaluate_is_order_preserving" "tests/test_optimizer.py::test_parallel_evaluate_matches_serial_and_reports_progress" "tests/test_ga_audit.py::test_the_batch_path_agrees_with_the_canonical_6dof_on_ga_individuals" -q` | **2026-10-21 K3 再実測: 3 passed**（作業ツリーの未コミット差分で解消）。§4.8 の根因候補「バッチ経路の実効 AGL 502 m」は**再現せず**（`tests/test_wind_height_parity.py` 3 passed＝風サンプルは一致）→ 差分箇所の特定が必要 → 担当 **W9** |
-| **K3-P0-2** | **水平 100 km 境界でのクラッシュ判定が働かない**。境界の 0.034 m 手前（`position_m.x = 99999.9657`）でも `crashed=False` のまま | `tests/test_world_bounds.py::test_simulation_crashes_and_freezes_when_crossing_horizontal_boundary` / 水平リミット判定（`physics/flight_sim.py`） | `python -m pytest "tests/test_world_bounds.py::test_simulation_crashes_and_freezes_when_crossing_horizontal_boundary" -q` | **2026-10-21 K3 再実測: 1 passed**（作業ツリーの未コミット差分で解消・コミット単位では未確認）→ 担当 **W9** |
-| **K3-P0-3** | **GA2 の Stage-0 幾何フィルタが既知設計を偽陽性で不合格にする**。既知設計が `reasons=['paper would tear']` で落ちる | `tests/test_ga2_stages.py::test_the_geometry_filter_accepts_the_known_designs` / `physics/ga2/stage0.py` | `python -m pytest "tests/test_ga2_stages.py::test_the_geometry_filter_accepts_the_known_designs" -q` | **2026-10-21 K3 再実測: 1 passed**。`_segments_overlap()` は**平行判定のみ**で共線性を検査せず、137–185 mm 離れている crease を重なりと誤算していた（hot_spot 9 → 正 5）。`MAX_FOLDS_AT_ONE_SPOT` の masking ではなく**共線性検査の追加**で解消 → 担当 **W10** |
-| **K3-P0-4〜P0-7** | **GA エンジンの審査 P0 4 件**。① 適合度式に出典無しの重み `grip_penalty_weight=0.01` / `max_secondary_weight=0.25` と基準値 `max_ld_ratio: 8.0` / `max_altitude_m: 10.0` ② 公開 payload に `model` / `approximate` / `physics_verification_eligible` / `limitations` が無い ③ **代理経路（`reduced_surrogate`）が「最適機体」として公開され得る** ④ **世代 0 の初期母集団が未評価で feasible 扱い**（−1.0 は INFEASIBLE −1e12 より 1e12 倍高い）。審査 verdict は **REJECT**。設計一致率は 12 一致 / 21 不一致 / 9 未実装 / 5 過剰実装、決定論性は同一シード 2 回で完全一致（合格） | `physics/ga_config.py` / `physics/ga_domain.py::_result_payload` / `api/routes/ga_research.py`（Y1 レポート `Y1_ga_engine_review.md` が正本。修正は `Y2_ga_p0_fixes.md`） | `python -m pytest tests/test_ga_engine.py -q -k "payload or provenance or limitations or surrogate or generation0 or bootstrap"` | **Y2 修正済み（作業ツリー・未コミット・CI 未確認）**。旧重み付きの成果物 `artifacts/ga_audit/**` は現行設定と不整合（引用不可）→ 再生成 or 生成時 config ハッシュの埋め込みが必要 → 担当 **GA 担当** |
-| **K3-P1** | **3 ファイルが 120 s を超えており、タイムアウトなのか単に遅いだけかが未確認** | `tests/test_investigate.py` / `tests/test_issue28_gpu_duration.py` / `tests/test_payload_contract.py` | `python -m pytest tests/test_investigate.py tests/test_issue28_gpu_duration.py tests/test_payload_contract.py -q --durations=10` | **未確認**（K3 は時間予算で未実測。§4.8 の `K2-P1` と同件）→ 担当 **W6** |
+| **K3-P0-1** | **GPU/バッチ経路と 6DoF 参照経路の数値不一致**。`distance_m` 5.2577409 対 5.2613846（`tests/test_optimizer.py::test_map_evaluate_is_order_preserving`）および 1.9218516 対 1.9239000（`::test_parallel_evaluate_matches_serial_and_reports_progress`）が許容 1e-6 を超過。`tests/test_ga_audit.py::test_the_batch_path_agrees_with_the_canonical_6dof_on_ga_individuals` は `max_stress_pa` 差 1.9e-4 > 許容 1e-6、reference 側が `status='crashed'` になる | `physics/gpu_dynamics.py:547,705,709`（`altitude = -position[:,2] - params.ground_level_m` の AGL 事前減算）/ `physics/wind_domain.py:852`（`heights_agl = P[:,2] - ground_level_m`）/ `physics/flight_sim.py:877`（参照経路の `height = -position[2]`） | `python -m pytest "tests/test_optimizer.py::test_map_evaluate_is_order_preserving" "tests/test_optimizer.py::test_parallel_evaluate_matches_serial_and_reports_progress" "tests/test_ga_audit.py::test_the_batch_path_agrees_with_the_canonical_6dof_on_ga_individuals" -q` | **解消済み（コミット: `8a41586`）**。真因は**大気メモの履歴依存**（`physics/flight_sim.py:705-718` で大気メモの高度 1 mm 量子化 `_ATMOSPHERE_QUANTUM_M = 1.0e-3` を撤去し**厳密キー**へ）／`physics/gpu_dynamics.py:299-341` で風高度を `z_up = -z_ned` へ。**「バッチ経路の実効 AGL 502 m」は真因ではなかった**（風サンプル自体は一致）。2026-10-22 再実測: `python -m pytest tests/test_ga_audit.py tests/test_optimizer.py -q` = **61 passed / 0 failed**。**残存は 6DoF 経路のカオス性**（§4.10） |
+| **K3-P0-2** | **水平 100 km 境界でのクラッシュ判定が働かない**。境界の 0.034 m 手前（`position_m.x = 99999.9657`）でも `crashed=False` のまま | `tests/test_world_bounds.py::test_simulation_crashes_and_freezes_when_crossing_horizontal_boundary` / 水平リミット判定（`physics/flight_sim.py`） | `python -m pytest "tests/test_world_bounds.py::test_simulation_crashes_and_freezes_when_crossing_horizontal_boundary" -q` | **解消済み（コミット: `8a41586`）**。`physics/flight_sim.py:2462-2530` の `_world_wall_contact()` が水平壁を壁として発火＋状態を凍結。2026-10-22 再実測: **1 passed** |
+| **K3-P0-3** | **GA2 の Stage-0 幾何フィルタが既知設計を偽陽性で不合格にする**。既知設計が `reasons=['paper would tear']` で落ちる | `tests/test_ga2_stages.py::test_the_geometry_filter_accepts_the_known_designs` / `physics/ga2/stage0.py` | `python -m pytest "tests/test_ga2_stages.py::test_the_geometry_filter_accepts_the_known_designs" -q` | **解消済み（コミット: `8a41586`）**。`_segments_overlap()` は**平行判定のみ**で共線性を検査せず、137–185 mm 離れている crease を重なりと誤算していた（hot_spot 9 → 正 5）。**共線性検査の追加**で解消。2026-10-22 再実測: `python -m pytest tests/test_ga2_stages.py -q` = **14 passed**。**残存: tear 判定そのものの出典**（`MAX_FOLDS_AT_ONE_SPOT` / `HOT_SPOT_RADIUS_M`） |
+| **K3-P0-4〜P0-7** | **GA エンジンの審査 P0 4 件**。① 適合度式に出典無しの重み `grip_penalty_weight=0.01` / `max_secondary_weight=0.25` と基準値 `max_ld_ratio: 8.0` / `max_altitude_m: 10.0` ② 公開 payload に `model` / `approximate` / `physics_verification_eligible` / `limitations` が無い ③ **代理経路（`reduced_surrogate`）が「最適機体」として公開され得る** ④ **世代 0 の初期母集団が未評価で feasible 扱い**（−1.0 は INFEASIBLE −1e12 より 1e12 倍高い）。審査 verdict は **REJECT**。設計一致率は 12 一致 / 21 不一致 / 9 未実装 / 5 過剰実装、決定論性は同一シード 2 回で完全一致（合格） | `physics/ga_config.py` / `physics/ga_domain.py::_result_payload` / `api/routes/ga_research.py`（Y1 レポート `Y1_ga_engine_review.md` が正本。修正は `Y2_ga_p0_fixes.md`） | `python -m pytest tests/test_ga_engine.py -q -k "payload or provenance or limitations or surrogate or generation0 or bootstrap"` | **解消済み（コミット: `d287af2`）**。①`physics/ga_config.py` に該当 4 設定は**存在せず**、`physics/ga_domain.py:1807-1854` は重みなしの積 ②`:521-526,2386-2400,2459-2461` ③`:968-983` ④`:1321,2610,2632-2635`。2026-10-22 再実測: `python -m pytest tests/test_ga_engine.py -q` = **51 passed / 0 failed**。**残存**: 旧重み付きの成果物 `artifacts/ga_audit/**` は現行設定と不整合（引用不可）→ 再生成 or 生成時 config ハッシュの埋め込みが必要 |
+| **K3-P1** | **3 ファイルが 120 s を超えており、タイムアウトなのか単に遅いだけかが未確認** | `tests/test_investigate.py` / `tests/test_issue28_gpu_duration.py` / `tests/test_payload_contract.py` | `python -m pytest tests/test_investigate.py tests/test_issue28_gpu_duration.py tests/test_payload_contract.py -q --durations=10` | **2026-10-22 実測済み**（下記「K3 再実測（2026-10-22）」の表を参照。3 ファイル合計で **0 failed**。**タイムアウトではなく実測上の所要時間が長いだけ**と切り分け済み） |
 
 **K3 再実測（2026-10-21）の記録**: 上記 5 テストは **5 passed**（264.50 s）。§4.8 が記録した
 「K2-P0-1 / K2-P0-2 は FAILED」は**作業ツリーの未コミット差分（他アクターの進行中修正）により解消**した実測であり、
@@ -426,6 +644,47 @@ K2-P0-8 / K2-P0-9 は**未実装**（コード側対応が要る）である。
 （`torque_rate[1] *= 0.10` 残存）は §4.8 のとおり**未実装**。K3 実測では
 `physics/flight_sim.py` に `wind_tunnel_bench_quaternion` が無く、`physics/flight_sim.py:1517` に
 `torque_rate[1] *= 0.10` が残存している。
+
+> **2026-10-22 追記（W13 台帳同期）**: 直上の 2026-10-21 記録は**commit 単位では未確認**だった。
+> 2026-10-22 の再実測で**コミット単位でも解消済み**であることを確認した
+> （`wind_tunnel_bench_quaternion` は `physics/flight_sim.py:993` に実装、
+> `torque_rate[1] *= 0.10` は消滅。`git log -S` で両者の実体会到 `c4b9286` を特定）。
+> 上記の 2026-10-21 記録は**陳腐化の記録としてそのまま残す**（§10 の運用ルール）。
+
+**K3 再実測（2026-10-22）の記録** — 3 ファイルの所要時間の切り分け（K1-P1 / K2-P1 / K3-P1 の実測）:
+`python -m pytest tests/test_investigate.py tests/test_issue28_gpu_duration.py tests/test_payload_contract.py -q --durations=15`
+→ **22 passed in 1220.53 s (0:20:20) / 0 failed**。
+
+| テスト | 実測所要時間 | 判定 |
+|---|---|---|
+| `tests/test_investigate.py::test_full_investigate_pipeline` | **527.88 s** | **長時間だが完走**。タイムアウトではなく**実装の計算量**（調査パイプライン全段の逐次実行） |
+| `tests/test_investigate.py::test_sensitivity_scan_ranks_variables` | **413.80 s** | 同上（感度スキャンの逐次評価） |
+| `tests/test_investigate.py::test_focused_tuning_preserves_immutable_aircraft_properties` | **114.75 s** | 120 s 未満 |
+| `tests/test_issue28_gpu_duration.py::test_gpu_batch_respects_individual_case_durations` | **71.94 s** | 120 s 未満 |
+| `tests/test_issue28_gpu_duration.py::test_gpu_batch_landing_within_duration` | 17.17 s | 120 s 未満 |
+| `tests/test_issue28_gpu_duration.py::test_cpu_batch_fallback_respects_durations` | 4.22 s | 120 s 未満 |
+| `tests/test_payload_contract.py::test_every_backend_reports_the_same_key_set` | 25.48 s | 120 s 未満 |
+| `tests/test_payload_contract.py::test_cupy_backend_emits_the_full_contract` | 10.81 s | 120 s 未満（残 10 件はすべて 10 s 未満） | 
+
+**結論**: 3 ファイル合計 **20 分 20 秒**、**0 failed**。**タイムアウトは発生していない**＝
+「120 s 超」の実体は **`tests/test_investigate.py` の 2 件（527.88 s + 413.80 s = 総時間の 87 %）**であり、
+**`test_issue28_gpu_duration.py` と `test_payload_contract.py` は 1 ファイル 120 s 未満**。
+K1-P1 / K2-P1 / K3-P1 の「タイムアウトなのか単に遅いだけか」の切り分けは **「単に遅いだけ」と確定**。
+**残存（最適化の余地）**: `test_full_investigate_pipeline` と `test_sensitivity_scan_ranks_variables` の
+逐次評価は §5 の 1（GPU 性能の融合）と §7.2 P1-3（最適化の実用性・1 評価 ≈ 9 秒）と同じ計算量の問題であり、
+**テストの不具合ではなく実装の計算量の制約**である。**作為的な短縮（閾値下调・スキップ）はしない**。
+
+## 4.10 2026-10-22 同期で**残存**と確認した項目（消してはならない制約・契約）
+
+> W13 台帳同期で「解消済み」へ移した項目の**背後にある、依然として有効な制約**。
+> コード・テストで裏取りしたうえで**残存として維持**する（§10 の運用ルール＝行は消さない）。
+
+| ID | 残存の制約 | 場所（file:line） | 確認コマンド | 判定 |
+|---|---|---|---|---|
+| **R-1** | **6DoF 参照経路はカオス的**であり、擾乱 1e-8 → 距離 1.2e-3（λ ≈ 33/s、e-folding 0.03 s）。**並列／直列の軌道はビット同一になり得ない**（別の数値積分）。したがって **parity 判定は「発散前段の量」（ピーク応力・载荷係数）を厳密値で見る契約**が正であり、距離・飛行時間はカオス発散検出の許容（`rel=5e-2` 等）でしか判定しない。**履歴依存がビット差の原因**であり、許容の緩めや乱数シードの固定で合わせ込まない | `physics/flight_sim.py`（6DoF RK4）/ `physics/optimizer_domain.py`（parity 許容）/ `tests/test_ga_audit.py::test_the_batch_path_agrees_with_the_canonical_6dof_on_ga_individuals` | `python -m pytest tests/test_ga_audit.py tests/test_optimizer.py -q` → **61 passed / 0 failed**（並列/逐次/単独がビット一致。**軌道の一致は保証しない**） | **残存（2026-10-22 確認）**。W9 の修正は大気メモの**履歴依存**を除去したが、**カオス性そのものは消えない**（§4.8 K2-P0-1 / §4.9 K3-P0-1 の残存欄） |
+| **R-2** | **`KAPPA_SIGMA = 9.0e-6` の出典制約**。Beam 理論の断面係数に経験的スケーリング係数を掛けたもので、**監査済み範囲のどの論文にも出典が存在しない**。値を直すと全応力値と失敗判定が同時に変わるため**根拠を得るまで数値改定を行わない** | `physics/stress_domain.py:106`（`KAPPA_SIGMA: float = 9.0e-6`）/ `physics/stress_domain.py:317`（`KAPPA_SIGMA * moment / modulus`）/ `no-finish.md` §A-1（`:58`）/ `docs/SPECIFICATION.md:48`・`:239` | `python -m pytest tests/test_stress.py -q` → **68 passed**（数値の据え置きを確認） | **残存（2026-10-22 確認）**。**据え置き根拠の正本は `docs/SPECIFICATION.md` §5.2「出典未取得の物理定数の据え置き根拠（G-17）」**（KAPPA_SIGMA / 後縁フォールド係数を出所・物理的意味・据え置き理由・再オープン条件つきで列挙） |
+| **R-3** | **旧式 stress 尺度の再導入禁止**。判定尺度は `physics/stress_domain.paper_allowable_stress`（`:637-655`、`A = 2500 (gsm/100)^0.5 (0.6 + 0.8 stiffness)`、既定 100 gsm・stiffness 0.35 で **2200 Pa**）の **1 つだけ**で、**過応力クラッシュ判定が蘇生**している。**120 kPa 系統（`_STRESS_LIMIT_PA`）は `physics/` から削除済み**、**25 kPa 系統（`INDEX_REFERENCE_PA = 2.5e4`）は import 互換のため `physics/stress_domain.py:122` に `# noqa: F401` で残存するのみ**（正規化には未使用。heat-map は `σ/σ_allow` の利用率）。**2.0e4·gsm 系統は `ALLOWABLE_BASE_PA`（`:134-137`）へ統合済み**。これらを**再導入すると判定が二重化する**（`no-finish-physics-supplement.md` F-3 / `PHYSICS_PAPER_CONFORMANCE_AUDIT.md` §2-H10 が同旨） | `physics/stress_domain.py:122,134-137,637-655` / `physics/aero_kernel.py` の `_guard_fold_increment`（`:749-769`） | `python tools/check_stress_peak_parity.py` → 最大相対差 **0.000e+00**（`paper_allowable_stress` が唯一の判定尺度であることを確認）/ `python -m pytest tests/test_stress.py -q` → **68 passed** | **残存（2026-10-22 確認・再導入禁止事項）**。§7.0 対照表の「応力 120 kPa 尺度を 3 系統分裂 → 解消済み」（`:571`）と**同じ趣旨のガードレール**。§4.2 M-26 / A-1 と同一系統 |
+| **R-4** | **GA ゲート G-17 の理由の `docs/SPECIFICATION.md` への記載**。出典未取得の物理定数（`KAPPA_SIGMA` / 後縁フォールド係数 / 把持フィルタ閾値）を、§5.1 と同じ記載形式で §5.2 に列挙し、実装状況と再オープン条件も明記 | `docs/SPECIFICATION.md:233`（§5.2 見出し） / §5.1（把持フィルタ閾値） | `python -c "import pathlib,re; t=pathlib.Path('docs/SPECIFICATION.md').read_text(encoding='utf-8'); print('G-17' in t, 'KAPPA_SIGMA' in t)"` → `True True` | **残存（2026-10-22 確認・記載は既に存在）**。W12 レポートが新設した。**G-17 の記載と本台帳 §A-1 / §A-2 の据え置き理由が一致している**ことだけを確認した（§A-2 の接続は解消済み・係数の出典なしは残存） |
 
 ## 5. 次のフェーズで着手する順序（推奨）
 
@@ -454,6 +713,10 @@ K2-P0-8 / K2-P0-9 は**未実装**（コード側対応が要る）である。
 - 最重要: **E-1（GPU/CPU 数値一致の定量照合）** — §2 の「完全一致」宣言を実測で裏づける最終作業。
 - 記載訂正: **G-4** — `H-19`（折り後縁の空力接続）は**未接続**（`trailing_edge_fold_effects` に呼び出し元が無い）。
   `PHYSICS_PAPER_CONFORMANCE_AUDIT.md` 付録B の該当行を訂正済み。
+  **2026-10-22 追記（W13 台帳同期）**: この「未接続」は**誤り**で、**接続は `7639895` で復元済み**
+  （`physics/aero_kernel.py:1084-1085` → `:1108` / `:1113` / `:1178`、`physics/aero_domain.py:557,606,619,660,699`）。
+  §A-2 / §4.1 H-19 の「未接続」記述は現状へ同期済み。**残存は係数（0.015 / −0.012 / 0.035）の出典なし**のみで、
+  その据え置き根拠は `docs/SPECIFICATION.md` §5.2（G-17）。
 
 ---
 
@@ -491,33 +754,46 @@ K2-P0-8 / K2-P0-9 は**未実装**（コード側対応が要る）である。
 | 判定 | 項目 | 根拠 |
 |---|---|---|
 | **解消済み** | GPU 経路の deg/rad 取り違え（αが57.3倍過小） | `physics/parallel_engine.py:158,191` が `rad2deg` で正規化し `aero_kernel` を委譲。旧 `_vector_lift_coefficient` は消滅 |
-| **解消済み** | GPU の Helmbold 式不一致 / 応力 120 kPa 尺度を 3 系統分裂 | `Knowledge.md` §69-70（単一化済み）。`stress_domain.paper_allowable_stress` が唯一の実装 |
+| **解消済み** | GPU の Helmbold 式不一致 / 応力 120 kPa 尺度を 3 系統分裂 | `Knowledge.md` §69-70（単一化済み）。`stress_domain.paper_allowable_stress` が唯一の実装。**2026-10-22 再確認**: 実装は `physics/stress_domain.py:637` の `paper_allowable_stress`（既定 2200 Pa）**1 つだけ**で、25 kPa / 120 kPa / 2.0e4·gsm の 3 系統は**再導入禁止**（再導入すると過応力クラッシュ判定が二重化）。正本: `docs/SPECIFICATION.md` §5.2（G-17）。`python tools/check_stress_peak_parity.py` = 最大相対差 0.000e+00 |
 | **解消済み** | 風ベクトルの 90°回転・符号 3 系統 | `physics/wind_domain.py` `wind_flow_components()` が単一定義に統合済み |
 | **解消済み** | `_local_aero` の操作権限4.3倍乖離 | `_local_aero` は削除済み（`flight_sim.py` に残るのは `_local_wind` のみ） |
 | **解消済み** | `aero_kernel._finite` のスカラー `nan_to_num` で3.6倍減速 | `physics/aero_kernel.py` `_finite` に `isinstance(value, float)` の早期分岐がある（docstring もスカラー優先を明記） |
-| **解消済み** | 未追跡モジュールでクリーンチェックアウト不能 | `aero_kernel.py` / `origami_domain.py` / `gpu_dynamics.py` / `api/routes/origami.py` / `static/js/origami.js` / `tools/branch_guard.py` / `tools/work_report.py` / `tools/mcp_call.py` / `tools/verify_mcp_servers.py` / `.kilo/kilo.jsonc` は **全て追跡済み**。残る未追跡は 4 件のみ（§7.1 P0-1） |
+| **解消済み** | 未追跡モジュールでクリーンチェックアウト不能 | `aero_kernel.py` / `origami_domain.py` / `gpu_dynamics.py` / `api/routes/origami.py` / `static/js/origami.js` / `tools/branch_guard.py` / `tools/work_report.py` / `tools/mcp_call.py` / `tools/verify_mcp_servers.py` / `.kilo/kilo.jsonc` は **全て追跡済み**。**2026-10-22 再確認: 未追跡ファイルは 0 件**（`git ls-files --others --exclude-standard` の出力が空。§7.1 P0-1 の 4 件も追跡済み） |
 | **解消済み** | master への push で CI が全滅（branch guard がセッションを abort） | 両 WF に workflow レベル `PAPER_AIRCRAFT_BRANCH_GUARD: warn` を明示。加えて `tools/branch_guard.py` が CI イベント checkout（`GITHUB_REF` ベース）を識別し、push checkout のローカル branch 名を**違反根拠にしない**（detached HEAD 基準）。ローカル clone の master 保護は維持（§7.1 P0-2） |
 | **解消済み** | `records_domain.py` の日本語93行の U+FFFD 化（P0-12 / 旧 §8 F-1） | 往復で消滅した元文字は復号せず、**ギネス記録の原文出典から日本語を再記述**。`tools/check_mojibake.py` でリポジトリ全体を走査し文字化け 0 件、`tests/test_no_mojibake.py` が回帰を固定化（保留中の除外指定は 0 件）。cp932 往復の再現を許す変換は追加しない |
+| **解消済み**（2026-10-22 追記） | **風洞ベンチ姿勢の正本関数 `wind_tunnel_bench_quaternion` が未定義**（§7.1 P0-3 / §4.8 K2-P0-8） | `physics/flight_sim.py:993` に実装（`WIND_TUNNEL_BENCH_HEADING_DEG = 180.0` は `:990`）、使用 `:2026` / `:3203`。`python -m pytest tests/test_wind_tunnel_bench.py -q` = **7 passed**。**コミット: `c4b9286`** |
+| **解消済み**（2026-10-22 追記） | **投入初期条件の出典なき人工係数 `torque_rate[1] *= 0.10`**（§4.2 M-17 / §4.8 K2-P0-9） | `physics/flight_sim.py` に残存せず（`:1653` は有限値ガードのみ）。回帰固定化 `tests/test_launch_release_torque.py:108-127`（解析値 `I⁻¹(r×F)Δt` と全軸 rel 1e-12 で一致）→ **4 passed**。**コミット: `c4b9286`** |
+| **解消済み**（2026-10-22 追記） | **後縁フォールドの空力接続が無い**（§A-2 / §4.1 H-19 / §5.5 G-4） | `physics/aero_kernel.py:1084-1085` → `:1108`（`cl_offset`）・`:1113`（`cd0`）・`:1178`（`cm`）、`physics/aero_domain.py:557,606,619,660,699`。**残存は係数の出典制約のみ**（§4.10 R-2 / `docs/SPECIFICATION.md` §5.2 G-17）。**コミット: `7639895`** |
+| **解消済み**（2026-10-22 追記） | **GPU/バッチ経路と 6DoF 参照経路の数値不一致**（§4.7 K1-P0-1 / §4.8 K2-P0-1 / §4.9 K3-P0-1） | 真因は**大気メモの履歴依存**（`physics/flight_sim.py:705-718` で大気メモの高度 1 mm 量子化 `_ATMOSPHERE_QUANTUM_M = 1.0e-3` を撤去し**厳密キー**へ）。`python -m pytest tests/test_ga_audit.py tests/test_optimizer.py -q` = **61 passed / 0 failed**。**残存は 6DoF 経路のカオス性**（§4.10 R-1）。**コミット: `8a41586`** |
+| **解消済み**（2026-10-22 追記） | **水平 100 km 境界でのクラッシュ判定が働かない**（§4.7 K1-P0-2 / §4.8 K2-P0-2 / §4.9 K3-P0-2） | `physics/flight_sim.py:2462-2530` の `_world_wall_contact()` が水平壁を壁として発火＋状態を凍結。`python -m pytest tests/test_world_bounds.py -q` = **1 passed**。**コミット: `8a41586`** |
+| **解消済み**（2026-10-22 追記） | **GA2 の Stage-0 幾何フィルタの偽陽性**（§4.7 K1-P0-3 / §4.8 K2-P0-3 / §4.9 K3-P0-3） | `physics/ga2/stage0.py` の `_segments_overlap()` に**共線性検査**を追加（hot_spot 9 → 正 5）。`python -m pytest tests/test_ga2_stages.py -q` = **14 passed**。**残存は tear 判定そのものの出典**。**コミット: `8a41586`** |
+| **解消済み**（2026-10-22 追記） | **GA エンジンの審査 P0 4 件**（§4.8 K2-P0-4〜P0-7 / §4.9 K3-P0-4〜P0-7） | ①`physics/ga_config.py` に `grip_penalty_weight` / `max_secondary_weight` / `max_ld_ratio` / `max_altitude_m` が**無く**、`physics/ga_domain.py:1807-1854` は重みなしの積 ②`:521-526,2386-2400,2459-2461` ③`:968-983` ④`:1321,2610`。`python -m pytest tests/test_ga_engine.py -q` = **51 passed**。**残存は旧成果物 `artifacts/ga_audit/**` の不整合**。**コミット: `d287af2`** |
+| **解消済み**（2026-10-22 追記） | **記録プリセットの trim 契約が死**（§7.1 P0-10） | `physics/records_domain.py:668-671` が `source["release_pitch_deg"] = RECORD_TRIM_ALPHA_DEG` の無条件代入へ、カタログの `"release_pitch_deg": 0.0` 明示 9 箇所を削除（`git blame` → `7639895`）。GET / POST が 12 プリセット全て 3.0 で一致。**コミット: `7639895`** |
+| **解消済み**（2026-10-22 追記） | **応力ヒートマップの転置**（§7.1 P0-11） | サーバ grid は `[spanwise][chordwise]` の正順。`python tools/check_stress_peak_parity.py` = 最大相対差 **0.000e+00**。**コミット: `7639895`**（W6 で正本化） |
+| **解消済み**（2026-10-22 追記） | **`physics/payload_contract.py` の `error` / `error_id` 消失** | `physics/payload_contract.py:70-71` に `CORE_KEYS` として存在、`:133-135` に既定 `None`、`:156-164` に必須キー宣言。`python -m pytest tests/test_payload_contract.py -q` = passed。**コミット: `7639895`** |
 | **要再検証** | 上記以外で、個別に現状を採取していない指摘 | §7.2 以降の「判定」欄が「要再検証」のもの。着手時に 1 回現状確認してから lestimate すること |
 
 > **運用ルール**: §7 の各行の「判定」欄は **2026-10-20 の現状採取結果**。以後の実装で状況が変わった場合は、
 > 本表と `docs/CODE_REVIEW_FINDINGS.md` を同時更新する（§10）。
+> **2026-10-22 追記（W13 台帳同期）**: 本表の `:571`（応力尺度の 3 系統分裂）と `:578-587` の 10 行を
+> **2026-10-22 の再実測**で更新した。判定の根拠は各行の記載どおり
+> **file:line・再現コマンド・実行したテスト結果**で、**コミット単位**（`git log -S` / `git blame`）で確認済み。
 
 ### 7.1 P0 — 最優先（12 件）
 
 | ID | 残課題 | 場所 | 判定 |
 |---|---|---|---|
-| **P0-1** | **未追跡ファイル4件**が追跡外のまま（`no-finish-physics-supplement.md` / `physics/origami_genome.py` / `tests/test_origami_genome.py` / `tools/show_run_logs.py`）。うち `physics/origami_genome.py` は import される可能性が高く、**未追跡のまま commit すると master を破壊**する | `git ls-files --others --exclude-standard` | 検証済（残存） |
+| **P0-1** | **未追跡ファイル4件**が追跡外のまま（`no-finish-physics-supplement.md` / `physics/origami_genome.py` / `tests/test_origami_genome.py` / `tools/show_run_logs.py`）。うち `physics/origami_genome.py` は import される可能性が高く、**未追跡のまま commit すると master を破壊**する | `git ls-files --others --exclude-standard` | **解消済み（コミット: `d287af2` / `8a41586` ら）**。2026-10-22 実測: `git ls-files --others --exclude-standard` = **出力 0 件**（未追跡ファイルなし）、上記 4 ファイルは**すべて追跡済み**（`git ls-files` で確認）。clean checkout による master 破壊リスクは消滅 |
 | **P0-2** | **master への push で CI が全滅**。branch guard の session-scope autouse fixture が `severity=="error"` で pytest 自体を中断するが、`actions/checkout` は push 時に**ローカル branch を作る**ため `master` と判定される（実測: `git checkout --force -B <branch> refs/remotes/origin/<branch>`）。両 WF とも `PAPER_AIRCRAFT_BRANCH_GUARD=warn` を**設定していない**（WF 内の設定 0 件） | `conftest.py:44-50` / `tools/branch_guard.py:66-69,119-122` / `.github/workflows/ci.yml`, `verify.yml` | **解消済み**（2026-10-20 修正）。両 WF に workflow レベル `PAPER_AIRCRAFT_BRANCH_GUARD: warn` を設定し、guard 側は CI イベント checkout（`GITHUB_REF`）を識別して push checkout のローカル branch 名を違反根拠にしない（detached HEAD 基準）。`PAPER_AIRCRAFT_BRANCH_GUARD` の `warn`/`off`/`error` セマンティクスとローカル clone の master 保護は維持。回帰テスト: `tests/test_branch_guard.py`（37件） |
-| **P0-3** | **風洞モードで機体が後ろ向きに吹かれる**。風洞流は `+x`（`stream[:,0]=v_eff`）だが、ベンチ姿勢は `quaternion_from_euler(0.0, alpha, -beta)`（yaw=0）でノーズも `+x`。相対流が `(−V,0,0)` となり `atan2(w,u)` が 180°+α を返す（ベンチ 4° → **α_eff = −176°**）。`/simulation/step` はこの反転流で積分する | `physics/wind_domain.py:897,913` / `physics/flight_sim.py:1883,2957` | 検証済（残存・要計測） |
+| **P0-3** | **風洞モードで機体が後ろ向きに吹かれる**。風洞流は `+x`（`stream[:,0]=v_eff`）だが、ベンチ姿勢は `quaternion_from_euler(0.0, alpha, -beta)`（yaw=0）でノーズも `+x`。相対流が `(−V,0,0)` となり `atan2(w,u)` が 180°+α を返す（ベンチ 4° → **α_eff = −176°**）。`/simulation/step` はこの反転流で積分する | `physics/wind_domain.py:897,913` / `physics/flight_sim.py:1883,2957` | **解消済み（コミット: `c4b9286`）**。正本関数 `physics/flight_sim.py:993` `wind_tunnel_bench_quaternion`（`WIND_TUNNEL_BENCH_HEADING_DEG = 180.0` は `:990`）を実装し、風洞モード（`:2026`）と UI 経路（`:3203`）が呼称。旧実装の heading 0°（α = 180°+α = −176°）は解消。`python -m pytest tests/test_wind_tunnel_bench.py -q` = **7 passed**（§4.8 K2-P0-8 と同系統） |
 | **P0-4** | **折り畳み crease の Bézier が発散**。2パネルがほぼ平行になると交点 `v` が不定距離に飛び、既定UI値（`elevon_deg=2, fold_trailing_deg=15`）で**機首前方に302mm**のスパイク（スライダ全域で最大7.5m）。退化判定は `denom <= 1e-20`（≈1e-10 rad）で、実失敗角は 1e-8 rad | `physics/origami_domain.py:1044-1048,1052-1078` | 構造未変（要再計測） |
 | **P0-5** | **「採用」ボタン2つが嘘**。①「推奨セッティングを機体に適用」→ `store.set(["aircraft",k], v)` は4引数APIに配列を渡すため `undefined===undefined` で早期 return し**何も書かず**に成功トースト。②「1位の投げ方を設定に反映」→ 対象スライダー `quick-slide-*` が `index.html` に不在で、**ハードコード 10 m/s / 12° / 0°** を store へ書いてサーバへ push（トーストは实际问题を表示） | `static/js/investigator.js:298,304` / `static/js/app.js:1158-1174,1230-1246` | 検証済（残存） |
 | **P0-6** | **フロント JS が `index.html` に存在しない DOM id を約35個参照**。エラー表示バナー（`sim-error-*` 7個）、飛行ステータス行（`status-dot`/`status-text`）、3Dモデル取り込み分岐（`this.meshpanel` vs `this.meshPanel`）、チャンピオン JSON/CSV ボタン、クイック投入ドック（20+ id）が死。**エラーは自己消滅する toast だけ**になる | `static/js/app.js:1763-1764,1095-1098,2623,333-334` / `templates/index.html` | 検証済（残存・id 8件を個別確認） |
 | **P0-7** | **API 認証が常に無効**。`app.py` が `load_dotenv()` を呼ばないため、`.env` に `API_KEY` を書いても `os.environ.get("API_KEY","")` は常に空 → **全保護エンドポイントが到達可能**。`.env.example` は `API_KEY` を文書化し、`/api/v1/system/*` は auth 作用域外 | `app.py:135` / `.env.example:19-27` | 検証済（残存） |
 | **P0-8** | **共有シミュレータをロック外で launch**。`SESSION` はモジュールシングルトンで全クライアントが1つの `FlightSimulator` を共有。`/simulation/launch` は `with SESSION.lock:` を**積分前に**抜け、`/simulation/step` は同じオブジェクトを mutate する → 並行 request で軌跡が混入・破壊 | `api/core.py:194,240-250,267` / `api/routes/simulation.py:54,137-147` | 要再検証 |
 | **P0-9** | **Guinness「公式検証レポート」が同義反復**。`verification_report` が**適合済み較正レシピ**で飛行するため乖離は常に ≈0%。payload 自身が `method` に "is **not evidence of validated performance**" / `performance_validated=False` と記載しながら、UI はその文字列を表示せず「再現率」として提示。「一括検証マトリクス」は `alert()` | `physics/records_domain.py:2260,2292` / `static/js/app.js:3141-3150` | 要再検証 |
-| **P0-10** | **記録プリセットのトリム契約が死**。`RECORD_TRIM_ALPHA_DEG=3.0` の `setdefault` は `LaunchConfig` が常に値を持つため発火せず、**12プリセット中9個が `release_pitch_deg=0.0` を明示**。`GET /records/presets/<key>` は 3.0、`POST /records/apply` は 0.0 を返す（**同一プリセットが2エンドポイントで矛盾**） | `physics/records_domain.py:670,1009,1155,1249,1335,1419,1499,1574,1639,1706,1769` | 検証済（残存） |
-| **P0-11** | **応力ヒートマップが転置**。サーバ grid は `[spanwise][chordwise]`、メッシュ UV は `(uSpan, t)` = (スパン, 弦) だが、サンプリングは `fy = v*ny`（行=弦）/ `fx = u*nx`（列=スパン）。**根翼前縁のピークが弦方向の帯**として描画される | `physics/stress_domain.py:825,862` / `static/js/airframe.js:277-282,474-486` | 検証済（残存） |
+| **P0-10** | **記録プリセットのトリム契約が死**。`RECORD_TRIM_ALPHA_DEG=3.0` の `setdefault` は `LaunchConfig` が常に値を持つため発火せず、**12プリセット中9個が `release_pitch_deg=0.0` を明示**。`GET /records/presets/<key>` は 3.0、`POST /records/apply` は 0.0 を返す（**同一プリセットが2エンドポイントで矛盾**） | `physics/records_domain.py:670,1009,1155,1249,1335,1419,1499,1574,1639,1706,1769` | **解消済み（コミット: `7639895`）**。`physics/records_domain.py:668-671` が `source["release_pitch_deg"] = RECORD_TRIM_ALPHA_DEG` の**無条件代入**へ変更され、カタログの `"release_pitch_deg": 0.0` 明示 9 箇所が削除（`git blame` → `7639895`）。定数の単一ソースは `physics/records_domain.py:1013`。GET / POST が **12 プリセット全て 3.0** で一致 |
+| **P0-11** | **応力ヒートマップが転置**。サーバ grid は `[spanwise][chordwise]`、メッシュ UV は `(uSpan, t)` = (スパン, 弦) だが、サンプリングは `fy = v*ny`（行=弦）/ `fx = u*nx`（列=スパン）。**根翼前縁のピークが弦方向の帯**として描画される | `physics/stress_domain.py:825,862` / `static/js/airframe.js:277-282,474-486` | **解消済み（コミット: `7639895`、W6 で正本化）**。サーバ grid は `[spanwise][chordwise]` の正順で、翼根ピークがスパン方向に分布するのが正。`python tools/check_stress_peak_parity.py` = 最大相対差 **0.000e+00**（6 ケースすべて grid 値 == reduction 値） |
 | **P0-12** | **`records_domain.py` の日本語93行が U+FFFD 化**（UTF-8→cp932→UTF-8 往復）。`/api/v1/records/presets` で直接公開され、UI の機体モデル dropdown に出る | `physics/records_domain.py`（U+FFFD 93行 / 276文字） | **解消済み**（2026-10-21 修正）。日本語93行は**ギネス記録の原文出典から再記述**。併せてレジストリ（`search/`）のバイト列欠陥と Markdown 全文の文字化けも修復。**再発防止**は `tools/check_mojibake.py`（検出）と `tests/test_no_mojibake.py`（回帰固定化）。旧 §8 F-1 も解消済みに移行（§7.0 対照表） |
 
 ### 7.2 P1 — 高（18 件）
@@ -700,6 +976,25 @@ K2-P0-8 / K2-P0-9 は**未実装**（コード側対応が要る）である。
 > **K2-P0-3**（GA2 stage-0 tear フィルタ）は 2026-10-21 実測で **PASS**（解消済み）だが、判定の出典確認は担当 **W10** に残す。
 > **K2-P1**（3 ファイルの未確認タイムアウト）は pytest の実測（`--durations`）だけで切り分けられるため、
 > 父の優先度判断に任せる。
+>
+> **2026-10-22 追記 3（W13 台帳同期・§9 の更新）**: 上の割り当ては**実行済み**。K2-P0-1 / K2-P0-2 /
+> K2-P0-3 / K2-P0-4〜K2-P0-7 / K2-P0-8 / K2-P0-9 は**すべて解消済み**で、**上表の該当段は「実施済」**に変わる。
+> 残る「依然として着手すべき」項目と、**消化しきれずに残る限定**だけを以下に残す。
+>
+> | 段 | 2026-10-22 時点の残存 | 対象 | 根拠 |
+> |---|---|---|---|
+> | **第1段（物理正本）** | **完了（消化）** | K2-P0-8（風洞ベンチ姿勢）/ K2-P0-9（人工係数）/ §7.1 P0-3 | §C-1 / §7.0 対照表（コミット `c4b9286`） |
+> | **第1段〜第6段** | **完了（消化）**（**残存はカオス性のみ**） | K2-P0-1 / K3-P0-1 | §4.10 R-1（並列/逐次はビット一致。**軌道の一致は保証しない**） |
+> | **第0段〜第1段の間** | **完了（消化）**（**残存は旧成果物の不整合のみ**） | K2-P0-2（水平 100 km）/ K2-P0-3（GA2 tear）/ K2-P0-4〜P0-7（GA P0 4 件） | §4.8 / §4.9 の各行 |
+> | **第6段（可視化の正しさ）** | **完了（消化）** | §7.1 P0-11（応力ヒートマップ） | `python tools/check_stress_peak_parity.py` = 0.000e+00 |
+> | **第5段（誠実性）** | **P0-12 完了**。**P0-10 完了**。**P0-9（Guinness 検証の同義反復）は §7.1 に残存** | P0-9 | §7.1 P0-9 の判定欄「要再検証」 |
+> | **第1段（据え置き・着手不可）** | **A-1 / H-11 / M-26（実材料・実断面）と A-2 / H-19 の係数出典**は**着手不能のまま据え置き**。据え置き根拠の正本は `docs/SPECIFICATION.md` §5.2（G-17） | A-1 / A-2 / H-11 / H-19 / M-26 | §4.10 R-2 |
+> | **第13段（既存フェーズ）** | **A-1 / A-5 / A-9 / L-01 / L-02 / L-10** は**残存**（§4.10 のとおり実測・出典の制約で着手不能または低優先） | §5 の 1〜5 | §4.10 |
+>
+> **残存 P0（2026-10-22 実測）**: §7.1 の P0-4（折り畳み crease の Bézier 発散）/ P0-5 / P0-6 / P0-7 / P0-8 /
+> P0-9 / P1-15〜P1-18 等は**本セッションの対象外**であり、判定欄は
+> 「検証済（残存）」または「要再検証」のまま維持している（**§7.1 P0-1 は 2026-10-22 実測で解消済み**へ更新）。
+> **§4.7 / §4.8 / §4.9 の P0-1〜P0-9 は全件解消済み**。
 
 ---
 

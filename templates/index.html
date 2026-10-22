@@ -276,9 +276,9 @@
 
         <div class="vp-hud vp-hud-tr" id="tunnel-hud" hidden style="min-width: 200px;">
           <div class="hud-title">風洞実験室 / WIND TUNNEL</div>
-          <div class="hud-row"><span class="hud-key">動態</span><span class="hud-val" id="hud-tunnel-status" style="color:#1a73e8;font-weight:600;">リアルタイム空力応答</span></div>
-          <div class="hud-row"><span class="hud-key">流線</span><span class="hud-val" style="color:#34a853;font-size:11px;">煙線レイク・翼干渉・翼端渦 ON</span></div>
-          <div class="hud-row"><span class="hud-key">迎角 α</span><span class="hud-val num" id="hud-tunnel-aoa" style="font-weight:700;color:#1a73e8;">4.0°</span></div>
+          <div class="hud-row"><span class="hud-key">動態</span><span class="hud-val" id="hud-tunnel-status" style="color:#1557b0;font-weight:600;">リアルタイム空力応答</span></div>
+          <div class="hud-row"><span class="hud-key">流線</span><span class="hud-val" style="color:#137333;font-size:11px;">煙線レイク・翼干渉・翼端渦 ON</span></div>
+          <div class="hud-row"><span class="hud-key">迎角 α</span><span class="hud-val num" id="hud-tunnel-aoa" style="font-weight:700;color:#1557b0;">4.0°</span></div>
           <div class="hud-row"><span class="hud-key">風速 V</span><span class="hud-val num" id="hud-tunnel-speed" style="font-weight:700;">12.0 m/s</span></div>
           <div class="hud-row"><span class="hud-key">C_L</span><span class="hud-val num" id="hud-cl">—</span></div>
           <div class="hud-row"><span class="hud-key">C_D</span><span class="hud-val num" id="hud-cd">—</span></div>
@@ -289,7 +289,7 @@
           <div style="margin-top:8px; border-top:1px solid rgba(0,0,0,0.08); padding-top:6px;">
             <div style="display:flex; justify-content:space-between; align-items:center; font-size:10px; margin-bottom:2px;">
               <span>迎角 (AoA) 調整</span>
-              <span id="tunnel-slider-aoa-val" class="num" style="font-weight:600; color:#1a73e8;">4.0°</span>
+              <span id="tunnel-slider-aoa-val" class="num" style="font-weight:600; color:#1557b0;">4.0°</span>
             </div>
             <input type="range" id="tunnel-slider-aoa" min="-15" max="30" step="0.5" value="4" style="width:100%; height:4px; cursor:pointer;" title="迎角をリアルタイム調整">
           </div>
@@ -305,9 +305,9 @@
           <!-- クイック迎角テストプリセット -->
           <div style="display:flex; flex-wrap:wrap; gap:3px; margin-top:8px;">
             <button type="button" class="btn btn-mini tunnel-preset-btn" data-aoa="0" style="padding:1px 4px; font-size:9.5px;">高速 0°</button>
-            <button type="button" class="btn btn-mini tunnel-preset-btn" data-aoa="4" style="padding:1px 4px; font-size:9.5px; border-color:#1a73e8; color:#1a73e8;">滑空 4°</button>
+            <button type="button" class="btn btn-mini tunnel-preset-btn" data-aoa="4" style="padding:1px 4px; font-size:9.5px; border-color:#1a73e8; color:#1557b0;">滑空 4°</button>
             <button type="button" class="btn btn-mini tunnel-preset-btn" data-aoa="10" style="padding:1px 4px; font-size:9.5px;">高揚力 10°</button>
-            <button type="button" class="btn btn-mini tunnel-preset-btn" data-aoa="16" style="padding:1px 4px; font-size:9.5px; color:#ea4335;">臨界失速 16°</button>
+            <button type="button" class="btn btn-mini tunnel-preset-btn" data-aoa="16" style="padding:1px 4px; font-size:9.5px; color:#c5221f;">臨界失速 16°</button>
             <button type="button" class="btn btn-mini tunnel-preset-btn" data-aoa="24" style="padding:1px 4px; font-size:9.5px; color:#d93025;">深失速 24°</button>
             <button type="button" class="btn btn-mini tunnel-preset-btn" data-aoa="-6" style="padding:1px 4px; font-size:9.5px;">逆迎角 -6°</button>
           </div>
@@ -320,7 +320,7 @@
         <div class="vp-hud vp-hud-tl flight-telemetry-hud" style="min-width: 220px; padding: 8px 10px; background: rgba(255,255,255,0.92); backdrop-filter: blur(8px); border: 1px solid var(--line); border-radius: 6px; box-shadow: 0 2px 8px rgba(0,0,0,0.06);">
           <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid var(--line); padding-bottom:5px; margin-bottom:6px;">
             <span style="font-weight:700; font-size:11px; color:var(--ink); letter-spacing:0.02em;">飛行ステータス</span>
-            <span class="hud-phase-pill" id="f-hud-phase" style="font-size:9.5px; padding:1px 6px; border-radius:10px; background:#e8f0fe; color:#1a73e8; font-weight:600;">待機中</span>
+            <span class="hud-phase-pill" id="f-hud-phase" style="font-size:9.5px; padding:1px 6px; border-radius:10px; background:#e8f0fe; color:#1557b0; font-weight:600;">待機中</span>
           </div>
 
           <div style="display:flex; align-items:center; gap:6px; margin-bottom:6px; font-size:10.5px; color:var(--ink-2);">
