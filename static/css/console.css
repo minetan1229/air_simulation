@@ -19,6 +19,15 @@
   --ok:         #1a7a34;
   --warn:       #b06000;
   --bad:        #ea4335;
+  /* Text colours.  The fill colours above are tuned for white text on a
+     solid fill; as *text* on a light surface they fall below the WCAG AA
+     ratio of 4.5:1, so the ink variants are kept apart from them. */
+  --accent-ink: #1557b0;   /* accent text on --accent-bg / white */
+  --bad-ink:    #c5221f;   /* red text on a light surface */
+  --ok-ink:     #137333;   /* green text on a light surface */
+  --rail-muted: #8f959c;   /* muted text on the dark top rail */
+  --rail-ok:    #3fb950;   /* green text on the dark top rail */
+  --rail-bad:   #ff7b72;   /* red text on the dark top rail */
   --stage-bg:   #e8eaed;
 
   /* P2-11: 3Dシーンとチャートで同義色を共通トークンに統一 */
@@ -94,6 +103,14 @@ button, input, select, textarea {
 /* ------------------------------------------------------------------ */
 .console {
   display: grid;
+  /* The implicit column is ``auto``, i.e. it is sized to the *min-content*
+     width of its widest row.  The top rail is a single flex row whose
+     min-content width is wider than a 1280 px viewport, so the column grew
+     past the viewport and pushed the right-hand action buttons (record,
+     load, CSV, help) out of reach: the document scrolled to 1392 px.  The
+     explicit ``minmax(0, 1fr)`` lets the column shrink to the viewport and
+     hands the overflow to the rail's own horizontal scroller. */
+  grid-template-columns: minmax(0, 1fr);
   grid-template-rows: var(--top-h) minmax(0, 1fr) auto var(--dock-h);
   height: 100vh;
   height: 100dvh;
@@ -142,9 +159,9 @@ button, input, select, textarea {
 .brand-title { font-size: 12.5px; font-weight: 600; letter-spacing: 0.02em; white-space: nowrap; }
 .brand-sub {
   font-family: var(--mono);
-  font-size: 8px;
+  font-size: 9px;
   letter-spacing: 0.14em;
-  color: #7f858d;
+  color: var(--rail-muted);
   white-space: nowrap;
 }
 
@@ -167,9 +184,11 @@ button, input, select, textarea {
 }
 .readout-key {
   font-family: var(--mono);
-  font-size: 7.5px;
-  letter-spacing: 0.14em;
-  color: #9aa0a6;
+  /* 7.5 px was below the legible floor for a Latin small-caps label; the
+     readouts sit next to 11.5 px values and the row is only 52 px high. */
+  font-size: 9px;
+  letter-spacing: 0.12em;
+  color: #a7adb3;
 }
 .readout-val {
   font-family: var(--mono);
@@ -179,8 +198,8 @@ button, input, select, textarea {
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.readout-val small { font-size: 8.5px; color: #7f858d; margin-left: 1px; }
-.readout-run .readout-val { color: var(--muted); font-weight: 600; }
+.readout-val small { font-size: 9px; color: var(--rail-muted); margin-left: 1px; }
+.readout-run .readout-val { color: #aeb4ba; font-weight: 600; }
 .readout-run[data-run="running"] .readout-val { color: #6ee7a8; }
 .readout-run[data-run="paused"] .readout-val { color: #f5c56b; }
 .readout-run[data-run="done"] .readout-val { color: #7fb2ff; }
@@ -447,8 +466,8 @@ input:disabled {
 .rail-title { font-size: 12px; font-weight: 600; }
 .rail-title-en {
   font-family: var(--mono);
-  font-size: 8.5px;
-  letter-spacing: 0.16em;
+  font-size: 9.5px;
+  letter-spacing: 0.14em;
   color: var(--muted);
 }
 .rail-head .btn-mini { margin-left: auto; }
@@ -488,8 +507,8 @@ input:disabled {
 .group-name { font-size: 12px; font-weight: 600; }
 .group-en {
   font-family: var(--mono);
-  font-size: 8.5px;
-  letter-spacing: 0.14em;
+  font-size: 9.5px;
+  letter-spacing: 0.12em;
   color: var(--muted);
 }
 .group-note { margin-left: auto; color: var(--muted); font-size: 11px; }
@@ -685,7 +704,7 @@ input[type="range"]:focus-visible { outline: 2px solid var(--accent); outline-of
 .state-pill[data-state="crash"] { color: var(--bad); border-color: #e0b0a8; background: #fdf1ef; }
 .state-pill[data-state="tunnel"] { color: var(--accent-dk); border-color: #a9c8f5; background: var(--accent-bg); }
 .state-pill[data-state="error"],
-.state-pill[data-state="diverged"] { color: #d93025; border-color: #f28b82; background: #fce8e6; font-weight: 600; }
+.state-pill[data-state="diverged"] { color: var(--bad-ink); border-color: #f28b82; background: #fce8e6; font-weight: 600; }
 
 /* recorder ----------------------------------------------------------- */
 .rec-head {
@@ -859,7 +878,7 @@ input[type="range"]:focus-visible { outline: 2px solid var(--accent); outline-of
 .tunnel-preset-btn.active {
   background: #e8f0fe !important;
   border-color: #1a73e8 !important;
-  color: #1a73e8 !important;
+  color: var(--accent-ink) !important;
   font-weight: 700 !important;
 }
 
@@ -867,7 +886,7 @@ input[type="range"]:focus-visible { outline: 2px solid var(--accent); outline-of
 .hud-key { color: var(--muted); }
 .hud-val { font-variant-numeric: tabular-nums; }
 .hud-title {
-  font-size: 8.5px;
+  font-size: 9.5px;
   letter-spacing: 0.16em;
   color: var(--muted);
   border-bottom: 1px solid var(--line);
@@ -876,13 +895,13 @@ input[type="range"]:focus-visible { outline: 2px solid var(--accent); outline-of
 }
 
 .heat-legend { margin-bottom: 6px; }
-.heat-title { font-size: 8.5px; letter-spacing: 0.14em; color: var(--muted); }
+.heat-title { font-size: 9.5px; letter-spacing: 0.14em; color: var(--muted); }
 .heat-bar { margin: 3px 0 1px; line-height: 0; }
 .heat-bar canvas { width: 180px; height: 10px; display: block; }
 .heat-scale {
   display: flex;
   justify-content: space-between;
-  font-size: 8.5px;
+  font-size: 9.5px;
   color: var(--muted);
   width: 180px;
 }
@@ -970,7 +989,7 @@ input[type="range"]:focus-visible { outline: 2px solid var(--accent); outline-of
   appearance: none;
   background: transparent;
   border: none;
-  color: #80868b;
+  color: var(--ink-2);
   font-size: 14px;
   cursor: pointer;
   padding: 2px 6px;
@@ -1032,7 +1051,7 @@ input[type="range"]:focus-visible { outline: 2px solid var(--accent); outline-of
 }
 .wb-tab small {
   font-family: var(--mono);
-  font-size: 8px;
+  font-size: 9px;
   letter-spacing: 0.14em;
   color: var(--muted);
 }
@@ -1058,14 +1077,14 @@ input[type="range"]:focus-visible { outline: 2px solid var(--accent); outline-of
   margin-right: 2px;
   border-right: 1px solid #2c2f34;
 }
-.toprail .eta-key { color: #9aa0a6; font-family: var(--mono); font-size: 8.5px; letter-spacing: 0.16em; }
+.toprail .eta-key { color: #a7adb3; font-family: var(--mono); font-size: 9.5px; letter-spacing: 0.14em; }
 .toprail .eta-val { color: #e9e7e2; font-size: 13px; font-family: var(--mono); font-weight: 600; }
-.toprail .eta-sub { color: #7f858d; font-size: 10px; font-family: var(--mono); }
+.toprail .eta-sub { color: var(--rail-muted); font-size: 10px; font-family: var(--mono); }
 .header-eta[data-active="1"] { border-right-color: #1a73e8; }
 .header-eta[data-active="1"] .eta-val { color: #8ab4f8; font-weight: 700; text-shadow: 0 0 10px rgba(138, 180, 248, 0.45); }
 .header-eta[data-active="1"] .eta-key { color: #8ab4f8; }
 .header-eta[data-active="1"] .eta-sub { color: #aecbfa; }
-.eta-key { font-family: var(--mono); font-size: 8.5px; letter-spacing: 0.16em; color: var(--muted); }
+.eta-key { font-family: var(--mono); font-size: 9.5px; letter-spacing: 0.16em; color: var(--muted); }
 .eta-val { font-size: 12px; color: var(--ink); }
 .eta-sub { font-size: 10px; color: var(--muted); }
 .wb-eta[data-active="1"] .eta-val { color: var(--accent-dk); }
@@ -1123,7 +1142,7 @@ input[type="range"]:focus-visible { outline: 2px solid var(--accent); outline-of
 }
 .wb-h small {
   font-family: var(--mono);
-  font-size: 8px;
+  font-size: 9px;
   letter-spacing: 0.14em;
   color: var(--muted);
   font-weight: 400;
@@ -1148,7 +1167,7 @@ input[type="range"]:focus-visible { outline: 2px solid var(--accent); outline-of
 .obj-name { font-size: 11.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .obj-dir {
   font-family: var(--mono);
-  font-size: 8.5px;
+  font-size: 9.5px;
   color: var(--muted);
   text-align: right;
 }
@@ -1214,7 +1233,7 @@ input[type="range"]:focus-visible { outline: 2px solid var(--accent); outline-of
 .eta-row-clock {
   font-size: 11.5px;
   font-weight: 700;
-  color: #1a73e8;
+  color: var(--accent-ink);
   font-family: var(--mono);
 }
 .eta-row-left {
@@ -1741,12 +1760,12 @@ input[type="range"]:focus-visible { outline: 2px solid var(--accent); outline-of
   font-weight: 600;
   border-radius: 3px;
   background: #e8f0fe;
-  color: #1a73e8;
+  color: var(--accent-ink);
 }
 .record-val {
   font-size: 14px;
   font-weight: 700;
-  color: #1a73e8;
+  color: var(--accent-ink);
 }
 .record-title {
   font-size: 13px;
@@ -1824,7 +1843,7 @@ input[type="range"]:focus-visible { outline: 2px solid var(--accent); outline-of
 }
 .record-mode-toggle .btn-mode.active {
   background: #fff;
-  color: #1a73e8;
+  color: var(--accent-ink);
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
   font-weight: 700;
 }
@@ -1839,7 +1858,7 @@ input[type="range"]:focus-visible { outline: 2px solid var(--accent); outline-of
 .record-help-details summary {
   cursor: pointer;
   font-weight: 600;
-  color: #1a73e8;
+  color: var(--accent-ink);
   outline: none;
   user-select: none;
 }
@@ -1855,7 +1874,7 @@ input[type="range"]:focus-visible { outline: 2px solid var(--accent); outline-of
   margin: 0;
 }
 .record-help-content .help-rec {
-  color: #188038;
+  color: var(--ok-ink);
   font-weight: 600;
   border-top: 1px dashed #dadce0;
   padding-top: 4px;
@@ -1923,7 +1942,7 @@ input[type="range"]:focus-visible { outline: 2px solid var(--accent); outline-of
 #btn-gpu-ensemble {
   background: rgba(26, 115, 232, 0.08);
   border-color: rgba(26, 115, 232, 0.4);
-  color: #1a73e8;
+  color: var(--accent-ink);
   font-weight: 600;
 }
 
@@ -1934,12 +1953,12 @@ input[type="range"]:focus-visible { outline: 2px solid var(--accent); outline-of
 }
 
 #top-backend.gpu-active, #top-fps.gpu-active {
-  color: #188038;
+  color: var(--rail-ok);
   font-weight: 700;
 }
 
 #top-fps.gpu-warning {
-  color: #d93025;
+  color: var(--rail-bad);
   font-weight: 700;
 }
 
@@ -2139,12 +2158,13 @@ input[type="range"]:focus-visible { outline: 2px solid var(--accent); outline-of
   font-weight: 700;
   border-radius: 3px;
   text-transform: uppercase;
-  background: #ea4335;
+  /* white on --bad was 3.92:1; the darker fill keeps the label legible */
+  background: var(--bad-ink);
   color: #fff;
 }
 
 .inv-badge-stable_glide {
-  background: #34a853;
+  background: var(--ok-ink);
 }
 
 .inv-badge-low_glide {
@@ -2242,7 +2262,7 @@ input[type="range"]:focus-visible { outline: 2px solid var(--accent); outline-of
   font-family: var(--mono);
   font-weight: 700;
   font-size: 11px;
-  color: var(--accent);
+  color: var(--accent-ink);
 }
 
 .inv-advice-target {
@@ -2493,7 +2513,7 @@ input[type="range"]:focus-visible { outline: 2px solid var(--accent); outline-of
 }
 .champ-sub {
   font-size: 11px;
-  color: var(--accent);
+  color: var(--accent-ink);
   font-family: var(--mono);
 }
 .champ-close-btn {
@@ -2556,7 +2576,7 @@ input[type="range"]:focus-visible { outline: 2px solid var(--accent); outline-of
   color: #b06000;
 }
 .champ-stat-card.champ-avg .champ-stat-label {
-  color: #1a73e8;
+  color: var(--accent-ink);
 }
 .champ-stat-card.champ-min .champ-stat-label {
   color: #c5221f;
@@ -2571,10 +2591,10 @@ input[type="range"]:focus-visible { outline: 2px solid var(--accent); outline-of
 }
 .champ-stat-card.champ-gold .champ-stat-value {
   font-size: 26px;
-  color: #b06000;
+  color: #8c4c00;
 }
 .champ-stat-card.champ-avg .champ-stat-value {
-  color: #1a73e8;
+  color: var(--accent-ink);
 }
 .champ-stat-card.champ-min .champ-stat-value {
   color: #c5221f;
@@ -2715,7 +2735,7 @@ input[type="range"]:focus-visible { outline: 2px solid var(--accent); outline-of
   font-size: 9px;
   font-weight: 700;
   background: #e8f0fe;
-  color: #1a73e8;
+  color: var(--accent-ink);
   margin-left: 6px;
   vertical-align: middle;
 }
@@ -2823,7 +2843,7 @@ input[type="range"]:focus-visible { outline: 2px solid var(--accent); outline-of
   color: var(--ink-2, #5f6368);
 }
 .flight-result-item.highlight .f-res-label {
-  color: #1a73e8;
+  color: var(--accent-ink);
 }
 .flight-result-item .f-res-val {
   font-size: 18px;
@@ -2932,4 +2952,4 @@ input[type="range"]:focus-visible { outline: 2px solid var(--accent); outline-of
   }
 }
 
-
+

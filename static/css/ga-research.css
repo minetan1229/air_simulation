@@ -271,7 +271,7 @@ body[data-mode="research"] .wb-panes {
   overflow-wrap: anywhere;
 }
 
-#ga-run-status[data-state="running"] { color: var(--accent); font-weight: 600; }
+#ga-run-status[data-state="running"] { color: var(--accent-ink); font-weight: 600; }
 #ga-run-status[data-state="completed"] { color: var(--ok); font-weight: 600; }
 #ga-run-status[data-state="failed"],
 #ga-run-status[data-state="error"] { color: var(--bad); font-weight: 600; }
