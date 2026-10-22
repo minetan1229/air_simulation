@@ -49,6 +49,12 @@ jobs:
       - name: 静的型検査 (Mypy)
         run: mypy --config-file mypy.ini physics app.py
 
+      # コンソールは ES モジュールグラフであり、1 ファイルでも構文エラーが
+      # あればアプリケーション全体の JavaScript が無効になる。GitHub ランナー
+      # は Node.js を同梱しているため、この検査は実際に実行される。
+      - name: フロントエンドモジュール構文検証 (ES module)
+        run: python tools/check_js_modules.py
+
       - name: 自動テストの実行 (Pytest)
         id: pytest_step
         run: python tools/run_ci_tests.py

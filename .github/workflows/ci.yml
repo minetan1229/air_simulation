@@ -45,6 +45,12 @@ jobs:
       - name: Syntax & Style Lint (Ruff)
         run: ruff check .
 
+      # The console is an ES module graph: one module that does not parse
+      # leaves the application without any JavaScript at all.  The check needs
+      # the Node.js runtime the GitHub runners ship with.
+      - name: Front-End Module Parse (ES module goal)
+        run: python tools/check_js_modules.py
+
       - name: Static Type Check (Mypy)
         run: mypy --config-file mypy.ini physics app.py api
 

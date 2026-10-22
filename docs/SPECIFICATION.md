@@ -27,6 +27,10 @@
   $$\delta_{eff}(q) = \delta_{trim} \cdot \left[ \frac{1}{1 + (q / q_{aeroelastic})^{n_{morph}}} \right]$$
 - **極低速頂点遷移力学 (Apex Low-Speed Pushover Dynamics)**:
   急上昇の頂点（$V < 2.0\,\text{m/s}$）において、動圧低下によるモーメント特異点を防ぎ、風圧中心 $x_{cp}$ の後退と質量中心偏心による機首下げモーメントを生成。重力と微小相対風による自然なプッシュオーバー（滑空姿勢への遷移）を実現する。
+- **全幅後縁折れの空力増分 (Trailing-Edge Fold Effects)**:
+  全幅後縁の折れ角 $\phi$ = `fold_trailing_deg`（正 = 後縁を下へ折る = キャンバー増）に対し、空力係数へ次の増分を加える:
+  $$\Delta C_L = 0.015\,\phi, \quad \Delta C_m = -0.012\,\phi, \quad \Delta C_D = 0.035\,\sin^2\phi$$
+  （$\phi$ は度。正の折れは揚力を増やし機首下げモーメントを生む。負の折れ（リフレックス）は揚力を減らし機首上げトリムを生む。$\Delta C_L$ と $\Delta C_m$ は $|\Delta C_L| \le C_{L,\max}$ を満たすよう**同時に**スケールされ（その比 $\Delta C_m/\Delta C_L$ = 後縁における増分作用点）、$\Delta C_D$ は独立に $\sin^2\phi$ で増加する。実装は `physics/aero_kernel.py::trailing_edge_fold_effects`（ベクトル化カーネル）で、6DoF 正規経路（`physics/aero_domain.py`）、GPU 最適化バッチ経路（`physics/gpu_dynamics.py`）、Drag Polar / Trim 経路のすべてが**同一の共有カーネル `evaluate_coefficients` 経由**で同じ係数を使う。**係数の値は §5.2 のとおり据え置き**（出典未取得）。）
 
 ### 1.2 大気・環境モデル (Atmosphere & Fluid Dynamics)
 - **大気モデル**:
@@ -41,6 +45,7 @@
 - 動圧 $q$、迎角 $\alpha$、および作用加速度（Gフォース）から翼根曲げモーメントを算出。
 - 翼面各頂点に対する動的応力評価値（0.0: 安全 〜 1.0: 破断限界）を算出し、3D ヒートマップとして可視化。
 - **応力インデックスの正規化尺度は単一**: `stress_index = sigma / sigma_allow` であり、分母は機体固有の許容折り応力 `paper_allowable_stress(gsm, stiffness)`（既定 100 g/m²・剛性 0.35 で 2.2 kPa）である。6DoF 経路・ヒートマップ・GPU 最適化バッチ・構造破壊判定はすべてこの尺度を共有する（旧来の 25 kPa / 120 kPa / 2.0e4·gsm の 3 系統は廃止）。荷重分布の min-max 形状は `stress_shape` チャンネルで別途公開する。
+- **応力較正係数 `KAPPA_SIGMA`**: 翼根曲げモーメント $M$ と矩形板の断面係数 $Z = b\,t^2/6$（$b$ = 局所弦長、$t$ = 展開シート厚 = `gsm/800`）から応力を $\sigma = \texttt{KAPPA\_SIGMA}\,M/Z$ として算出する。`physics/stress_domain.py::KAPPA_SIGMA = 9.0e-6` は **Beam 理論値へ掛ける無次元経験的較正係数**であり、報告応力を Beam 理論値の約 1/111000 に縮める（`stress_field` / `section_modulus_batch` の双方）。寸法的な意味は無く、§1.3 の `stress_index` の分子側を規定する。**値は §5.2 のとおり据え置き**（出典未取得）。
 
 ### 1.4 6DoF 運動方程式積分 (Flight Dynamics Engine)
 - 四元数（Quaternion）表現による特異点フリーの機体姿勢更新。
@@ -224,6 +229,19 @@ uniform として紙シェーダに渡し、翼端で $\mathrm{elastic}^2$ に�
 `physics/origami_genome.py` の `GripThresholds` 既定（最低高さ 8 mm / 前後長 30 mm / 最小 2 層 / CG 許容 15 mm / グリップ半幅 12 mm）は、成人指の把持を模した**動的見積もり**である。人体工学・人体計測の出典は**未取得**（§5 の文献レジストリに該当する論文・番号なし）であり、閾値は推定値のまま据え置く。出典のない係数を新たに作成しない（AGENTS.md §1.2 / 1.5）。
 
 **再オープン条件**: 成人指幅・ピンチ接触幅・把持可能スラブ深さ等を記した公開文献を入手し、その値に `min_grip_height_m` / `min_grip_length_m` を合わせた上で、当節に論文名・番号を記載する。出典が無いままの数値変更は行わない。すべての閾値はコンストラクタおよび API から変更可能。
+
+### 5.2 出典未取得の物理定数の据え置き根拠（G-17）
+
+§5.1 と同じ扱いだが、物理モデルの**較正係数**である。いずれも**値を改定しない**。出典のない係数を新たに作らない（AGENTS.md §1.5 / §2）。**本節に記した値 = 実装値**であり、実装側の改変はしない。
+
+| 定数 | 値 | 物理的意味 | 据え置きの理由 | 出典 |
+|---|---|---|---|---|
+| `KAPPA_SIGMA` | `9.0e-6`（`physics/stress_domain.py::KAPPA_SIGMA`） | 翼根曲げモーメント $M$ と矩形板の断面係数 $Z = b\,t^2/6$ から求めた Beam 理論応力 $\sigma = \texttt{KAPPA\_SIGMA}\,M/Z$ へ掛ける**無次元経験的較正係数**。$t$ は展開シート厚（`gsm/800`）。§1.3 の `stress_index = sigma/sigma_allow` の分子側を規定する | 実紙・実折面の材料定数（引裂強度・折れ面の残留断面）に対応する出典が**監査済み範囲のどの論文にも存在しない**。値を直すと全応力値と失敗判定が同時に変わるため、**根拠を得るまで数値改定を行わない**。なお `paper_allowable_stress` の基準 2200 Pa も実紙の引張強度 20〜40 MPa ではなく、`KAPPA_SIGMA` との**組み合わせでのみ**意味を持つ | `no-finish.md` §A-1（48 行） / `PHYSICS_PAPER_CONFORMANCE_AUDIT.md` §2-H-11（462〜479 行）、定数表（1248 行）、付録B H-11（1314 行） |
+| `trailing_edge_fold_effects` の係数 | `0.015` / `-0.012` / `0.035`（`physics/aero_kernel.py::trailing_edge_fold_effects`） | 全幅後縁折れ角 $\phi$ に対する空力係数の増分 $\Delta C_L = 0.015\,\phi$、$\Delta C_m = -0.012\,\phi$、$\Delta C_D = 0.035\,\sin^2\phi$（§1.1）。正の折れ = 揚力増・機首下げ、負の折れ = 揚力減・機首上げ | 後縁折れによる空力変化（翼型後縁の抗力増加＋後縁渦の形成）に対応する**特定論文の式が存在しない**。パネル法の「局所幾何 → 局所揚力」枠組みで近似すると、正規経路（Helmbold / Hoerner）と混在して A-1 と同じ**出典なき係数**が増える | `no-finish.md` §A-2（55〜65 行） / `PHYSICS_PAPER_CONFORMANCE_AUDIT.md` §2-H-19（681〜699 行。「係数 0.015 / −0.012 / 0.035 は出典なし」）、付録B H-19（1322 行） |
+
+**実装状況の注記**: `no-finish.md` §A-2 と監査 §H-19 は「`trailing_edge_fold_effects` の呼び出し元が無い」状態を記録しているが、その後縁の空力接続は `7639895 fix(physics): restore the fold-integration contract and the payload keys` で復元済みである（`no-finish.md` 363〜365 行）。**係数の出典が未取得である事実は変わらない**ため、値の据え置きは継続する（接続の有無と係数の出典は別問題）。
+
+**再オープン条件**: 紙航空機の後縁折れ空力（後縁抗力増加・後縁渦の揚力／モーメント寄与）に関する実測論文、または紙材料の引裂強度・折れ面の残留断面形状の実測データを入手できること。入手までは**値を改定しない**。
 
 ---
 

@@ -78,7 +78,11 @@ def get_system_metrics() -> Dict[str, Any]:
             metrics["memory_percent"] = mem.percent
             metrics["memory"] = f"{mem_used_gb:.1f}GB / {mem_tot_gb:.1f}GB ({mem.percent}%)"
         except Exception as exc:  # pragma: no cover - depends on the host
-            metrics["cpu_error"] = str(exc)
+            # Intentional guard: a host without a readable /proc or psutil must
+            # not abort the health report, the metrics are simply incomplete.
+            # The cause (class + message) is recorded instead of being
+            # swallowed.
+            metrics["cpu_error"] = f"{type(exc).__name__}: {exc}"
 
     smi = shutil.which("nvidia-smi")
     if smi:
@@ -112,7 +116,11 @@ def get_system_metrics() -> Dict[str, Any]:
                 if gpus:
                     metrics["gpu"] = "\n".join(gpus)
         except Exception as exc:  # pragma: no cover - depends on the host
-            metrics["gpu"] = f"GPU取得エラー: {exc}"
+            # Intentional guard: a missing or failing nvidia-smi must not
+            # abort the health report, the GPU line is simply replaced by the
+            # error.  The cause (class + message) is recorded instead of being
+            # swallowed.
+            metrics["gpu"] = f"GPU取得エラー: {type(exc).__name__}: {exc}"
 
     return metrics
 
@@ -278,7 +286,16 @@ class MonitorAgent:
         for name, backend in (backends or {}).items():
             try:
                 available = bool(backend.is_available())
-            except Exception:  # pragma: no cover - defensive
+            except Exception as exc:  # pragma: no cover - defensive
+                # Intentional guard: a probe that raises must not abort the
+                # whole health check, the backend is simply reported as
+                # unavailable.  The cause is recorded instead of being
+                # swallowed.
+                print(
+                    f"[MonitorAgent] availability probe of `{name}` failed "
+                    f"({type(exc).__name__}: {exc})",
+                    file=sys.stderr,
+                )
                 available = False
             stats = self._backend_stats.setdefault(name, self._empty_backend_stats())
             stats["available"] = available
@@ -354,8 +371,23 @@ class MonitorAgent:
         task.cancel()
         try:
             await task
-        except (asyncio.CancelledError, Exception):
-            pass
+        except asyncio.CancelledError as exc:
+            # Intentional guard: ``stop()`` cancels the loop task on purpose,
+            # so the CancelledError raised by ``await task`` is the expected
+            # outcome and must not propagate to the caller (it would abort the
+            # shutdown).  The reason is recorded instead of being swallowed.
+            print(
+                f"[MonitorAgent] monitor loop cancelled ({type(exc).__name__})",
+                file=sys.stderr,
+            )
+        except Exception as exc:
+            # Intentional guard: a failing monitor loop must not break the
+            # shutdown of the bridge.  The cause is recorded instead of being
+            # swallowed.
+            print(
+                f"[MonitorAgent] monitor loop failed ({type(exc).__name__}: {exc})",
+                file=sys.stderr,
+            )
 
     async def run_forever(self, backends: Optional[Dict[str, Any]] = None) -> None:
         """Continuously evaluate the state and deliver the resulting alerts."""

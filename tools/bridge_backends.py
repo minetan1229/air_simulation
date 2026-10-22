@@ -286,11 +286,20 @@ class KiloCodeBackend(AgentBackend):
 
         event_type = str(data.get("type") or "")
         part = data.get("part") or {}
+        part_type = str(part.get("type") or "")
         session_id = data.get("sessionID")
 
-        if "error" in event_type:
-            message = part.get("error") or data.get("error") or part.get("message") or ""
-            return StreamEvent(kind="error", text=str(message), session_id=session_id, raw=data)
+        if "error" in event_type or "error" in part_type:
+            payload = part.get("error") or data.get("error")
+            if isinstance(payload, str):
+                message = payload
+            elif payload is not None:
+                message = json.dumps(payload, ensure_ascii=False)
+            else:
+                message = str(part.get("message") or data.get("message") or "")
+            if not message:
+                message = json.dumps(data, ensure_ascii=False)
+            return StreamEvent(kind="error", text=message[:2000], session_id=session_id, raw=data)
         if event_type == "text":
             return StreamEvent(
                 kind="text",

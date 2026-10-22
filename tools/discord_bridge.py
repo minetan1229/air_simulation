@@ -154,11 +154,26 @@ def acquire_instance_lock() -> bool:
         sock.listen(1)
         _INSTANCE_LOCK_SOCK = sock
         return True
-    except OSError:
+    except OSError as exc:
+        # Intentional guard: the lock is not held when the bind fails, so the
+        # caller must simply report "another instance is running".  The bind
+        # error is recorded (class + message) instead of being swallowed, and
+        # the half-open socket is closed on a best-effort basis -- a failure
+        # there must not hide the bind failure.
+        logger.debug(
+            "Instance lock bind failed on port %s (%s: %s)",
+            _INSTANCE_LOCK_PORT,
+            type(exc).__name__,
+            exc,
+        )
         try:
             sock.close()
-        except OSError:
-            pass
+        except OSError as close_exc:
+            logger.debug(
+                "Could not close the unbound instance lock socket (%s: %s)",
+                type(close_exc).__name__,
+                close_exc,
+            )
         return False
 
 
@@ -167,8 +182,14 @@ def release_instance_lock() -> None:
     if _INSTANCE_LOCK_SOCK is not None:
         try:
             _INSTANCE_LOCK_SOCK.close()
-        except OSError:
-            pass
+        except OSError as exc:
+            # Intentional best-effort cleanup: the lock socket is dropped
+            # either way, and a failing close must not stop the shutdown.
+            logger.debug(
+                "Could not close the instance lock socket (%s: %s)",
+                type(exc).__name__,
+                exc,
+            )
         _INSTANCE_LOCK_SOCK = None
 
 
@@ -189,7 +210,10 @@ def is_chrome_url_allowed(url: str) -> bool:
     """Validate a URL passed to !chrome / /chrome: http/https only, blocklist applied."""
     try:
         parsed = urllib.parse.urlparse(url)
-    except Exception:
+    except ValueError as exc:
+        # Intentional guard: an unparsable URL is refused (fail closed).  The
+        # parse error is recorded so a malformed input is visible in the log.
+        logger.debug("Could not parse the URL %r (%s: %s)", url, type(exc).__name__, exc)
         return False
     if parsed.scheme.lower() not in ("http", "https"):
         return False
@@ -304,8 +328,18 @@ def get_recent_conversations(limit: int = 10) -> List[Dict[str, Any]]:
                                 first_prompt = raw_content[:120].strip()
                             first_prompt = " ".join(first_prompt.split())
                             break
-            except Exception:
-                pass
+            except (OSError, ValueError) as exc:
+                # Intentional best-effort scan: one unreadable transcript must
+                # not abort the whole session list.  OSError covers the file
+                # access, ValueError covers a malformed JSON line and a
+                # UnicodeDecodeError (a ValueError subclass).  The reason is
+                # recorded instead of being swallowed.
+                logger.debug(
+                    "Could not read the transcript %s (%s: %s)",
+                    transcript_file,
+                    type(exc).__name__,
+                    exc,
+                )
 
             sessions.append({
                 "id": item.name,
@@ -589,28 +623,50 @@ class DiscordBridgeClient(discord.Client):
             if not self.channel_tasks[channel_id]:
                 self.channel_tasks.pop(channel_id, None)
 
+    def _kill_task(self, task_id: str, proc: asyncio.subprocess.Process) -> bool:
+        """Kill one running task and report whether the process was killed.
+
+        Intentional guard: a task that cannot be killed (it exited in the
+        meantime, or the platform has no kill implementation) must not abort
+        the whole ``!abort`` command, so the remaining tasks are still
+        aborted.  The exception types are narrow: a process that has already
+        gone raises ``ProcessLookupError`` (an ``OSError``) and Windows raises
+        ``NotImplementedError`` for an unsupported signal.  The cause is
+        recorded instead of being swallowed.
+        """
+        try:
+            proc.kill()
+            return True
+        except ProcessLookupError as exc:
+            logger.info(
+                "Task %s had already exited when it was aborted (%s: %s)",
+                task_id,
+                type(exc).__name__,
+                exc,
+            )
+        except (OSError, NotImplementedError) as exc:
+            logger.warning(
+                "Could not abort the task %s (%s: %s)",
+                task_id,
+                type(exc).__name__,
+                exc,
+            )
+        return False
+
     def abort_tasks(self, channel_id: Optional[int] = None, task_id: Optional[str] = None) -> int:
         """Abort tasks either by specific task_id or for an entire channel."""
         aborted = 0
         if task_id and task_id in self.active_processes:
             p = self.active_processes[task_id]
-            if p.returncode is None:
-                try:
-                    p.kill()
-                    aborted += 1
-                except Exception:
-                    pass
+            if p.returncode is None and self._kill_task(task_id, p):
+                aborted += 1
             return aborted
 
         target_tasks = self.channel_tasks.get(channel_id, set()).copy() if channel_id else set(self.active_processes.keys())
         for tid in target_tasks:
             p = self.active_processes.get(tid)
-            if p and p.returncode is None:
-                try:
-                    p.kill()
-                    aborted += 1
-                except Exception:
-                    pass
+            if p and p.returncode is None and self._kill_task(tid, p):
+                aborted += 1
         return aborted
 
     async def _on_monitor_alert(self, alert: MonitorAlert) -> None:
@@ -1219,8 +1275,19 @@ async def execute_agent_prompt(
         status_msg = await channel.send(embed=status_embed)
     try:
         await status_msg.add_reaction("🛑")
-    except Exception:
-        pass
+    except Exception as exc:
+        # Intentional guard: the abort reaction is a convenience, not a
+        # requirement (the ``!abort`` command aborts the task as well), so a
+        # failing reaction must not abort the whole agent run.  The type stays
+        # broad on purpose -- a Discord REST call can fail with an HTTP
+        # error, a transport error or a timeout, and letting any of them
+        # propagate would change the behaviour of the run.  The cause is
+        # recorded instead of being swallowed.
+        logger.debug(
+            "Could not add the abort reaction to the status message (%s: %s)",
+            type(exc).__name__,
+            exc,
+        )
 
     current_status_line = "🧠 Thinking / Analyzing codebase..."
     recent_activity_log: List[str] = []
@@ -1247,8 +1314,18 @@ async def execute_agent_prompt(
 
                 await status_msg.edit(embed=status_embed)
                 last_edit_time = now
-            except Exception:
-                pass
+            except Exception as exc:
+                # Intentional guard: the live status embed is a progress
+                # indicator, not a result.  A failing edit (rate limit, a
+                # deleted message, a transport error) must not break the agent
+                # run, so the type stays broad on purpose and the cause is
+                # recorded instead of being swallowed.
+                logger.debug(
+                    "Could not refresh the live status embed of task %s (%s: %s)",
+                    task_id,
+                    type(exc).__name__,
+                    exc,
+                )
 
     async def handle_event(event) -> None:
         nonlocal current_status_line, used_backend
@@ -1318,14 +1395,32 @@ async def execute_agent_prompt(
             recent_activity_log.append(fallback_note[:120])
             try:
                 await channel.send(fallback_note)
-            except Exception:
-                pass
+            except Exception as exc:
+                # Intentional guard: the fallback notice is an additional
+                # message, not the result itself.  A failing send must not
+                # discard the answer, so the type stays broad on purpose and
+                # the cause is recorded instead of being swallowed.
+                logger.warning(
+                    "Could not post the fallback notice to channel %s (%s: %s)",
+                    channel_id,
+                    type(exc).__name__,
+                    exc,
+                )
 
     # Clean up status message
     try:
         await status_msg.delete()
-    except Exception:
-        pass
+    except Exception as exc:
+        # Intentional best-effort cleanup: the status message is a progress
+        # embed and may already be gone.  Deleting it must never prevent the
+        # final answer from being posted, so the type stays broad on purpose
+        # and the cause is recorded instead of being swallowed.
+        logger.debug(
+            "Could not delete the status message of task %s (%s: %s)",
+            task_id,
+            type(exc).__name__,
+            exc,
+        )
 
     # Post final output
     if not accumulated_text.strip():

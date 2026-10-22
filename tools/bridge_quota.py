@@ -18,6 +18,7 @@ enough samples exist.
 from __future__ import annotations
 
 import asyncio
+import logging
 import re
 import shutil
 import subprocess
@@ -26,6 +27,8 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
+
+logger = logging.getLogger("BridgeQuota")
 
 QUOTA_TTL_SECONDS = 120.0
 WEEKLY_METRIC = "weekly"
@@ -43,11 +46,28 @@ def _parse_reset(value: str) -> Optional[datetime]:
         return None
     try:
         return datetime.fromisoformat(text.replace("Z", "+00:00"))
-    except ValueError:
-        pass
+    except ValueError as exc:
+        # Intentional fallback: the ISO parser rejects the ``...Z`` pattern the
+        # CLI emits, so the explicit format below is tried next.  The parse
+        # error is recorded instead of being swallowed.
+        logger.debug(
+            "Reset timestamp %r is not ISO-8601 (%s: %s); trying the CLI pattern",
+            text,
+            type(exc).__name__,
+            exc,
+        )
     try:
         return datetime.strptime(text, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
-    except ValueError:
+    except ValueError as exc:
+        # Intentional guard: an unparsable reset timestamp means "no reset
+        # time", not a crash of the quota display.  The cause is recorded
+        # instead of being swallowed.
+        logger.debug(
+            "Reset timestamp %r does not match the CLI pattern (%s: %s)",
+            text,
+            type(exc).__name__,
+            exc,
+        )
         return None
 
 

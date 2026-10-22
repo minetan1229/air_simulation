@@ -276,8 +276,13 @@ export class StripChart {
       ctx.fillText(`${row.spec.label} ${row.spec.unit}`, plotLeft - 6, top + rowH / 2 - 6);
       ctx.fillStyle = "#a9a49b";
       ctx.font = '8.5px ui-monospace, Consolas, monospace';
-      const scale = row.spec.scale || 1;
-      ctx.fillText(this.ring.size ? sig(row.dataHigh * scale, 3) : "—", plotLeft - 6, top + rowH / 2 + 6);
+      // The unit factor of the row (Pa -> kPa, 1e-3 for the stress lane) and
+      // the vertical scale of the plot are two different things; they used to
+      // share the name ``scale``, which is a redeclaration in the same block
+      // and therefore a SyntaxError that killed the whole module -- and with
+      // it the application, because app.js imports the gauges from here.
+      const unit_scale = row.spec.scale || 1;
+      ctx.fillText(this.ring.size ? sig(row.dataHigh * unit_scale, 3) : "—", plotLeft - 6, top + rowH / 2 + 6);
 
       if (this.ring.size < 2) return;
       const value = this.ring.get(this.ring.size - 1, row.lane + 1);

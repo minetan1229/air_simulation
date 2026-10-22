@@ -185,6 +185,16 @@ try:  # the atmosphere worker owns that module; the fallback below is functional
 except Exception:  # pragma: no cover - exercised only if the sibling is broken
     _ATMOSPHERE = None
 
+#: Memo of the derived atmosphere state.
+#:
+#: The atmosphere was re-derived from the environment on every aerodynamic
+#: evaluation, although it only changes when the environment does.  The memo
+#: is keyed on the very fields the atmosphere depends on, so a repeated
+#: evaluation of the same air state reuses the derived density, viscosity and
+#: sound speed instead of redoing the ISA / Sutherland integration (§P2-1).
+_ATMOSPHERE_MEMO: Dict[Tuple[Any, ...], Dict[str, float]] = {}
+_ATMOSPHERE_MEMO_LIMIT = 64
+
 
 # --------------------------------------------------------------------------
 # Numeric guards
@@ -879,6 +889,40 @@ def _fallback_atmosphere(env: EnvironmentConfig) -> Tuple[float, float, float, f
     return density, viscosity / density, math.sqrt(GAMMA_AIR * R_AIR * temperature), temperature
 
 
+def _atmosphere_state(env: EnvironmentConfig) -> Dict[str, float]:
+    """Return the derived atmosphere of ``env``, reusing the last result.
+
+    The key covers every field the atmosphere worker reads, so a changed
+    environment always invalidates the memo while an unchanged one does not
+    pay for the ISA / Sutherland integration twice (§P2-1).
+    """
+    key = (
+        bool(env.isa_mode),
+        float(env.sea_level_temperature_K),
+        float(env.lapse_rate_K_per_m),
+        float(env.sea_level_pressure_Pa),
+        float(env.temperature_K),
+        float(env.pressure_Pa),
+        float(env.humidity_rel),
+        float(env.altitude_m),
+        float(env.gravity),
+    )
+    cached = _ATMOSPHERE_MEMO.get(key)
+    if cached is not None:
+        return cached
+    payload = _ATMOSPHERE.evaluate_atmosphere(env, reference_chord_m=DEFAULT_REFERENCE_CHORD_M)
+    state = {
+        "density_kgm3": float(payload["density_kgm3"]),
+        "kinematic_viscosity_m2s": float(payload["kinematic_viscosity_m2s"]),
+        "sound_speed_mps": float(payload["sound_speed_mps"]),
+        "temperature_K": float(payload["temperature_K"]),
+    }
+    if len(_ATMOSPHERE_MEMO) >= _ATMOSPHERE_MEMO_LIMIT:
+        _ATMOSPHERE_MEMO.clear()
+    _ATMOSPHERE_MEMO[key] = state
+    return state
+
+
 def atmosphere_state(
     env: EnvironmentConfig, speed_mps: float = 0.0, reference_chord_m: float = DEFAULT_REFERENCE_CHORD_M
 ) -> Dict[str, float]:
@@ -900,7 +944,7 @@ def atmosphere_state(
     chord = max(_finite(reference_chord_m, DEFAULT_REFERENCE_CHORD_M), 1.0e-9)
     if _ATMOSPHERE is not None:
         try:
-            payload = _ATMOSPHERE.evaluate_atmosphere(env, reference_chord_m=chord)
+            payload = _atmosphere_state(env)
             density = float(payload["density_kgm3"])
             kinematic = float(payload["kinematic_viscosity_m2s"])
             sound = float(payload["sound_speed_mps"])

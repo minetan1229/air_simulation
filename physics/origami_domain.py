@@ -129,6 +129,12 @@ SHAPE_FLAG_ARCHETYPE: Dict[int, str] = {
     2: ARCHETYPE_SKY_KING,
 }
 
+#: Reverse mapping of :data:`SHAPE_FLAG_ARCHETYPE`, so the catalogue does not
+#: have to search the mapping at every call (§P3-11).
+ARCHETYPE_SHAPE_FLAG: Dict[str, int] = {
+    archetype: flag for flag, archetype in SHAPE_FLAG_ARCHETYPE.items()
+}
+
 ARCHETYPES: Tuple[str, ...] = (ARCHETYPE_DART, ARCHETYPE_NAKAMURA, ARCHETYPE_SKY_KING)
 
 
@@ -1446,6 +1452,7 @@ def build_pattern_mesh(
         twist_weights=builder.twist_weights,
         paper_sides=builder.paper_sides,
         face_ids=builder.face_ids,
+        folds=fold_sequence(pattern),
         layer_pitch_m=pitch,
         paper_thickness_m=thickness,
         max_layers=layers.max_layers,
@@ -2144,10 +2151,7 @@ def archetype_catalog() -> List[Dict[str, Any]]:
             {
                 "key": key,
                 "label": ARCHETYPE_LABELS[key],
-                "shape_flag": next(
-                    (flag for flag, name in SHAPE_FLAG_ARCHETYPE.items() if name == key),
-                    0,
-                ),
+                "shape_flag": ARCHETYPE_SHAPE_FLAG.get(key, 0),
                 "paper_thickness_m": VISUAL_THICKNESS_M,
                 "layer_pitch_m": LAYER_PITCH_M,
                 "layer_air_gap_m": LAYER_AIR_GAP_M,
@@ -2189,6 +2193,7 @@ def mesh_payload(mesh: OrigamiMesh) -> Dict[str, Any]:
         "layer_pitch_m": mesh.layer_pitch_m,
         "max_layers": mesh.max_layers,
         "scale": mesh.scale,
+        "folds": list(mesh.folds),
         "bounds": {"min": list(lo), "max": list(hi)},
         "stats": {
             "vertices": mesh.vertex_count,
@@ -2206,6 +2211,12 @@ def apply_aeroelastic(
     The deformation is driven by the per-vertex elastic weight (spanwise
     station of the wing) and twist weight (chordwise station), so the
     deformation is C1 continuous and the keel stays rigid.
+
+    This is a **utility of the aero-elastic pipeline and of the unit tests**,
+    not part of the production render path: the renderer keeps the mesh
+    undeformed and transports the physical values to the shader instead
+    (§A-15, the physics stays one-directional).  Calling it therefore changes
+    the geometry on purpose and only where the caller asks for it.
     """
     if bend_deg == 0.0 and twist_deg == 0.0:
         return mesh
