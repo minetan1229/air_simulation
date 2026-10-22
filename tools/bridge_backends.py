@@ -205,7 +205,14 @@ class AntigravityBackend(AgentBackend):
             )
         if event == "error":
             message = data.get("message") or data.get("error") or data.get("detail") or ""
-            return StreamEvent(kind="error", text=str(message), raw=data)
+            if not isinstance(message, str):
+                message = json.dumps(message, ensure_ascii=False)
+            return StreamEvent(
+                kind="error",
+                text=message[:2000],
+                session_id=data.get("conversation_id"),
+                raw=data,
+            )
         if event == "result":
             result = data.get("result") or {}
             response = result.get("response")
@@ -287,7 +294,7 @@ class KiloCodeBackend(AgentBackend):
         event_type = str(data.get("type") or "")
         part = data.get("part") or {}
         part_type = str(part.get("type") or "")
-        session_id = data.get("sessionID")
+        session_id = data.get("sessionID") or part.get("sessionID")
 
         if "error" in event_type or "error" in part_type:
             payload = part.get("error") or data.get("error")
