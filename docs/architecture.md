@@ -104,10 +104,11 @@ flowchart TD
 
 ---
 
-## 4. GPU アクセラレーション原則 (Hardware Accelerator Protocol)
+## 4. GPU アクセラレーションおよび並列処理アーキテクチャ (Hardware Accelerator Architecture)
 
-1. **GPU 必須化および Fail-Fast 原則**:
-   - 空間風場演算およびバッチ並列フライト評価は、CUDA GPU (`cupy-cuda12x`) を必須とする。
-   - GPU バックエンドが明示的に要求された場合、または GPU が利用できない構成である場合、CPU への暗黙的なフォールバックは厳禁とし、即座に `RuntimeError` を送出して処理を停止する。
+1. **自動フォールバックとスキーマ等価性**:
+   - GPU（CUDA / CuPy）が利用可能な環境では GPU ベクトル化演算を活用し、GPU が利用不能または CUDA 初期化不可の環境では NumPy / `multiprocessing` による CPU 並列計算へ自動的に移行する。
+   - 返却スキーマ（`landed`, `crashed`, `status`, `horizontal_range_m` 等）は GPU 経路と CPU 経路で等価性を保持する。
 2. **並列処理アーキテクチャ (`parallel_engine.py`)**:
-   - CuPy によるベクトル化並列実行により、NVIDIA RTX 4060 等のハードウェア上で 100〜1,000 機以上のアンサンブル同時飛行シミュレーションを実行。
+   - CuPy によるベクトル化並列実行により、NVIDIA RTX 4060 等のハードウェア上でアンサンブル飛行シミュレーションや最適化バッチ評価を高速実行。
+   - GPU 最適化バッチ経路 (`model = "rigid_body_6dof"`) は 13 状態 RK4 剛体モデルをベクトル化して計算し、GPU モンテカルロ・アンサンブル経路は縮約モデル (`model = "reduced_surrogate"`) として動作する。

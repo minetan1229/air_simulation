@@ -9,8 +9,9 @@
 - **オペレーティングシステム**: Windows 10/11 (64-bit), Linux (Ubuntu 20.04 LTS 以上推奨), macOS 12+
 - **Python**: 3.10 以上 (3.11.x 推奨)
 - **アクセラレータ (GPU)**: NVIDIA GPU (CUDA 12.x / Compute Capability 5.0 以上)
-- **必須パッケージ**: `cupy-cuda12x>=13.0.0`
-  - GPU が明示的に指定された場合、またはバッチ並列計算において GPU が利用不能な場合は即座に `RuntimeError` を送出して処理を停止する（フェイルファスト原則）。CPU への暗黙的フォールバックは禁止されている。
+- **パッケージ**: `cupy-cuda12x>=13.0.0` (GPU 利用時)
+  - GPU 非搭載または CUDA 初期化不可環境では、NumPy / `multiprocessing` による **CPU フォールバックへ自動的に移行する**（返却スキーマは GPU 経路と同一）。CUDA 初期化に失敗しても `RuntimeError` で停止しない。
+  - GPU 最適化バッチ経路 (`model = "rigid_body_6dof"`, `model_detail = "gpu_batch_rk4"`) は 13 状態 RK4 剛体モデルをベクトル化して計算し、GPU モンテカルロ・アンサンブル経路は縮約モデル (`model = "reduced_surrogate"`) として動作する。
 - **表示環境**: WebGL 2.0 対応ブラウザ (Google Chrome, Microsoft Edge, Firefox, Safari)
 
 ---
