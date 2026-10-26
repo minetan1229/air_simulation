@@ -1759,7 +1759,15 @@ class ConsoleApp {
       const gpu = stats.gpu || (this.viewport && this.viewport.gpuInfo);
       if (gpu && gpu.shortName) {
         const warnIcon = gpu.isIntel ? " ⚠️" : "";
-        this.dom["top-fps"].textContent = `${stats.fps.toFixed(0)} fps (${gpu.shortName}${warnIcon})`;
+        // Below 1740 px the top rail cannot hold the GPU name next to the
+        // frame rate: the read-out showed "144 fps (Intel(R)" cut in the
+        // middle of the name.  The short form keeps the frame rate legible
+        // and the GPU name stays available in the tooltip and in the
+        // diagnostic dialog.
+        const compact = window.innerWidth <= 1800;
+        this.dom["top-fps"].textContent = compact
+          ? `${stats.fps.toFixed(0)} fps${gpu.isIntel ? " ⚠" : ""}`
+          : `${stats.fps.toFixed(0)} fps (${gpu.shortName}${warnIcon})`;
         this.dom["top-fps"].title = `3D描画 (WebGL): ${gpu.raw}\nベンダー: ${gpu.vendor || "N/A"}${gpu.isIntel ? "\n※省電力GPU(Intel)で動作しています。クリックしてRTX切り替えガイドを表示" : "\n※高性能GPUで動作中。クリックして詳細表示"}`;
         if (gpu.isIntel) {
           this.dom["top-fps"].classList.add("gpu-warning");

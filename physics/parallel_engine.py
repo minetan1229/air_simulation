@@ -1611,10 +1611,17 @@ def gpu_batch_evaluate_cases(
     use_gpu = (not force_cpu) and gpu_info["available"] and (gpu_info["backend"] == "cupy")
 
     if not use_gpu:
-        raw_results = parallel_evaluate(cases, processes=0, progress_cb=progress_cb)
+        clamped_cases = []
+        for c in cases:
+            c_copy = dict(c)
+            if "duration_s" in c_copy:
+                c_copy["duration_s"] = clamp(float(c_copy["duration_s"]), 0.1, 120.0)
+            clamped_cases.append(c_copy)
+        raw_results = parallel_evaluate(clamped_cases, processes=0, progress_cb=progress_cb)
         cpu_results: List[Dict[str, Any]] = []
         for idx, item in enumerate(raw_results):
-            dur = float(cases[idx].get("duration_s", 20.0))
+            raw_dur = float(cases[idx].get("duration_s", 20.0))
+            dur = clamp(raw_dur, 0.1, 120.0)
             t_val = min(float(item.get("flight_time_s", 0.0)), dur)
             status_raw = str(item.get("status", "flying"))
             failed = status_raw in ("error", "failed")

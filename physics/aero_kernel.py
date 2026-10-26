@@ -72,6 +72,7 @@ __all__ = [
     "stall_blend_weight",
     "flat_plate_lift_coefficient",
     "post_stall_lift_coefficient",
+    "polhamus_attached_branch",
     "lift_coefficient",
     "separated_pressure_drag_coefficient",
     "drag_coefficient",
@@ -554,6 +555,61 @@ def post_stall_lift_coefficient(
     )
 
 
+def polhamus_attached_branch(
+    xp: Any,
+    alpha_deg: Any,
+    zero_lift: Any,
+    slope_per_rad: Any,
+    polhamus_kp: Any = 0.0,
+    polhamus_kv: Any = 0.0,
+) -> Any:
+    """The attached-flow lift branch, including the Polhamus LEV terms.
+
+    The Polhamus suction analogy (1966/1971) publishes
+
+    ``C_L = K_p sin(a) cos^2(a) + K_v sin^2(a) cos(a)``
+
+    with two terms that are **not** interchangeable:
+
+    * the *potential* term ``K_p sin(a) cos^2(a)`` is the **two-dimensional**
+      lift slope of a sharp-edge delta wing.  When ``K_p > 0`` it *replaces*
+      the linear branch, because the published relation is the whole
+      attached-flow law of that wing, not an increment on top of it.
+    * the *vortex* term ``K_v sin^2(a) cos(a)`` is the leading-edge-suction
+      increment and is added **on top of** whichever attached branch is used.
+
+    With the default ``K_p = 0`` the airframe keeps its own three-dimensional
+    Helmbold slope ``cL0 + C_Lalpha a``: a low aspect-ratio wing must not be
+    given the two-dimensional slope on top of the finite-wing correction.
+    Only the vortex increment is then added.
+
+    The published term already carries the correct sign -- ``sin^2(a) cos(a)``
+    is negative for ``|a| > 90 deg`` -- so no ``copysign`` is applied.
+
+    This function is the **canonical** implementation of the relation inside
+    the flight path.  :func:`physics.aero_domain.polhamus_lift_coefficient`
+    exposes the published relation *standalone* (without the ``cL0`` offset
+    and with the airframe's own slope substituted for ``K_p``), which is a
+    different quantity; the two are kept apart by name instead of being two
+    accidental copies of each other.
+    """
+    kp = xp.maximum(_finite(xp, polhamus_kp, 0.0), 0.0)
+    kv = xp.maximum(_finite(xp, polhamus_kv, 0.0), 0.0)
+    alpha_rad = _rad(xp, alpha_deg)
+    sin_a = xp.sin(alpha_rad)
+    cos_a = xp.cos(alpha_rad)
+
+    linear_default = zero_lift + slope_per_rad * alpha_rad
+    linear_polhamus = (
+        zero_lift
+        + kp * sin_a * xp.square(cos_a)
+        + kv * xp.square(sin_a) * cos_a
+    )
+    attached = xp.where(kp > 0.0, linear_polhamus, linear_default)
+    vortex = kv * xp.square(sin_a) * cos_a
+    return xp.where((kp <= 0.0) & (kv > 0.0), attached + vortex, attached)
+
+
 def lift_coefficient(
     xp: Any,
     alpha_deg: Any,
@@ -589,25 +645,13 @@ def lift_coefficient(
     zero_lift = _finite(xp, cL0, 0.0)
     offset = _finite(xp, cl_offset, 0.0)
 
-    kp = xp.maximum(_finite(xp, polhamus_kp, 0.0), 0.0)
-    kv = xp.maximum(_finite(xp, polhamus_kv, 0.0), 0.0)
-    alpha_rad = _rad(xp, alpha)
-    sin_a = xp.sin(alpha_rad)
-    cos_a = xp.cos(alpha_rad)
-
-    linear_default = zero_lift + slope * alpha_rad
-    linear_polhamus = (
-        zero_lift
-        + kp * sin_a * xp.square(cos_a)
-        + kv * xp.square(sin_a) * cos_a
+    linear = polhamus_attached_branch(
+        xp, alpha, zero_lift, slope, polhamus_kp, polhamus_kv
     )
-    linear = xp.where(kp > 0.0, linear_polhamus, linear_default)
-    if True:  # the LEV increment is added on top of the Helmbold branch
-        vortex = kv * xp.square(sin_a) * cos_a
-        linear = xp.where((kp <= 0.0) & (kv > 0.0), linear + vortex, linear)
 
     stall_rad = _rad(xp, stall_alpha)
     linear_at_stall = zero_lift + slope * stall_rad
+    kv = xp.maximum(_finite(xp, polhamus_kv, 0.0), 0.0)
     stall_vortex = kv * xp.square(xp.sin(stall_rad)) * xp.cos(stall_rad)
     linear_at_stall = linear_at_stall + xp.where(kv > 0.0, stall_vortex, 0.0)
 

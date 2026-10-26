@@ -55,6 +55,11 @@ jobs:
       - name: フロントエンドモジュール構文検証 (ES module)
         run: python tools/check_js_modules.py
 
+      # コンソールの文字サイズ下限とシェルグリッドの不変条件。レイアウトの
+      # 回帰を目視ではなく静的に検出する。
+      - name: コンソールスタイル不変条件の検証
+        run: python tools/check_ui_css.py
+
       - name: 自動テストの実行 (Pytest)
         id: pytest_step
         run: python tools/run_ci_tests.py

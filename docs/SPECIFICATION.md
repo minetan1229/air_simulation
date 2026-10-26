@@ -224,6 +224,23 @@ uniform として紙シェーダに渡し、翼端で $\mathrm{elastic}^2$ に�
 6. **Sutherland (1893)**: 気体の動粘性係数の温度依存性式。
 7. **AeroSandbox (Bremwand et al.)**: 6DoF 飛行力学および微小擾乱安定微係数の定式化。
 
+### 5.0 モデル別の正本・出典・適用限界 (Issue #48 / #49 / #50 / #51 / #52)
+
+上表は **引用** の一覧であり、**実装の正本** は別文書にある。
+**どのモデルが実装済みか**（`/api/v1/meta/physics-references` の各エントリの `implemented` /
+`canonical_module` / `applicability` がその機械可読な宣言）、**どの式が重複定義されているか**、
+**レイノルズ数への依存性**、**失速後モデルの採否の根拠** は次の 2 文書に集約している:
+
+- **`docs/PHYSICS_MODELS.md`** — モデル別の「式 → 出典 → 正本モジュール → 適用限界 → 検証テスト」。
+  Issue #48（Helmbold の式と独立検証）、#49（深失速モデルと遷移の連続性）、
+  #50（Re 依存性と範囲外の扱い）、#51（重複定義の解消）、#52（Polhamus 既定値の妥当性）を解く。
+- **`docs/CFD_ROADMAP.md`** — Issue #47（3D Navier–Stokes ソルバの要求仕様と段階的導入計画）。
+  6DoF パネル法とは **別の層** であり、探索用 fitness は 6DoF のまま維持する。
+
+**重要な相違**: 引用 3（Viterna & Corrigan）は **未実装** である。実装されている失速後モデルは
+引用 5（Hoerner 平板）であり、その採否の根拠と適用限界は `docs/PHYSICS_MODELS.md` §3 に記す。
+レジストリはこの区別を `implemented` フラグで明示する（`tests/test_physics_model_registry.py` が検証）。
+
 ### 5.1 把持フィルタ閾値の根拠（G9-1、補足）
 
 `physics/origami_genome.py` の `GripThresholds` 既定（最低高さ 8 mm / 前後長 30 mm / 最小 2 層 / CG 許容 15 mm / グリップ半幅 12 mm）は、成人指の把持を模した**動的見積もり**である。人体工学・人体計測の出典は**未取得**（§5 の文献レジストリに該当する論文・番号なし）であり、閾値は推定値のまま据え置く。出典のない係数を新たに作成しない（AGENTS.md §1.2 / 1.5）。

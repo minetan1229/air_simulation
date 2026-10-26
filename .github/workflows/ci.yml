@@ -51,6 +51,11 @@ jobs:
       - name: Front-End Module Parse (ES module goal)
         run: python tools/check_js_modules.py
 
+      # The console type scale and the shell grid are checked statically, so
+      # a layout regression does not have to be found by eye.
+      - name: Console Style Invariants
+        run: python tools/check_ui_css.py
+
       - name: Static Type Check (Mypy)
         run: mypy --config-file mypy.ini physics app.py api
 

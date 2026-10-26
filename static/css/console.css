@@ -172,7 +172,10 @@ button, input, select, textarea {
 .toprail-readouts {
   display: flex;
   align-items: stretch;
-  flex: 0 1 auto;
+  /* The read-outs keep their intrinsic width.  With ``flex: 0 1 auto`` the
+     flex distribution handed them a width one pixel short of their content,
+     and every value then ended in an ellipsis ("READY" -> "REA..."). */
+  flex: 0 0 auto;
   min-width: 0;
   overflow: hidden;
 }
@@ -1641,6 +1644,44 @@ input[type="range"]:focus-visible { outline: 2px solid var(--accent); outline-of
 /* ------------------------------------------------------------------ */
 /* toprail responsive collapses                                        */
 /* ------------------------------------------------------------------ */
+
+/* The top rail needs about 1530 px of actions plus the brand and the
+   read-outs.  Between 1280 px and 1740 px the actions did not fit: the
+   right-hand group (save / load / CSV / record / help) was pushed out of
+   the rail and only reachable by scrolling a rail whose scrollbar is
+   hidden -- the buttons were invisible and undiscoverable.
+   Below 1740 px the rail therefore sheds the diagnostic SOLVER read-out
+   (the same information is in the GPU diagnostic dialog), abbreviates the
+   render read-out, and tightens the mode buttons, the read-out padding
+   and the group gap.  Measured: the deficit is 0 px at 1280 / 1366 /
+   1440 / 1536 / 1600 / 1700 px. */
+@media (max-width: 1800px) {
+  .fleet-mode-selector .btn-mini {
+    padding: 0 5px;
+    font-size: 10.5px;
+  }
+  .toprail .brand {
+    padding: 0 10px;
+  }
+  .toprail-readouts .readout {
+    padding: 0 6px;
+  }
+  .toprail-readouts .readout-solver {
+    display: none;
+  }
+  .toprail-readouts .readout-render .readout-val {
+    display: inline-block;
+    vertical-align: bottom;
+    max-width: 96px;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+  .toprail-actions {
+    gap: 4px;
+  }
+}
+
 @media (max-width: 1560px) {
   .toprail-util-group .btn .btn-text {
     display: none;
