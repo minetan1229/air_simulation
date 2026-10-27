@@ -40,3 +40,22 @@ class CFDResult2D:
     mass_conservation_residual: float
     grid_cells: int
     metadata: Dict[str, Any] = field(default_factory=dict)
+
+
+from physics.cfd.grid2d import StructuredGrid2D, generate_c_grid
+from physics.cfd.grid3d import StructuredGrid3D, generate_wing_grid_3d
+from physics.cfd.solver2d import Solver2D
+from physics.cfd.solver3d import CFDConfig3D, CFDResult3D, Solver3D
+
+__all__ = [
+    "CFDConfig2D",
+    "CFDResult2D",
+    "CFDConfig3D",
+    "CFDResult3D",
+    "StructuredGrid2D",
+    "StructuredGrid3D",
+    "generate_c_grid",
+    "generate_wing_grid_3d",
+    "Solver2D",
+    "Solver3D",
+]
