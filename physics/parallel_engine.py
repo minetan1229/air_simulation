@@ -94,7 +94,17 @@ __all__ = [
     "worker_id",
     "worker_pid",
     "FLIGHT_RESULT_KEYS",
+    "MIN_ENSEMBLE_TRAJECTORIES",
+    "MAX_ENSEMBLE_TRAJECTORIES",
+    "MIN_SAMPLE_TRACKS",
+    "MAX_SAMPLE_TRACKS",
 ]
+
+#: Bounds for ensemble Monte Carlo simulations.
+MIN_ENSEMBLE_TRAJECTORIES: int = 1
+MAX_ENSEMBLE_TRAJECTORIES: int = 4096
+MIN_SAMPLE_TRACKS: int = 0
+MAX_SAMPLE_TRACKS: int = 4096
 
 #: Upper bound applied when the caller asks for the automatic worker count.
 MAX_AUTO_WORKERS: int = 8
@@ -1004,8 +1014,8 @@ def gpu_ensemble_simulation(
             backend = "numpy"
 
 
-    # Clamp trajectory count
-    N = int(clamp(n_trajectories, 16, 4096))
+    # Clamp trajectory count defensively within [MIN_ENSEMBLE_TRAJECTORIES, MAX_ENSEMBLE_TRAJECTORIES]
+    N = int(clamp(int(n_trajectories), MIN_ENSEMBLE_TRAJECTORIES, MAX_ENSEMBLE_TRAJECTORIES))
 
     if random_seed is not None:
         xp.random.seed(int(random_seed))
@@ -1148,7 +1158,7 @@ def gpu_ensemble_simulation(
     history_times: List[float] = []
     history_altitudes = []
     history_distances = []
-    sample_count = max(1, min(int(max_sample_tracks), N))
+    sample_count = max(0, min(int(max_sample_tracks), N))
     sample_indices = list(range(sample_count))
     sample_indices_xp = xp.asarray(sample_indices, dtype=xp.int32)
     sample_pos_snapshots = []

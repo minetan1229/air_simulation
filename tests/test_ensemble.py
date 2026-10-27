@@ -182,3 +182,37 @@ def test_ensemble_skip_first_promotion_logic():
     # Skipped item is distinct
     assert promoted_champion["id"] != original_top1["id"]
 
+def test_api_simulation_ensemble_validation_and_bounds():
+    """Verify input validation and boundaries for n_trajectories and max_sample_tracks."""
+    client = flask_app.app.test_client()
+
+    # n_trajectories <= 0 -> 400 BadRequest
+    res_zero = client.post("/api/v1/simulation/ensemble", json={"n_trajectories": 0})
+    assert res_zero.status_code == 400
+    assert "n_trajectories" in res_zero.get_json()["error"]
+
+    res_neg = client.post("/api/v1/simulation/ensemble", json={"n_trajectories": -5})
+    assert res_neg.status_code == 400
+
+    # n_trajectories > 4096 -> 400 BadRequest
+    res_over = client.post("/api/v1/simulation/ensemble", json={"n_trajectories": 5000})
+    assert res_over.status_code == 400
+    assert "n_trajectories" in res_over.get_json()["error"]
+
+    # max_sample_tracks < 0 -> 400 BadRequest
+    res_neg_samples = client.post("/api/v1/simulation/ensemble", json={"n_trajectories": 20, "max_sample_tracks": -1})
+    assert res_neg_samples.status_code == 400
+    assert "max_sample_tracks" in res_neg_samples.get_json()["error"]
+
+    # max_sample_tracks > n_trajectories -> 400 BadRequest
+    res_excess_samples = client.post("/api/v1/simulation/ensemble", json={"n_trajectories": 20, "max_sample_tracks": 25})
+    assert res_excess_samples.status_code == 400
+    assert "max_sample_tracks" in res_excess_samples.get_json()["error"]
+
+    # max_sample_tracks == 0 is valid (returns 0 sample trajectories without crashing)
+    res_zero_samples = client.post("/api/v1/simulation/ensemble", json={"n_trajectories": 20, "max_sample_tracks": 0})
+    assert res_zero_samples.status_code == 200
+    data = res_zero_samples.get_json()
+    assert len(data["sample_trajectories"]) == 0
+    assert data["trajectories_count"] == 20
+

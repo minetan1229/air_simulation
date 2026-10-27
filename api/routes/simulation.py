@@ -255,13 +255,22 @@ def simulation_ensemble():
     launch = build(LaunchConfig, payload.get("launch"), SESSION.launch)
     settings = build(SimulationSettings, payload.get("settings"), SESSION.settings)
 
-    n_trajectories = int(payload.get("n_trajectories", 100))
+    n_trajectories_raw = payload.get("n_trajectories", 100)
+    n_trajectories = as_int(n_trajectories_raw, "n_trajectories")
+    min_traj = getattr(parallel, "MIN_ENSEMBLE_TRAJECTORIES", 1)
+    max_traj = getattr(parallel, "MAX_ENSEMBLE_TRAJECTORIES", 4096)
+    if not (min_traj <= n_trajectories <= max_traj):
+        raise BadRequest(f"'n_trajectories' must lie within [{min_traj}, {max_traj}]")
+
+    max_samples_raw = payload.get("max_sample_tracks", n_trajectories)
+    max_sample_tracks = as_int(max_samples_raw, "max_sample_tracks")
+    if not (0 <= max_sample_tracks <= n_trajectories):
+        raise BadRequest(f"'max_sample_tracks' must lie within [0, {n_trajectories}]")
+
     noise_config = payload.get("noise_config")
     force_cpu = bool(payload.get("force_cpu", False))
-    random_seed = payload.get("random_seed", 42)
-    max_sample_tracks = int(payload.get("max_sample_tracks", n_trajectories))
-    if random_seed is not None:
-        random_seed = int(random_seed)
+    random_seed_raw = payload.get("random_seed", 42)
+    random_seed = as_int(random_seed_raw, "random_seed") if random_seed_raw is not None else None
 
     result = parallel.gpu_ensemble_simulation(
         aircraft=aircraft,
