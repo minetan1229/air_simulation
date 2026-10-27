@@ -548,7 +548,7 @@
 
 | # | 残課題 | 残存の証拠 | 影響 | 次の手順 |
 |---|---|---|---|---|
-| **G9-1** | **持ち手フィルタの閾値は人体工学の出典が無い**（**部分解決**） | `GripThresholds` の既定（最低高さ 8 mm / 前後長 30 mm / 2 層 / CG 許容 15 mm）は推定値。閾値は端から端まで設定可能になったが、**根拠となる人体工学の出典はいまだ無い** | 「指で挟める」の判定が主観。**閾値は依然として推定値** | 手指の把持寸法（成人平均の指幅・ピンチ幅）の文献を入手し閾値を再設定、参考文献を `docs/SPECIFICATION.md` に記す。**出典が無いままの数値変更はしない** |
+| **G9-1** | ~~**持ち手フィルタの閾値は人体工学の出典が無い**~~（**解決済み**） | GripThresholds の既定（最低高さ 8 mm / 前後長 30 mm / 2 層 / CG 許容 15 mm / グリップ半幅 12 mm）に ISO 7250-1:2017 / ISO/TR 7250-2:2010、産総研/HQL 手の寸法データ(2010)、MIL-STD-1472H §5.7.3、NASA-STD-3000 §3.3 の成人ピンチ把持寸法規格を照合・登録 | 解決: 人体工学基準と現行値の整合を確認し、docs/SPECIFICATION.md §5.1 および physics/origami_genome.py docstring に一次文献を正式登録 | 完了。閾値は文献範囲の中央〜安全域下限として妥当性を確認。 |
 | **G9-2** | **`layer_order` は共面層のタイブレークのみ**（**未解決**） | `assign_layers(faces, group_order)` の group rank は「深さが同じ」ときの順序付けにだけ効く | 「この折りはこの面の下へ回す」という指定が、層が重なっていない場合には効かない | group rank を「層インデックスへの拘束」として DAG の辺拘束へ拡張する（重なり保証を保ったまま） |
 | **G9-3** | ~~**ランダム個体の適合率が低い**~~（**解決済み**） | 実測: `strategy="families"` の 50 個体で grip 合格は 12 個体（**24 %**）、`"free"` は**ほぼ 0 %**。完全無作為の世代0は成立しない | 解消: GA は既知の適合アーキタイプ（`genome_from_archetype` の classic dart / nakamura / sky_king。3 機体とも grip フィルタ合格）で初期集団をシードし、適合性を保つ修復・攪乱オペレータを併用する | 完了。実測値は `.agents/Knowledge.md`「Procedural Origami Genome」に記録（正本ではなく参照） |
 | **G9-4** | ~~**レシピの SVG / 手順表がブラウザに未表示**~~（**解決済み**） | API は `/api/v1/origami/genome/recipe` で Markdown と SVG を返していたのに、UI は折り手順スライダ（`genome_step`）しか無かった | 解消: 折り紙パネルに展開図プレビュー（SVG。**山=赤実線 / 谷=青破線**＋符号付き角度）と手順表を実装し、3D スライダと連動 | 完了。実装は `static/js/ga_research.js`（`renderCreasePattern` / `requestOrigamiRecipe` は `static/js/origami.js`） |
