@@ -46,10 +46,15 @@ fi
 
 if [ "$START_SIM" = true ]; then
     echo "[watchdog.sh] Launching simulation in background..."
-    # Launch independently (nohup / setsid equivalent on Windows via start-process / python background)
+    # Launch independently (resume if latest.json exists)
     "$PY_CMD" -c "
-import subprocess, sys
-p = subprocess.Popen([sys.executable, 'tools/run_ga_research.py'], stdout=open('sim_output.log', 'ab'), stderr=subprocess.STDOUT)
+import subprocess, sys, os
+cmd = [sys.executable, 'tools/run_ga_research.py']
+latest = 'runs/ga_research/checkpoints/latest.json'
+if os.path.exists(latest):
+    cmd.extend(['--resume', latest])
+    print('Resuming from:', latest)
+p = subprocess.Popen(cmd, stdout=open('sim_output.log', 'ab'), stderr=subprocess.STDOUT)
 with open('sim_process.pid', 'w') as f:
     f.write(str(p.pid))
 print('Started PID:', p.pid)
