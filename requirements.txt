@@ -8,7 +8,8 @@ python-dotenv>=1.0.0
 
 # Optional extras: `pip install -e ".[gpu,bridge]"` (not installed unconditionally)
 cupy-cuda12x>=13.0.0 ; extra == "gpu"
-discord.py>=2.7.0 ; extra == "bridge"
+discord.py>=2.7.1,<3.0 ; extra == "bridge"
+psutil>=7.2.2 ; extra == "bridge"
 
 # Development, testing, and static analysis
 pytest>=8.0.0
