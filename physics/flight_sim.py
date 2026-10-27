@@ -872,33 +872,60 @@ def _atmosphere_state_uncached(
 
 
 def _local_wind(env: EnvironmentConfig, position: VectorLike, time_s: float) -> np.ndarray:
-    """Mean wind with a logarithmic boundary layer (exact zero when calm).
+    """Fallback mean wind conforming to the single source of truth in :mod:`physics.wind_domain`.
 
-    ``wind_direction_deg`` follows the same meteorological convention as
-    :mod:`physics.wind_domain`: it is the bearing the wind blows **FROM**,
-    clockwise from north, with ``north = +y`` and ``east = +x``, so the flow
-    vector is ``-(sin theta, cos theta, 0)``.  The profile is
-    ``u(z)/u(z_ref) = ln(z/z0)/ln(z_ref/z0)`` clamped to ``[0, 1]`` (the upstream
-    solver does not bound it above 1 because it is the same log law; the two agree
-    exactly at and below the reference height, which is the whole flight regime).
+    Uses the canonical :func:`physics.wind_domain.wind_flow_components`,
+    :func:`physics.wind_domain.boundary_layer_profile`, and
+    :func:`physics.wind_domain.gust_factor` so that the fallback evaluation
+    cannot drift in sign, ABL scaling, or gust dynamics.
     """
     speed = _finite(env.wind_speed)
     out = np.zeros(3, dtype=np.float64)
-    if speed == 0.0:
+    if speed <= 0.0:
         return out
-    bearing = deg2rad(clamp(_finite(env.wind_direction_deg), 0.0, 360.0))
+    bearing = clamp(_finite(env.wind_direction_deg), 0.0, 360.0)
     altitude = max(-_finite(position[2]) - _finite(env.ground_level_m), 0.0)
-    factor = 1.0
-    if bool(env.boundary_layer_enabled):
-        z0 = max(_finite(env.surface_roughness_m, 8.0e-4), 1.0e-9)
-        z_ref = max(_finite(env.reference_height_m, 1.0), z0 * 1.001)
-        denominator = math.log(z_ref / z0)
-        if abs(denominator) > 1.0e-9:
-            factor = clamp(math.log(max(altitude, z0 * 1.001) / z0) / denominator, 0.0, 1.0)
-    gust = 1.0 + _finite(env.gust_intensity) * 0.1 * math.sin(0.7 * _finite(time_s))
-    magnitude = speed * factor * gust
-    out[0] = -magnitude * math.sin(bearing)
-    out[1] = -magnitude * math.cos(bearing)
+
+    wind_mod = wind_module()
+    if wind_mod is not None:
+        flow_func = getattr(wind_mod, "wind_flow_components", None)
+        bl_func = getattr(wind_mod, "boundary_layer_profile", None)
+        gust_func = getattr(wind_mod, "gust_factor", None)
+    else:
+        flow_func = bl_func = gust_func = None
+
+    if flow_func is not None:
+        fx, fy = flow_func(bearing)
+    else:
+        rad = deg2rad(bearing)
+        fx, fy = -math.sin(rad), -math.cos(rad)
+
+    if bl_func is not None:
+        profile_speed = bl_func(
+            z=altitude,
+            surface_roughness_m=max(_finite(env.surface_roughness_m, 8.0e-4), 1.0e-9),
+            reference_speed=speed,
+            reference_height_m=max(_finite(env.reference_height_m, 1.0), 1.0e-4),
+            enabled=bool(env.boundary_layer_enabled),
+        )
+    else:
+        factor = 1.0
+        if bool(env.boundary_layer_enabled):
+            z0 = max(_finite(env.surface_roughness_m, 8.0e-4), 1.0e-9)
+            z_ref = max(_finite(env.reference_height_m, 1.0), z0 * 1.001)
+            denominator = math.log(z_ref / z0)
+            if abs(denominator) > 1.0e-9:
+                factor = max(0.0, math.log(max(altitude, z0 * 1.001) / z0) / denominator)
+        profile_speed = speed * factor
+
+    if gust_func is not None:
+        g_factor = gust_func(env, time_s)
+    else:
+        g_factor = 1.0 + clamp(_finite(env.gust_intensity), 0.0, 1.0) * 0.1 * math.sin(0.7 * _finite(time_s))
+
+    magnitude = profile_speed * g_factor
+    out[0] = magnitude * fx
+    out[1] = magnitude * fy
     return out
 
 

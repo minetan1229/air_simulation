@@ -903,15 +903,18 @@ def assign_layers(
                 if db > da + DEPTH_EPS:
                     below = True
                 elif abs(db - da) <= DEPTH_EPS:
-                    # Coplanar layers (a flat fold): break the tie with the
-                    # fold level, the stack order hint and the face id so the
-                    # order is deterministic.
+                    # Coplanar layers (a flat fold): rank (group_order) is the
+                    # primary stacking hint. If ranks differ, lower rank is below
+                    # higher rank. If ranks are equal, break the tie with the fold
+                    # level and the face id so the order is deterministic and acyclic.
                     fa, fb = faces[a], faces[b]
-                    if fa.level < fb.level or (
-                        fa.level == fb.level
-                        and (rank(fa), fa.fid) < (rank(fb), fb.fid)
-                    ):
-                        below = True
+                    ra, rb = rank(fa), rank(fb)
+                    if ra != rb:
+                        below = ra < rb
+                    elif fa.level != fb.level:
+                        below = fa.level < fb.level
+                    else:
+                        below = fa.fid < fb.fid
                 if below:
                     edges[a].append(b)
                     indegree[b] += 1
@@ -1264,11 +1267,12 @@ def build_pattern_mesh(
     scale: float = 1.0,
     archetype: str = "program",
     span_m: Optional[float] = None,
+    group_order: Optional[Dict[str, int]] = None,
 ) -> OrigamiMesh:
     """Build the renderable mesh of an already compiled fold programme."""
     alpha = max(0.0, min(1.0, float(alpha)))
     faces = _fold_faces(pattern)
-    layers = assign_layers(faces)
+    layers = assign_layers(faces, group_order=group_order)
 
     thickness = VISUAL_THICKNESS_M
     pitch = LAYER_PITCH_M

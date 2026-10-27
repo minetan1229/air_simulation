@@ -1677,9 +1677,10 @@ def step_meshes(
     """
     creases = genome_to_creases(genome)
     meshes = []
+    order = _group_order(genome)
     for count in range(len(creases) + 1):
         pattern = compile_creases(creases[:count], genome.sheet, alpha, genome.key)
-        mesh = build_pattern_mesh(pattern, alpha, 1.0, genome.key)
+        mesh = build_pattern_mesh(pattern, alpha, 1.0, genome.key, group_order=order)
         meshes.append((count, mesh))
 
     factor = 1.0
