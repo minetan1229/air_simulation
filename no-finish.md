@@ -552,7 +552,7 @@
 | **G9-2** | **`layer_order` は共面層のタイブレークのみ**（**未解決**） | `assign_layers(faces, group_order)` の group rank は「深さが同じ」ときの順序付けにだけ効く | 「この折りはこの面の下へ回す」という指定が、層が重なっていない場合には効かない | group rank を「層インデックスへの拘束」として DAG の辺拘束へ拡張する（重なり保証を保ったまま） |
 | **G9-3** | ~~**ランダム個体の適合率が低い**~~（**解決済み**） | 実測: `strategy="families"` の 50 個体で grip 合格は 12 個体（**24 %**）、`"free"` は**ほぼ 0 %**。完全無作為の世代0は成立しない | 解消: GA は既知の適合アーキタイプ（`genome_from_archetype` の classic dart / nakamura / sky_king。3 機体とも grip フィルタ合格）で初期集団をシードし、適合性を保つ修復・攪乱オペレータを併用する | 完了。実測値は `.agents/Knowledge.md`「Procedural Origami Genome」に記録（正本ではなく参照） |
 | **G9-4** | ~~**レシピの SVG / 手順表がブラウザに未表示**~~（**解決済み**） | API は `/api/v1/origami/genome/recipe` で Markdown と SVG を返していたのに、UI は折り手順スライダ（`genome_step`）しか無かった | 解消: 折り紙パネルに展開図プレビュー（SVG。**山=赤実線 / 谷=青破線**＋符号付き角度）と手順表を実装し、3D スライダと連動 | 完了。実装は `static/js/ga_research.js`（`renderCreasePattern` / `requestOrigamiRecipe` は `static/js/origami.js`） |
-| **G9-5** | **遺伝子個体の翼寸法は `wingspan_m` 設定と独立**（**未解決**） | `genome_to_aircraft_config` は実測スパンを使うが、UI の `wingspan_m` スライダとは無関係 | 見た目のスパンと計算のスパンがずれる（G-1 と同根） | G-1 の 2 段スケーリング（生成 → 実スパン → 再スケール）を遺伝子経路にも適用する |
+| **G9-5** | ~~**遺伝子個体の翼寸法は wingspan_m 設定と独立**~~（**解決済み**） | step_meshes / origami_mesh / origami_genome.py / API /api/v1/origami/genome/steps / UI static/js/app.js / origami.js に wingspan_m 2段スケーリング（実測スパンから  = \text{target} / \text{current}$ で頂点・寸法を一括再スケール）を適用 | 解決: UI の wingspan_m スライダーと 3D メッシュ・物理特性のスパンが一致するよう配管 | 完了。	ests/test_origami_genome.py::test_origami_genome_wingspan_rescaling で固定化。 |
 
 **検証状態（遺伝子系のみ）**: `tests/test_origami_genome.py` = **22 passed**
 （無作為 1000 個体の幾何変換・持ち手判定・6DoF 受け渡し、3 定型機体の grip 合格、

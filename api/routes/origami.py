@@ -266,7 +266,12 @@ def origami_genome_steps():
     alpha = as_float(payload.get("alpha", 1.0), "alpha")
     if not 0.0 <= alpha <= 1.0:
         raise BadRequest("field 'alpha' must be within [0, 1]")
-    states = genome.step_meshes(program, alpha)
+    wingspan_m: Optional[float] = None
+    if "wingspan_m" in payload and payload["wingspan_m"] is not None:
+        wingspan_m = as_float(payload["wingspan_m"], "wingspan_m")
+        if wingspan_m <= 0.0:
+            raise BadRequest("field 'wingspan_m' must be strictly positive")
+    states = genome.step_meshes(program, alpha, wingspan_m=wingspan_m)
     return jsonify(
         {
             "genome": program.to_dict(),

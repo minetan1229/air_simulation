@@ -270,6 +270,9 @@ export async function requestOrigamiGenomeSteps(options) {
     step_count: String(Math.max(1, Math.round(Number(options.stepCount) || 8))),
     strategy: String(options.strategy || "families"),
   });
+  if (options.wingspan_m != null && Number(options.wingspan_m) > 0) {
+    params.set("wingspan_m", String(Number(options.wingspan_m)));
+  }
   const response = await fetch(`/api/v1/origami/genome/steps?${params.toString()}`, {
     signal: options.signal,
   });

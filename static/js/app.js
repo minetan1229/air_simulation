@@ -1899,12 +1899,13 @@ class ConsoleApp {
       return;
     }
     if (genomeEnabled) {
-      const signature = `genome|${genomeSeed}|${genomeSteps}|${genomeStrategy}|${genomeStep}`;
+      const wingspan = this.store.data.aircraft.wingspan_m;
+      const signature = `genome|${genomeSeed}|${genomeSteps}|${genomeStrategy}|${genomeStep}|${wingspan}`;
       if (signature === this._origamiSignature) return;
       this._origamiSignature = signature;
       if (this._origamiTimer) clearTimeout(this._origamiTimer);
       this._origamiTimer = setTimeout(
-        () => this._loadOrigamiGenome(genomeSeed, genomeSteps, genomeStrategy, genomeStep),
+        () => this._loadOrigamiGenome(genomeSeed, genomeSteps, genomeStrategy, genomeStep, wingspan),
         60
       );
       return;
@@ -1923,7 +1924,7 @@ class ConsoleApp {
    * intermediate state, so the step slider walks through the folding one
    * move at a time.
    */
-  async _loadOrigamiGenome(seed, stepCount, strategy, step) {
+  async _loadOrigamiGenome(seed, stepCount, strategy, step, wingspan_m) {
     if (this._origamiAbort) this._origamiAbort.abort();
     const controller = new AbortController();
     this._origamiAbort = controller;
@@ -1932,6 +1933,7 @@ class ConsoleApp {
         seed,
         stepCount,
         strategy,
+        wingspan_m,
         signal: controller.signal,
       });
       if (controller.signal.aborted) return;

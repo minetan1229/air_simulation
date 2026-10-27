@@ -1663,18 +1663,44 @@ def crease_pattern_svg(
 def step_meshes(
     genome: OrigamiGenome,
     alpha: float = 1.0,
+    wingspan_m: Optional[float] = None,
 ) -> List[Dict[str, Any]]:
     """The solid of every intermediate fold state.
 
     Index 0 is the flat sheet, index *n* the finished aeroplane.  The
     payload is the same vertex buffer format the 3D viewer already knows, so
     a slider can step through the folding one move at a time.
+
+    When ``wingspan_m`` is supplied, the finished aeroplane (the last step)
+    is scaled to match ``wingspan_m`` and the same scale factor is applied to
+    every intermediate state so the progression animates at constant scale.
     """
     creases = genome_to_creases(genome)
-    states: List[Dict[str, Any]] = []
+    meshes = []
     for count in range(len(creases) + 1):
         pattern = compile_creases(creases[:count], genome.sheet, alpha, genome.key)
         mesh = build_pattern_mesh(pattern, alpha, 1.0, genome.key)
+        meshes.append((count, mesh))
+
+    factor = 1.0
+    if wingspan_m is not None and float(wingspan_m) > 0.0 and meshes:
+        # Measure the folded wing span of the final step
+        final_mesh = meshes[-1][1]
+        lo, hi = final_mesh.bounds()
+        final_span = hi[2] - lo[2]
+        if final_span > 1e-9:
+            factor = float(wingspan_m) / final_span
+
+    states: List[Dict[str, Any]] = []
+    for count, mesh in meshes:
+        if abs(factor - 1.0) > 1e-12:
+            mesh.positions = [
+                (float(p[0]) * factor, float(p[1]) * factor, float(p[2]) * factor)
+                for p in mesh.positions
+            ]
+            mesh.paper_thickness_m *= factor
+            mesh.layer_pitch_m *= factor
+            mesh.scale *= factor
         payload = mesh_payload(mesh)
         payload["step_index"] = count
         payload["label"] = (

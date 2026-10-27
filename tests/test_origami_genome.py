@@ -610,3 +610,12 @@ def test_genome_to_aircraft_config_matches_wingspan_m() -> None:
     # Areas and mass scale with fit**2.
     assert config.wing_area_m2 == pytest.approx(config_base.wing_area_m2 * fit * fit, rel=1e-6)
     assert config.mass_kg == pytest.approx(config_base.mass_kg * fit * fit, rel=1e-6)
+
+    # Step meshes scale with wingspan_m
+    states_unscaled = og.step_meshes(genome)
+    states_scaled = og.step_meshes(genome, wingspan_m=target)
+    assert len(states_scaled) == len(states_unscaled)
+    # The final step span must equal target
+    final_bounds = states_scaled[-1]["bounds"]
+    final_span = final_bounds["max"][2] - final_bounds["min"][2]
+    assert final_span == pytest.approx(target, rel=1e-3)
