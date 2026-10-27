@@ -2888,12 +2888,26 @@ def _highest_tier(tier_counts: Dict[str, int]) -> int:
 
 
 def _write_json(path: str, payload: Any) -> None:
-    """Write a JSON file (UTF-8, indented, stable key order)."""
+    """Write a JSON file atomically (UTF-8, indented, stable key order)."""
     directory = os.path.dirname(os.path.abspath(path))
     if directory:
         os.makedirs(directory, exist_ok=True)
-    with open(path, "w", encoding="utf-8") as handle:
-        json.dump(payload, handle, indent=2, ensure_ascii=False, default=str)
+    temp_path = f"{path}.tmp.{uuid.uuid4().hex[:8]}"
+    try:
+        with open(temp_path, "w", encoding="utf-8") as handle:
+            json.dump(payload, handle, indent=2, ensure_ascii=False, default=str)
+            handle.flush()
+            try:
+                os.fsync(handle.fileno())
+            except OSError:
+                pass
+        os.replace(temp_path, path)
+    finally:
+        if os.path.exists(temp_path):
+            try:
+                os.remove(temp_path)
+            except OSError:
+                pass
 
 
 # --------------------------------------------------------------------------
