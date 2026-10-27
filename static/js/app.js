@@ -3025,6 +3025,7 @@ class ConsoleApp {
       } else if (val === "preset_glider") {
         this._applyStandardPreset({
           name: "Paper Glider",
+          shape_flag: 1,
           wingspan_m: 0.20,
           wing_area_m2: 0.015,
           mass_kg: 0.005,
@@ -3037,6 +3038,7 @@ class ConsoleApp {
       } else if (val === "preset_dart") {
         this._applyStandardPreset({
           name: "Dart High-Speed",
+          shape_flag: 0,
           wingspan_m: 0.12,
           wing_area_m2: 0.009,
           mass_kg: 0.006,
@@ -3049,6 +3051,7 @@ class ConsoleApp {
       } else if (val === "preset_wide") {
         this._applyStandardPreset({
           name: "Wide-Body Glider",
+          shape_flag: 2,
           wingspan_m: 0.26,
           wing_area_m2: 0.024,
           mass_kg: 0.0045,
