@@ -49,11 +49,11 @@ if [ "$START_SIM" = true ]; then
     # Launch independently (resume if latest.json exists)
     "$PY_CMD" -c "
 import subprocess, sys, os
-cmd = [sys.executable, 'tools/run_ga_research.py']
+cmd = [sys.executable, 'tools/run_ga_research.py', '--generations', '1000', '--max-trials', '500000']
 latest = 'runs/ga_research/checkpoints/latest.json'
 if os.path.exists(latest):
     cmd.extend(['--resume', latest])
-    print('Resuming from:', latest)
+    print('Resuming from:', latest, 'with generations=1000, max_trials=500000')
 p = subprocess.Popen(cmd, stdout=open('sim_output.log', 'ab'), stderr=subprocess.STDOUT)
 with open('sim_process.pid', 'w') as f:
     f.write(str(p.pid))

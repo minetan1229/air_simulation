@@ -114,15 +114,17 @@ def read_latest_checkpoint_metrics(run_dir: Path) -> Dict[str, Any]:
     ckpt_dir = run_dir / "checkpoints"
     if not ckpt_dir.exists():
         return {}
-    files = sorted(ckpt_dir.glob("generation_*.json"))
+    files = sorted(ckpt_dir.glob("checkpoint_*.json"))
     if not files:
         return {}
     try:
         with open(files[-1], "r", encoding="utf-8") as f:
             data = json.load(f)
+        hof = data.get("hall_of_fame", [])
+        bf = hof[0].get("fitness", 0.0) if hof else data.get("best_fitness", 0.0)
         return {
             "generation": data.get("generation", 0),
-            "best_fitness": data.get("best_fitness", 0.0),
+            "best_fitness": bf if bf is not None else 0.0,
             "stats": data.get("stats", {}),
             "total_checkpoints": len(files),
             "files": [str(x) for x in files],
