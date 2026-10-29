@@ -309,18 +309,21 @@ class Solver3D:
         return res
 
     def compute_forces(self) -> Tuple[float, float, float]:
-        """Compute aerodynamic coefficients (cl, cd, cm) by surface pressure integration."""
+        """Compute aerodynamic coefficients (cl, cd, cm) by surface pressure integration on the wing."""
         _, _, _, _, p_wall, _ = self.get_primitive(self.u[:, 0, :, :])
         p_gauge = p_wall - self.p_inf
 
-        ax = self.grid.j_area_x[:, 0, :]
-        ay = self.grid.j_area_y[:, 0, :]
-        az = self.grid.j_area_z[:, 0, :]
+        # Isolate wing surface cells up to tip (k < nk_wing)
+        kw = self.grid.nk_wing
+        ax = self.grid.j_area_x[:, 0, :kw]
+        ay = self.grid.j_area_y[:, 0, :kw]
+        az = self.grid.j_area_z[:, 0, :kw]
+        p_w = p_gauge[:, :kw]
 
         # Total force on semi-span wing (multiply by 2 for full aircraft)
-        fx = 2.0 * float(np.sum(p_gauge * ax))
-        fy = 2.0 * float(np.sum(p_gauge * ay))
-        fz = 2.0 * float(np.sum(p_gauge * az))
+        fx = 2.0 * float(np.sum(p_w * ax))
+        fy = 2.0 * float(np.sum(p_w * ay))
+        fz = 2.0 * float(np.sum(p_w * az))
 
         q_inf = 0.5 * self.rho_inf * (self.v_inf**2)
         alpha_rad = math.radians(self.config.alpha_deg)
@@ -336,24 +339,24 @@ class Solver3D:
         cd = float(drag / (q_inf * s_ref))
 
         # Pitching moment about (0.25*c_root, 0, 0)
-        # Surface cell centers on j=0 wall face: average of 4 corners (ni, nk)
+        # Surface cell centers on j=0 wall face: average of 4 corners (ni, kw)
         xc_wall = 0.25 * (
-            self.grid.x[:-1, 0, :-1]
-            + self.grid.x[1:, 0, :-1]
-            + self.grid.x[1:, 0, 1:]
-            + self.grid.x[:-1, 0, 1:]
+            self.grid.x[:-1, 0, :kw]
+            + self.grid.x[1:, 0, :kw]
+            + self.grid.x[1:, 0, 1 : kw + 1]
+            + self.grid.x[:-1, 0, 1 : kw + 1]
         )
         zc_wall = 0.25 * (
-            self.grid.z[:-1, 0, :-1]
-            + self.grid.z[1:, 0, :-1]
-            + self.grid.z[1:, 0, 1:]
-            + self.grid.z[:-1, 0, 1:]
+            self.grid.z[:-1, 0, :kw]
+            + self.grid.z[1:, 0, :kw]
+            + self.grid.z[1:, 0, 1 : kw + 1]
+            + self.grid.z[:-1, 0, 1 : kw + 1]
         )
         arm_x = xc_wall - 0.25
         arm_z = zc_wall
 
-        dfx = 2.0 * p_gauge * ax
-        dfz = 2.0 * p_gauge * az
+        dfx = 2.0 * p_w * ax
+        dfz = 2.0 * p_w * az
         my = float(np.sum(arm_z * dfx - arm_x * dfz))
         cm = float(my / (q_inf * s_ref * c_ref))
 

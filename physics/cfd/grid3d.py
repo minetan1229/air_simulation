@@ -29,6 +29,9 @@ class StructuredGrid3D:
     # Cell volumes: (ni, nj, nk)
     vol: np.ndarray
 
+    # Spanwise index separating wing surface from tip wake/extension
+    nk_wing: int
+
     # Face metric vectors (outward normal * area):
     # i-faces (ni+1, nj, nk): connects (i, j, k) to (i+1, j, k)
     i_area_x: np.ndarray
@@ -247,6 +250,7 @@ def generate_wing_grid_3d(
         yc=yc,
         zc=zc,
         vol=vol,
+        nk_wing=nk_wing,
         i_area_x=i_ax,
         i_area_y=i_ay,
         i_area_z=i_az,

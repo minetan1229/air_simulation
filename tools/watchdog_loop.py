@@ -221,11 +221,12 @@ def main() -> int:
                 best_fitness_history.append((gen, bf))
                 print(f"[watchdog] Gen {gen}: best_fitness={bf:.6f}, Mem={mem_mb:.1f}MB, Handles={handles}")
 
-            # Check stagnation: 8 generations without improvement
-            if len(best_fitness_history) >= 8:
-                recent_bfs = [x[1] for x in best_fitness_history[-8:]]
+            # Check stagnation: 25 generations without improvement
+            # (Allows GA internal stagnation_generations=10 structure_search_shift to adapt to fold_steps 8->9->10)
+            if len(best_fitness_history) >= 25:
+                recent_bfs = [x[1] for x in best_fitness_history[-25:]]
                 if max(recent_bfs) - min(recent_bfs) < 1e-4:
-                    reason = f"Soft anomaly: Best fitness stagnated across 8 generations ({recent_bfs[0]:.6f} to {recent_bfs[-1]:.6f})"
+                    reason = f"Soft anomaly: Best fitness stagnated across 25 generations ({recent_bfs[0]:.6f} to {recent_bfs[-1]:.6f})"
                     print(f"[watchdog] {reason}")
                     write_status(30, reason)
                     return 30
