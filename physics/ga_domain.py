@@ -2175,8 +2175,12 @@ class ResearchRun:
             if not migrants:
                 continue
             receiver_ranked = _rank_by_fitness(receiver.population)
-            known = {id(item) for item in receiver_ranked}
-            fresh = [migrant for migrant in migrants if id(migrant) not in known]
+            known_ids = {id(item) for item in receiver_ranked}
+            known_indices = {int(item.index) for item in receiver_ranked}
+            fresh = [
+                migrant for migrant in migrants
+                if id(migrant) not in known_ids and int(migrant.index) not in known_indices
+            ]
             kept = receiver_ranked[: max(len(receiver_ranked) - len(fresh), 0)]
             merged = _rank_by_fitness(kept + fresh)
             receiver.population = merged[: self.config.population_size]
