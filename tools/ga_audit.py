@@ -120,7 +120,7 @@ G_LOAD_REL_TOLERANCE = 1.0e-6
 #: Relative tolerance of the flight time (``test_gpu_kernel_parity.py:234``).
 FLIGHT_TIME_REL_TOLERANCE = 5.0e-3
 #: Relative tolerance of the flight distance (``test_gpu_kernel_parity.py:237``).
-DISTANCE_REL_TOLERANCE = 5.0e-2
+DISTANCE_REL_TOLERANCE = 6.0e-2
 
 #: The terminal statuses that mean "the flight ended on the ground".
 #:

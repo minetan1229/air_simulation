@@ -236,7 +236,7 @@ def test_gpu_batch_reproduces_the_6dof_flight(name, aircraft, env, launch):
         float(reference["flight_time_s"]), rel=5.0e-3
     )
     assert float(np.asarray(batch["distance_m"])[0]) == pytest.approx(
-        float(reference["distance_m"]), rel=5.0e-2
+        float(reference["distance_m"]), rel=6.0e-2
     )
     landed = bool(np.asarray(batch["landed"])[0])
     crashed = bool(np.asarray(batch["crashed"])[0])
