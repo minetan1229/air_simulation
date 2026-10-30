@@ -10,13 +10,28 @@ cd "$SCRIPT_DIR"
 PYTHON_BIN=""
 for cmd in python3 python py; do
     if command -v "$cmd" >/dev/null 2>&1; then
-        PYTHON_BIN="$cmd"
-        break
+        if "$cmd" -c "import sys; exit(0 if sys.version_info >= (3, 10) else 1)" >/dev/null 2>&1; then
+            PYTHON_BIN="$cmd"
+            break
+        fi
     fi
 done
 
 if [ -z "$PYTHON_BIN" ]; then
-    echo "[ERROR] Python 3.10+ is required but not found in PATH." >&2
+    DETECTED_RAW=""
+    for cmd in python3 python py; do
+        if command -v "$cmd" >/dev/null 2>&1; then
+            DETECTED_RAW=$("$cmd" -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')" 2>/dev/null || true)
+            if [ -n "$DETECTED_RAW" ]; then
+                break
+            fi
+        fi
+done
+    if [ -n "$DETECTED_RAW" ]; then
+        echo "[ERROR] Python 3.10+ is required, but detected version is $DETECTED_RAW." >&2
+    else
+        echo "[ERROR] Python 3.10+ is required but no suitable Python was found in PATH." >&2
+    fi
     exit 1
 fi
 

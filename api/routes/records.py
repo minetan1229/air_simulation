@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import math
 from flask import Blueprint, Response, jsonify, request
 
 from physics import storage_domain
@@ -188,6 +189,8 @@ def guinness_simulate():
     calibrated = bool(payload.get("calibrated", False))
     flight_mode = payload.get("flight_mode")
     duration_s = as_float(payload.get("duration_s", 60.0), "duration_s")
+    if not (math.isfinite(duration_s) and 0.1 <= duration_s <= 120.0):
+        raise BadRequest("field 'duration_s' must be a finite number between 0.1 and 120.0 seconds")
 
     try:
         result = records_domain.simulate_preset(

@@ -8,9 +8,31 @@ $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 Set-Location $ScriptDir
 
 # Check Python installation
-$PythonCmd = if (Get-Command python -ErrorAction SilentlyContinue) { "python" } elseif (Get-Command py -ErrorAction SilentlyContinue) { "py" } else { $null }
+# Check Python installation (requiring Python 3.10+)
+$CandidateCmds = @("python", "py")
+$PythonCmd = $null
+foreach ($cmd in $CandidateCmds) {
+    if (Get-Command $cmd -ErrorAction SilentlyContinue) {
+        $isCompatible = & $cmd -c "import sys; exit(0 if sys.version_info >= (3, 10) else 1)"
+        if ($LASTEXITCODE -eq 0) {
+            $PythonCmd = $cmd
+            break
+        }
+    }
+}
 if (-not $PythonCmd) {
-    Write-Error "[ERROR] Python 3.10+ is required but not found in PATH."
+    $DetectedRaw = $null
+    foreach ($cmd in $CandidateCmds) {
+        if (Get-Command $cmd -ErrorAction SilentlyContinue) {
+            $DetectedRaw = & $cmd -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')"
+            if ($DetectedRaw) { break }
+        }
+    }
+    if ($DetectedRaw) {
+        Write-Error "[ERROR] Python 3.10+ is required, but detected version is $DetectedRaw."
+    } else {
+        Write-Error "[ERROR] Python 3.10+ is required but no suitable Python was found in PATH."
+    }
     exit 1
 }
 

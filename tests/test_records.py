@@ -323,3 +323,18 @@ def test_preset_payloads_expose_the_catalogue_japanese_strings():
         assert served["label_ja"] == competitions[served["key"]].label_ja
         assert served["statement_ja"] == competitions[served["key"]].statement_ja
 
+
+@pytest.mark.parametrize("invalid_duration", [
+    -1.0, 0.0, 0.05, 120.01, 1000000.0, "NaN", "Infinity", "-Infinity", None
+])
+def test_guinness_simulate_rejects_out_of_bounds_or_non_finite_duration(invalid_duration):
+    client = app.test_client()
+    payload = {"key": "unite_31s"}
+    if invalid_duration is not None:
+        payload["duration_s"] = invalid_duration
+    else:
+        payload["duration_s"] = "invalid_string"
+    response = client.post("/api/v1/guinness/simulate", json=payload)
+    assert response.status_code == 400
+    assert "duration_s" in response.json.get("error", "").lower() or "duration_s" in response.json.get("message", "").lower()
+
