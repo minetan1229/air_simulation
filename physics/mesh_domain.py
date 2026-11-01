@@ -1514,7 +1514,7 @@ def panel_aerodynamics(
             width = math.radians(10.0)
             weight = clamp((magnitude - math.radians(STALL_ALPHA_DEG)) / width, 0.0, 1.0)
             weight = weight * weight * (3.0 - 2.0 * weight)
-            cl_flat = 2.0 * math.sin(local_rad) * math.cos(local_rad)
+            cl_flat = 2.0 * math.sin(local_rad) * (math.cos(local_rad) ** 2)
             cl = (1.0 - weight) * cl_linear + weight * cl_flat
 
         cl_rot = cl * safe_div(cg_proj - float(chord_proj[position]), chord_extent, default=0.0)

@@ -740,3 +740,20 @@ def test_differential_evolution_small_budget_falls_back_to_surrogate():
     assert result["evaluations"] <= 4
 
     assert all("physics" in row for row in result["pareto_front"])
+
+
+def test_pareto_front_rejects_nan_and_inf_rows():
+    from physics.optimizer_domain import pareto_front, non_dominated_sort
+    objs = ['max_distance', 'max_flight_time']
+    matrix = np.array([
+        [10.0, 5.0],
+        [np.nan, 20.0],
+        [5.0, 2.0],
+        [np.inf, np.nan]
+    ])
+    front = pareto_front(objs, matrix)
+    assert front == [0]
+    fronts = non_dominated_sort(objs, matrix)
+    assert fronts[0] == [0]
+    assert 1 not in fronts[0]
+    assert 3 not in fronts[0]

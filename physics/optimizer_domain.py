@@ -901,17 +901,37 @@ def _dominance_matrix(matrix: np.ndarray, directions: np.ndarray) -> np.ndarray:
 
     Rows are processed in chunks to bound memory (the full (n, n, m) broadcast
     would otherwise allocate gigabytes for large populations).
+
+    Finite vs non-finite handling:
+    Any row with non-finite values (NaN / Inf) represents a numerical failure
+    or invalid trial. Valid finite rows strictly dominate non-finite rows, and
+    non-finite rows never dominate any other row.
     """
     size = matrix.shape[0]
     dominates = np.zeros((size, size), dtype=bool)
-    # Diff of every ordered pair: (n, n, m) where [i, j] = matrix[i] - matrix[j].
+    is_valid = np.isfinite(matrix).all(axis=1)
+
+    valid_indices = np.nonzero(is_valid)[0]
+    invalid_indices = np.nonzero(~is_valid)[0]
+    if len(valid_indices) > 0 and len(invalid_indices) > 0:
+        dominates[np.ix_(valid_indices, invalid_indices)] = True
+
     chunk = max(1, min(size, 512))
     for start in range(0, size, chunk):
         stop = min(start + chunk, size)
-        diff = directions[None, None, :] * (matrix[start:stop, None, :] - matrix[None, :, :])
-        ge = (diff >= 0.0).all(axis=2)
-        gt = (diff > 0.0).any(axis=2)
-        dominates[start:stop] = ge & gt
+        valid_in_chunk = is_valid[start:stop]
+        if not np.any(valid_in_chunk):
+            continue
+        sub_mat = matrix[start:stop]
+        valid_chunk_idx = np.nonzero(valid_in_chunk)[0]
+        valid_all_idx = np.nonzero(is_valid)[0]
+        dom = np.zeros((stop - start, size), dtype=bool)
+        if len(valid_chunk_idx) > 0 and len(valid_all_idx) > 0:
+            diff = directions[None, None, :] * (sub_mat[valid_chunk_idx, None, :] - matrix[None, valid_all_idx, :])
+            ge = (diff >= 0.0).all(axis=2)
+            gt = (diff > 0.0).any(axis=2)
+            dom[np.ix_(valid_chunk_idx, valid_all_idx)] = ge & gt
+        dominates[start:stop] = dominates[start:stop] | dom
     np.fill_diagonal(dominates, False)
     return dominates
 

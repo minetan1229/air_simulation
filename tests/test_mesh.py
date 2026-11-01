@@ -1209,3 +1209,11 @@ def test_mesh_domain_star_import_has_no_undefined_names():
     assert "PANEL_INCIDENCE_DRAG_K" not in mod.__all__
     assert "paper_sheet_thickness_m" not in mod.__all__
 
+
+
+def test_panel_stall_hoerner_plate_exact():
+    import math
+    from physics.mesh_domain import STALL_ALPHA_DEG
+    local_rad = math.radians(45.0)
+    expected = 2.0 * math.sin(local_rad) * (math.cos(local_rad) ** 2)
+    assert math.isclose(expected, 1.0 / math.sqrt(2.0), rel_tol=1e-5)

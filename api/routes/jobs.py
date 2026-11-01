@@ -268,14 +268,20 @@ def investigate_run():
         raise BadRequest("'target_metric' must be 'distance' or 'flight_time'")
 
     total_evals = 100
-    job = JOB_MANAGER.create(
-        name=f"Auto-investigate ({target_metric})",
-        total_evaluations=total_evals,
-        backend="auto_investigate",
-        objectives=[f"max_{target_metric}"],
-        algorithm="sensitivity_and_focused_tuning",
-        model_id=SESSION.mesh_model_id,
-    )
+
+    with _JOBS_ADMISSION_LOCK:
+        if JOB_MANAGER.active_count() >= _ADMISSION_LIMIT:
+            raise BadRequest(
+                "server busy: maximum active jobs (4) reached, please wait or cancel running jobs"
+            )
+        job = JOB_MANAGER.create(
+            name=f"Auto-investigate ({target_metric})",
+            total_evaluations=total_evals,
+            backend="auto_investigate",
+            objectives=[f"max_{target_metric}"],
+            algorithm="sensitivity_and_focused_tuning",
+            model_id=SESSION.mesh_model_id,
+        )
 
     def progress_cb(pct: int, total: int, msg: str) -> None:
         if JOB_MANAGER.is_cancelled(job.job_id) or JOB_MANAGER.is_cancel_requested(job.job_id):
@@ -311,11 +317,6 @@ def investigate_run():
             except KeyError:
                 pass
 
-    with _JOBS_ADMISSION_LOCK:
-        if JOB_MANAGER.active_count() >= _ADMISSION_LIMIT:
-            raise BadRequest(
-                "server busy: maximum active jobs (4) reached, please wait or cancel running jobs"
-            )
         JOB_MANAGER.start(job.job_id)
 
         thread = threading.Thread(target=worker, name=f"investigate-{job.job_id}", daemon=True)

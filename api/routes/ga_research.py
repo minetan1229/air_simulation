@@ -32,8 +32,26 @@ API_PREFIX = "/api/ga/research"
 #: The registry of the research runs of this process.
 RUNS: Dict[str, "GARunState"] = {}
 
+#: Maximum completed/terminal research runs kept in memory.
+MAX_RETAINED_GA_RUNS = 32
+
 #: Lock that protects the registry.
 RUNS_LOCK = threading.RLock()
+
+
+def _prune_retained_runs_locked() -> None:
+    """Evict oldest terminated runs when the registry exceeds MAX_RETAINED_GA_RUNS."""
+    if len(RUNS) <= MAX_RETAINED_GA_RUNS:
+        return
+    # Collect candidate terminal runs (completed, failed, or cancelled)
+    terminal_keys = [
+        run_id for run_id, state in RUNS.items()
+        if state.status in ("completed", "failed", "cancelled")
+    ]
+    # Remove oldest until within capacity
+    overflow = len(RUNS) - MAX_RETAINED_GA_RUNS
+    for run_id in terminal_keys[:overflow]:
+        del RUNS[run_id]
 
 
 def _highest_tier(tier_counts: Dict[str, Any]) -> int:
@@ -234,6 +252,7 @@ def _start(overrides: Dict[str, Any], base_config: Any = None) -> GARunState:
     )
     state.thread = thread
     with RUNS_LOCK:
+        _prune_retained_runs_locked()
         RUNS[run_id] = state
     thread.start()
     return state

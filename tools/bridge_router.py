@@ -18,6 +18,7 @@ from __future__ import annotations
 import asyncio
 import os
 import re
+import subprocess
 import sys
 import time
 from dataclasses import dataclass, field
@@ -474,6 +475,17 @@ async def _drain_stderr(proc: asyncio.subprocess.Process, sink: List[str]) -> No
 async def _terminate(proc: asyncio.subprocess.Process) -> None:
     if proc.returncode is not None:
         return
+    pid = proc.pid
+    if sys.platform == "win32" and pid is not None:
+        try:
+            # Kill process tree on Windows to prevent orphaned worker/MCP child processes
+            subprocess.run(
+                ["taskkill", "/PID", str(pid), "/T", "/F"],
+                capture_output=True,
+                check=False,
+            )
+        except Exception:
+            pass
     try:
         proc.kill()
     except ProcessLookupError:

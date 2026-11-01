@@ -200,21 +200,23 @@ def isa_pressure(
         exponent = -g * (h - TROPOPAUSE_ALTITUDE_M) / (R_AIR * max(abs(t11), _MIN_TEMPERATURE_K))
         return p11 * math.exp(clamp(exponent, -700.0, 700.0))
 
-    # Base of the stratospheric lapse layer.
+    # Base of the stratospheric lapse layer (20 km to 32 km).
+    # Between 11 km and 20 km is an isothermal layer, so T20 == T11.
     p20 = p11 * math.exp(clamp(-g * (STRATOSPHERE_BASE_ALTITUDE_M - TROPOPAUSE_ALTITUDE_M)
                                / (R_AIR * max(abs(t11), _MIN_TEMPERATURE_K)), -700.0, 700.0))
-    t20 = t11 + STRATOSPHERE_LAPSE_RATE_K_PER_M * (STRATOSPHERE_BASE_ALTITUDE_M - TROPOPAUSE_ALTITUDE_M)
+    t20 = t11
+    strat_lapse = STRATOSPHERE_LAPSE_RATE_K_PER_M  # +0.001 K/m
     if h <= STRATOSPHERE_TOP_ALTITUDE_M:
-        temperature = t11 + STRATOSPHERE_LAPSE_RATE_K_PER_M * (h - STRATOSPHERE_BASE_ALTITUDE_M)
+        temperature = t20 + strat_lapse * (h - STRATOSPHERE_BASE_ALTITUDE_M)
         ratio = max(temperature / max(t20, 1.0e-6), 1.0e-6)
-        exponent = -g / (lapse * R_AIR)
+        exponent = -g / (strat_lapse * R_AIR)
         return p20 * (ratio ** exponent)
 
     # Upper isothermal layer.
-    t32 = t11 + STRATOSPHERE_LAPSE_RATE_K_PER_M * (
+    t32 = t20 + strat_lapse * (
         STRATOSPHERE_TOP_ALTITUDE_M - STRATOSPHERE_BASE_ALTITUDE_M
     )
-    p32 = p20 * ((t32 / max(t20, 1.0e-6)) ** (-g / (lapse * R_AIR)))
+    p32 = p20 * ((t32 / max(t20, 1.0e-6)) ** (-g / (strat_lapse * R_AIR)))
     exponent = -g * (h - STRATOSPHERE_TOP_ALTITUDE_M) / (R_AIR * max(abs(t32), _MIN_TEMPERATURE_K))
     return p32 * math.exp(clamp(exponent, -700.0, 700.0))
 

@@ -1063,3 +1063,22 @@ def test_single_point_grid_and_empty_inputs():
     assert wind.wind_velocity(np.zeros((0, 3)), env, 0.0).shape == (0, 3)
     # Degenerate box: the single axis sample sits on the lower bound.
     assert field["positions"] == [[0.0], [0.0], [1.0]]
+
+
+def test_stratospheric_boundary_continuity():
+    from physics.atmosphere_domain import isa_pressure, isa_temperature
+    p_below_20k = isa_pressure(19999.9)
+    p_at_20k = isa_pressure(20000.0)
+    p_above_20k = isa_pressure(20000.1)
+    assert math.isclose(p_below_20k, p_at_20k, rel_tol=1e-4)
+    assert math.isclose(p_at_20k, p_above_20k, rel_tol=1e-4)
+
+    t_at_20k = isa_temperature(20000.0)
+    t_above_20k = isa_temperature(20000.1)
+    assert math.isclose(t_at_20k, t_above_20k, rel_tol=1e-5)
+
+    p_below_32k = isa_pressure(31999.9)
+    p_at_32k = isa_pressure(32000.0)
+    p_above_32k = isa_pressure(32000.1)
+    assert math.isclose(p_below_32k, p_at_32k, rel_tol=1e-4)
+    assert math.isclose(p_at_32k, p_above_32k, rel_tol=1e-4)
