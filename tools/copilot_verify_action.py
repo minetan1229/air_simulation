@@ -52,7 +52,8 @@ def get_git_diff():
             return ""
 
 def call_ai_review(diff_text, github_token):
-    url = "https://models.inference.ai.azure.com/chat/completions"
+    # 正式な GitHub Models API エンドポイント
+    url = "https://models.github.ai/inference/chat/completions"
     headers = {
         "Content-Type": "application/json",
         "Authorization": f"Bearer {github_token}"
@@ -72,7 +73,7 @@ def call_ai_review(diff_text, github_token):
     user_prompt = f"Here is the git diff of the latest commit:\n```diff\n{diff_text[:12000]}\n```"
 
     payload = {
-        "model": "gpt-4o-mini",
+        "model": "openai/gpt-4o-mini",
         "messages": [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_prompt}
@@ -88,11 +89,12 @@ def call_ai_review(diff_text, github_token):
             content = data["choices"][0]["message"]["content"]
             return json.loads(content)
     except urllib.error.HTTPError as e:
-        print(f"API Error ({e.code}): {e.read().decode('utf-8', errors='replace')}")
-        return {"has_issues": False, "summary": f"Review skipped due to API error: {e}", "patch": ""}
+        err_msg = e.read().decode('utf-8', errors='replace')
+        print(f"API Error ({e.code}): {err_msg}")
+        return {"has_issues": False, "summary": f"Review skipped (API response {e.code}): {err_msg[:200]}", "patch": ""}
     except Exception as e:
         print(f"Review call error: {e}")
-        return {"has_issues": False, "summary": f"Review failed: {e}", "patch": ""}
+        return {"has_issues": False, "summary": f"Review call failed: {e}", "patch": ""}
 
 def test_and_verify(patch_str):
     if not patch_str or not patch_str.strip():

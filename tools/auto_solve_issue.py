@@ -7,7 +7,7 @@ import subprocess
 import time
 
 def call_ai_for_solution(issue_num, title, body, token):
-    url = "https://models.inference.ai.azure.com/chat/completions"
+    url = "https://models.github.ai/inference/chat/completions"
     headers = {
         "Content-Type": "application/json",
         "Authorization": f"Bearer {token}"
@@ -24,7 +24,7 @@ def call_ai_for_solution(issue_num, title, body, token):
     user_prompt = f"Issue #{issue_num}: {title}\n\nDescription:\n{body[:8000]}"
 
     payload = {
-        "model": "gpt-4o-mini",
+        "model": "openai/gpt-4o-mini",
         "messages": [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_prompt}
@@ -105,7 +105,6 @@ def main():
     patch = sol.get("patch")
     summary = sol.get("summary")
 
-    # ブランチ作成
     branch_name = f"auto-fix/issue-{issue_num}-{int(time.time())}"
     subprocess.run(["git", "checkout", "-b", branch_name])
 
@@ -122,7 +121,6 @@ def main():
     subprocess.run(["git", "commit", "-m", commit_msg])
     subprocess.run(["git", "push", "origin", branch_name])
 
-    # PR作成 (ターゲットは遺伝的アルゴリズムブランチまたはmaster等)
     base_branch = "genetic-project"
     pr_title = f"fix(auto): resolve Issue #{issue_num} - {title}"
     pr_body = (
