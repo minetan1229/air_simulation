@@ -73,9 +73,9 @@ set -e
 
 # 3. Handle exit codes
 if [ "$WATCHDOG_EXIT" -eq 20 ]; then
-    echo "[watchdog.sh] Periodic audit triggered. Sending Discord report & updating progress.md..."
+    echo "[watchdog.sh] Periodic audit triggered. Sending Discord report & updating runs/ga_research/progress.log..."
     "$PY_CMD" tools/notify_discord.py verify "GA 2-Hour Periodic Check" "Simulation running normally. Periodic audit initiated." || true
-    echo "[$(date '+%Y-%m-%d %H:%M:%S')] Periodic 2h heartbeat: PID $SIM_PID active." >> progress.md
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] Periodic 2h heartbeat: PID $SIM_PID active." >> runs/ga_research/progress.log
 fi
 
 exit "$WATCHDOG_EXIT"

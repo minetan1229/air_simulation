@@ -12,6 +12,7 @@ python -m pytest tests -q
 python smoke_test.py
 ```
 ### 2. Git & CI 運用
+- **AI Agent 起動時必須**: python tools/sync_ai_review.py（GitHub上のIssue自動解決PRのマージ＆検証済み修正の自動ローカル同期）
 - ブランチ: `git checkout -b <type>/<desc>` (`feat/`, `fix/`, `docs/`, `test/`等)
 - マージ&プッシュ: ローカル全通過後、実動コードのみ master マージ → `git push`
 - CI/Issue確認: `python tools/check_runs.py` でCI完了確認 → `python tools/check_issues.py` & `python tools/close_resolved_issue.py` でIssueクローズ。
