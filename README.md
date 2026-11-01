@@ -1,5 +1,11 @@
 # 3D Paper Airplane Simulator
 
+[![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
+[![Flask](https://img.shields.io/badge/backend-Flask%20REST%20API-lightgrey.svg)](https://flask.palletsprojects.com/)
+[![Three.js](https://img.shields.io/badge/frontend-Three.js%20%2F%20WebGL-black.svg)](https://threejs.org/)
+[![Physics 6DoF](https://img.shields.io/badge/physics-6DoF%20RK4-brightgreen.svg)]()
+[![CUDA Accelerator](https://img.shields.io/badge/accelerator-CUDA%20%2F%20CuPy-green.svg)]()
+
 流体力学・飛行力学モデルに基づく、紙飛行機の 6自由度 (6DoF) 飛行シミュレータおよび自律設計最適化環境です。  
 ブラウザ上でリアルタイムに飛行軌道・姿勢・気流を 3D 表示し、GPU を用いた並列アンサンブル計算や遺伝的アルゴリズム (GA) による機体探索を行えます。
 
