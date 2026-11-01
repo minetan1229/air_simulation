@@ -93,6 +93,8 @@ from .config_schema import (
     THROW_STYLE_CATALOGUE,
     FLIGHT_LOG_COLUMNS,
 )
+from . import aero_kernel
+from .aero_kernel import ScalarMath
 from .geometry_utils import (
     angular_acceleration_body,
     body_inertia_tensor,
@@ -1939,6 +1941,9 @@ class FlightSimulator:
         self._next_record_time = 0.0
         self._diagnostics_cache: Optional[Dict[str, Any]] = None
         self._stiffness_cache: Optional[Tuple[float, float]] = None
+        self._aero_dihedral_lag: float = 0.0
+        self._aero_twist_lag: float = 0.0
+        self._last_dt: float = 0.01
         self._refresh_derived()
         if bool(self.settings.collision_enabled) and not self._state.crashed:
             self._state = self._apply_ground_contact(self._state)
@@ -2269,10 +2274,24 @@ class FlightSimulator:
         alpha_deg, beta_deg = effective_alpha_beta(body_relative, gravity_body, self.environment)
         mach = safe_div(speed, max(air["sound_speed_mps"], 1.0), 0.0)
         reynolds = safe_div(speed * self._chord, max(air["kinematic_viscosity_m2s"], 1.0e-12), 0.0)
-        model_valid = bool(
-            mach <= MODEL_MACH_LIMIT
-            and MODEL_REYNOLDS_MIN <= reynolds <= MODEL_REYNOLDS_MAX
+        # Mass ratio assessment
+        ref_area = max(self._derived.get("ref_area_m2", 0.015), 1.0e-6)
+        rho_val = max(air["density_kgm3"], 1.0e-6)
+        mass_ratio = float(
+            aero_kernel.compute_mass_ratio(
+                ScalarMath, self._mass, rho_val, ref_area, self._chord
+            )
         )
+        mass_ratio_warning = bool(mass_ratio < 5.0)
+
+        validity_res = aero_kernel.evaluate_model_validity(
+            ScalarMath,
+            mach=mach,
+            reynolds=reynolds,
+            alpha_deg=alpha_deg,
+            mass_ratio=mass_ratio,
+        )
+        model_valid = bool(validity_res["valid"])
 
         # Dynamic pressure
         q_dyn = 0.5 * max(air["density_kgm3"], 1.0e-6) * speed * speed
@@ -2303,6 +2322,22 @@ class FlightSimulator:
                 q_ref = 100.0 * stiffness
                 aero_dihedral_deg = aero_flex_gain * (q_dyn / q_ref) * 5.0
                 aero_twist_deg = aero_twist_gain * (q_dyn / q_ref) * 4.0
+
+        # Simple first-order lag filter on quasi-static deformations (Task item 3)
+        lag_tau = max(_finite(getattr(self.aircraft, "aeroelastic_tau_s", 0.0), 0.0), 0.0)
+        dt_step = getattr(self, "_last_dt", 0.01)
+        aero_dihedral_deg = float(
+            aero_kernel.first_order_lag(
+                ScalarMath, self._aero_dihedral_lag, aero_dihedral_deg, dt_step, lag_tau
+            )
+        )
+        aero_twist_deg = float(
+            aero_kernel.first_order_lag(
+                ScalarMath, self._aero_twist_lag, aero_twist_deg, dt_step, lag_tau
+            )
+        )
+        self._aero_dihedral_lag = aero_dihedral_deg
+        self._aero_twist_lag = aero_twist_deg
 
         effective_alpha_deg = alpha_deg - aero_twist_deg
         effective_dihedral_deg = float(self.aircraft.dihedral_deg) + aero_dihedral_deg
@@ -2376,11 +2411,22 @@ class FlightSimulator:
         # It is unsuitable for quantitative tumbling or apex recovery claims.
         # Adjust linear acceleration in body normal direction accordingly.
         span = max(self._derived["wingspan_m"], 1.0e-6)
+        ref_area = max(self._derived.get("ref_area_m2", 0.015), 1.0e-6)
+        rho_val = max(air["density_kgm3"], 1.0e-6)
+        mass_ratio = float(
+            aero_kernel.compute_mass_ratio(
+                ScalarMath, self._mass, rho_val, ref_area, self._chord
+            )
+        )
+        mass_ratio_warning = bool(mass_ratio < 5.0)
+
+        # Single implementation of added mass tensor from aero_kernel (Task item 4 & 6)
         if bool(getattr(self.aircraft, "added_mass_enabled", False)):
-            rho = max(air["density_kgm3"], 1.0e-6)
-            m_add_z = (math.pi / 4.0) * rho * span * (self._chord ** 2)
+            added = aero_kernel.compute_added_mass(
+                ScalarMath, rho_val, ref_area, self._chord
+            )
+            m_add_z = float(added["added_mass_z_kg"])
             m_eff_z = self._mass + m_add_z
-            # Accelerations in body frame before world rotation:
             gravity_body = world_to_body(quaternion, gravity_world)
             a_body = (force_body / self._mass) + gravity_body
             a_body[2] = (force_body[2] / m_eff_z) + gravity_body[2]
@@ -2439,6 +2485,8 @@ class FlightSimulator:
             "geometric_alpha_deg": alpha_deg,
             "model_valid": model_valid,
             "speed_capped": speed_capped,
+            "mass_ratio": mass_ratio,
+            "mass_ratio_warning": mass_ratio_warning,
         }
 
     def _derivative(self, y: np.ndarray, time_s: float, core: Optional[Dict[str, Any]] = None) -> np.ndarray:
@@ -3085,6 +3133,9 @@ class FlightSimulator:
             "aeroelastic_twist_deg": core.get("aeroelastic_twist_deg", 0.0),
             "trailing_edge_bend_deg": core.get("trailing_edge_bend_deg", 0.0),
             "geometric_alpha_deg": core["geometric_alpha_deg"],
+            "model_valid": bool(core.get("model_valid", True)),
+            "mass_ratio": float(core.get("mass_ratio", 10.0)),
+            "mass_ratio_warning": bool(core.get("mass_ratio_warning", False)),
         }
         self._diagnostics_cache = packet
         return packet

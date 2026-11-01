@@ -57,6 +57,9 @@ __all__ = [
     "ScalarMath",
     "RE_REFERENCE",
     "STALL_BLEND_ORDER",
+    "MODEL_MACH_LIMIT",
+    "MODEL_REYNOLDS_MIN",
+    "MODEL_REYNOLDS_MAX",
     "ELEVON_LIFT_PER_DEG",
     "ELEVON_MOMENT_PER_DEG",
     "MAX_ABS_LIFT_COEFFICIENT",
@@ -83,6 +86,11 @@ __all__ = [
     "effective_stall_alpha_deg",
     "fused_gpu_state",
     "params_from_config",
+    "estimate_polhamus_kv",
+    "first_order_lag",
+    "compute_mass_ratio",
+    "compute_added_mass",
+    "evaluate_model_validity",
 ]
 
 #: Reference Reynolds number of the ``cd0`` correlation.
@@ -94,6 +102,11 @@ RE_REFERENCE: float = 1.0e5
 #: power keeps the blend smooth and centred on the stall angle while making
 #: the weight decay like ``exp(-order k |d|)``.
 STALL_BLEND_ORDER: int = 4
+
+#: Aerodynamic model validity envelope constants.
+MODEL_MACH_LIMIT: float = 0.3
+MODEL_REYNOLDS_MIN: float = 1.0e3
+MODEL_REYNOLDS_MAX: float = 1.0e5
 
 #: Elevon effectiveness.  ``dcl`` grows with a trailing-edge-down (positive)
 #: deflection, ``dcm`` is the resulting **nose-down** pitching increment.
@@ -503,12 +516,20 @@ def post_stall_lift_coefficient(
     ref_cl: Any,
     stall_alpha_deg: Any,
     blend_deg: Any = POST_STALL_PLATE_BLEND_DEG,
+    residual_cl: Any = 0.0,
 ) -> Any:
     """Post-stall lift anchored on the Hoerner flat-plate limit.
 
     The branch starts at the airframe's own stall value ``ref_cl`` and moves
     onto the fully separated plate curve ``2 sin(a) cos^2(a)`` over
     ``[alpha_stall, blend_deg]``.
+
+    When ``residual_cl > 0.0``, a smooth residual lift increment representing
+    camber and residual separated-vortex suction is retained past stall:
+    ``C_L,res = residual_cl * cos(alpha)``, ensuring C0/C1 continuity with the
+    attached branch at ``alpha_stall`` and transitioning smoothly to zero at
+    90 deg. When ``residual_cl == 0.0`` (the default), the pure Hoerner
+    flat-plate limit is recovered with bit-level fidelity.
 
     The transition target is the plate value *at the blend angle*, not the
     moving plate curve itself.  Blending towards the moving curve produced a
@@ -526,23 +547,24 @@ def post_stall_lift_coefficient(
     airframe's own lift capability.
     """
     alpha = _finite(xp, alpha_deg, 0.0)
-    # The condition is built on the array module: a plain Python float would
-    # make ``alpha >= 0.0`` a Python ``bool``, and ``cupy.where`` rejects a
-    # Python condition (``AttributeError: 'bool' object has no attribute
-    # 'astype'``) while NumPy and :class:`ScalarMath` accept it.  The kernel
-    # has to behave the same on all three backends.
     sign = xp.where(alpha >= 0.0, _f64(xp, 1.0), _f64(xp, -1.0))
     abs_alpha = xp.abs(alpha)
     stall_alpha = xp.abs(_finite(xp, stall_alpha_deg, 14.0))
     reference = xp.abs(_finite(xp, ref_cl, 0.0))
     blend_angle = _f64(xp, _finite(xp, blend_deg, POST_STALL_PLATE_BLEND_DEG))
-    plate = flat_plate_lift_coefficient(xp, alpha)
-    # The blend target is the *magnitude* of the plate value at the blend
-    # angle.  Using the signed value (``sign * blend_angle``) made the
-    # negative branch blend from +reference towards -|target| and the
-    # magnitude collapsed (0.690 -> 0.553 at 20 deg), which is exactly the
-    # spurious dip the fixed target was introduced to remove.
-    target = xp.abs(flat_plate_lift_coefficient(xp, blend_angle))
+    res_param = xp.maximum(_finite(xp, residual_cl, 0.0), 0.0)
+
+    # Base Hoerner plate
+    plate_bare = flat_plate_lift_coefficient(xp, alpha)
+    # Cosine roll-off for residual lift
+    cos_a = xp.maximum(xp.cos(_rad(xp, abs_alpha)), 0.0)
+    plate = plate_bare + sign * res_param * cos_a
+
+    # The blend target is the magnitude of the plate value at the blend angle
+    target_bare = xp.abs(flat_plate_lift_coefficient(xp, blend_angle))
+    cos_blend = xp.maximum(xp.cos(_rad(xp, blend_angle)), 0.0)
+    target = target_bare + res_param * cos_blend
+
     blend = _smoothstep01(
         xp, (abs_alpha - stall_alpha) / xp.maximum(blend_angle - stall_alpha, 1.0)
     )
@@ -553,6 +575,145 @@ def post_stall_lift_coefficient(
         xp.where(abs_alpha <= stall_alpha, sign * reference,
                  xp.where(abs_alpha >= blend_angle, plate, ramp)),
     )
+
+
+def estimate_polhamus_kv(
+    xp: Any,
+    aspect_ratio: Any,
+    sweep_le_deg: Any,
+    taper_ratio: Any = 1.0,
+) -> Any:
+    """Estimate Polhamus suction analogy vortex lift factor K_v from planform geometry.
+
+    According to Polhamus (1966 NASA TN D-3767, 1971 NASA TN D-6482):
+    For sharp-edge delta and swept wings, leading-edge suction translates into
+    normal vortex lift proportional to K_v. On a slender delta wing, K_v approaches
+    pi (~3.14159). For general swept wings, the vortex suction analogy scales with
+    the leading-edge sweep angle and aspect ratio:
+        K_v = pi * sin(Lambda_LE) * (AR / (AR + 2.0 * cos(Lambda_LE)))
+    bounded within [0.0, pi].
+    When leading-edge sweep is zero, K_v is identically 0.0.
+    """
+    ar = xp.maximum(_finite(xp, aspect_ratio, 2.0), 0.1)
+    sweep_rad = _rad(xp, _finite(xp, sweep_le_deg, 0.0))
+    sin_sw = xp.abs(xp.sin(sweep_rad))
+    cos_sw = xp.abs(xp.cos(sweep_rad))
+    kv_raw = math.pi * sin_sw * (ar / xp.maximum(ar + 2.0 * cos_sw, 0.1))
+    return _clamp(xp, kv_raw, 0.0, math.pi)
+
+
+def first_order_lag(
+    xp: Any,
+    current: Any,
+    target: Any,
+    dt: Any,
+    tau: Any,
+) -> Any:
+    """First-order lag filter: tau * dx/dt + x = target.
+
+    Discretised step:
+        x_next = current + (dt / (tau + dt)) * (target - current)
+    When tau <= 0.0 or dt <= 0.0, the response is instantaneous (x_next = target).
+    """
+    dt_val = xp.maximum(_finite(xp, dt, 0.0), 0.0)
+    tau_val = xp.maximum(_finite(xp, tau, 0.0), 0.0)
+    cur = _finite(xp, current, 0.0)
+    tgt = _finite(xp, target, 0.0)
+    active = (tau_val > 1.0e-9) & (dt_val > 1.0e-9)
+    alpha = _safe_div(xp, dt_val, tau_val + dt_val)
+    lagged = cur + alpha * (tgt - cur)
+    return xp.where(active, lagged, tgt)
+
+
+def compute_mass_ratio(
+    xp: Any,
+    mass_kg: Any,
+    density_kgm3: Any,
+    wing_area_m2: Any,
+    mac_m: Any,
+) -> Any:
+    """Non-dimensional mass ratio mu = mass / (rho * S * mac).
+
+    For ultra-light paper gliders, mu is typically on the order of 1 - 5,
+    meaning fluid added mass is not negligible compared to structural mass.
+    """
+    m = xp.maximum(_finite(xp, mass_kg, 0.003), 1.0e-9)
+    rho = xp.maximum(_finite(xp, density_kgm3, 1.225), 1.0e-6)
+    s = xp.maximum(_finite(xp, wing_area_m2, 0.02), 1.0e-9)
+    c = xp.maximum(_finite(xp, mac_m, 0.1), 1.0e-9)
+    return m / (rho * s * c)
+
+
+def compute_added_mass(
+    xp: Any,
+    density_kgm3: Any,
+    wing_area_m2: Any,
+    mac_m: Any,
+) -> Dict[str, Any]:
+    """Apparent (added) fluid mass for a thin planar wing.
+
+    Theoretical flat plate in normal motion (Blevins / Newman):
+        m_added_z = (pi / 4) * rho * S * mac
+        I_added_yy = (pi / 128) * rho * S * mac^3
+    """
+    rho = xp.maximum(_finite(xp, density_kgm3, 1.225), 0.0)
+    s = xp.maximum(_finite(xp, wing_area_m2, 0.02), 0.0)
+    c = xp.maximum(_finite(xp, mac_m, 0.1), 0.0)
+    m_z = (math.pi / 4.0) * rho * s * c
+    i_yy = (math.pi / 128.0) * rho * s * (c * c * c)
+    return {
+        "added_mass_z_kg": m_z,
+        "added_inertia_yy_kgm2": i_yy,
+    }
+
+
+def evaluate_model_validity(
+    xp: Any,
+    mach: Any,
+    reynolds: Any,
+    alpha_deg: Any = 0.0,
+    mass_ratio: Any = 10.0,
+    mach_limit: float = MODEL_MACH_LIMIT,
+    re_min: float = MODEL_REYNOLDS_MIN,
+    re_max: float = MODEL_REYNOLDS_MAX,
+    stall_alpha_margin_deg: float = 45.0,
+    min_mass_ratio: float = 0.5,
+    strict_checks: bool = False,
+) -> Dict[str, Any]:
+    """Evaluate whether flight conditions stay within aerodynamic envelope limits.
+
+    Baseline validity checks:
+    - mach <= mach_limit (incompressible low-speed assumption)
+    - re_min <= reynolds <= re_max (calibrated Reynolds range)
+
+    Extended checks (active when strict_checks=True or accessed via telemetry):
+    - abs(alpha_deg) <= stall_alpha_margin_deg (post-stall applicability limits)
+    - mass_ratio >= min_mass_ratio (added-mass quasi-steady assumption)
+    """
+    m = _finite(xp, mach, 0.0)
+    re = _finite(xp, reynolds, 1.0e4)
+    a = xp.abs(_finite(xp, alpha_deg, 0.0))
+    mu = _finite(xp, mass_ratio, 10.0)
+
+    mach_ok = m <= mach_limit
+    re_ok = (re >= re_min) & (re <= re_max)
+    alpha_ok = a <= stall_alpha_margin_deg
+    mu_ok = mu >= min_mass_ratio
+
+    base_valid = mach_ok & re_ok
+    full_valid = base_valid & alpha_ok & mu_ok
+    valid = xp.where(_flag_array(xp, strict_checks), full_valid, base_valid)
+    mass_ratio_warning = mu < 5.0
+
+    return {
+        "valid": valid,
+        "base_valid": base_valid,
+        "mach_ok": mach_ok,
+        "re_ok": re_ok,
+        "alpha_ok": alpha_ok,
+        "mass_ratio_ok": mu_ok,
+        "mass_ratio_warning": mass_ratio_warning,
+    }
 
 
 def polhamus_attached_branch(
@@ -622,6 +783,7 @@ def lift_coefficient(
     polhamus_kv: Any = 0.0,
     cl_offset: Any = 0.0,
     blend_order: int = STALL_BLEND_ORDER,
+    residual_cl: Any = 0.0,
 ) -> Any:
     """Lift coefficient including the stall break and the elevon offset.
 
@@ -659,7 +821,7 @@ def lift_coefficient(
     attached = _clamp(xp, linear, -ceiling, ceiling)
 
     post_stall = post_stall_lift_coefficient(
-        xp, alpha, linear_at_stall, stall_alpha
+        xp, alpha, linear_at_stall, stall_alpha, residual_cl=residual_cl
     )
     weight = stall_blend_weight(xp, alpha, stall_alpha, sharpness, blend_order)
     value = (1.0 - weight) * attached + weight * post_stall + offset
@@ -719,6 +881,7 @@ def drag_coefficient(
     cl_offset: Any = 0.0,
     polhamus_kp: Any = 0.0,
     polhamus_kv: Any = 0.0,
+    residual_cl: Any = 0.0,
 ) -> Any:
     """Attached polar plus separated pressure drag and wave drag."""
     cl = lift_coefficient(
@@ -732,6 +895,7 @@ def drag_coefficient(
         polhamus_kp=polhamus_kp,
         polhamus_kv=polhamus_kv,
         cl_offset=cl_offset,
+        residual_cl=residual_cl,
     )
     parasite = parasite_drag_coefficient(xp, cd0, reynolds, re_exponent)
     induced = cl * cl / xp.maximum(_finite(xp, polar_constant, 1.0), 1.0e-12)

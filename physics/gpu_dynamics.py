@@ -318,6 +318,9 @@ class FlightParams:
     wind_backend: str = "numpy"
     mean_wind: Any = None
     use_mean_wind_only: bool = False
+    inertia_matrix: Any = None
+    inertia_inv: Any = None
+    sample_wind_stages: bool = False
 
 
 def wind_batch(
@@ -414,6 +417,28 @@ def build_params(
         ),
         axis=-1,
     )
+    # Build full 3x3 inertia tensors and inverses (including off-diagonal cross terms)
+    mats_list = []
+    invs_list = []
+    for item in derived:
+        ixx = max(float(item["roll_inertia_kgm2"]), 1.0e-12)
+        iyy = max(float(item["pitch_inertia_kgm2"]), 1.0e-12)
+        izz = max(float(item["yaw_inertia_kgm2"]), 1.0e-12)
+        ixy = float(item.get("inertia_xy_kgm2", 0.0))
+        ixz = float(item.get("inertia_xz_kgm2", 0.0))
+        iyz = float(item.get("inertia_yz_kgm2", 0.0))
+        t_mat = np.array([
+            [ixx, ixy, ixz],
+            [ixy, iyy, iyz],
+            [ixz, iyz, izz],
+        ], dtype=np.float64)
+        mats_list.append(t_mat)
+        try:
+            invs_list.append(np.linalg.inv(t_mat))
+        except np.linalg.LinAlgError:
+            invs_list.append(np.linalg.pinv(t_mat))
+    inertia_matrix = xp.asarray(np.stack(mats_list, axis=0))
+    inertia_inv = xp.asarray(np.stack(invs_list, axis=0))
     areas = xp.asarray(area_values)
     chords = xp.asarray(chord_values)
     spans = xp.asarray(span_values)
@@ -510,6 +535,8 @@ def build_params(
         wind_backend="numpy",
         mean_wind=wind,
         use_mean_wind_only=use_mean_wind,
+        inertia_matrix=inertia_matrix,
+        inertia_inv=inertia_inv,
     )
 
 
@@ -665,10 +692,20 @@ def _evaluate_state(
         xp, params, omega, coefficients["q_dyn"], speed, beta_rad
     )
 
-    angular_momentum = params.inertia * omega
-    angular_acceleration = (
-        moment_body - _cross(xp, omega, angular_momentum)
-    ) / params.inertia
+    if getattr(params, "inertia_matrix", None) is not None:
+        angular_momentum = xp.matmul(
+            params.inertia_matrix, omega[:, :, xp.newaxis]
+        )[:, :, 0]
+        gyro = _cross(xp, omega, angular_momentum)
+        net_moment = moment_body - gyro
+        angular_acceleration = xp.matmul(
+            params.inertia_inv, net_moment[:, :, xp.newaxis]
+        )[:, :, 0]
+    else:
+        angular_momentum = params.inertia * omega
+        angular_acceleration = (
+            moment_body - _cross(xp, omega, angular_momentum)
+        ) / params.inertia
 
     specific_force = world_to_body_batch(
         xp, rotation, acceleration - gravity_world
@@ -735,25 +772,37 @@ def _rk4(
     h: Any,
     wind: Any,
     k1: Any = None,
+    time_s: float = 0.0,
+    sample_wind_stages: bool = False,
 ) -> Any:
     """One classical RK4 sweep, renormalising the quaternions afterwards.
 
-    The wind field is sampled **once per step** and shared by the four
-    stages: the field varies over seconds, not over the millisecond of one
-    step, and re-evaluating the (expensive) turbulence model four times per
-    step for every case would make the batch far slower than the path it
-    replaces.
-
-    ``k1`` may be supplied by the caller when the derivative of ``y0`` has
-    already been evaluated; it is then reused instead of being computed a
-    second time.
+    When ``sample_wind_stages`` is True, each intermediate RK4 stage samples
+    the local wind field at its updated position and time, matching the
+    reference 6-DoF integrator (flight_sim.py::_rk4).
     """
+    h_col = h[:, xp.newaxis]
+    half_h = 0.5 * h_col
     if k1 is None:
         k1 = _derivative(xp, params, y0, wind)
-    k2 = _derivative(xp, params, y0 + 0.5 * h[:, xp.newaxis] * k1, wind)
-    k3 = _derivative(xp, params, y0 + 0.5 * h[:, xp.newaxis] * k2, wind)
-    k4 = _derivative(xp, params, y0 + h[:, xp.newaxis] * k3, wind)
-    y1 = y0 + (h[:, xp.newaxis] / 6.0) * (k1 + 2.0 * k2 + 2.0 * k3 + k4)
+    if sample_wind_stages and not getattr(params, "use_mean_wind_only", False):
+        mean_dt = float(xp.mean(h))
+        y2 = y0 + half_h * k1
+        w2 = wind_batch(xp, params, y2[:, 0:3], time_s + 0.5 * mean_dt)
+        k2 = _derivative(xp, params, y2, w2)
+
+        y3 = y0 + half_h * k2
+        w3 = wind_batch(xp, params, y3[:, 0:3], time_s + 0.5 * mean_dt)
+        k3 = _derivative(xp, params, y3, w3)
+
+        y4 = y0 + h_col * k3
+        w4 = wind_batch(xp, params, y4[:, 0:3], time_s + mean_dt)
+        k4 = _derivative(xp, params, y4, w4)
+    else:
+        k2 = _derivative(xp, params, y0 + half_h * k1, wind)
+        k3 = _derivative(xp, params, y0 + half_h * k2, wind)
+        k4 = _derivative(xp, params, y0 + h_col * k3, wind)
+    y1 = y0 + (h_col / 6.0) * (k1 + 2.0 * k2 + 2.0 * k3 + k4)
     quat = quaternion_normalize_batch(xp, y1[:, 6:10])
     y1 = xp.concatenate((y1[:, 0:6], quat, y1[:, 10:13]), axis=1)
     return y1
@@ -963,6 +1012,7 @@ def simulate_batch(
     max_steps: int = 20000,
     use_graph: Optional[bool] = None,
     record_interval_s: Optional[float] = None,
+    sample_wind_stages: bool = False,
 ) -> Dict[str, Any]:
     """Integrate a batch of airframes with the 6-DoF rigid-body model.
 
@@ -1125,7 +1175,17 @@ def simulate_batch(
         # the state evaluation above is the same evaluation of the same
         # state.  It is evaluated once and shared instead of twice.
         k1 = _derivative_from_core(xp, params, y, core)
-        y_next = _rk4(xp, params, y, size, wind, k1=k1)
+        current_time = float(xp.mean(acc["time"]))
+        y_next = _rk4(
+            xp,
+            params,
+            y,
+            size,
+            wind,
+            k1=k1,
+            time_s=current_time,
+            sample_wind_stages=getattr(params, "sample_wind_stages", False),
+        )
 
         # --- ground contact ------------------------------------------------
         # The contact is detected on the *stations* of the airframe, not on
@@ -1310,6 +1370,7 @@ def simulate_batch(
             acc[key][...] = value
         wind[...] = saved["wind"]
 
+    params.sample_wind_stages = bool(sample_wind_stages)
     if use_graph is None:
         use_graph = _is_device_module(xp)
     graph = None
