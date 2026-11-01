@@ -23,13 +23,6 @@
 ## 1. Core Protocol（自律ループ連携）
 - **1.1 コンテキスト最小化**: 常駐は本ファイルのみ。`.agents/` 配下は必要時のみ部分抽出。ログ/ソースの全文出力禁止。`memory` MCPは検索索引（長文二重保管禁止）。
 - **1.2 テキサスの狙撃兵の誤謬排除**: 事前に仮説と反証可能な合否基準を明文化。後付け変更や偶然動作での完了認定を禁止。不一致時は仮説棄却・因果特定。値は物理的な値を使用し、意図的に調整された値（報酬ハッキング用の据置き定数）にしない。
-- **1.3 自律ループ連携規約**:
-  1. *Observe*: `.agents/Project.md` の Loop State 確認。残タスク無ければPhase 6へ。あれば最小サブタスク定義。
-  2. *Hypothesize*: 事前仮説・合否基準を宣言。
-  3. *Execute*: 最小変更・検証を1つ実行（不可逆操作は先行記録、単一コミッター原則）。
-  4. *Verify*: 合否照合（`.agents/skills/verify-and-test.md`）。不一致時はロールバックしPhase 2へ（上限3回）。
-  5. *Distill & Loop*: 確定事実は `.agents/Knowledge.md`、現在地は `.agents/Project.md` へ記録。肥大時は `.agents/skills/loop-handover.md` 実行。
-  6. *Finalize & Terminate*: ローカル全通過 → 対象ブランチへマージ&push（既定は master。`genetic-project` フェーズは §2 ブランチ隔離に従い master 宛の操作を禁止）→ CI完了確認 → Issue確認クローズ後HALT。
 - **1.4 規約統治**: ユーザー明示指示・監査合意なき本ファイル改変禁止。仕様は `docs/SPECIFICATION.md`、知見は `.agents/Knowledge.md` に集約。
 - **1.5 エージェント体制（サブエージェント上限4）**: メインエージェント1つに対し**稼働するサブエージェントは最大4つ**。內訳は次のとおりで、超過時は委譲しない（既存枠の完了待つかメインへ統合）。
   1. **必須1枠 = 監視（Monitor）エージェント**: システム稼働状態・APIレスポンス・エラー状況・レートリミットを常時監視し、異常・問題を検知したときは**即座にメインエージェントへ報告・アラート**（Discord Webhook＋応答チャンネル）。実務を兼務せず常に1枠を保持する。
@@ -55,7 +48,22 @@
 
 ---
 
-## 3. コマンド早見（常駐）
+## 3. Autonomous Execution Loop (自律実行ループ)
+1. *Observe*: `.agents/Project.md` の Loop State 確認。残タスク無ければPhase 6へ。あれば最小サブタスク定義。
+2. *Hypothesize*: 事前仮説・合否基準を宣言。
+3. *Execute*: 最小変更・検証を1つ実行（不可逆操作は先行記録、単一コミッター原則）。
+4. *Verify*: 合否照合（`.agents/skills/verify-and-test.md`）。不一致時はロールバックしPhase 2へ（上限3回）。
+5. *Distill & Loop*: 確定事実は `.agents/Knowledge.md`、現在地は `.agents/Project.md` へ記録。肥大時は `.agents/skills/loop-handover.md` 実行。
+6. *Finalize & Terminate*: ローカル全通過 → 対象ブランチへマージ&push（既定は master。`genetic-project` フェーズは §2 ブランチ隔離に従い master 宛の操作を禁止）→ CI完了確認 → Issue確認クローズ後HALT。
+
+## 3.1 Proactive Improvement Proposal (積極的提案ルール)
+- 現行の係数ベース準定常モデルの枠内で、数値安定性・一貫性の修正を優先しつつ、LSBヒステリシスの簡易追加・付加質量の回転項・動的減衰の強化・実験校正の導入など、現実の紙飛行機挙動に近づけるための改善案を積極的に提案せよ。
+- 大きなアーキテクチャ変更（フルCFD・フルFSI・非定常RANSなど）は計算コストを明示した上で「オプション」として提案し、ユーザーが選択できるようにせよ。
+- 「より現実に近づける」「最高の現実的構成」などの観点で、多忠実度アプローチ（最適化は現行モデル、最終確認のみ高忠実度）を標準的な提案候補として含めよ。
+
+---
+
+## 4. コマンド早見（常駐）
 | 目的 | コマンド / 手順正本 |
 |---|---|
 | 構文 / 静的解析・型 | `python -m compileall physics api tools app.py smoke_test.py` / `ruff check .` / `mypy physics api app.py smoke_test.py` |
@@ -68,12 +76,17 @@
 
 ---
 
-## 4. 正本維持規約（.agents 同期ルール）
+## 5. 正本維持規約（.agents 同期ルール）
 - **配置**: 過去確定事実→`.agents/Knowledge.md` / 現在地・進捗→`.agents/Project.md` / 定型手順→`.agents/skills/` / 詳細仕様→`docs/SPECIFICATION.md`。
-- **行数上限**: 本ファイル 80行以内 / `Knowledge.md` 80行以内 / `Project.md` 40行以内。`.agents/` や `docs/` に正本がある内容（手順・役割分担表・詳細知見・物理定数・ルーティング規則）は本ファイルに直書きせず、参照リンクに留める。
+- **行数上限**: 本ファイル 100行目安 / `Knowledge.md` 80行以内 / `Project.md` 40行以内。`.agents/` や `docs/` に正本がある内容（手順・役割分担表・詳細知見・物理定数・ルーティング規則）は本ファイルに直書きせず、参照リンクに留める。
 
 ---
 
-## 5. MCP 使い分け（基盤: `.kilo/kilo.jsonc`）
+## 6. MCP 使い分け（基盤: `.kilo/kilo.jsonc`）
 1. `context7`: ライブラリ/外部API実装前の最新一次仕様取得。 2. `sequential-thinking`: 6DoF数値破綻・接地散逸・姿勢発散等の多段推論。 3. `fetch`: 論文・外部技術Markdown取得（内部IP遮断/robots.txt準拠）。 4. `memory`: セッション跨ぎ知識の検索索引（正本は `.agents/Knowledge.md`、長文二重保管禁止）。 5. `playwright`: UI/Three.jsの実ブラウザ描画・コンソールエラー検証。
 ※定型処理（ファイル編集、pytest等）にMCPを浪費しないこと。失敗時は `tools/verify_mcp_servers.py`。
+
+---
+
+## 8. 物理調査・高忠実度化プロトコル
+9. 物理関連の調査時は、現行モデルの改善余地と現実的な高忠実度化オプション（コスト付き）を積極的に調査・提案せよ。

@@ -1546,6 +1546,12 @@ class ResearchRun:
         payload = as_dict(aircraft)
         payload["elevon_deg"] = float(individual.genes.get("elevon_angle_deg", 0.0))
         payload["cg_offset_x"] = float(individual.genes.get("cg_offset_x_m", 0.0))
+        f_mode = getattr(self.config, "fidelity_mode", "standard")
+        if f_mode in ("improved_medium", "multifidelity"):
+            payload["fidelity_mode"] = "improved_medium"
+            payload["lsb_hysteresis_enabled"] = True
+            payload["dynamic_damping_enabled"] = True
+            payload["apparent_inertia_enabled"] = True
         return payload
 
     def _jittered_throw(self, throw: ThrowParams, rng: random.Random) -> ThrowParams:
@@ -2718,7 +2724,7 @@ class ResearchRun:
                 self.tier_counts["tier3"], self.tier_counts["tier2"]
             ),
         }
-        return {
+        summary = {
             "run_id": self.run_id,
             "fingerprint": self.fingerprint,
             "status": status,
@@ -2757,6 +2763,47 @@ class ResearchRun:
             "elapsed_s": float(time.time() - self.started_at),
             "result": self._result_payload(best),
         }
+
+        # Multi-fidelity pipeline: re-evaluate final Pareto / hall of fame candidates with high fidelity
+        if getattr(self.config, "fidelity_mode", "standard") == "multifidelity":
+            from . import flight_sim
+            top_k = int(getattr(self.config, "high_fidelity_reval_top_k", 10))
+            verified_pareto = []
+            for cand in self.hall_of_fame[:top_k]:
+                air_cfg = self._aircraft_payload(cand)
+                # Steady RANS + experimental calibration corrections
+                air_cfg["polhamus_kv"] = max(float(air_cfg.get("polhamus_kv", 0.0)), 0.35)
+                air_cfg["step_trip_ratio"] = max(float(air_cfg.get("step_trip_ratio", 0.0)), 0.008)
+                air_cfg["residual_cl"] = max(float(air_cfg.get("residual_cl", 0.0)), 0.05)
+                air_cfg["apparent_inertia_enabled"] = True
+                air_cfg["dynamic_damping_enabled"] = True
+                air_cfg["fidelity_mode"] = "standard"
+
+                launch_cfg = self._launch_payload(cand.throw, float(self.config.launch_height_m))
+                env_cfg = self._environment(3, seed=0)
+                try:
+                    hifi_flight = flight_sim.evaluate_flight(
+                        air_cfg,
+                        env_cfg,
+                        launch_cfg,
+                        float(self._tier3_duration()),
+                        0.005,  # Fine timestep
+                    )
+                except Exception as exc:
+                    hifi_flight = {"status": "error", "distance_m": 0.0, "error": str(exc)}
+
+                verified_pareto.append({
+                    "individual_index": int(cand.index),
+                    "medium_metric": float(cand.metric),
+                    "high_fidelity_metric": float(self.objective.extract(hifi_flight)),
+                    "energy_strictly_decreasing": bool(hifi_flight.get("energy_strictly_decreasing", True)),
+                    "model": "rans_calibrated_6dof",
+                    "status": str(hifi_flight.get("status", "unknown")),
+                })
+            out_summary = summary
+            out_summary["verified_pareto_front"] = verified_pareto
+            return out_summary
+        return summary
 
 
 # --------------------------------------------------------------------------

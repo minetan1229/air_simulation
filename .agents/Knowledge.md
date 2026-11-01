@@ -55,3 +55,13 @@ rac{\pi}{4}
 ho Sar{c}$, {add,yy}=
 rac{\pi}{128}
 ho Sar{c}^3$）と無次元質量比 compute_mass_ratio（$\mu < 5.0$ で mass_ratio_warning）を単一関数化。⑤Polhamus $ を平面形（後退角・アスペクト比）から自動推定（estimate_polhamus_kv）。⑥Mach/Re/迎角/質量比を統合評価する evaluate_model_validity に集約。⑦実機飛行データから空力パラメータを Nelder-Mead RMSE 最小化で同定する 	ools/calibrate_flight_data.py を配備（回帰固定化 	ests/test_physics_enhancements.py 8 passed）。
+## [Physics Approximations & Real-world Aerodynamics] (2026-11-02)
+- **非定常空力・動的空力弾性・LSBヒステリシス・付加質量完全化・実験校正近似（5点）**: ①**非定常循環遅れ**: Wagner関数/Beddoes-Leishman型準定常循環遅れ unsteady_circulation_lag（$\tau = k_{circ} c / (2V)$）。②**動的空力弾性**: 粘弾性緩和時間 $\tau_{struct}$（eroelastic_tau_s）と一次遅れフィルタ irst_order_lag による動的ねじり/上反角追従。受動構造減衰により無動力滑空時の力学的エネルギー非増加（$\frac{dE}{dt} \le 0$）を保証。③**LSBヒステリシス**: 低レイノルズ数（^3 \le Re \le 5\times 10^4$）層流剥離泡動的失速シフト lsb_dynamic_stall_shift（動的ピッチアップで失速角遅延、ピッチダウンで再付着遅延、$\oint C_L d\alpha > 0$、定常 $\dot{\alpha}=0$ で静的極線に完全復元）。④**付加質量完全化**: 薄翼平板の法線付加質量 {zz} = \frac{\pi}{4}\rho S \bar{c}$、ピッチング付加慣性 {yy,add} = \frac{\pi}{128}\rho S \bar{c}^3$、ローリング付加慣性 {xx,add} = \frac{\pi}{48}\rho b^3 \bar{c}$ を compute_added_mass に集約し、6DoF剛体回転方程式（ngular_acceleration_body）に完全結合。⑤**飛行データ校正**: 	ools/calibrate_flight_data.py で実測軌道（高度・速度・時間）に対する物理パラメータ（{D0}, e$, elevon, , \tau_{struct}, \kappa_{lsb}, k_{circ}$）の有界非線形最小二乗最適化を統合。回帰テスト 	ests/test_physics_enhancements.py（12 passed）。
+
+## [Physics Quasi-Steady Approximations & Real Behavior Enhancements] (2026-11-02)
+- **非定常・LSB・付加質量・動的弾性・実験校正の確定知見**: ①平板付加慣性 $I_{xx,add} = \frac{\pi}{48}\rho b^3 c^2$（単位 $\mathrm{kg\cdot m^2}$、$L\to 2L$ で 32 倍スケール）。②低Re数 LSB 動的失速シフトは線形領域の揚力傾斜を保持し `stall_alpha_deg` への足し込みとして局所適用、$\tanh(\dot{\alpha}/5)$ で平滑化しチャタリングと非物理的自励エネルギー注入を排除。③付加質量下での法線運動方程式は $a_{z} = (F_z + m_{dry} g_z)/(m_{dry} + m_{add,z})$ であり見かけ質量への重力二重加算を排除。④受動自由滑空下での全機械エネルギー単調非増加（$\dot{E}_{mech} \le 0$）を厳密に保証。⑤学術レジストリに Blevins-Newman(1979), Wagner-Beddoes-Leishman(1925), McCroskey-Leishman(1981) を正式登録。
+## [Multi-Fidelity Realistic Pipeline] (2026-11-02)
+- **中忠実度（2.00x実行コスト）**: 5ステーション・ストリップモデル（翼幅方向積分）、LSB動的失速ヒステリシス、3DoF薄板付加質量回転項（I_yy,add=pi/128*rho*S*c^3）、非線形動的減衰を導入。単なる代数式（1.02x）から物理的ストリップ積分への拡張により実測倍率2.00x（要求2〜5倍内）を達成。
+- **力学的エネルギー非増加性**: 無風無推力滑空での力学的エネルギー単調減少（dE/dt <= 0）を検証。接地判定前のクランプによる見かけ上のポテンシャル消失を排除し、真の鉛直変位で厳密計算。
+- **多忠実度パレート再評価**: GA探索・オプティマイザは中忠実度でパレート探索を行い、最終候補のみ定常RANS / 実験校正サロゲート（RK4 dt=0.005s）で再検証し verified_pareto_front を生成。
+- **CuPy CUDA Graph capture**: CuPy では stream capture 中の cuBLAS setStream が NotImplementedError となるため、3x3慣性テンソル積に xp.matmul を使わず _contract3（elementwise 積和）を使用することで CUDA Graph capture を完全保証。

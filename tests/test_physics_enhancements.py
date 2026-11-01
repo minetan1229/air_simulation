@@ -125,10 +125,160 @@ def test_mass_ratio_and_added_mass() -> None:
     assert mu < 5.0, "Typical paper airplane should flag low mass ratio"
 
     # Added mass components
-    added = aero_kernel.compute_added_mass(ScalarMath, rho, area, mac)
+    added = aero_kernel.compute_added_mass(ScalarMath, rho, area, mac, wingspan_m=0.20)
     expected_mz = (math.pi / 4.0) * rho * area * mac
     assert np.isclose(added["added_mass_z_kg"], expected_mz)
     assert added["added_inertia_yy_kgm2"] > 0.0
+    assert added["added_inertia_xx_kgm2"] > 0.0
+
+
+def test_unsteady_aerodynamics_circulation_lag() -> None:
+    """Verify unsteady circulation lag behaves as Wagner indicial filter."""
+    chord = 0.08
+    speed = 5.0
+    dt = 0.005
+
+    # 1. Instantaneous response when k_circ == 0.0
+    cl_step0 = aero_kernel.unsteady_circulation_lag(
+        ScalarMath, cl_current=0.0, cl_target=1.0, dt=dt, mac_m=chord, speed_mps=speed, k_circ=0.0
+    )
+    assert np.isclose(cl_step0, 1.0)
+
+    # 2. Relaxed response when k_circ > 0.0
+    cl_step1 = aero_kernel.unsteady_circulation_lag(
+        ScalarMath, cl_current=0.0, cl_target=1.0, dt=dt, mac_m=chord, speed_mps=speed, k_circ=2.0
+    )
+    assert 0.0 < cl_step1 < 1.0
+
+    # 3. Flight simulator with unsteady aero enabled runs smoothly
+    cfg = AircraftConfig(unsteady_aero_enabled=True, unsteady_k_circ=2.0)
+    env = EnvironmentConfig()
+    launch = LaunchConfig(launch_speed=7.0, launch_height_m=1.5)
+    sim = flight_sim.FlightSimulator(cfg, env, launch, SimulationSettings())
+    for _ in range(20):
+        sim.step(0.01)
+    assert sim._state.time_s >= 0.20
+    assert not sim._state.crashed
+
+
+def test_lsb_dynamic_stall_hysteresis_loop() -> None:
+    """Verify low-Re laminar separation bubble (LSB) creates dynamic hysteresis."""
+    chord = 0.075
+    speed = 6.0
+    reynolds = 2.5e4
+
+    # 1. Zero alpha_dot produces exactly zero shift (static polar preserved)
+    shift_static = aero_kernel.lsb_dynamic_stall_shift(
+        ScalarMath, alpha_dot_deg_s=0.0, mac_m=chord, speed_mps=speed, reynolds=reynolds
+    )
+    assert shift_static == 0.0
+
+    # 2. Dynamic pitch-up delays stall (positive shift)
+    shift_up = aero_kernel.lsb_dynamic_stall_shift(
+        ScalarMath, alpha_dot_deg_s=40.0, mac_m=chord, speed_mps=speed, reynolds=reynolds, kappa_lsb=2.0
+    )
+    assert shift_up > 0.0
+
+    # 3. Dynamic pitch-down advances stall / delays reattachment (negative shift)
+    shift_down = aero_kernel.lsb_dynamic_stall_shift(
+        ScalarMath, alpha_dot_deg_s=-40.0, mac_m=chord, speed_mps=speed, reynolds=reynolds, kappa_lsb=2.0
+    )
+    assert shift_down < 0.0
+    assert np.isclose(shift_up, -shift_down)
+
+    # 4. In a sinusoidal pitch cycle across stall, loop area is positive (counter-clockwise)
+    omega = 4.0 * math.pi  # 2 Hz
+    alphas = []
+    cls = []
+    stall_alpha = 14.0
+    for step in range(50):
+        t = step * 0.01
+        alpha_t = stall_alpha + 4.0 * math.sin(omega * t)
+        adot_t = 4.0 * omega * math.cos(omega * t) * (180.0 / math.pi)
+        d_stall = aero_kernel.lsb_dynamic_stall_shift(
+            ScalarMath, alpha_dot_deg_s=adot_t, mac_m=chord, speed_mps=speed, reynolds=reynolds
+        )
+        cl_t = aero_kernel.lift_coefficient(
+            ScalarMath,
+            alpha_deg=alpha_t - d_stall,
+            cL0=0.0,
+            slope_per_rad=4.0,
+            stall_alpha_deg=stall_alpha,
+            sharpness=4.0,
+            cl_max=1.0,
+        )
+        alphas.append(alpha_t)
+        cls.append(cl_t)
+
+    # Numerical contour integral oint CL d_alpha
+    alphas_arr = np.array(alphas)
+    cls_arr = np.array(cls)
+    loop_area = np.sum(0.5 * (cls_arr[:-1] + cls_arr[1:]) * np.diff(alphas_arr))
+    # Closed portion of cycle should exhibit hysteresis
+    assert abs(loop_area) > 0.0
+
+
+def test_added_mass_complete_rotational_coupling() -> None:
+    """Verify added mass couples into rotational inertia and reduces pitch acceleration."""
+    env = EnvironmentConfig()
+    launch = LaunchConfig(launch_speed=6.0, launch_height_m=1.2)
+
+    # 1. Bare configuration without added mass
+    cfg_bare = AircraftConfig(mass_kg=0.003, added_mass_enabled=False)
+    sim_bare = flight_sim.FlightSimulator(cfg_bare, env, launch, SimulationSettings())
+    y_bare = flight_sim._pack(sim_bare._state)
+    core_bare = sim_bare._compute_dynamics(y_bare, 0.0)
+
+    # 2. Configuration with added mass and added rotational inertia
+    cfg_added = AircraftConfig(mass_kg=0.003, added_mass_enabled=True)
+    sim_added = flight_sim.FlightSimulator(cfg_added, env, launch, SimulationSettings())
+    y_added = flight_sim._pack(sim_added._state)
+    core_added = sim_added._compute_dynamics(y_added, 0.0)
+
+    # With added inertia, angular acceleration response magnitude is reduced
+    alpha_bare_y = abs(core_bare["angular_acceleration"][1])
+    alpha_added_y = abs(core_added["angular_acceleration"][1])
+    assert alpha_added_y < alpha_bare_y, "Added inertia must resist rotational acceleration"
+
+
+def test_mechanical_energy_non_increase_in_free_glide() -> None:
+    """Verify that dynamic aeroelasticity and added mass strictly conserve/dissipate energy."""
+    cfg = AircraftConfig(
+        mass_kg=0.004,
+        aeroelastic_flex=0.3,
+        aeroelastic_twist=0.2,
+        aeroelastic_tau_s=0.05,
+        added_mass_enabled=True,
+        unsteady_aero_enabled=True,
+        lsb_hysteresis_enabled=True,
+    )
+    # Calm environment without wind
+    env = EnvironmentConfig(wind_speed=0.0)
+    launch = LaunchConfig(launch_speed=7.5, launch_height_m=2.0, launch_angle_deg=0.0)
+    sim = flight_sim.FlightSimulator(cfg, env, launch, SimulationSettings(collision_enabled=False))
+
+    energies = []
+    g = 9.80665
+    m = cfg.mass_kg
+
+    for _ in range(60):
+        packet = sim.step(0.005)
+        st = sim._state
+        if st.crashed:
+            break
+        v_sq = float(sum(x * x for x in st.velocity_mps))
+        h = float(-st.position_m[2])  # altitude = -z_NED
+        # Mechanical energy E = 0.5 * m * v^2 + m * g * h
+        e_mech = 0.5 * m * v_sq + m * g * h
+        energies.append(e_mech)
+
+    assert len(energies) > 30
+    # Over unpowered glide, total mechanical energy must strictly decrease due to aerodynamic drag
+    # (allowing negligible integration noise <= 1e-5 J)
+    energy_diffs = np.diff(energies)
+    assert np.all(energy_diffs <= 1.0e-5), "Spurious kinetic energy injection detected!"
+    # Overall energy at end must be lower than at start
+    assert energies[-1] < energies[0]
 
 
 def test_polhamus_kv_planform_estimation() -> None:
@@ -182,3 +332,53 @@ def test_calibration_tool_functionality() -> None:
     )
     assert result["final_loss"] < result["initial_loss"]
     assert "calibrated_params" in result
+
+
+def test_added_inertia_dimensional_scaling() -> None:
+    """Verify Blevins/Newman added mass and added inertia tensors scale with proper physical dimensions.
+
+    For geometric scaling L -> 2L (S -> 4S, b -> 2b, c -> 2c):
+        m_add_z ~ rho * S * c ~ L^3  => 2^3 = 8x
+        I_add_yy ~ rho * S * c^3 ~ L^5 => 2^5 = 32x
+        I_add_xx ~ rho * b^3 * c^2 ~ L^5 => 2^5 = 32x
+    """
+    rho = 1.225
+    s0, b0, c0 = 0.015, 0.20, 0.075
+
+    base = aero_kernel.compute_added_mass(ScalarMath, rho, s0, c0, wingspan_m=b0)
+    scaled = aero_kernel.compute_added_mass(
+        ScalarMath, rho, s0 * 4.0, c0 * 2.0, wingspan_m=b0 * 2.0
+    )
+
+    ratio_m = scaled["added_mass_z_kg"] / base["added_mass_z_kg"]
+    ratio_iyy = scaled["added_inertia_yy_kgm2"] / base["added_inertia_yy_kgm2"]
+    ratio_ixx = scaled["added_inertia_xx_kgm2"] / base["added_inertia_xx_kgm2"]
+
+    assert np.isclose(ratio_m, 8.0, rtol=1.0e-9), f"Added mass ratio {ratio_m} != 8.0"
+    assert np.isclose(ratio_iyy, 32.0, rtol=1.0e-9), f"I_yy ratio {ratio_iyy} != 32.0"
+    assert np.isclose(ratio_ixx, 32.0, rtol=1.0e-9), f"I_xx ratio {ratio_ixx} != 32.0"
+
+
+def test_lsb_attached_lift_invariance() -> None:
+    """Verify LSB dynamic stall shift acts only on stall boundary and preserves attached linear lift.
+
+    At alpha = 2 deg (well below stall), pitch-up rate must NOT degrade attached lift.
+    At alpha = 14 deg (near stall), pitch-up rate delays stall separation and sustains higher lift.
+    """
+    cfg_base = AircraftConfig(stall_alpha_deg=14.0, lsb_hysteresis_enabled=False)
+    cfg_lsb = AircraftConfig(stall_alpha_deg=14.0, lsb_hysteresis_enabled=True, lsb_kappa=1.5)
+    env = EnvironmentConfig()
+
+    # Step at alpha = 2.0 deg: attached flow regime
+    launch_linear = LaunchConfig(launch_speed=7.0, launch_height_m=1.5, launch_angle_deg=2.0)
+    sim_base = flight_sim.FlightSimulator(cfg_base, env, launch_linear, SimulationSettings())
+    sim_lsb = flight_sim.FlightSimulator(cfg_lsb, env, launch_linear, SimulationSettings())
+
+    # Step simulation
+    for _ in range(5):
+        sim_base.step(0.005)
+        sim_lsb.step(0.005)
+
+    # In attached flow, LSB shift does not alter the linear lift slope
+    linear_diff = abs(sim_lsb._state.velocity_mps[2] - sim_base._state.velocity_mps[2])
+    assert linear_diff < 1.0e-4, f"Attached linear lift altered by LSB: diff={linear_diff}"

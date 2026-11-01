@@ -344,6 +344,15 @@ class AircraftConfig:
     paper_grain_angle_deg: float = 0.0  # paper fiber angle: 0 = MD (longitudinal), 90 = CD (transverse)
     paper_anisotropy_ratio: float = 1.8  # E_MD / E_CD ratio (typical paper 1.5..2.2)
     added_mass_enabled: bool = False  # apparent mass tensor for lightweight bodies
+    aeroelastic_tau_s: float = 0.0  # viscoelastic relaxation time constant (s)
+    unsteady_aero_enabled: bool = False  # unsteady circulation / downwash lag
+    unsteady_k_circ: float = 2.0  # circulatory lag scaling factor
+    lsb_hysteresis_enabled: bool = False  # laminar separation bubble dynamic hysteresis
+    lsb_kappa: float = 1.5  # LSB dynamic stall overshoot sensitivity (deg)
+    residual_cl: float = 0.0  # post-stall residual lift parameter
+    dynamic_damping_enabled: bool = False  # separation-aware non-linear dynamic damping
+    apparent_inertia_enabled: bool = False  # 3-DoF thin plate rotational apparent inertia
+    fidelity_mode: str = "standard"  # "standard" | "improved_medium" | "multifidelity"
     ground_pitch_coupling: float = 0.0  # nose-down pitching moment coupling in ground effect
     ground_cushion_lift: float = 0.0  # ram pressure cushion lift gain in ground effect
 
@@ -435,6 +444,15 @@ class AircraftConfig:
             paper_grain_angle_deg=clamp(self.paper_grain_angle_deg, *AIRCRAFT_RANGES["paper_grain_angle_deg"]),
             paper_anisotropy_ratio=clamp(self.paper_anisotropy_ratio, *AIRCRAFT_RANGES["paper_anisotropy_ratio"]),
             added_mass_enabled=bool(self.added_mass_enabled),
+            aeroelastic_tau_s=clamp(self.aeroelastic_tau_s, *AIRCRAFT_RANGES["aeroelastic_tau_s"]),
+            unsteady_aero_enabled=bool(self.unsteady_aero_enabled),
+            unsteady_k_circ=clamp(self.unsteady_k_circ, *AIRCRAFT_RANGES["unsteady_k_circ"]),
+            lsb_hysteresis_enabled=bool(self.lsb_hysteresis_enabled),
+            lsb_kappa=clamp(self.lsb_kappa, *AIRCRAFT_RANGES["lsb_kappa"]),
+            residual_cl=clamp(self.residual_cl, *AIRCRAFT_RANGES["residual_cl"]),
+            dynamic_damping_enabled=bool(self.dynamic_damping_enabled),
+            apparent_inertia_enabled=bool(self.apparent_inertia_enabled),
+            fidelity_mode=str(self.fidelity_mode or "standard"),
             ground_pitch_coupling=clamp(self.ground_pitch_coupling, *AIRCRAFT_RANGES["ground_pitch_coupling"]),
             ground_cushion_lift=clamp(self.ground_cushion_lift, *AIRCRAFT_RANGES["ground_cushion_lift"]),
             cm0=clamp(self.cm0, *AIRCRAFT_RANGES["cm0"]),
@@ -1277,6 +1295,7 @@ class OptimizerConfig:
     launch: LaunchConfig = field(default_factory=LaunchConfig)
     k_nn: int = 4
     rbf_gamma: float = 0.5
+    fidelity_mode: str = "standard"
 
     def variable(self, name: str) -> DesignVariable:
         for candidate in DESIGN_VARIABLE_CATALOGUE:
@@ -1543,6 +1562,10 @@ AIRCRAFT_RANGES: Dict[str, Tuple[float, float]] = {
     "aeroelastic_compliance": (0.0, 5.0),
     "aeroelastic_morph_exponent": (0.5, 12.0),
     "aeroelastic_pressure_scale_pa": (1.0, 1.0e4),
+    "aeroelastic_tau_s": (0.0, 5.0),
+    "unsteady_k_circ": (0.0, 10.0),
+    "lsb_kappa": (0.0, 10.0),
+    "residual_cl": (0.0, 1.0),
     "paper_grain_angle_deg": (-90.0, 90.0),
     "paper_anisotropy_ratio": (1.0, 5.0),
     "ground_pitch_coupling": (0.0, 5.0),

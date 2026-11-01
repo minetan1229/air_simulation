@@ -342,6 +342,7 @@ physics/origami_genome.py の GripThresholds 既定（最低高さ 8 mm / 前後
 | 6 | `parallel-optimizer` | `physics/parallel_engine.py`, `physics/optimizer_domain.py`, `tests/test_optimizer.py` | GPU一括評価・ケース別duration_s・CPU完全一致フォールバック・NSGA-II |
 | 7 | `job-eta-storage` | `physics/job_manager.py`, `physics/storage_domain.py`, `tests/test_jobs.py` | JobManager・EMA ETA・進捗管理・JSON/CSV エクスポート |
 | 8 | `ui-gpu-viz` | `templates/index.html`, `static/css/console.css`, `static/js/*.js` | Google Clean UI・Three.js シェーダー・時間軸・テレメトリ |
+| 9 | `physics-proposal` | `AGENTS.md`, `physics/*`, `docs/*` | 物理関連調査時の現行モデル改善余地・現実的高忠実度化オプション（計算コスト明記）の積極調査・提案 |
 
 ---
 

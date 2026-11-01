@@ -44,6 +44,10 @@ PARAM_SPECS: Dict[str, Dict[str, Any]] = {
     "aeroelastic_flex": {"bounds": (0.0, 1.0), "default": 0.0, "scale": 0.1},
     "polhamus_kv": {"bounds": (0.0, math.pi), "default": 0.0, "scale": 0.5},
     "cL0": {"bounds": (-0.1, 0.4), "default": 0.0, "scale": 0.05},
+    "unsteady_k_circ": {"bounds": (0.0, 5.0), "default": 2.0, "scale": 1.0},
+    "lsb_kappa": {"bounds": (0.0, 5.0), "default": 1.5, "scale": 0.5},
+    "residual_cl": {"bounds": (0.0, 0.4), "default": 0.0, "scale": 0.05},
+    "aeroelastic_tau_s": {"bounds": (0.0, 1.0), "default": 0.0, "scale": 0.05},
 }
 
 

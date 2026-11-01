@@ -693,14 +693,10 @@ def _evaluate_state(
     )
 
     if getattr(params, "inertia_matrix", None) is not None:
-        angular_momentum = xp.matmul(
-            params.inertia_matrix, omega[:, :, xp.newaxis]
-        )[:, :, 0]
+        angular_momentum = _contract3(xp, params.inertia_matrix, omega)
         gyro = _cross(xp, omega, angular_momentum)
         net_moment = moment_body - gyro
-        angular_acceleration = xp.matmul(
-            params.inertia_inv, net_moment[:, :, xp.newaxis]
-        )[:, :, 0]
+        angular_acceleration = _contract3(xp, params.inertia_inv, net_moment)
     else:
         angular_momentum = params.inertia * omega
         angular_acceleration = (

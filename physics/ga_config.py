@@ -57,6 +57,10 @@ __all__ = [
     "STAT_MODE_HYBRID",
     "STAT_MODE_BEST",
     "STAT_MODES",
+    "FIDELITY_STANDARD",
+    "FIDELITY_IMPROVED_MEDIUM",
+    "FIDELITY_MULTIFIDELITY",
+    "FIDELITY_MODES",
     "GAConfig",
     "config_from_mapping",
     "load_config_file",
@@ -171,6 +175,15 @@ STAT_MODES: Tuple[str, ...] = (
     STAT_MODE_MEDIAN,
     STAT_MODE_HYBRID,
     STAT_MODE_BEST,
+)
+
+FIDELITY_STANDARD: str = "standard"
+FIDELITY_IMPROVED_MEDIUM: str = "improved_medium"
+FIDELITY_MULTIFIDELITY: str = "multifidelity"
+FIDELITY_MODES: Tuple[str, ...] = (
+    FIDELITY_STANDARD,
+    FIDELITY_IMPROVED_MEDIUM,
+    FIDELITY_MULTIFIDELITY,
 )
 
 
@@ -447,6 +460,8 @@ class GAConfig:
     symmetry_change_rate: float = DEFAULT_SYMMETRY_CHANGE_RATE
 
     # --- physics fidelity -------------------------------------------------
+    fidelity_mode: str = FIDELITY_STANDARD
+    high_fidelity_reval_top_k: int = 10
     #: Duration of the intermediate tier; ``0`` selects the objective default.
     tier2_duration_s: float = 0.0
     #: Duration of the full fidelity tier; ``0`` selects the objective default.
@@ -620,6 +635,10 @@ class GAConfig:
             raise ValueError("'launch_height_m' must be positive")
         if self.dt_max <= 0.0:
             raise ValueError("'dt_max' must be positive")
+        if self.fidelity_mode not in FIDELITY_MODES:
+            raise ValueError(f"unknown fidelity mode '{self.fidelity_mode}'; expected one of {', '.join(FIDELITY_MODES)}")
+        if self.high_fidelity_reval_top_k < 1:
+            raise ValueError("'high_fidelity_reval_top_k' must be at least 1")
         return self
 
     # ------------------------------------------------------------------

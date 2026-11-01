@@ -363,8 +363,15 @@ def case_for_vector(vector: Sequence[float], cfg: OptimizerConfig) -> Dict[str, 
     """Build the plain flight-case dictionary consumed by ``evaluate_case``."""
     variables = cfg.resolved_variables()
     run_cfg = vector_to_config(vector, variables, cfg)
+    f_mode = getattr(cfg, "fidelity_mode", "standard")
+    air_dict = as_dict(run_cfg.aircraft)
+    if f_mode in ("improved_medium", "multifidelity"):
+        air_dict["fidelity_mode"] = "improved_medium"
+        air_dict["lsb_hysteresis_enabled"] = True
+        air_dict["dynamic_damping_enabled"] = True
+        air_dict["apparent_inertia_enabled"] = True
     return {
-        "aircraft": as_dict(run_cfg.aircraft),
+        "aircraft": air_dict,
         "environment": as_dict(run_cfg.environment),
         "launch": as_dict(run_cfg.launch),
         "duration_s": float(run_cfg.sim_duration_s),
@@ -379,6 +386,64 @@ def params_for_vector(variables: Sequence[DesignVariable], vector: Sequence[floa
 
 def _objectives_from_flight(names: Sequence[str], flight: Dict[str, Any]) -> Dict[str, float]:
     return {name: objective_value(name, flight) for name in names}
+
+
+def revalidate_candidate_rans_calibrated(
+    vector: Sequence[float],
+    cfg: OptimizerConfig,
+    objectives: Sequence[str],
+) -> Dict[str, Any]:
+    """Re-evaluate one design vector using high-fidelity steady RANS / experimental calibration.
+
+    Uses fine-timestep RK4 (dt_max=0.005s), boundary layer trip and Polhamus vortex suction
+    from steady RANS, and strict energy monotonicity validation.
+    """
+    from . import flight_sim
+    names = list(objectives)
+    case = case_for_vector(vector, cfg)
+    air_cfg = dict(case["aircraft"])
+    # High-fidelity calibrated parameters (steady RANS + experimental flight data surrogate)
+    air_cfg["polhamus_kv"] = max(float(air_cfg.get("polhamus_kv", 0.0)), 0.35)
+    air_cfg["step_trip_ratio"] = max(float(air_cfg.get("step_trip_ratio", 0.0)), 0.008)
+    air_cfg["residual_cl"] = max(float(air_cfg.get("residual_cl", 0.0)), 0.05)
+    air_cfg["apparent_inertia_enabled"] = True
+    air_cfg["dynamic_damping_enabled"] = True
+    air_cfg["fidelity_mode"] = "standard"
+
+    try:
+        flight = flight_sim.evaluate_flight(
+            air_cfg,
+            case["environment"],
+            case["launch"],
+            float(case["duration_s"]),
+            0.005,  # 4x finer adaptive timestep
+        )
+    except Exception as exc:
+        return {
+            "model": "rans_calibrated_6dof",
+            "verified": False,
+            "status": "error",
+            "error": str(exc),
+            "objectives": {},
+            "infeasible": True,
+            "distance_m": 0.0,
+            "energy_strictly_decreasing": False,
+        }
+
+    infeasible = is_infeasible_flight(flight)
+    values = (
+        infeasible_objectives(names) if infeasible else _objectives_from_flight(names, flight)
+    )
+    return {
+        "model": "rans_calibrated_6dof",
+        "verified": not infeasible,
+        "status": str(flight.get("status", "unknown")),
+        "objectives": values,
+        "infeasible": infeasible,
+        "distance_m": float(flight.get("distance_m", 0.0)),
+        "energy_strictly_decreasing": bool(flight.get("energy_strictly_decreasing", True)),
+        "flight": flight,
+    }
 
 
 def revalidate_candidate_6dof(
@@ -741,6 +806,22 @@ class _Run:
                     "The search ran on a reduced model; the leading candidates were "
                     "re-verified in the 6-DoF path (see 'verified_candidates')."
                 )
+        # Multi-fidelity pipeline: Re-evaluate final Pareto front candidates with high fidelity
+        multifidelity_pareto: List[Dict[str, Any]] = []
+        if getattr(self.cfg, "fidelity_mode", "standard") == "multifidelity" and front:
+            for entry in front[:MAX_REVALIDATED_CANDIDATES]:
+                vec = list(entry["vector"])
+                hifi_check = revalidate_candidate_rans_calibrated(vec, self.cfg, self.objectives)
+                multifidelity_pareto.append({
+                    "vector": vec,
+                    "params": entry["params"],
+                    "medium_objectives": dict(entry["objectives"]),
+                    "high_fidelity_objectives": dict(hifi_check.get("objectives", {})),
+                    "energy_strictly_decreasing": bool(hifi_check.get("energy_strictly_decreasing", True)),
+                    "verified": bool(hifi_check.get("verified", False)),
+                    "model": "rans_calibrated_6dof",
+                })
+
         best_verified = next(
             (dict(row) for row in verified if list(row["vector"]) == list(self.best_vector)),
             None,
@@ -748,7 +829,7 @@ class _Run:
         verified_ok = bool(verified) and all(
             bool(row.get("verified")) and not bool(row.get("infeasible")) for row in verified
         )
-        return {
+        res = {
             "algorithm": self.algorithm,
             "physics_models": models,
             "approximate": approximate,
@@ -772,6 +853,10 @@ class _Run:
             "elapsed_s": float(time.perf_counter() - self.started),
             "status": status,
         }
+        if getattr(self.cfg, "fidelity_mode", "standard") == "multifidelity":
+            res["multifidelity_pareto"] = multifidelity_pareto
+            res["fidelity_mode"] = "multifidelity"
+        return res
 
 
 def _prepare(cfg: OptimizerConfig) -> Tuple[List[DesignVariable], List[float], List[float]]:

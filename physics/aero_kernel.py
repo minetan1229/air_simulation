@@ -91,6 +91,10 @@ __all__ = [
     "compute_mass_ratio",
     "compute_added_mass",
     "evaluate_model_validity",
+    "unsteady_circulation_lag",
+    "lsb_dynamic_stall_shift",
+    "lsb_dynamic_stall_hysteresis",
+    "nonlinear_dynamic_damping",
 ]
 
 #: Reference Reynolds number of the ``cd0`` correlation.
@@ -649,22 +653,190 @@ def compute_added_mass(
     density_kgm3: Any,
     wing_area_m2: Any,
     mac_m: Any,
+    wingspan_m: Any = None,
 ) -> Dict[str, Any]:
     """Apparent (added) fluid mass for a thin planar wing.
 
     Theoretical flat plate in normal motion (Blevins / Newman):
         m_added_z = (pi / 4) * rho * S * mac
         I_added_yy = (pi / 128) * rho * S * mac^3
+        I_added_xx = (pi / 48) * rho * b^3 * mac^2
     """
     rho = xp.maximum(_finite(xp, density_kgm3, 1.225), 0.0)
     s = xp.maximum(_finite(xp, wing_area_m2, 0.02), 0.0)
     c = xp.maximum(_finite(xp, mac_m, 0.1), 0.0)
+    if wingspan_m is not None:
+        b = xp.maximum(_finite(xp, wingspan_m, 0.20), 0.0)
+    else:
+        # Default aspect ratio ~ 3 estimate if span not provided
+        b = xp.sqrt(xp.maximum(s * 3.0, 1.0e-6))
     m_z = (math.pi / 4.0) * rho * s * c
     i_yy = (math.pi / 128.0) * rho * s * (c * c * c)
+    i_xx = (math.pi / 48.0) * rho * (b * b * b) * (c * c)
     return {
         "added_mass_z_kg": m_z,
         "added_inertia_yy_kgm2": i_yy,
+        "added_inertia_xx_kgm2": i_xx,
     }
+
+
+def unsteady_circulation_lag(
+    xp: Any,
+    cl_current: Any,
+    cl_target: Any,
+    dt: Any,
+    mac_m: Any,
+    speed_mps: Any,
+    k_circ: Any = 2.0,
+) -> Any:
+    """Circulation development lag for unsteady thin airfoil / wing flow.
+
+    Based on the Wagner function indicial response / Beddoes-Leishman formulation.
+    The convective circulation lag time constant is:
+        tau_circ = k_circ * c / (2 * V_rel)
+    When k_circ <= 0.0 or speed <= 0.0, the response is instantaneous (cl_target).
+    """
+    k = xp.maximum(_finite(xp, k_circ, 2.0), 0.0)
+    c = xp.maximum(_finite(xp, mac_m, 0.1), 1.0e-6)
+    v = xp.maximum(_finite(xp, speed_mps, 0.0), 0.0)
+    # Avoid zero division when stationary
+    tau = xp.where(
+        (k > 1.0e-9) & (v > 0.1),
+        (k * c) / (2.0 * xp.maximum(v, 0.1)),
+        0.0,
+    )
+    return first_order_lag(xp, cl_current, cl_target, dt, tau)
+
+
+def lsb_dynamic_stall_shift(
+    xp: Any,
+    alpha_dot_deg_s: Any,
+    mac_m: Any,
+    speed_mps: Any,
+    reynolds: Any,
+    kappa_lsb: Any = 1.5,
+) -> Any:
+    """Dynamic stall angle shift due to low-Reynolds laminar separation bubble (LSB).
+
+    At low Reynolds numbers (1e3 <= Re <= 5e4), laminar separation bubbles delay
+    boundary layer separation during dynamic pitch-up (alpha_dot > 0), raising
+    effective stall angle:
+        alpha_stall_eff = alpha_stall_static + delta_alpha_hyst
+    During pitch-down (alpha_dot < 0), reattachment is delayed, lowering effective
+    stall angle:
+        delta_alpha_hyst = sgn(alpha_dot) * kappa_lsb * sqrt(k_reduced) * f(Re)
+    where:
+        k_reduced = |alpha_dot_rad| * c / (2 * V_rel)
+        f(Re) = sqrt(1e4 / max(Re, 1000))
+    At steady state (alpha_dot = 0), delta_alpha_hyst is identically 0.0.
+    """
+    adot = _finite(xp, alpha_dot_deg_s, 0.0)
+    adot_rad = _rad(xp, adot)
+    abs_adot_rad = xp.abs(adot_rad)
+    c = xp.maximum(_finite(xp, mac_m, 0.1), 1.0e-6)
+    v = xp.maximum(_finite(xp, speed_mps, 0.0), 0.1)
+    re = xp.maximum(_finite(xp, reynolds, 1.0e4), 1.0e3)
+    k_lsb = xp.maximum(_finite(xp, kappa_lsb, 1.5), 0.0)
+
+    # Reduced pitch rate
+    k_red = (abs_adot_rad * c) / (2.0 * v)
+    # Reynolds scaling factor (bounded)
+    f_re = _clamp(xp, xp.sqrt(1.0e4 / re), 0.2, 2.0)
+
+    # Regularized smooth direction to prevent chattering and numerical energy injection
+    smooth_sign = xp.tanh(adot / 5.0)
+    # Scale from nondimensional delay to degrees using (180 / pi)
+    delta_deg = smooth_sign * k_lsb * (180.0 / math.pi) * xp.sqrt(xp.maximum(k_red, 0.0)) * f_re
+    # Physical clamp on maximum dynamic stall overshoot (+/- 10 degrees)
+    return _clamp(xp, delta_deg, -10.0, 10.0)
+
+
+def lsb_dynamic_stall_hysteresis(
+    xp: Any,
+    alpha_deg: Any,
+    alpha_dot_deg_s: Any,
+    stall_alpha_deg: Any,
+    mac_m: Any,
+    speed_mps: Any,
+    reynolds: Any,
+    is_stalled_prev: Any = False,
+    kappa_lsb: Any = 1.5,
+    kappa_reatt: Any = 1.0,
+    delta_alpha0_deg: Any = 2.5,
+) -> Tuple[Any, Any]:
+    """Low-Re Laminar Separation Bubble (LSB) dynamic hysteresis model.
+
+    Distinguishes pitch-up stall delay (convective lag) from pitch-down
+    reattachment delay (turbulent bubble reform lag), producing a physical
+    counter-clockwise hysteresis loop in CL(alpha).
+
+    Returns:
+        (effective_stall_alpha_deg, is_stalled_current)
+    """
+    alpha = xp.abs(_finite(xp, alpha_deg, 0.0))
+    adot = _finite(xp, alpha_dot_deg_s, 0.0)
+    adot_rad = _rad(xp, adot)
+    c = xp.maximum(_finite(xp, mac_m, 0.1), 1.0e-6)
+    v = xp.maximum(_finite(xp, speed_mps, 0.0), 0.1)
+    re = xp.maximum(_finite(xp, reynolds, 1.0e4), 1.0e3)
+    k_lsb = xp.maximum(_finite(xp, kappa_lsb, 1.5), 0.0)
+    k_reatt = xp.maximum(_finite(xp, kappa_reatt, 1.0), 0.0)
+    a_stall_0 = xp.abs(_finite(xp, stall_alpha_deg, 14.0))
+
+    k_red = xp.sqrt(xp.maximum((xp.abs(adot_rad) * c) / (2.0 * v), 0.0))
+    f_re = _clamp(xp, xp.sqrt(1.0e4 / re), 0.2, 2.0)
+    delta_reatt = _clamp(xp, delta_alpha0_deg * xp.sqrt(2.0e4 / re), 0.5, 6.0)
+
+    shift_up = k_lsb * k_red * f_re * (180.0 / math.pi)
+    shift_down = -(delta_reatt + k_reatt * k_red * f_re * (180.0 / math.pi))
+    delta_shift = xp.where(adot >= 0.0, shift_up, shift_down)
+
+    is_prev = _flag_array(xp, is_stalled_prev)
+    eff_stall = xp.where(
+        is_prev,
+        a_stall_0 + xp.minimum(delta_shift, -0.5),
+        a_stall_0 + xp.maximum(delta_shift, 0.0),
+    )
+    eff_stall = _clamp(xp, eff_stall, a_stall_0 - 8.0, a_stall_0 + 10.0)
+    is_stalled = alpha > eff_stall
+    return eff_stall, is_stalled
+
+
+def nonlinear_dynamic_damping(
+    xp: Any,
+    alpha_deg: Any,
+    stall_alpha_deg: Any,
+    p_hat: Any,
+    q_hat: Any,
+    r_hat: Any,
+    cl_p0: Any = -0.35,
+    cm_q0: Any = -1.80,
+    cn_r0: Any = -0.25,
+) -> Tuple[Any, Any, Any]:
+    """Separation-aware non-linear dynamic damping derivatives.
+
+    At attached flow, preserves potential linear damping (cl_p0, cm_q0, cn_r0).
+    As stall progresses, smoothly transitions to cross-flow bluff-body drag
+    damping (|p|, |q|, |r| dependence).
+    Strictly negative everywhere, enforcing monotonic energy dissipation.
+    """
+    abs_alpha = xp.abs(_finite(xp, alpha_deg, 0.0))
+    a_stall = xp.abs(_finite(xp, stall_alpha_deg, 14.0))
+    prog = _clamp(xp, (abs_alpha - a_stall) / 15.0, 0.0, 1.0)
+    w_sep = prog * prog * (3.0 - 2.0 * prog)
+
+    lp_att = xp.minimum(_finite(xp, cl_p0, -0.35), -1.0e-4)
+    mq_att = xp.minimum(_finite(xp, cm_q0, -1.80), -1.0e-4)
+    nr_att = xp.minimum(_finite(xp, cn_r0, -0.25), -1.0e-4)
+
+    lp_sep = -(0.15 + 1.2 * xp.abs(_finite(xp, p_hat, 0.0)))
+    mq_sep = -(0.40 + 2.5 * xp.abs(_finite(xp, q_hat, 0.0)))
+    nr_sep = -(0.10 + 1.0 * xp.abs(_finite(xp, r_hat, 0.0)))
+
+    cl_p = (1.0 - w_sep) * lp_att + w_sep * lp_sep
+    cm_q = (1.0 - w_sep) * mq_att + w_sep * mq_sep
+    cn_r = (1.0 - w_sep) * nr_att + w_sep * nr_sep
+    return cl_p, cm_q, cn_r
 
 
 def evaluate_model_validity(

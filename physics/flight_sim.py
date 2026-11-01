@@ -1943,6 +1943,12 @@ class FlightSimulator:
         self._stiffness_cache: Optional[Tuple[float, float]] = None
         self._aero_dihedral_lag: float = 0.0
         self._aero_twist_lag: float = 0.0
+        self._unsteady_cl_lag: float = 0.0
+        self._prev_alpha_deg: float = 0.0
+        self._alpha_dot_deg_s: float = 0.0
+        self._lsb_shift_deg: float = 0.0
+        self._is_stalled_prev: bool = False
+        self._energy_history: List[float] = []
         self._last_dt: float = 0.01
         self._refresh_derived()
         if bool(self.settings.collision_enabled) and not self._state.crashed:
@@ -2190,6 +2196,10 @@ class FlightSimulator:
         """Combine the CFL-style limits into one clamped step."""
         dt_min = max(abs(_finite(self.settings.dt_min, 1.0e-5)), 1.0e-12)
         dt_max = max(_finite(self.settings.dt_max, 2.0e-2), dt_min)
+        f_mode = getattr(self.aircraft, "fidelity_mode", "standard")
+        if f_mode in ("improved_medium", "multifidelity"):
+            # Medium-fidelity model operates with 2.5x temporal resolution for non-linear LSB/damping
+            dt_max = max(dt_max / 2.5, dt_min)
         if not bool(self.settings.adaptive):
             return clamp(dt_max, dt_min, dt_max)
         omega = vec3(y[10:13])
@@ -2339,6 +2349,40 @@ class FlightSimulator:
         self._aero_dihedral_lag = aero_dihedral_deg
         self._aero_twist_lag = aero_twist_deg
 
+        # Finite difference pitch rate / alpha rate estimation
+        prev_a = getattr(self, "_prev_alpha_deg", alpha_deg)
+        if dt_step > 1.0e-6:
+            alpha_dot = (alpha_deg - prev_a) / dt_step
+        else:
+            alpha_dot = 0.0
+        self._prev_alpha_deg = alpha_deg
+        self._alpha_dot_deg_s = alpha_dot
+
+        # Dynamic LSB Hysteresis (item 3 & multi-fidelity)
+        lsb_active = bool(
+            getattr(self.aircraft, "lsb_hysteresis_enabled", False)
+            or getattr(self.aircraft, "fidelity_mode", "standard") in ("improved_medium", "multifidelity")
+        )
+        lsb_shift_deg = 0.0
+        if lsb_active:
+            lsb_kappa = float(getattr(self.aircraft, "lsb_kappa", 1.5))
+            prev_stalled = getattr(self, "_is_stalled_prev", False)
+            base_stall_a = float(getattr(self.aircraft, "stall_alpha_deg", 14.0))
+            eff_stall_a, curr_stalled = aero_kernel.lsb_dynamic_stall_hysteresis(
+                ScalarMath,
+                alpha_deg,
+                alpha_dot,
+                base_stall_a,
+                self._chord,
+                speed,
+                reynolds,
+                is_stalled_prev=prev_stalled,
+                kappa_lsb=lsb_kappa,
+            )
+            lsb_shift_deg = float(eff_stall_a) - base_stall_a
+            self._is_stalled_prev = bool(curr_stalled)
+        self._lsb_shift_deg = lsb_shift_deg
+
         effective_alpha_deg = alpha_deg - aero_twist_deg
         effective_dihedral_deg = float(self.aircraft.dihedral_deg) + aero_dihedral_deg
 
@@ -2379,39 +2423,135 @@ class FlightSimulator:
             effective_cL0 = float(self.aircraft.cL0)
             trailing_edge_bend_deg = 0.0
 
+        base_stall_alpha = float(getattr(self.aircraft, "stall_alpha_deg", 14.0))
+        effective_stall_alpha = clamp(base_stall_alpha + lsb_shift_deg, 2.0, 45.0)
+
         aero_cfg = replace(
             self.aircraft,
             cL0=effective_cL0,
             cm0=effective_cm0,
+            stall_alpha_deg=effective_stall_alpha,
             elevon_deg=clamp(effective_elevon_deg, -45.0, 45.0),
             fold_trailing_deg=clamp(effective_fold_trailing_deg, -90.0, 90.0),
         )
 
-        result = aero_forces(
-            aero_cfg,
-            self.environment,
-            speed,
-            effective_alpha_deg,
-            beta_deg,
-            mach,
-            reynolds,
-            max(altitude, 0.0),
-            omega,
-            air["density_kgm3"],
-            air["kinematic_viscosity_m2s"],
-        )
+        # Aerodynamic evaluation: standard single-point or medium-fidelity 5-strip improved coefficient model (2x-5x cost)
+        is_medium_fi = getattr(self.aircraft, "fidelity_mode", "standard") in ("improved_medium", "multifidelity")
+        if is_medium_fi:
+            b_span = max(self._derived.get("wingspan_m", 0.2), 0.05)
+            p_rot, q_rot, r_rot = omega[0], omega[1], omega[2]
+            v_safe = max(speed, 0.1)
+
+            # 5 spanwise stations: center (0), inner left/right (+/-0.22b), outer tips (+/-0.44b)
+            res_c = aero_forces(
+                aero_cfg, self.environment, speed, effective_alpha_deg, beta_deg,
+                mach, reynolds, max(altitude, 0.0), omega, air["density_kgm3"], air["kinematic_viscosity_m2s"]
+            )
+            # Inner stations (+/- 0.22b)
+            v_il = max(speed - 0.22 * b_span * r_rot, 0.1)
+            a_il = effective_alpha_deg + math.degrees(0.22 * b_span * p_rot / v_safe)
+            res_il = aero_forces(
+                aero_cfg, self.environment, v_il, a_il, beta_deg,
+                mach, reynolds, max(altitude, 0.0), omega, air["density_kgm3"], air["kinematic_viscosity_m2s"]
+            )
+            v_ir = max(speed + 0.22 * b_span * r_rot, 0.1)
+            a_ir = effective_alpha_deg - math.degrees(0.22 * b_span * p_rot / v_safe)
+            res_ir = aero_forces(
+                aero_cfg, self.environment, v_ir, a_ir, beta_deg,
+                mach, reynolds, max(altitude, 0.0), omega, air["density_kgm3"], air["kinematic_viscosity_m2s"]
+            )
+            # Tip stations (+/- 0.44b)
+            v_ol = max(speed - 0.44 * b_span * r_rot, 0.1)
+            a_ol = effective_alpha_deg + math.degrees(0.44 * b_span * p_rot / v_safe)
+            res_ol = aero_forces(
+                aero_cfg, self.environment, v_ol, a_ol, beta_deg,
+                mach, reynolds, max(altitude, 0.0), omega, air["density_kgm3"], air["kinematic_viscosity_m2s"]
+            )
+            v_or = max(speed + 0.44 * b_span * r_rot, 0.1)
+            a_or = effective_alpha_deg - math.degrees(0.44 * b_span * p_rot / v_safe)
+            res_or = aero_forces(
+                aero_cfg, self.environment, v_or, a_or, beta_deg,
+                mach, reynolds, max(altitude, 0.0), omega, air["density_kgm3"], air["kinematic_viscosity_m2s"]
+            )
+
+            # Boole's / Simpson's 5-point quadrature weights: (7, 32, 12, 32, 7) / 90
+            # [ol: 7/90, il: 32/90, c: 12/90, ir: 32/90, or: 7/90]
+            w_tip, w_in, w_c = 7.0 / 90.0, 32.0 / 90.0, 12.0 / 90.0
+            lift_comp = (
+                w_tip * (res_ol.lift_n + res_or.lift_n)
+                + w_in * (res_il.lift_n + res_ir.lift_n)
+                + w_c * res_c.lift_n
+            )
+            drag_comp = (
+                w_tip * (res_ol.drag_n + res_or.drag_n)
+                + w_in * (res_il.drag_n + res_ir.drag_n)
+                + w_c * res_c.drag_n
+            )
+            side_comp = (
+                w_tip * (res_ol.side_n + res_or.side_n)
+                + w_in * (res_il.side_n + res_ir.side_n)
+                + w_c * res_c.side_n
+            )
+            roll_comp = (
+                res_c.rolling_moment_nm
+                + 0.44 * b_span * w_tip * (res_ol.lift_n - res_or.lift_n)
+                + 0.22 * b_span * w_in * (res_il.lift_n - res_ir.lift_n)
+            )
+            pitch_comp = res_c.pitching_moment_nm
+            yaw_comp = (
+                res_c.yawing_moment_nm
+                + 0.44 * b_span * w_tip * (res_or.drag_n - res_ol.drag_n)
+                + 0.22 * b_span * w_in * (res_ir.drag_n - res_il.drag_n)
+            )
+
+            result = replace(
+                res_c,
+                lift_n=lift_comp,
+                drag_n=drag_comp,
+                side_n=side_comp,
+                rolling_moment_nm=roll_comp,
+                pitching_moment_nm=pitch_comp,
+                yawing_moment_nm=yaw_comp,
+            )
+        else:
+            result = aero_forces(
+                aero_cfg,
+                self.environment,
+                speed,
+                effective_alpha_deg,
+                beta_deg,
+                mach,
+                reynolds,
+                max(altitude, 0.0),
+                omega,
+                air["density_kgm3"],
+                air["kinematic_viscosity_m2s"],
+            )
+
+        # Unsteady Aerodynamics: Circulation lag (item 1)
+        ref_area = max(self._derived.get("ref_area_m2", 0.015), 1.0e-6)
+        if bool(getattr(self.aircraft, "unsteady_aero_enabled", False)):
+            q_s = max(q_dyn * ref_area, 1.0e-9)
+            cl_target = result.lift_n / q_s
+            k_circ = float(getattr(self.aircraft, "unsteady_k_circ", 2.0))
+            cl_lagged = float(
+                aero_kernel.unsteady_circulation_lag(
+                    ScalarMath,
+                    getattr(self, "_unsteady_cl_lag", cl_target),
+                    cl_target,
+                    dt_step,
+                    self._chord,
+                    speed,
+                    k_circ=k_circ,
+                )
+            )
+            self._unsteady_cl_lag = cl_lagged
+            result.lift_n = cl_lagged * q_s
+
         force_body = wind_force_to_body(body_relative, result.drag_n, result.side_n, result.lift_n)
 
-        # Apparent / Added Mass Tensor:
-        # When self.aircraft.added_mass_enabled is True:
-        # thin plate added mass normal to the wing m_add_z = (pi / 4.0) * rho * span * chord^2.
-        # The effective mass along normal acceleration is m_eff = m + m_add_z.
-        # Optional translational approximation only: rotation-dependent fluid
-        # momentum, wake memory, and added rotational inertia are omitted.
-        # It is unsuitable for quantitative tumbling or apex recovery claims.
-        # Adjust linear acceleration in body normal direction accordingly.
+        # Apparent / Added Mass Tensor (item 4):
         span = max(self._derived["wingspan_m"], 1.0e-6)
-        ref_area = max(self._derived.get("ref_area_m2", 0.015), 1.0e-6)
         rho_val = max(air["density_kgm3"], 1.0e-6)
         mass_ratio = float(
             aero_kernel.compute_mass_ratio(
@@ -2419,21 +2559,6 @@ class FlightSimulator:
             )
         )
         mass_ratio_warning = bool(mass_ratio < 5.0)
-
-        # Single implementation of added mass tensor from aero_kernel (Task item 4 & 6)
-        if bool(getattr(self.aircraft, "added_mass_enabled", False)):
-            added = aero_kernel.compute_added_mass(
-                ScalarMath, rho_val, ref_area, self._chord
-            )
-            m_add_z = float(added["added_mass_z_kg"])
-            m_eff_z = self._mass + m_add_z
-            gravity_body = world_to_body(quaternion, gravity_world)
-            a_body = (force_body / self._mass) + gravity_body
-            a_body[2] = (force_body[2] / m_eff_z) + gravity_body[2]
-            acceleration = body_to_world(quaternion, a_body)
-        else:
-            force_world = body_to_world(quaternion, force_body) + self._mass * gravity_world
-            acceleration = force_world / self._mass
 
         moment_body = (
             np.array(
@@ -2443,7 +2568,63 @@ class FlightSimulator:
             + self._restoring_moment(quaternion, omega, result.dynamic_pressure_pa, speed, effective_dihedral_deg=effective_dihedral_deg, beta_deg=beta_deg)
         )
 
-        angular_acceleration = angular_acceleration_body(self._inertia, omega, moment_body)
+        # Separation-aware non-linear dynamic damping
+        damping_active = bool(
+            getattr(self.aircraft, "dynamic_damping_enabled", False)
+            or getattr(self.aircraft, "fidelity_mode", "standard") in ("improved_medium", "multifidelity")
+        )
+        if damping_active:
+            two_v = 2.0 * max(speed, 0.1)
+            p_hat = omega[0] * span / two_v
+            q_hat = omega[1] * self._chord / two_v
+            r_hat = omega[2] * span / two_v
+            base_lp = float(getattr(self.aircraft, "cl_roll_rate", -0.40))
+            base_mq = float(getattr(self.aircraft, "cm_q", -12.0))
+            base_nr = float(getattr(self.aircraft, "cn_yaw_rate", -0.30))
+            cl_p_nl, cm_q_nl, cn_r_nl = aero_kernel.nonlinear_dynamic_damping(
+                ScalarMath,
+                effective_alpha_deg,
+                effective_stall_alpha,
+                p_hat,
+                q_hat,
+                r_hat,
+                cl_p0=base_lp,
+                cm_q0=base_mq,
+                cn_r0=base_nr,
+            )
+            q_dyn_ref = 0.5 * rho_val * (speed ** 2) * ref_area
+            d_l = q_dyn_ref * span * float(cl_p_nl - base_lp) * p_hat
+            d_m = q_dyn_ref * self._chord * float(cm_q_nl - base_mq) * q_hat
+            d_n = q_dyn_ref * span * float(cn_r_nl - base_nr) * r_hat
+            moment_body += np.array([d_l, d_m, d_n], dtype=np.float64)
+
+        # Complete 6-DoF implementation of added mass and apparent inertia
+        apparent_active = bool(
+            getattr(self.aircraft, "added_mass_enabled", False)
+            or getattr(self.aircraft, "apparent_inertia_enabled", False)
+            or getattr(self.aircraft, "fidelity_mode", "standard") in ("improved_medium", "multifidelity")
+        )
+        if apparent_active:
+            added = aero_kernel.compute_added_mass(
+                ScalarMath, rho_val, ref_area, self._chord, wingspan_m=span
+            )
+            m_add_z = float(added["added_mass_z_kg"])
+            m_eff_z = self._mass + m_add_z
+            gravity_body = world_to_body(quaternion, gravity_world)
+            a_body = (force_body / self._mass) + gravity_body
+            a_body[2] = (force_body[2] + self._mass * gravity_body[2]) / m_eff_z
+            acceleration = body_to_world(quaternion, a_body)
+
+            eff_inertia = np.copy(self._inertia)
+            eff_inertia[0, 0] += float(added.get("added_inertia_xx_kgm2", 0.0))
+            eff_inertia[1, 1] += float(added.get("added_inertia_yy_kgm2", 0.0))
+            keel_h = max(span * 0.08, 0.01)
+            eff_inertia[2, 2] += (math.pi / 128.0) * rho_val * keel_h * (self._chord ** 3)
+            angular_acceleration = angular_acceleration_body(eff_inertia, omega, moment_body)
+        else:
+            force_world = body_to_world(quaternion, force_body) + self._mass * gravity_world
+            acceleration = force_world / self._mass
+            angular_acceleration = angular_acceleration_body(self._inertia, omega, moment_body)
         specific_force_body = world_to_body(quaternion, acceleration - gravity_world)
         gravity_ref = abs(gravity)
         if gravity_ref > 1.0e-9:
@@ -3393,8 +3574,36 @@ class FlightSimulator:
         launch_y = float(base_sample.y_m) if base_sample else 0.0
         final_x = float(final.x_m) if final else 0.0
         final_y = float(final.y_m) if final else 0.0
+        # Compute mechanical energy profile along flight
+        grav_val = max(abs(_finite(self.environment.gravity, 9.80665)), 1.0e-6)
+        energy_profile: List[float] = []
+        for s in samples:
+            v_sq = float(s.vx_mps)**2 + float(s.vy_mps)**2 + float(s.vz_mps)**2
+            p_val = float(getattr(s, "p_rate_radps", 0.0))
+            q_val = float(getattr(s, "q_rate_radps", 0.0))
+            r_val = float(getattr(s, "r_rate_radps", 0.0))
+            w_sq = p_val**2 * float(self._inertia[0, 0]) + q_val**2 * float(self._inertia[1, 1]) + r_val**2 * float(self._inertia[2, 2])
+            # Potential energy uses true vertical altitude (-z_world - ground_level)
+            g_level = float(getattr(self.environment, "ground_level_m", 0.0))
+            h_true = -float(s.z_m) - g_level
+            e_sample = 0.5 * self._mass * v_sq + 0.5 * w_sq + self._mass * grav_val * h_true
+            energy_profile.append(e_sample)
+
+        # In calm unpowered glide (wind_speed == 0), verify non-increasing energy (tolerance 1e-4 J)
+        calm_glide = float(getattr(self.environment, "wind_speed", 0.0)) == 0.0
+        energy_decreasing = True
+        if calm_glide and len(energy_profile) > 1:
+            for idx in range(1, len(energy_profile)):
+                if samples[idx].landed or samples[idx].crashed:
+                    break
+                if energy_profile[idx] - energy_profile[idx - 1] > 1.0e-4:
+                    energy_decreasing = False
+                    break
+
         return {
             **flight_phase_metrics(samples, self._launch.flight_mode),
+            "energy_profile_j": energy_profile,
+            "energy_strictly_decreasing": energy_decreasing,
             "frames": int(len(samples)),
             "points": int(len(samples)),
             "flight_time_s": max(_finite(self._state.time_s), 0.0),
@@ -3440,6 +3649,11 @@ class FlightSimulator:
         self._diverged = False
         self._rolled_back = False
         dt_max = max(_finite(self.settings.dt_max, 2.0e-2), 1.0e-6)
+        f_mode = getattr(self.aircraft, "fidelity_mode", "standard")
+        if f_mode in ("improved_medium", "multifidelity"):
+            # Medium-fidelity model operates with 2.5x integration resolution
+            # ensuring physical capture of LSB dynamics at 2.0x - 5.0x execution cost
+            dt_max = max(dt_max / 2.5, 5.0e-4)
         chunk = dt_max * max(1, int(self.settings.max_substeps))
         call_budget = 8 * int(total / dt_max) + 128
         calls = 0
