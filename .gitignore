@@ -54,3 +54,8 @@ antigravity.py
 
 # Paper collection pipeline cache (regenerable with search/tools/collect_papers.py)
 search/.cache/
+progress.md
+*.progress.md
+sim_process.pid
+watchdog_status.txt
+*.patch
