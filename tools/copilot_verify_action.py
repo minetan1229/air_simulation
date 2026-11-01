@@ -6,6 +6,34 @@ import urllib.error
 import subprocess
 import time
 
+def post_github_comment(repo, commit_sha, comment_body, token):
+    """コミットに対してCopilotレビュー結果をコメント返信する"""
+    if not token or not repo or not commit_sha:
+        return
+    url = f"https://api.github.com/repos/{repo}/commits/{commit_sha}/comments"
+    headers = {
+        "Authorization": f"token {token}",
+        "Accept": "application/vnd.github.v3+json",
+        "Content-Type": "application/json"
+    }
+    payload = {"body": comment_body}
+    try:
+        req = urllib.request.Request(url, data=json.dumps(payload).encode("utf-8"), headers=headers)
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            print(f"Posted review comment to commit {commit_sha}: {resp.status}")
+    except Exception as e:
+        print(f"Failed to post commit comment: {e}")
+
+def write_step_summary(markdown_body):
+    """GitHub Actions の Job Summary に出力する"""
+    summary_path = os.environ.get("GITHUB_STEP_SUMMARY")
+    if summary_path and os.path.exists(summary_path):
+        try:
+            with open(summary_path, "a", encoding="utf-8") as f:
+                f.write(f"\n{markdown_body}\n")
+        except Exception as e:
+            print(f"Failed to write step summary: {e}")
+
 def get_git_diff():
     try:
         diff = subprocess.check_output(
@@ -93,11 +121,6 @@ def test_and_verify(patch_str):
         return False
 
 def push_verified_fix_concurrent(summary):
-    """
-    同時並行作業を支えるGit pushメカニズム:
-    ローカルや他のエージェントが同時にコミットを進めている場合でも衝突せず共存できるよう、
-    最新コミットを rebase / fetch して競合を解消してからプッシュする。
-    """
     subprocess.run(["git", "config", "user.name", "github-actions[bot]"])
     subprocess.run(["git", "config", "user.email", "github-actions[bot]@users.noreply.github.com"])
     subprocess.run(["git", "add", "-A"])
@@ -107,11 +130,9 @@ def push_verified_fix_concurrent(summary):
         print("Nothing to commit or commit failed.")
         return
 
-    # 同時並行コミットへの追従リトライ（最大3回）
     branch = subprocess.check_output(["git", "branch", "--show-current"], text=True).strip()
     for attempt in range(3):
         print(f"Attempting to push verified fix (attempt {attempt+1}/3)...")
-        # リモートの最新並行コミットを取得してリベース
         subprocess.run(["git", "pull", "--rebase", "origin", branch])
         push_res = subprocess.run(["git", "push", "origin", branch])
         if push_res.returncode == 0:
@@ -119,7 +140,6 @@ def push_verified_fix_concurrent(summary):
             return
         time.sleep(2)
 
-    # 万が一直プッシュで衝突が激しい場合は、独立した検証ブランチへプッシュ（作業を阻害しない）
     fallback_branch = f"copilot-verified-{int(time.time())}"
     print(f"Direct push conflicted with concurrent work. Pushing to isolated branch '{fallback_branch}'...")
     subprocess.run(["git", "checkout", "-b", fallback_branch])
@@ -128,13 +148,24 @@ def push_verified_fix_concurrent(summary):
 
 def main():
     token = os.environ.get("GITHUB_TOKEN")
+    repo = os.environ.get("GITHUB_REPOSITORY", "")
+    commit_sha = os.environ.get("GITHUB_SHA", "")
+
     if not token:
         print("GITHUB_TOKEN is not set. Exiting.")
         sys.exit(0)
 
+    try:
+        if not commit_sha:
+            commit_sha = subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()
+    except Exception:
+        commit_sha = ""
+
     diff = get_git_diff()
     if not diff.strip():
-        print("No diff detected. Everything clean. Done.")
+        msg = "### 🤖 Copilot Review: No Changes Detected\n差分が検出されなかったため、レビューをスキップしました。"
+        post_github_comment(repo, commit_sha, msg, token)
+        write_step_summary(msg)
         sys.exit(0)
 
     print("Requesting AI/Copilot code review...")
@@ -147,18 +178,41 @@ def main():
     print(f"Summary: {summary}")
 
     if not has_issues or not patch.strip():
-        print(">> No valid issues identified by review. Nothing to fix. Completed successfully.")
+        msg = (
+            f"### 🤖 Copilot Review: ✅ 問題なし (All Clean)\n\n"
+            f"**コミット:** `{commit_sha[:7]}`\n\n"
+            f"> {summary or '問題・不具合・型エラー等は検出されませんでした。現在の実装で問題ありません。'}"
+        )
+        print(msg)
+        post_github_comment(repo, commit_sha, msg, token)
+        write_step_summary(msg)
         sys.exit(0)
 
     print(">> Issues suggested by review. Verifying proposed fix...")
     verified = test_and_verify(patch)
 
     if not verified:
-        print(">> Copilot review/fix was INCORRECT or failed verification.")
-        print(">> As per protocol, incorrect reviews are rejected without modifying code. Completed.")
+        msg = (
+            f"### 🤖 Copilot Review: ⚠️ 修正案棄却 (Verification Failed)\n\n"
+            f"**コミット:** `{commit_sha[:7]}`\n\n"
+            f"Copilot から以下の修正案が出されましたが、CI テスト検証に失敗したため**提案を棄却**しました（コードは変更されず完了）。\n\n"
+            f"- **指摘内容:** {summary}\n"
+            f"- **判定:** 不一致 / テスト不合格（テキサスの狙撃兵の誤謬防止ガード発動）"
+        )
+        print(msg)
+        post_github_comment(repo, commit_sha, msg, token)
+        write_step_summary(msg)
         sys.exit(0)
 
-    print(">> Proposed fix VERIFIED and PASSED all tests! Applying fix concurrently to repository...")
+    msg = (
+        f"### 🤖 Copilot Review: 🚀 修正案検証合格・自動反映 (Verified & Applied)\n\n"
+        f"**コミット:** `{commit_sha[:7]}`\n\n"
+        f"Copilot の修正案が全テスト検証に合格したため、リポジトリに自動反映しました。\n\n"
+        f"- **修正内容:** {summary}"
+    )
+    print(msg)
+    post_github_comment(repo, commit_sha, msg, token)
+    write_step_summary(msg)
     push_verified_fix_concurrent(summary)
 
 if __name__ == "__main__":
