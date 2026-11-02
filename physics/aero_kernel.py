@@ -465,7 +465,8 @@ def ground_effect_factor(xp: Any, height_m: Any, span_m: Any, enabled: Any = Tru
 def parasite_drag_coefficient(xp: Any, cd0: Any, reynolds: Any, exponent: Any) -> Any:
     """Reynolds-corrected parasite drag ``C_D0 = cd0 (1e5 / Re) ** exponent``."""
     value = xp.maximum(xp.abs(_finite(xp, reynolds, RE_REFERENCE)), 1.0)
-    return _finite(xp, cd0, 0.02) * (RE_REFERENCE / value) ** _finite(xp, exponent, 0.0)
+    safe_cd0 = xp.maximum(_finite(xp, cd0, 0.02), 0.0)
+    return safe_cd0 * (RE_REFERENCE / value) ** _finite(xp, exponent, 0.0)
 
 
 def wave_drag_coefficient(xp: Any, mach: Any, compressible: Any = True) -> Any:
@@ -933,13 +934,14 @@ def polhamus_attached_branch(
     cos_a = xp.cos(alpha_rad)
 
     linear_default = zero_lift + slope_per_rad * alpha_rad
+    vortex_sign = xp.where(sin_a >= 0.0, _f64(xp, 1.0), _f64(xp, -1.0))
     linear_polhamus = (
         zero_lift
         + kp * sin_a * xp.square(cos_a)
-        + kv * xp.square(sin_a) * cos_a
+        + kv * xp.square(sin_a) * cos_a * vortex_sign
     )
     attached = xp.where(kp > 0.0, linear_polhamus, linear_default)
-    vortex = kv * xp.square(sin_a) * cos_a
+    vortex = kv * xp.square(sin_a) * cos_a * vortex_sign
     return xp.where((kp <= 0.0) & (kv > 0.0), attached + vortex, attached)
 
 
@@ -991,9 +993,10 @@ def lift_coefficient(
 
     ceiling = xp.maximum(xp.abs(_finite(xp, cl_max, 0.90)), 1.0e-6)
     attached = _clamp(xp, linear, -ceiling, ceiling)
+    capped_linear_at_stall = _clamp(xp, linear_at_stall, -ceiling, ceiling)
 
     post_stall = post_stall_lift_coefficient(
-        xp, alpha, linear_at_stall, stall_alpha, residual_cl=residual_cl
+        xp, alpha, capped_linear_at_stall, stall_alpha, residual_cl=residual_cl
     )
     weight = stall_blend_weight(xp, alpha, stall_alpha, sharpness, blend_order)
     value = (1.0 - weight) * attached + weight * post_stall + offset

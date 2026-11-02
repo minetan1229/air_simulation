@@ -1446,3 +1446,80 @@ def test_elevon_max_deg_matches_physical_travel_limit():
 
 
 
+
+
+# ==========================================================================
+# 16. Comprehensive Physical Audit & Continuity Validation (fix2)
+# ==========================================================================
+def test_polhamus_negative_alpha_antisymmetry(cfg: AircraftConfig) -> None:
+    """Polhamus LEV suction must be antisymmetric with respect to alpha on symmetric airframe."""
+    cfg_sym = AircraftConfig(**{**as_dict(cfg), "cL0": 0.0, "polhamus_kv": 1.8, "polhamus_kp": 0.0, "elevon_deg": 0.0, "fold_trailing_deg": 0.0})
+    for a in (2.0, 5.0, 8.0, 12.0):
+        cl_pos = lift_coefficient(a, cfg_sym, compressible=False)
+        cl_neg = lift_coefficient(-a, cfg_sym, compressible=False)
+        assert cl_pos + cl_neg == pytest.approx(0.0, abs=1e-12)
+        assert polhamus_lift_coefficient(a, cfg_sym) + polhamus_lift_coefficient(-a, cfg_sym) == pytest.approx(0.0, abs=1e-12)
+
+
+def test_stall_capping_monotonicity(cfg: AircraftConfig) -> None:
+    """Post-stall lift must not exhibit an artificial upward bump above cl_max when linear branch was clamped."""
+    # Slope is high, cl_max low so that linear reaches cl_max before stall_alpha
+    cfg_steep = AircraftConfig(**{**as_dict(cfg), "cL0": 0.0, "cl_max": 0.85, "stall_alpha_deg": 15.0, "aspect_ratio": 6.0})
+    alphas = np.linspace(10.0, 25.0, 151)
+    cls = [lift_coefficient(float(a), cfg_steep, compressible=False) for a in alphas]
+    # Maximum lift achieved should not exceed cl_max
+    assert max(cls) <= 0.85 + 1e-6
+
+
+def test_cd0_non_negative_robustness(cfg: AircraftConfig) -> None:
+    """Negative cd0 input must be guarded to 0 to prevent unphysical thrust/energy gain."""
+    cfg_neg = AircraftConfig(**{**as_dict(cfg), "cd0": -0.05})
+    cd_p = parasite_drag_coefficient(cfg_neg, 50000.0)
+    assert cd_p >= 0.0
+
+
+def test_cl_cd_cm_c0_continuity_full_envelope(cfg: AircraftConfig, env: EnvironmentConfig) -> None:
+    """CL, CD, CM must be strictly C0 continuous (no finite jump discontinuity) across [-180, 180] deg."""
+    alphas = np.linspace(-180.0, 180.0, 721)  # 0.5 deg resolution
+    res_list = [evaluate_aero(cfg, env, 8.0, float(a)) for a in alphas]
+    cls = np.array([r.cl for r in res_list])
+    cds = np.array([r.cd for r in res_list])
+    cms = np.array([r.cm for r in res_list])
+
+    # Adjacent differences must be bounded by physical slope limits
+    d_cl = np.abs(np.diff(cls))
+    d_cd = np.abs(np.diff(cds))
+    d_cm = np.abs(np.diff(cms))
+
+    assert np.all(np.isfinite(cls))
+    assert np.all(np.isfinite(cds))
+    assert np.all(np.isfinite(cms))
+    assert np.all(cds >= 0.0)  # CD non-negative everywhere
+    assert np.max(d_cl) < 0.15  # Max jump per 0.5 deg well within smooth variation
+    assert np.max(d_cd) < 0.15
+    assert np.max(d_cm) < 0.20
+
+
+def test_lateral_directional_symmetry_at_zero_sideslip(cfg: AircraftConfig, env: EnvironmentConfig) -> None:
+    """On symmetric aircraft with zero control deflection and beta=0, roll/yaw must be strictly zero."""
+    cfg_sym = AircraftConfig(**{**as_dict(cfg), "elevon_deg": 0.0, "asymmetry_cl": 0.0, "aileron_deg": 0.0, "rudder_deg": 0.0})
+    res = evaluate_aero(cfg_sym, env, speed_mps=10.0, alpha_deg=4.0, beta_deg=0.0)
+    assert res.cy == pytest.approx(0.0, abs=1e-12)
+    assert res.rolling_moment_nm == pytest.approx(0.0, abs=1e-12)
+    assert res.yawing_moment_nm == pytest.approx(0.0, abs=1e-12)
+
+
+def test_finite_difference_derivative_boundedness(cfg: AircraftConfig, env: EnvironmentConfig) -> None:
+    """Numerical derivatives dCL/dalpha, dCD/dalpha, dCM/dalpha must remain bounded without singularity."""
+    h = 0.01  # deg
+    test_alphas = [-45.0, -14.0, -5.0, 0.0, 5.0, 14.0, 30.0, 45.0, 90.0]
+    for a in test_alphas:
+        r_plus = evaluate_aero(cfg, env, 10.0, a + h)
+        r_minus = evaluate_aero(cfg, env, 10.0, a - h)
+        dcl_da = (r_plus.cl - r_minus.cl) / (2 * h)
+        dcd_da = (r_plus.cd - r_minus.cd) / (2 * h)
+        dcm_da = (r_plus.cm - r_minus.cm) / (2 * h)
+
+        assert math.isfinite(dcl_da) and abs(dcl_da) < 1.0  # < 1.0 per deg (= 57 per rad)
+        assert math.isfinite(dcd_da) and abs(dcd_da) < 1.0
+        assert math.isfinite(dcm_da) and abs(dcm_da) < 1.0

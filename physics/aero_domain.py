@@ -363,7 +363,8 @@ def polhamus_lift_coefficient(alpha_deg: float, cfg: AircraftConfig, kp: Optiona
     else:
         k_p = float(kp)
     k_v = max(_finite(cfg.polhamus_kv, 0.0), 0.0)
-    return k_p * sin_a * (cos_a ** 2) + k_v * (sin_a ** 2) * cos_a
+    vortex_sign = 1.0 if sin_a >= 0.0 else -1.0
+    return k_p * sin_a * (cos_a ** 2) + k_v * (sin_a ** 2) * cos_a * vortex_sign
 
 
 def stall_blend_weight(alpha_deg: float, cfg: AircraftConfig) -> float:

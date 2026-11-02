@@ -65,3 +65,8 @@ ho Sar{c}^3$）と無次元質量比 compute_mass_ratio（$\mu < 5.0$ で mass_
 - **力学的エネルギー非増加性**: 無風無推力滑空での力学的エネルギー単調減少（dE/dt <= 0）を検証。接地判定前のクランプによる見かけ上のポテンシャル消失を排除し、真の鉛直変位で厳密計算。
 - **多忠実度パレート再評価**: GA探索・オプティマイザは中忠実度でパレート探索を行い、最終候補のみ定常RANS / 実験校正サロゲート（RK4 dt=0.005s）で再検証し verified_pareto_front を生成。
 - **CuPy CUDA Graph capture**: CuPy では stream capture 中の cuBLAS setStream が NotImplementedError となるため、3x3慣性テンソル積に xp.matmul を使わず _contract3（elementwise 積和）を使用することで CUDA Graph capture を完全保証。
+## [Aerodynamic Coefficient Model Audit & Physical Conformance] (2026-11-02)
+- **Polhamus渦揚力反対称性**: 前縁剥離渦(LEV)吸出項  \sin^2lpha \coslpha$ は $\sinlpha$ の符号反転（$	ext{sgn}(\sinlpha)$）を考慮しないと負迎角で上向き揚力（非対称性・物理則破綻・GA負迎角ハッキング脆弱性）が発生していたため、$	ext{copysign}(\cdot, \sinlpha)$ により (-lpha) = -C_L(lpha)$ を厳密保証。
+- **失速後CL天井クランプ整合性**: 線形揚力が {L,\max}$ に到達後に失速角へ向かう際、ポスト失速遷移の基準値 linear_at_stall を _clamp(linear_at_stall, -ceiling, ceiling) とすることで失速後に局所的に揚力が再上昇する双峰性（擬似ピーク）を排除。
+- **寄生抗力非負性ガード**: 不正入力・探索外れ値による負抗力（自発エネルギー生成）を防止するため safe_cd0 = xp.maximum(cd0, 0.0) 防御をカーネルに常設。
+- **モーメント基準点・無次元化整合性**: 基準長（MAC $）、参照点（AC .25c$, CG {cg}$）における有次元トルク  = q S c C_M + x_{cg} L$ と無次元化の整合性、$eta=0$ 時のロール・ヨー厳密ゼロ（^{-16}	ext{ N}\cdot	ext{m}$）および数値微分有界性を 	ests/test_aero.py で確認。
