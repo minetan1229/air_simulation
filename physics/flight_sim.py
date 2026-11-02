@@ -683,11 +683,14 @@ def _local_atmosphere(env: EnvironmentConfig, altitude_m: float, chord_m: float)
     temperature = max(temperature, 150.0)
     pressure = max(pressure, 1.0e3)
     celsius = temperature - 273.15
-    p_sat = 610.78 * math.exp(clamp(17.2694 * celsius / (celsius + 237.29), -30.0, 30.0))
+    # Magnus / Tetens form in Alduchov & Eskridge (1996) coefficients (conforming with atmosphere_domain)
+    p_sat = 610.94 * math.exp(clamp(17.625 * celsius / (celsius + 243.04), -30.0, 30.0))
     p_sat = clamp(p_sat, 0.0, 0.95 * pressure)
-    mixing = 0.62198 * p_sat / max(pressure - p_sat, 1.0e-6) * clamp(_finite(env.humidity_rel), 0.0, 1.0)
-    virtual = (1.0 + mixing * (r_air / r_vapour - 1.0)) / (1.0 + mixing)
-    density = pressure / (r_air * temperature) * virtual
+    p_v = clamp(clamp(_finite(env.humidity_rel), 0.0, 1.0) * p_sat, 0.0, 0.95 * pressure)
+    p_d = pressure - p_v
+    # Thermodynamic density from Dalton\'s law: rho = p_d / (R_air * T) + p_v / (R_vapour * T) = p / (R_moist * T)
+    r_moist = pressure / ((p_d / r_air) + (p_v / r_vapour))
+    density = pressure / (r_moist * temperature)
     mu0, sutherland, t_ref = 1.716e-5, 110.4, 273.15
     mu = mu0 * (temperature / t_ref) ** 1.5 * (t_ref + sutherland) / (temperature + sutherland)
     kinematic = safe_div(mu, density, 1.5e-5)
@@ -914,10 +917,13 @@ def _local_wind(env: EnvironmentConfig, position: VectorLike, time_s: float) -> 
         factor = 1.0
         if bool(env.boundary_layer_enabled):
             z0 = max(_finite(env.surface_roughness_m, 8.0e-4), 1.0e-9)
-            z_ref = max(_finite(env.reference_height_m, 1.0), z0 * 1.001)
-            denominator = math.log(z_ref / z0)
-            if abs(denominator) > 1.0e-9:
-                factor = max(0.0, math.log(max(altitude, z0 * 1.001) / z0) / denominator)
+            if altitude <= z0:
+                factor = 0.0
+            else:
+                z_ref = max(_finite(env.reference_height_m, 1.0), z0 * 1.001)
+                denominator = math.log(z_ref / z0)
+                if abs(denominator) > 1.0e-9:
+                    factor = max(0.0, math.log(altitude / z0) / denominator)
         profile_speed = speed * factor
 
     if gust_func is not None:
@@ -1179,8 +1185,9 @@ def aero_forces(
             0.5 * max(_finite(density, 1.225), 1.0e-6) * max(_finite(speed_mps), 0.0) ** 2
         )
     if result.reynolds <= 0.0:
+        chord_fallback = max(_finite(getattr(aircraft, 'mean_aerodynamic_chord_m', 0.1)), 1.0e-4)
         result.reynolds = safe_div(
-            max(_finite(speed_mps), 0.0) * 0.1,
+            max(_finite(speed_mps), 0.0) * chord_fallback,
             max(_finite(kinematic_viscosity, 1.5e-5), 1.0e-12),
             0.0,
         )

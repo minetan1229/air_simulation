@@ -243,21 +243,45 @@ def atmosphere_batch(
         t0 = max(float(env.sea_level_temperature_K), 1.0)
         p0 = max(float(env.sea_level_pressure_Pa), 1.0)
         lapse = float(env.lapse_rate_K_per_m)
-        height = xp.maximum(altitude, 0.0)
-        isa_t = t0 - lapse * height
-        isa_t = xp.maximum(isa_t, 50.0)
-        ratio = isa_t / t0
-        exponent = gravity / (lapse * R_AIR) if lapse > 0.0 else 0.0
-        troposphere = p0 * xp.power(
-            xp.maximum(ratio, 1.0e-6), exponent
-        )
-        isothermal = p0 * xp.exp(-gravity * height / (R_AIR * t0))
-        # ``xp.where`` rejects a Python bool condition on CuPy ("'bool'
-        # object has no attribute 'astype'"); the lapse rate is a scalar, so
-        # the branch is selected in Python.
-        isa_p = troposphere if lapse > 0.0 else isothermal
-        temperature = xp.where(isa_t > 0.0, isa_t, t0)
-        pressure = xp.maximum(isa_p, 1.0)
+        h = altitude  # smooth extrapolation for negative altitudes consistent with atmosphere_domain
+        if lapse == 0.0 or t0 == 0.0:
+            exp_iso = xp.clip(-gravity * h / (R_AIR * max(abs(t0), 50.0)), -700.0, 700.0)
+            temperature = xp.full_like(h, t0)
+            pressure = p0 * xp.exp(exp_iso)
+        else:
+            h_tropo = 11000.0
+            h_strat_base = 20000.0
+            h_strat_top = 32000.0
+            strat_lapse = 0.001
+
+            t11 = t0 - lapse * h_tropo
+            p11 = p0 * (max(t11 / max(t0, 1.0), 1.0e-6) ** (gravity / (lapse * R_AIR)))
+            exp20 = clamp(-gravity * (h_strat_base - h_tropo) / (R_AIR * max(abs(t11), 50.0)), -700.0, 700.0)
+            p20 = p11 * math.exp(exp20)
+            t20 = t11
+            t32 = t20 + strat_lapse * (h_strat_top - h_strat_base)
+            p32 = p20 * (max(t32 / max(t20, 1.0e-6), 1.0e-6) ** (-gravity / (strat_lapse * R_AIR)))
+
+            # Segmented temperature
+            t_tropo = t0 - lapse * h
+            t_strat = t20 + strat_lapse * (h - h_strat_base)
+            t_layer = xp.where(h <= h_tropo, t_tropo,
+                               xp.where(h <= h_strat_base, t11,
+                                        xp.where(h <= h_strat_top, t_strat, t32)))
+
+            # Segmented pressure (t0 and t20 are positive scalars guaranteed > 0)
+            ratio_tropo = (t0 - lapse * h) / t0 if t0 > 0.0 else xp.full_like(h, 1.0e-6)
+            p_tropo = p0 * xp.power(xp.maximum(ratio_tropo, 1.0e-6), gravity / (lapse * R_AIR))
+            p_iso11 = p11 * xp.exp(xp.clip(-gravity * (h - h_tropo) / (R_AIR * max(abs(t11), 50.0)), -700.0, 700.0))
+            ratio_strat = (t20 + strat_lapse * (h - h_strat_base)) / t20 if t20 > 0.0 else xp.full_like(h, 1.0e-6)
+            p_strat = p20 * xp.power(xp.maximum(ratio_strat, 1.0e-6), -gravity / (strat_lapse * R_AIR))
+            p_iso32 = p32 * xp.exp(xp.clip(-gravity * (h - h_strat_top) / (R_AIR * max(abs(t32), 50.0)), -700.0, 700.0))
+
+            p_layer = xp.where(h <= h_tropo, p_tropo,
+                               xp.where(h <= h_strat_base, p_iso11,
+                                        xp.where(h <= h_strat_top, p_strat, p_iso32)))
+            temperature = xp.maximum(t_layer, 50.0)
+            pressure = xp.maximum(p_layer, 1.0e-12)
 
     temperature = xp.maximum(temperature, 100.0)
     pressure = xp.maximum(pressure, 1.0)
