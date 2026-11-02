@@ -22,7 +22,7 @@ Models implemented (prompt.md 2.1 / AGENTS.md 8.1):
 
       p_v   = phi * p_sat(T)                     (partial pressure of vapour)
       p_d   = p - p_v                             (partial pressure of dry air)
-      R_moist = (p_d R_air + p_v R_vapour) / p    (specific gas constant)
+      R_moist = p / (p_d / R_air + p_v / R_vapour) (specific gas constant, Dalton harmonic mean)
       rho   = p / (R_moist T)
 
   Because ``R_vapour (461.5) > R_air (287.05)``, humid air is measurably less
