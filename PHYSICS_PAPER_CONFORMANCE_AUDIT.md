@@ -2,7 +2,7 @@
 
 > 監査日: 2026-10-19 / 対象コミット: `60fdef6` (master)
 > 状態: **修正実施中**（本書は監査結果と修正案の正本。実施状況は §0.0 の進捗表を参照）
-> 関連: `docs/SPECIFICATION.md`, `PHYSICS_AUDIT_REPORT.md`（旧版）, `search/topics/topic_01..13.md`
+> 関連: `docs/SPECIFICATION.md`, `archive/PHYSICS_AUDIT_REPORT.md`（旧版）, `search/topics/topic_01..13.md`
 
 ---
 
@@ -275,7 +275,7 @@ Helmbold (1942) / Polhamus (1966,1971) / Viterna & Corrigan (1982) / Wieselsberg
   467: weight = transition * transition * (3.0 - 2.0 * transition)
   468: return weight * 2.0 * math.sin(deg2rad(alpha)) ** 2
   ```
-  Hoerner (1965) / `PHYSICS_AUDIT_REPORT.md:21` の式は `C_D,sep = 2 sin²α + C_D0 cosα` だが、コードは **`C_D0 cosα` を落としている**。さらに `weight` は失速角で**0** であり 90° で初めて 1 になる。
+  Hoerner (1965) / `archive/PHYSICS_AUDIT_REPORT.md:21` の式は `C_D,sep = 2 sin²α + C_D0 cosα` だが、コードは **`C_D0 cosα` を落としている**。さらに `weight` は失速角で**0** であり 90° で初めて 1 になる。
 - **論文・物理法則との乖離**: 実測（上表）— α=15° では重み 0.0006 につき剥離抗力 0.0002 に対し Hoerner は 0.153。**約150倍遅い**抗力ビルドアップ。α=20° で 0.0796 vs 0.2527（3.2倍）、α=30° で 0.1013 vs 0.5173（**5.1倍**）。物理的には、失速直後に抗力がほとんど増えないため**抗力極線に失速の谷が無く**、失速citationsの急降下（極小抗力→急失速）が再現されず、無限に雲から転落する機体が「空力的阻力が増大中」に見える。また仕様 §1.1 が要求する `C_Dmax ≈ 1.8–2.0` は正規経路でのみ達成され（α=90° で 2.028）、GPU 経路では到達不能（§2-H05）。
 - **修正案**:
   ```python
@@ -303,7 +303,7 @@ Helmbold (1942) / Polhamus (1966,1971) / Viterna & Corrigan (1982) / Wieselsberg
   990: cd = cd0 + cd_induced + cd_stall_increment
   ```
 - **論文・物理法則との乖離**:
-  1. **不連続**: 既定失速角14°で `cl_linear = 0.12 + 3.142×0.2443 = 0.888`、`cl_post_stall = 0.85·sin(0.4886) = 0.398`。閾値通過で**揚力が瞬時に55 % 落ちる**＝ステップ状の力変化。これはステップ関数の力＝**インパルス的ピッチング/ロールトルク**を生む。仕様 §1.1 は「滑らかに接続」を要求、旧 `PHYSICS_AUDIT_REPORT.md:16` は「シグモイド重み関数」と明記している。**重み関数が存在しない**。また `0.85` は Viterna の `A₁`（翼型ごとに測定してフィット）ではなく固定値。
+  1. **不連続**: 既定失速角14°で `cl_linear = 0.12 + 3.142×0.2443 = 0.888`、`cl_post_stall = 0.85·sin(0.4886) = 0.398`。閾値通過で**揚力が瞬時に55 % 落ちる**＝ステップ状の力変化。これはステップ関数の力＝**インパルス的ピッチング/ロールトルク**を生む。仕様 §1.1 は「滑らかに接続」を要求、旧 `archive/PHYSICS_AUDIT_REPORT.md:16` は「シグモイド重み関数」と明記している。**重み関数が存在しない**。また `0.85` は Viterna の `A₁`（翼型ごとに測定してフィット）ではなく固定値。
   2. **抗力**: `0.35(1−cosα)` は Hoerner の `2 sin²α + C_D0 cosα` とも Viterna の `B₁ sinα + B₂ cosα` とも無関係。α=30° で 0.045（Hoerner 0.52）、45° で 0.103（Hoerner 1.01）、90° で 0.35（Hoerner 2.0）。**到達可能最大 C_D は約 0.10** で、仕様の `C_Dmax ≈ 1.8–2.0` に**11–20倍届かず**。深失速した紙飛行機が正常滑空より高効率になる（L/D が逆転）。
   3. `cl = xp.clip(cl_linear, -0.6, cl_max)` は負迎角 −13°超で C_L を −0.6 に固定（線形連続の連続性が切れる）。
 - **修正案**: §2-H01 のベクトル化ポートで `aero_domain` の**同一実装**を使う。その上で失速後を Viterna 形で書く場合:
@@ -340,7 +340,7 @@ Helmbold (1942) / Polhamus (1966,1971) / Viterna & Corrigan (1982) / Wieselsberg
      ```
      GPU 経路は **ケース毎スカラー1回**で計算し broadcast する（ステップ毎ではないためベクトル化不要、VRAM 増分 0）。
   2. **物理形の選択**: 紙飛行機（三角翼）_defaults を `taper_ratio` ではなく**前縁後退角 `Λ_c`** で表現する方式が正。建议 `leading_edge_sweep_deg` を `AircraftConfig` に追加し、Helmbold 原式 `2πAR/(2+√(AR²(1+tan²(Λ_c/2))+4))` を採用。
-  3. `docs/SPECIFICATION.md:16` / `PHYSICS_AUDIT_REPORT.md:12` / `api/routes/meta.py:57` / `physics/stress_domain.py:205-220`（4箇所！）を**同一式に統一**し、どれが採用されたかを明記する。
+  3. `docs/SPECIFICATION.md:16` / `archive/PHYSICS_AUDIT_REPORT.md:12` / `api/routes/meta.py:57` / `physics/stress_domain.py:205-220`（4箇所！）を**同一式に統一**し、どれが採用されたかを明記する。
 - **計算コスト・メモリへの影響**: ケース毎スカラー1回 → CPU/VRAM とも**無視可能**（VRAM 増分 0）。文書統一は 0。
 
 ---
@@ -356,7 +356,7 @@ Helmbold (1942) / Polhamus (1966,1971) / Viterna & Corrigan (1982) / Wieselsberg
   2410:     omega[2] -= 1.5 * damping
   ```
   `damping = 1/(1+ground_friction)`（既定 `ground_friction=0.40` → 0.714）。
-- **論文・物理法則との乖離**: 外部インパルスによる角運動量変化は `ΔH = r × J` で、**インパルス大きさと腕長に依存する**。本実装は接触速度・質量・慣性・接触幾何に**一切依存せず**一定の角速度を注入する。**0.05 m/s の羽根一样的接触でも 30 m/s の垂直墜落でも同じ 115 °/s のロールキック**。また `ground_friction` は**接線方向摩擦**の係数であるのに、ロールキックの強さを支配しており、係数の意味が混在している。`PHYSICS_AUDIT_REPORT.md:86` が要求するのは「法線方向は反発係数、接線方向は摩擦係数による非正の仕事」までで、**回転インパルスのモデル自体は存在しない**。
+- **論文・物理法則との乖離**: 外部インパルスによる角運動量変化は `ΔH = r × J` で、**インパルス大きさと腕長に依存する**。本実装は接触速度・質量・慣性・接触幾何に**一切依存せず**一定の角速度を注入する。**0.05 m/s の羽根一样的接触でも 30 m/s の垂直墜落でも同じ 115 °/s のロールキック**。また `ground_friction` は**接線方向摩擦**の係数であるのに、ロールキックの強さを支配しており、係数の意味が混在している。`archive/PHYSICS_AUDIT_REPORT.md:86` が要求するのは「法線方向は反発係数、接線方向は摩擦係数による非正の仕事」までで、**回転インパルスのモデル自体は存在しない**。
 - **修正案**（接触インパルスによる統一解決）:
   ```python
   # 接触瞬間に、翼端の鉛直速度から法線インパルスを決める
@@ -386,7 +386,7 @@ Helmbold (1942) / Polhamus (1966,1971) / Viterna & Corrigan (1982) / Wieselsberg
   2513: q_settled = quaternion_from_euler(new_roll, new_pitch, yaw)
   ```
   **トルクを一切発生させずに姿勢ベクトルを直接 25 % 減衰**させる。`landed` でない（=`else`）スライダリング中の機体にも適用される。加えてこれは §2-H09 のエネルギー射影（`2433行`）の**後**に実行されるため、射影が「E_post ≤ 0.25 E_pre」を保証した後も回転がエネルギーを変化させる。
-- **論文・物理法則との乖離**: `PHYSICS_AUDIT_REPORT.md:41` は「人工的な姿勢復元トルクや水平基準トルクは**完全撤廃済み**」と宣言するが、これはその撤廃vioの**再導入**である。物理的には、地面接触は法線反力・摩擦力・接触トルクを通じた**力学的応答**であり、SAVE 則を満たす角運動量変化を伴うべきものであって、姿勢の直接操作ではない。時定数 ≈ 4 サブステップ（実効刻み 1.5 ms で ≈6 ms）であり、**衝突エネルギーに依存せず**機首下げ・ knife-edge 接地を即座に平坦化する。
+- **論文・物理法則との乖離**: `archive/PHYSICS_AUDIT_REPORT.md:41` は「人工的な姿勢復元トルクや水平基準トルクは**完全撤廃済み**」と宣言するが、これはその撤廃vioの**再導入**である。物理的には、地面接触は法線反力・摩擦力・接触トルクを通じた**力学的応答**であり、SAVE 則を満たす角運動量変化を伴うべきものであって、姿勢の直接操作ではない。時定数 ≈ 4 サブステップ（実効刻み 1.5 ms で ≈6 ms）であり、**衝突エネルギーに依存せず**機首下げ・ knife-edge 接地を即座に平坦化する。
 - **修正案**:
   1. 2504-2514 を削除し、接触応答を §2-H07 の**トルク制限付き接地反力**に置き換える:
      ```python
@@ -415,7 +415,7 @@ Helmbold (1942) / Polhamus (1966,1971) / Viterna & Corrigan (1982) / Wieselsberg
   2433: if e_post > e_limit and e_post > 1.0e-15:
   2434:     scale = math.sqrt(e_limit / e_post)     # 速度と角速度を一律スケール
   ```
-  `settings.restitution` の既定は **0.15**（`config_schema.py:936`）なので `max_ratio = max(0.0225, 0.25) = 0.25` **常に一定**。この制約は `PHYSICS_AUDIT_REPORT.md:86` の「人工的な運動エネルギー増加を厳密に排除」を意図するが、実装は「**25 % の残存を常に許可**」しており、**-solvent** の意味では**保护になっていない**（コード内のどの演算も E_post > 0.25 E_pre に至らないため）。
+  `settings.restitution` の既定は **0.15**（`config_schema.py:936`）なので `max_ratio = max(0.0225, 0.25) = 0.25` **常に一定**。この制約は `archive/PHYSICS_AUDIT_REPORT.md:86` の「人工的な運動エネルギー増加を厳密に排除」を意図するが、実装は「**25 % の残存を常に許可**」しており、**-solvent** の意味では**保护になっていない**（コード内のどの演算も E_post > 0.25 E_pre に至らないため）。
   付随して: (a) 翼端分岐の反発係数は `2418: clamp(restitution, 0.0, 0.5)`、機体分岐は `2469: clamp(restitution, 0.0, 1.0)` と**同一物理量に異なるクランプ**；(b) `e_pre` は `2399: m = float(self.aircraft.mass_kg)`（生設定値）であり、他が使う `self._mass`（`max(cfg.mass_kg, 1e-9)`）と異なる。`cfg.mass_kg <= 0` のとき `e_pre <= 0` → `math.sqrt(負)` で **ValueError**（`evaluate_flight` は `3099: except Exception: return empty` で握り潰し、`status="diverged"` の全ゼロ結果になる）。
 - **論文・物理法則との乖離**: 完全非弾性衝突（e=0）では法線方向の運動エネルギーは 0 になるべきで、Coulomb 摩擦はエネルギーを**除去**するのみ。0.25 の下限は**非物理的なエネルギー生成源**を許す。さらに `scale` は** translational と rotational に同一係数**を適用するため、衝突後の角速度分布が保存則から導かれない。另一个分支（機体着地、2469行）には下限が無いので、**同一関数内で2つの異なるエネルギー予算**が共存する。
 - **修正案**:
@@ -534,7 +534,7 @@ Helmbold (1942) / Polhamus (1966,1971) / Viterna & Corrigan (1982) / Wieselsberg
   `2109` のwashout は `q` に対して**線形かつ無制限**で、`1000 Pa`（`paper_stiffness=0.35` → `q_ref=35 Pa`, `aeroelastic_twist=1.0`）で `aero_twist_deg = 114°` になる（2094/2095 の `*5.0`/`*4.0` が出典なし）。このtwistは `2097: effective_alpha_deg = alpha_deg - aero_twist_deg` として**迎角そのもの**から引かれ、**迎角を反転**させる。`aero_domain` 側の `1073-1078` は**別の式**（`q_scale = q/(50*stiffness)`, `*2.5`/`*1.5`）で、**2つの経路が異なる量**を返している（`flight_sim` は `stress_domain.aeroelastic_deformations` の値を使うため、API `POST /aerodynamics/calculate` の `aeroelastic_dihedral_deg` は**シミュレータが実際に使用した変形ではない**）。
 - **論文・物理法則との乖離**: `docs/SPECIFICATION.md:25` の式は **δ_eff(q) のみ**:
   `δ_eff(q) = δ_trim · [1 / (1 + (q/q_aeroelastic)^{n_morph})]`
-  `PHYSICS_AUDIT_REPORT.md:55` も同じ。`n_morph` は**論文が名指しするモデルパラメータ**だが、コードには設定項目が存在せずリテラル `3.0` が固定されている（`tools/test_morph_cm0.py:26-28` は `q_aeroelastic = 30.0*stiffness`, `n_morph=1.5` を使い、`tools/check_morph_decay.py` は `n_morph ∈ {1.5,2.0,2.5,3.0}` を掃引 — **手動探索した値が仕様化なしで凍結**されている）。
+  `archive/PHYSICS_AUDIT_REPORT.md:55` も同じ。`n_morph` は**論文が名指しするモデルパラメータ**だが、コードには設定項目が存在せずリテラル `3.0` が固定されている（`tools/test_morph_cm0.py:26-28` は `q_aeroelastic = 30.0*stiffness`, `n_morph=1.5` を使い、`tools/check_morph_decay.py` は `n_morph ∈ {1.5,2.0,2.5,3.0}` を掃引 — **手動探索した値が仕様化なしで凍結**されている）。
   `cL0` と `cm0` に**同一倍率**を掛けるのは物理的に誤り：後縁折れによるキャンバー変化は `ΔC_L0` と `ΔC_m0` に**異なる量**（エレオンは重心後方なので `ΔC_m/ΔC_L ≈ 0.22·(x_ac−x_cg)/c`）を与える。同一倍率にすると `q → ∞` で**翼が平板(cL0=cm0=0)になり、静安定トリムそのものが消える** — まさに「頭上げループ抑制」-Net_FEATUREの制御対象である高 q 域で静的安定性が消滅する。
 - **修正案**:
   1. `q_ref`（`aeroelastic_q_ref_pa`）と `n_morph`（`aeroelastic_n_morph`, 既定3）を**設定項目に昇格**し、160.0/3.0 リテラルを廃止。
@@ -639,7 +639,7 @@ Helmbold (1942) / Polhamus (1966,1971) / Viterna & Corrigan (1982) / Wieselsberg
   | `gpu_batch` | (+1, 0) | **西**（90°回転＋符号反転） |
 
   GPU 2 経路は**互いに 180° 違う**。
-- **論文・物理法則との乖離**: `docs/SPECIFICATION.md` §1.2 および `PHYSICS_AUDIT_REPORT.md:72` は「風向角 `ψ_wind` は気象規約（風が「吹いてくる」方角、北基準時計回り）に**完全準拠**」と明記。実際は 3 経路中 2 経路が**90°回転**、かつ GPU 2 経路が互いに**180°不一致**。`v_rel = vel − wind` に入るため、動圧・迎角・揚力・抗力がすべて無秩序に変わる。**同じ「北風」で機体の挙動が3通り**になる。
+- **論文・物理法則との乖離**: `docs/SPECIFICATION.md` §1.2 および `archive/PHYSICS_AUDIT_REPORT.md:72` は「風向角 `ψ_wind` は気象規約（風が「吹いてくる」方角、北基準時計回り）に**完全準拠**」と明記。実際は 3 経路中 2 経路が**90°回転**、かつ GPU 2 経路が互いに**180°不一致**。`v_rel = vel − wind` に入るため、動圧・迎角・揚力・抗力がすべて無秩序に変わる。**同じ「北風」で機体の挙動が3通り**になる。
 - **修正案**: 共有ヘルパー1つ:
   ```python
   def wind_flow_vector(speed, direction_deg):     # WMO FROM, north=+y, east=+x
@@ -661,7 +661,7 @@ Helmbold (1942) / Polhamus (1966,1971) / Viterna & Corrigan (1982) / Wieselsberg
   2154: a_body = (force_body / self._mass) + gravity_body
   2155: a_body[2] = (force_body[2] / m_eff_z) + gravity_body[2]   # ★ 重力が m_eff でない
   ```
-  平板の法線方向付加質量は `m_a = ρ π b c²/8`（あるいは `ρ π b³/8` の回転形）。本実装は `π/4·ρ·b·c²` という**平板法線形と球形係数の折衝**で、**機体 z 軸1本のみ**に適用（面内 x,y は 0）。**回転付加慣性**（タンブルする紙飛行機では支配的）は完全に欠落（コードのコメント `2143-2145` が自認）。加えて**重力が有効質量でスケールされない**ため、機体重量を `m/m_eff` だけ過大に評価する。`PHYSICS_AUDIT_REPORT.md:104-106` は「付加質量…は**未実装**」と明記しており、**コードと文書が矛盾**する。
+  平板の法線方向付加質量は `m_a = ρ π b c²/8`（あるいは `ρ π b³/8` の回転形）。本実装は `π/4·ρ·b·c²` という**平板法線形と球形係数の折衝**で、**機体 z 軸1本のみ**に適用（面内 x,y は 0）。**回転付加慣性**（タンブルする紙飛行機では支配的）は完全に欠落（コードのコメント `2143-2145` が自認）。加えて**重力が有効質量でスケールされない**ため、機体重量を `m/m_eff` だけ過大に評価する。`archive/PHYSICS_AUDIT_REPORT.md:104-106` は「付加質量…は**未実装**」と明記しており、**コードと文書が矛盾**する。
 - **論文・物理法則との乖離**: 正しい法線方向運動方程式は `m_eff·a_n = F_n + m_a·g_n`（流体も一部重量を負担）。既定機体（m=5 g, b=0.20 m, c=0.08 m, ρ=1.225）で `m_a = (π/4)(1.225)(0.20)(0.0064) = 1.23e-3 kg` ＝ **機体質量の 26 %**。滑空時の力平衡に対する**一次の誤差**である。`added_mass_enabled` の既定は False なので現行挙動は「準定常」だが、**コード経路自体は誤り**。
 - **修正案**:
   ```python
@@ -673,7 +673,7 @@ Helmbold (1942) / Polhamus (1966,1971) / Viterna & Corrigan (1982) / Wieselsberg
   omega_dot = I_total_inv @ (M - cross(omega, I_total @ omega))  # I_total = I_dry + I_a
   ```
   - **安定性ガード**: 付加質量テンソルは有効質量を**増加**させるため、陽的 RK4 の最速固有値を**小さく**する方向（不安定化しない）。回転付加慣性は `angular_acceleration_body` の**前**に `self._inertia` へ加える必要がある。
-  - 実装しない場合: `PHYSICS_AUDIT_REPORT.md` §7 の記述を真に保つ（コード削除）。
+  - 実装しない場合: `archive/PHYSICS_AUDIT_REPORT.md` §7 の記述を真に保つ（コード削除）。
 - **計算コスト・メモリへの影響**: 有効時 1 RK4 段あたり 3×3 行列積 1 回 + 線形解 1 回（**約 +8 %**）。`float64` 6 個の追加。無効時 0。
 
 ---
@@ -734,7 +734,7 @@ Helmbold (1942) / Polhamus (1966,1971) / Viterna & Corrigan (1982) / Wieselsberg
 ### [重要度：中] M-01. 翼端/機体で反発係数のクランプが不統一、翼端エネルギー予算と機体エネルギー予算が別物
 - **該当箇所**: `physics/flight_sim.py:2418`（翼端 `clamp(restitution, 0.0, 0.5)`）vs `:2469`（機体 `clamp(restitution, 0.0, 1.0)`）
 - **現在の実装と制限内容**: 同一物理量 `settings.restitution` に上限 0.5 と 1.0 の別クランプ。翼端は紙翼端の方が**低反発**のはずで、上限方向が逆。加えて `2418` の枝は `2469` の枝より**先に**実行され、両方が同一ステップで発火する可能性がある。
-- **論文・物理法則との乖離**: `PHYSICS_AUDIT_REPORT.md:86` は `e_restitution ∈ [0,1]` と規定。翼端の 0.5 上限は出典なし。`e=0.9` を指定しても翼端では 0.5 に静かに書き換わる。
+- **論文・物理法則との乖離**: `archive/PHYSICS_AUDIT_REPORT.md:86` は `e_restitution ∈ [0,1]` と規定。翼端の 0.5 上限は出典なし。`e=0.9` を指定しても翼端では 0.5 に静かに書き換わる。
 - **修正案**: 両枝で `settings.restitution` をそのまま使う。翼端固有値が必要なら `tip_restitution` を新設（既定は `restitution`）。**安定性ガード**: クランプは `[0,1]` のみ。
 - **計算コスト・メモリへの影響**: 0。
 
@@ -823,13 +823,13 @@ Helmbold (1942) / Polhamus (1966,1971) / Viterna & Corrigan (1982) / Wieselsberg
   2060:     speed = AERO_SPEED_CAP_MPS
   ```
   250 m/s を超えると**全空力力・トルクが 250 m/s の相当量で評価**され、状態速度と加速度が**不整合**になる（報告 `speed_mps` は実速度のまま）。250 m/s ≒ 海面高度 M0.73 で、モデル自身の有効範囲 `Ma < 0.3` を大きく超える。
-- **修正案**: **切り詰めではなく適用範囲フラグ**にする: `model_valid = (mach <= 0.3) and (1e3 <= Re <= 1e5)` をテレメトリに載せ、**力は何も変えない**。これにより `PHYSICS_AUDIT_REPORT.md:31` の適用範囲宣言が正直になる。
+- **修正案**: **切り詰めではなく適用範囲フラグ**にする: `model_valid = (mach <= 0.3) and (1e3 <= Re <= 1e5)` をテレメトリに載せ、**力は何も変えない**。これにより `archive/PHYSICS_AUDIT_REPORT.md:31` の適用範囲宣言が正直になる。
 - **計算コスト・メモリへの影響**: 0（+1 bool フィールド）。
 
 ### [重要度：中] M-09. 失速ブレンドが `logistic⁴`（形状パラメータ）で、50 % 点・90 % 点が 1.65 倍シフト
 - **該当箇所**: `physics/aero_domain.py:130`（`STALL_BLEND_ORDER = 4`）、`:338-354`
 - **現在の実装と制限内容**: `_logistic(sharpness*offset) ** 4`。docstring は「ロジスティックをべき乗にすることで失速前の線形分岐を機械精度で再現するため（`tests/test_aero.py` が 1e-29 相対を要求）」と**明記**。50 % 点が `Δα=0` から `1.19°` へ、90 % 点が `1.57°` から `2.60°` へ移動＝**失速が 1.65 倍鋭くなる**。
-- **修正案**: 指数の代わりに**C1 連続の局所線形化**で exacta な付着流を作る: `w = 1/(1+exp(-k·d))`、`|d| ≤ 1e-3` では `w = 0.5 + 0.25·k·d`。指数を維持する場合は `stall_blend_order` を設定項目にし、`PHYSICS_AUDIT_REPORT.md` §1.1 に「意図的な形状パラメータ」として記載。
+- **修正案**: 指数の代わりに**C1 連続の局所線形化**で exacta な付着流を作る: `w = 1/(1+exp(-k·d))`、`|d| ≤ 1e-3` では `w = 0.5 + 0.25·k·d`。指数を維持する場合は `stall_blend_order` を設定項目にし、`archive/PHYSICS_AUDIT_REPORT.md` §1.1 に「意図的な形状パラメータ」として記載。
 - **計算コスト・メモリへの影響**: 0（`pow` → 乗算）。
 
 ### [重要度：中] M-10. 対称翼なのに負側失速閾値が 30°（正側14°の 2.1 倍）
@@ -842,7 +842,7 @@ Helmbold (1942) / Polhamus (1966,1971) / Viterna & Corrigan (1982) / Wieselsberg
 ### [重要度：中] M-11. 側力係数 `C_Y = cy_beta·β` が無制限（β のクランプ・ラップが未実装）
 - **該当箇所**: `physics/aero_domain.py:889`、`:941`
 - **現在の実装と制限内容**: β はクランプされず、`C_Y` は β に比例して無制限（β=180° で −0.785、β=720° で −3.14）。
-- **論文・物理法則との乖離**: `PHYSICS_AUDIT_REPORT.md:27` は「`α ∈ [-180°,180°]`、`β ∈ [-90°,90°]` 全域で…`C_L, C_D, C_Y` を連続関数として**クランプ・ラップ**」と要求するが、β 側のクランプ・ラップが未実装。平板限界 `C_Y → 2 sinβ cos²β`（≤0.77）があるべきで、線形無制限ではない。
+- **論文・物理法則との乖離**: `archive/PHYSICS_AUDIT_REPORT.md:27` は「`α ∈ [-180°,180°]`、`β ∈ [-90°,90°]` 全域で…`C_L, C_D, C_Y` を連続関数として**クランプ・ラップ**」と要求するが、β 側のクランプ・ラップが未実装。平板限界 `C_Y → 2 sinβ cos²β`（≤0.77）があるべきで、線形無制限ではない。
 - **修正案**: `beta = clamp(beta_deg, -90, 90)` ＋ 平板限界のブレンド:
   ```python
   cy = cy_beta*beta_rad + (1 - abs(math.cos(beta_rad)))*copysign(2*math.sin(beta_rad)*math.cos(beta_rad)**2, beta_rad)
@@ -988,7 +988,7 @@ Helmbold (1942) / Polhamus (1966,1971) / Viterna & Corrigan (1982) / Wieselsberg
 
 ### [重要度：中] M-30. `static_margin`（0.12）が**空力的に無意味**
 - **該当箇所**: `physics/config_schema.py:312`（`static_margin`）、`physics/parallel_engine.py:505`（代理モデルのみで使用）
-- **現在の実装と制限内容**: 正規 6DoF 経路の**どのモーメント項にも使われていない**。`PHYSICS_AUDIT_REPORT.md:44` の静的縦安定性条件（`C_mα < 0` かつ `x_cp` が `x_cg` より後方）は、手動設定された `cm_alpha` と `cg_offset_x` のみで担保され、UI の `static_margin` スライダーは**空力に影響しない**。
+- **現在の実装と制限内容**: 正規 6DoF 経路の**どのモーメント項にも使われていない**。`archive/PHYSICS_AUDIT_REPORT.md:44` の静的縦安定性条件（`C_mα < 0` かつ `x_cp` が `x_cg` より後方）は、手動設定された `cm_alpha` と `cg_offset_x` のみで担保され、UI の `static_margin` スライダーは**空力に影響しない**。
 - **修正案**: `static_margin` をモーメントモデルに接続: `cp_x = 0.25c + static_margin·c`、`cm_alpha` を `static_margin` から導出（または `cm_alpha` と整合検証）。
 - **計算コスト・メモリへの影響**: 代数変換のみ。0。
 
@@ -1175,7 +1175,7 @@ Helmbold (1942) / Polhamus (1966,1971) / Viterna & Corrigan (1982) / Wieselsberg
 | **P2（2 sprint）** | ⑫接地インパルス化（§H07,§H08,§H09,§M02,§M03,§M04）<br>⑬ステップ受入の相対化（§H20）<br>⑭刻み条件の相対速度化（§M06）＋RK4安全係数（§M07）<br>⑮`_local_aero` 削除（§H14） | flight_sim | CPU **-5〜+20 %** | 受入判定の相対化は**既存収束性テストの期待値を変える**ため、順序に注意 |
 | **P3（3 sprint）** | ⑯GPU 経路の 13 状態 RK4 ベクトル化（§H01,§H02）<br>⑰`fold_trailing_deg` 接続（§H19）<br>⑱`static_margin` 接続（§M30）<br>⑲構造応力を実材料・折り断面へ（§H11,§M26）<br>⑳最適化器の最終 6DoF 再検証を追加（§H05） | parallel_engine, optimizer_domain, stress_domain | VRAM +1.1 MB (N=4096) | §H01 の P3(b) 完了で**初めて**「CPU/GPU 物理一致」の主張が成立する |
 
-**P3(⑳) について**: `PHYSICS_AUDIT_REPORT.md` §6.2 は「最終選定された機体候補は必ず完全 6DoF シミュレーションによって再検証」と宣言しているが、**リポジトリ全体検索で該当機構は存在しない**（`revalidat|reverif|verify_flight|final_verif` は `parallel_engine.py:595` の 1 箇所のみ）。**この宣言は現状、偽**。
+**P3(⑳) について**: `archive/PHYSICS_AUDIT_REPORT.md` §6.2 は「最終選定された機体候補は必ず完全 6DoF シミュレーションによって再検証」と宣言しているが、**リポジトリ全体検索で該当機構は存在しない**（`revalidat|reverif|verify_flight|final_verif` は `parallel_engine.py:595` の 1 箇所のみ）。**この宣言は現状、偽**。
 
 ### 2026-10-20 実装状況
 
@@ -1226,7 +1226,7 @@ Helmbold (1942) / Polhamus (1966,1971) / Viterna & Corrigan (1982) / Wieselsberg
 ## 9. 監査の限界（未尽事項）
 
 - 本監査は**静的解析**が主体であり、**全 720 テストの再実行は行っていない**（リソース制約と「重いプロセスを並列走らせない」指示に従った）。数値的検証は §0.5 の1ケース比較と §2-H03/H12 のスカラー評価の 2 件に限定した。
-- `search/topics/topic_08/10/11/13.md` 等は**数式を含まないテンプレート**であり、束縛ある参照として `docs/SPECIFICATION.md`・`PHYSICS_AUDIT_REPORT.md`・上記原論文を用いた。
+- `search/topics/topic_08/10/11/13.md` 等は**数式を含まないテンプレート**であり、束縛ある参照として `docs/SPECIFICATION.md`・`archive/PHYSICS_AUDIT_REPORT.md`・上記原論文を用いた。
 - `physics/optimizer_domain.py` の**目的関数**、`physics/job_manager.py`、`physics/storage_domain.py` は物理計算を直接含まないため対象外（ただし §H01 の最適化経路は経由的に対象）。
 - 3D メッシュ実体（`models/*.obj|stl`）は**読み込まない**方針のため、`mesh_domain` の評価は**ソース静的解析**に基づく。
 - `physics/records_domain.py` の質量キャップと `physics/geometry_utils.py` の射影変換は概ね妥当と判断したが、重点対象外とした。
