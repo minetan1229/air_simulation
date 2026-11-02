@@ -268,7 +268,7 @@ def test_rk4_timestep_convergence_order():
     y0 = flight_sim._pack(sim.state)
     h1 = 0.0002
     h2 = 0.0001
-    
+
     # Error for h1
     y_full1 = sim._rk4(y0, h1, 0.0)
     y_half1 = sim._rk4(sim._rk4(y0, h1 / 2.0, 0.0), h1 / 2.0, h1 / 2.0)
