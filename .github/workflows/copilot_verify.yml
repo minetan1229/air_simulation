@@ -38,6 +38,9 @@ jobs:
       - name: Run Review & Verification Pipeline
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          LLM_API_KEY: ${{ secrets.LLM_API_KEY || secrets.OPENROUTER_API_KEY || secrets.OPENAI_API_KEY }}
+          LLM_BASE_URL: ${{ vars.LLM_BASE_URL }}
+          LLM_MODEL: ${{ vars.LLM_MODEL }}
           PAPER_AIRCRAFT_BRANCH_GUARD: warn
         run: |
           python tools/copilot_verify_action.py

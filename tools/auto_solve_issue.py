@@ -7,10 +7,23 @@ import subprocess
 import time
 
 def call_ai_for_solution(issue_num, title, body, token):
-    url = "https://models.github.ai/inference/chat/completions"
+    api_key = os.environ.get("LLM_API_KEY")
+    base_url = os.environ.get("LLM_BASE_URL", "").rstrip("/")
+    model = os.environ.get("LLM_MODEL", "")
+
+    if not api_key:
+        print("Notice: LLM_API_KEY is not configured.")
+        return {"can_solve": False, "summary": "LLM_API_KEY secret is not set.", "patch": ""}
+
+    if not base_url:
+        base_url = "https://openrouter.ai/api/v1"
+    if not model:
+        model = "openai/gpt-4o-mini"
+
+    url = f"{base_url}/chat/completions"
     headers = {
         "Content-Type": "application/json",
-        "Authorization": f"Bearer {token}"
+        "Authorization": f"Bearer {api_key}"
     }
 
     system_prompt = (
@@ -24,7 +37,7 @@ def call_ai_for_solution(issue_num, title, body, token):
     user_prompt = f"Issue #{issue_num}: {title}\n\nDescription:\n{body[:8000]}"
 
     payload = {
-        "model": "openai/gpt-4o-mini",
+        "model": model,
         "messages": [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_prompt}

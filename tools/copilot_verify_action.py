@@ -52,11 +52,31 @@ def get_git_diff():
             return ""
 
 def call_ai_review(diff_text, github_token):
-    # 正式な GitHub Models API エンドポイント
-    url = "https://models.github.ai/inference/chat/completions"
+    # LLM API 設定（OpenRouter / OpenAI / Azure / 互換エンドポイント対応）
+    api_key = os.environ.get("LLM_API_KEY")
+    base_url = os.environ.get("LLM_BASE_URL", "").rstrip("/")
+    model = os.environ.get("LLM_MODEL", "")
+
+    if not api_key:
+        # APIキー未設定時は明示的にスキップを返し、成功と誤認させない
+        print("Notice: LLM_API_KEY (or OPENROUTER_API_KEY / OPENAI_API_KEY) is not configured.")
+        return {
+            "has_issues": False,
+            "status": "skipped",
+            "summary": "Review skipped: LLM_API_KEY secret is not configured in repository.",
+            "patch": ""
+        }
+
+    # デフォルトは OpenRouter (多様なモデル/無料・安価枠が利用可能)
+    if not base_url:
+        base_url = "https://openrouter.ai/api/v1"
+    if not model:
+        model = "openai/gpt-4o-mini"
+
+    url = f"{base_url}/chat/completions"
     headers = {
         "Content-Type": "application/json",
-        "Authorization": f"Bearer {github_token}"
+        "Authorization": f"Bearer {api_key}"
     }
 
     system_prompt = (
@@ -73,7 +93,7 @@ def call_ai_review(diff_text, github_token):
     user_prompt = f"Here is the git diff of the latest commit:\n```diff\n{diff_text[:12000]}\n```"
 
     payload = {
-        "model": "openai/gpt-4o-mini",
+        "model": model,
         "messages": [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_prompt}
@@ -87,14 +107,26 @@ def call_ai_review(diff_text, github_token):
         with urllib.request.urlopen(req, timeout=60) as resp:
             data = json.loads(resp.read().decode("utf-8"))
             content = data["choices"][0]["message"]["content"]
-            return json.loads(content)
+            result = json.loads(content)
+            result["status"] = "success"
+            return result
     except urllib.error.HTTPError as e:
         err_msg = e.read().decode('utf-8', errors='replace')
         print(f"API Error ({e.code}): {err_msg}")
-        return {"has_issues": False, "summary": f"Review skipped (API response {e.code}): {err_msg[:200]}", "patch": ""}
+        return {
+            "has_issues": False,
+            "status": "error",
+            "summary": f"Review failed (API {e.code}): {err_msg[:200]}",
+            "patch": ""
+        }
     except Exception as e:
         print(f"Review call error: {e}")
-        return {"has_issues": False, "summary": f"Review call failed: {e}", "patch": ""}
+        return {
+            "has_issues": False,
+            "status": "error",
+            "summary": f"Review call failed: {e}",
+            "patch": ""
+        }
 
 def test_and_verify(patch_str):
     if not patch_str or not patch_str.strip():
@@ -172,12 +204,37 @@ def main():
 
     print("Requesting AI/Copilot code review...")
     review = call_ai_review(diff, token)
+    status = review.get("status", "success")
     has_issues = review.get("has_issues", False)
     summary = review.get("summary", "")
     patch = review.get("patch", "")
 
-    print(f"Review result - has_issues: {has_issues}")
+    print(f"Review result - status: {status}, has_issues: {has_issues}")
     print(f"Summary: {summary}")
+
+    if status == "skipped":
+        msg = (
+            f"### 🤖 Copilot Review: ℹ️ スキップ (Skipped)\n\n"
+            f"**コミット:** `{commit_sha[:7]}`\n\n"
+            f"> {summary}\n\n"
+            f"AI レビューを実行するには、リポジトリの Secrets に `LLM_API_KEY`（OpenRouter または OpenAI / 互換キー）を設定してください。"
+        )
+        print(msg)
+        post_github_comment(repo, commit_sha, msg, token)
+        write_step_summary(msg)
+        sys.exit(0)
+
+    if status == "error":
+        msg = (
+            f"### 🤖 Copilot Review: ❌ API エラー (Review Failed)\n\n"
+            f"**コミット:** `{commit_sha[:7]}`\n\n"
+            f"> {summary}\n\n"
+            f"レビュー API 呼び出しに失敗しました。エンドポイント設定または API キーを確認してください。"
+        )
+        print(msg)
+        post_github_comment(repo, commit_sha, msg, token)
+        write_step_summary(msg)
+        sys.exit(1)
 
     if not has_issues or not patch.strip():
         msg = (
