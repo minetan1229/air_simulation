@@ -41,8 +41,8 @@
 
 ```bash
 # リポジトリのクローン
-git clone <repository-url>
-cd <repository-directory>
+git clone https://github.com/minetan1229/air_simulation.git
+cd air_simulation
 
 # 仮想環境の作成と有効化
 python -m venv .venv

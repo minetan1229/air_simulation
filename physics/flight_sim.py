@@ -2447,28 +2447,30 @@ class FlightSimulator:
                 aero_cfg, self.environment, speed, effective_alpha_deg, beta_deg,
                 mach, reynolds, max(altitude, 0.0), omega, air["density_kgm3"], air["kinematic_viscosity_m2s"]
             )
-            # Inner stations (+/- 0.22b)
-            v_il = max(speed - 0.22 * b_span * r_rot, 0.1)
-            a_il = effective_alpha_deg + math.degrees(0.22 * b_span * p_rot / v_safe)
+            # Inner stations (+/- 0.22b): left wing y = -0.22b, right wing y = +0.22b
+            # When p > 0 (roll right, right wing down), alpha_right increases and alpha_left decreases.
+            # When r > 0 (yaw right, nose right), airspeed_left increases and airspeed_right decreases.
+            v_il = max(speed + 0.22 * b_span * r_rot, 0.1)
+            a_il = effective_alpha_deg - math.degrees(0.22 * b_span * p_rot / v_safe)
             res_il = aero_forces(
                 aero_cfg, self.environment, v_il, a_il, beta_deg,
                 mach, reynolds, max(altitude, 0.0), omega, air["density_kgm3"], air["kinematic_viscosity_m2s"]
             )
-            v_ir = max(speed + 0.22 * b_span * r_rot, 0.1)
-            a_ir = effective_alpha_deg - math.degrees(0.22 * b_span * p_rot / v_safe)
+            v_ir = max(speed - 0.22 * b_span * r_rot, 0.1)
+            a_ir = effective_alpha_deg + math.degrees(0.22 * b_span * p_rot / v_safe)
             res_ir = aero_forces(
                 aero_cfg, self.environment, v_ir, a_ir, beta_deg,
                 mach, reynolds, max(altitude, 0.0), omega, air["density_kgm3"], air["kinematic_viscosity_m2s"]
             )
             # Tip stations (+/- 0.44b)
-            v_ol = max(speed - 0.44 * b_span * r_rot, 0.1)
-            a_ol = effective_alpha_deg + math.degrees(0.44 * b_span * p_rot / v_safe)
+            v_ol = max(speed + 0.44 * b_span * r_rot, 0.1)
+            a_ol = effective_alpha_deg - math.degrees(0.44 * b_span * p_rot / v_safe)
             res_ol = aero_forces(
                 aero_cfg, self.environment, v_ol, a_ol, beta_deg,
                 mach, reynolds, max(altitude, 0.0), omega, air["density_kgm3"], air["kinematic_viscosity_m2s"]
             )
-            v_or = max(speed + 0.44 * b_span * r_rot, 0.1)
-            a_or = effective_alpha_deg - math.degrees(0.44 * b_span * p_rot / v_safe)
+            v_or = max(speed - 0.44 * b_span * r_rot, 0.1)
+            a_or = effective_alpha_deg + math.degrees(0.44 * b_span * p_rot / v_safe)
             res_or = aero_forces(
                 aero_cfg, self.environment, v_or, a_or, beta_deg,
                 mach, reynolds, max(altitude, 0.0), omega, air["density_kgm3"], air["kinematic_viscosity_m2s"]

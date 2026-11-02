@@ -30,7 +30,7 @@ def _mesh_import_inner():
         if uploaded is None or not uploaded.filename:
             raise BadRequest("multipart upload must contain a 'file' field")
         data = uploaded.read()
-        filename = uploaded.filename
+        filename = secure_filename(uploaded.filename) or 'model.glb'
         raw_gsm = as_float(request.form.get("paper_gsm", 100.0), "paper_gsm")
         metrics = mesh_domain.MESH_LIBRARY.import_model_bytes(
             data=data,

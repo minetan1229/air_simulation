@@ -322,10 +322,10 @@ def test_mesh_ssrf_multihop_and_cloud_metadata():
     with pytest.raises(ValueError, match="forbidden|blocked|private"):
         handler.redirect_request(None, None, 302, "Found", {}, "http://127.0.0.1/evil.glb")
 
-    # Exceeding max hops
-    dummy_req = urllib.request.Request("http://example.com/init.glb")
+    # Exceeding max hops (using explicit public IP to avoid external DNS dependency)
+    dummy_req = urllib.request.Request("http://93.184.216.34/init.glb")
     strict_handler = mesh_domain._SafeRedirectHandler(max_hops=2)
     with pytest.raises(ValueError, match="too many redirects"):
         for i in range(3):
-            strict_handler.redirect_request(dummy_req, None, 302, "Found", {}, f"http://example.com/hop{i}.glb")
+            strict_handler.redirect_request(dummy_req, None, 302, "Found", {}, f"http://93.184.216.34/hop{i}.glb")
 

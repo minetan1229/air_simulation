@@ -1677,6 +1677,9 @@ class _SafeRedirectHandler(urllib.request.HTTPRedirectHandler):
         self.hops += 1
         if self.hops > self.max_hops:
             raise ValueError(f"too many redirects ({self.hops} > {self.max_hops}) fetching {newurl!r}")
+        base_url = getattr(req, "full_url", None) or (req.get_full_url() if hasattr(req, "get_full_url") else "")
+        if base_url:
+            newurl = urllib.parse.urljoin(str(base_url), str(newurl))
         validate_url_safe(newurl)
         return super().redirect_request(req, fp, code, msg, headers, newurl)
 

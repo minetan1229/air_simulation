@@ -173,6 +173,7 @@ def meta_physics_references():
         },
         {
             "id": "blevins_1979_newman_1977_added_mass",
+            "aerosandbox_reference": "aerosandbox.aerodynamics.buildup (apparent mass / added inertia extensions)",
             "domain": "aerodynamics",
             "model": "Blevins-Newman Thin Planar Wing Added Mass and Inertia Tensor",
             "equation": "m_add_z = (pi/4)*rho*S*c, I_add_yy = (pi/128)*rho*S*c^3, I_add_xx = (pi/48)*rho*b^3*c^2",
@@ -186,6 +187,7 @@ def meta_physics_references():
         },
         {
             "id": "wagner_1925_beddoes_leishman_circulation_lag",
+            "aerosandbox_reference": "aerosandbox.aerodynamics.airfoil (unsteady indicial response / circulation lag)",
             "domain": "aerodynamics",
             "model": "Wagner-Beddoes-Leishman Indicial Circulation Lag",
             "equation": "tau_circ = k_circ * c / (2 * V), dCL/dt = (CL_target - CL) / tau_circ",
@@ -199,6 +201,7 @@ def meta_physics_references():
         },
         {
             "id": "mccroskey_1981_leishman_lsb_dynamic_stall",
+            "aerosandbox_reference": "aerosandbox.aerodynamics.airfoil (low-Re separation bubble / dynamic stall)",
             "domain": "aerodynamics",
             "model": "McCroskey-Leishman Low-Reynolds Laminar Separation Bubble Dynamic Stall Hysteresis",
             "equation": "delta_alpha = tanh(adot/5) * kappa_lsb * (180/pi) * sqrt(k_red) * sqrt(1e4/Re)",
