@@ -20,7 +20,6 @@ python smoke_test.py
 ```
 
 ### 2. Git & CI 運用
-- **AI Agents 自動読込**: `python tools/sync_ai_review.py`（GitHub上のCopilot検証済み確定修正を自動フェッチ＆同期）
 - **ブランチ作成**: `git checkout -b <type>/<desc>` (`feat/`, `fix/`, `docs/`, `test/`等)
 - **マージ&プッシュ**: ローカル全通過後、実動コードのみマージ → `git push`（※`.agents/context.md` のブランチ制約を遵守）
 - **CI/Issue確認**: `python tools/check_runs.py` でCI完了確認 → `python tools/check_issues.py` & `python tools/close_resolved_issue.py` でIssueクローズ。
