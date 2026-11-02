@@ -36,3 +36,9 @@ bridge = [
     "discord.py>=2.7.1,<3.0",
     "psutil>=7.2.2",
 ]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["api*", "physics*", "tools*"]
+exclude = ["tests*", "docs*", "static*", "templates*", "archive*", "skill*", "config*", "search*"]
+

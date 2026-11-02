@@ -2177,7 +2177,6 @@ class FlightSimulator:
         if cached is not None and abs(q_reference - cached[0]) <= STIFFNESS_CACHE_TOLERANCE * max(abs(cached[0]), 1.0):
             return cached[1]
         velocity = vec3(y[3:6])
-        speed = float(np.linalg.norm(velocity))
         probe_rate = y.copy()
         probe_rate[10:13] = vec3(y[10:13]) + np.full(3, 1.0 / math.sqrt(3.0))
         perturbed = self._compute_dynamics(probe_rate, time_s)
@@ -2185,14 +2184,21 @@ class FlightSimulator:
             np.linalg.norm(vec3(perturbed["angular_acceleration"]) - vec3(core["angular_acceleration"]))
         ) / 1.0
         speed_stiffness = 0.0
-        if speed > 1.0e-6:
-            delta = 0.01 * max(speed, 1.0)
+        # Aerodynamic stiffness depends on airspeed (relative to wind), not inertial ground speed.
+        # When stationary relative to ground in wind (v_inertial ~ 0), airspeed is non-zero.
+        position = vec3(y[0:3])
+        wind = wind_vector(position, self.environment, time_s)
+        relative_vel = velocity - wind
+        airspeed = float(np.linalg.norm(relative_vel))
+        if airspeed > 1.0e-6:
+            delta = 0.01 * max(airspeed, 1.0)
             probe_velocity = y.copy()
-            probe_velocity[3:6] = velocity + delta * velocity / speed
+            probe_velocity[3:6] = velocity + delta * (relative_vel / airspeed)
             perturbed = self._compute_dynamics(probe_velocity, time_s)
             speed_stiffness = (
                 float(np.linalg.norm(vec3(perturbed["acceleration"]) - vec3(core["acceleration"]))) / delta
             )
+
         value = max(rate_stiffness, speed_stiffness)
         if not math.isfinite(value) or value < 0.0:
             value = 0.0
@@ -2627,9 +2633,9 @@ class FlightSimulator:
             eff_inertia = np.copy(self._inertia)
             eff_inertia[0, 0] += float(added.get("added_inertia_xx_kgm2", 0.0))
             eff_inertia[1, 1] += float(added.get("added_inertia_yy_kgm2", 0.0))
-            keel_h = max(span * 0.08, 0.01)
-            eff_inertia[2, 2] += (math.pi / 128.0) * rho_val * keel_h * (self._chord ** 3)
+            eff_inertia[2, 2] += float(added.get("added_inertia_zz_kgm2", 0.0))
             angular_acceleration = angular_acceleration_body(eff_inertia, omega, moment_body)
+
         else:
             force_world = body_to_world(quaternion, force_body) + self._mass * gravity_world
             acceleration = force_world / self._mass

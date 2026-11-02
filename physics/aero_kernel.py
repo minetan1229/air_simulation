@@ -674,11 +674,20 @@ def compute_added_mass(
     m_z = (math.pi / 4.0) * rho * s * c
     i_yy = (math.pi / 128.0) * rho * s * (c * c * c)
     i_xx = (math.pi / 48.0) * rho * (b * b * b) * (c * c)
+    # Yaw apparent inertia (vertical keel/fin plate rotation about z axis: Blevins / Newman)
+    # Keel / vertical fin projected area ~ S_v = keel_h * c, where keel_h ~ 0.08 * b
+    # Dimension: [rho * b * c^4] or [rho * S_v * c^3] = [kg/m^3 * m * m^3 = kg * m] was incorrect.
+    # The moment of inertia of added mass about yaw z-axis for a vertical plate of depth h and chord c:
+    # I_zz = (pi / 128) * rho * h * (c^4) -> [kg/m^3 * m * m^4] = [kg m^2]
+    keel_h = xp.maximum(b * 0.08, 0.01)
+    i_zz = (math.pi / 128.0) * rho * keel_h * (c * c * c * c)
     return {
         "added_mass_z_kg": m_z,
         "added_inertia_yy_kgm2": i_yy,
         "added_inertia_xx_kgm2": i_xx,
+        "added_inertia_zz_kgm2": i_zz,
     }
+
 
 
 def unsteady_circulation_lag(
