@@ -70,3 +70,7 @@ ho Sar{c}^3$）と無次元質量比 compute_mass_ratio（$\mu < 5.0$ で mass_
 - **失速後CL天井クランプ整合性**: 線形揚力が {L,\max}$ に到達後に失速角へ向かう際、ポスト失速遷移の基準値 linear_at_stall を _clamp(linear_at_stall, -ceiling, ceiling) とすることで失速後に局所的に揚力が再上昇する双峰性（擬似ピーク）を排除。
 - **寄生抗力非負性ガード**: 不正入力・探索外れ値による負抗力（自発エネルギー生成）を防止するため safe_cd0 = xp.maximum(cd0, 0.0) 防御をカーネルに常設。
 - **モーメント基準点・無次元化整合性**: 基準長（MAC $）、参照点（AC .25c$, CG {cg}$）における有次元トルク  = q S c C_M + x_{cg} L$ と無次元化の整合性、$eta=0$ 時のロール・ヨー厳密ゼロ（^{-16}	ext{ N}\cdot	ext{m}$）および数値微分有界性を 	ests/test_aero.py で確認。
+## [Physical Consistency & Numerical Robustness Fixes] (2026-11-02)
+- **付加慣性ヨー軸次元整合性 (#84)**: physics/flight_sim.py のヨー軸付加慣性 {zz,\text{add}}$ が $\rho \cdot h \cdot c^3$（単位 $\mathrm{kg\cdot m}$）となっていた不整合を、垂直平板（キール）回転モデルに基づき {zz,\text{add}} = \frac{\pi}{128}\rho h c^4$（単位 $\mathrm{kg\cdot m^2}$）として compute_added_mass へ統一集約。
+- **風中静止時の剛性評価 (#85)**: _stiffness_estimate の有限差分速度摂動が対地速度ベースだったため無風以外の対気速度下で摂動がスキップされる問題を修正。対気相対速度ベクトル方向での差分摂動を行い、風中ゼロ対地速度時も局所空力剛性を正しく推定。
+- **風軸分解の特異点直交性検証 (#86)**: wind_force_to_body は body $ 軸や $ 軸と平行な特異流向を含む全3D流向で厳密に正規直交右手系（$\|\text{lift}\|=\|\text{side}\|=1.0$, $|\text{drag}\cdot\text{lift}| \le 10^{-12}$, $|\text{drag}\cdot\text{side}| \le 10^{-12}$）を構成していることを 100,000 回の乱数・特異点スイープで数理検証。
