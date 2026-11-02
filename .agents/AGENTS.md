@@ -26,7 +26,7 @@
 1. **常駐**: ルート `AGENTS.md` §1〜§4 ＋ `.agents/Knowledge-important.md`
 2. **付録（該当時のみ）**: ルート `AGENTS.md` §5〜§8 / `.agents/Project.md` /
    `.agents/Knowledge.md` / `docs/SPECIFICATION.md`
-3. **禁止**: ログ・ソースの全文出力。行指定・範囲指定・关键词検索を徹底する。
+3. **禁止**: ログ・ソースの全文出力。行指定・範囲指定・キーワード検索を徹底する。
 
 ---
 
@@ -36,7 +36,7 @@
 |---|---|---|
 | コンテキスト最小化 | ルート `AGENTS.md` §1.1 | 常駐は §1〜§4 のみ。付録は該当節だけ読む |
 | Anti-Fallacy（テキサスの狙撃兵） | ルート `AGENTS.md` §1.2 | 事前仮説と合否基準を宣言せず変更／実行しない。偶然動作を完了としない |
-| 自律実行ループ | ルート `AGENTS.md` §1.3 | Observe→Hypothesize→Execute→Verify→Distill→Finalize の6フェーズ |
+| 自律実行ループ & 提案 | ルート `AGENTS.md` §3, §3.1 | Observe〜Finalize の6フェーズ＋物理改善・現実適合性向上の積極的提案 |
 
 **ループ状態の正本は `.agents/Project.md` §「Loop State」** であり、_protocol の
 定義（フェーズ内容・リトライ上限・ロールバック規則）はルート `AGENTS.md` §1.3 に

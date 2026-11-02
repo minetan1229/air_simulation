@@ -5,6 +5,9 @@ __pycache__/
 venv/
 .env
 
+node_modules/
+package-lock.json
+
 # Kilo Code local MCP runtime artefacts
 .kilo/mcp/memory.jsonl
 .kilo/mcp/playwright/
@@ -24,29 +27,35 @@ logs/
 *.log
 *.csv
 !tests/**/*.csv
-!search/raw_data/**/*.csv
 smoke_*.json
-pytest_failure_summary.txt
 
-# Regenerable repair / verification artefacts
+# Generated verification artefacts (regenerable with tools/verify_physics_repair.py
+# and tools/capture_ui.py; the JSON dumps are tens of megabytes)
 artifacts/
 
-# Research corpus caches
-search/.cache/
+# Scratch diagnostics kept in the working tree are not part of the product.
+scratch_*
+tmp_*.py
 
 .pytest_cache/
-.mypy_cache/
-.ruff_cache/
 .coverage
 htmlcov/
 .vscode/
 .idea/
-dist/
-build/
-*.egg
+
+# Tool caches and CI summaries (listed explicitly instead of relying on the
+# self-ignore the tools write into their own cache directory)
+.mypy_cache/
+.ruff_cache/
+pytest_failure_summary.txt
 
 # Prevent accidental shadowing of standard modules
 antigravity.py
 
 # Paper collection pipeline cache (regenerable with search/tools/collect_papers.py)
 search/.cache/
+progress.md
+*.progress.md
+sim_process.pid
+watchdog_status.txt
+*.patch

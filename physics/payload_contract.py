@@ -60,6 +60,15 @@ CORE_KEYS: Tuple[str, ...] = (
     "glide_entry_time_s",
     "stable_glide_duration_s",
     "apex_recovery_status",
+    # Failure reporting.  ``evaluate_flight`` returns ``status="error"`` together
+    # with the exception class name in ``error`` and a unique correlation id in
+    # ``error_id`` (see ``physics.flight_sim.evaluate_flight``), and
+    # ``PHYSICS_PAPER_CONFORMANCE_AUDIT.md`` (appendix B.3, "error / error_id
+    # の新設") records the two keys as part of the contract.  Both are optional
+    # in value but mandatory in *presence*: a payload without them cannot be
+    # distinguished from a payload whose evaluation failed silently.
+    "error",
+    "error_id",
 )
 
 #: Further observables reported by every backend.
@@ -79,9 +88,13 @@ DIAGNOSTIC_KEYS: Tuple[str, ...] = (
 #: Provenance flags.  ``approximate`` marks a reduced-order backend,
 #: ``physics_verification_eligible`` marks a result that may be compared with
 #: wind-tunnel or P1 verification data, and ``limitations`` enumerates what the
-#: backend could not reproduce.
+#: backend could not reproduce.  ``model_detail`` names the concrete integrator
+#: that produced the numbers (``6dof_rk4`` for the reference path,
+#: ``rigid_body_6dof_batch`` for the GPU batch): every backend publishes it, so
+#: it belongs to the contract rather than to the set of extra diagnostics.
 METADATA_KEYS: Tuple[str, ...] = (
     "model",
+    "model_detail",
     "approximate",
     "physics_verification_eligible",
     "limitations",
@@ -115,6 +128,11 @@ DEFAULT_VALUES: Dict[str, Any] = {
     "glide_entry_time_s": None,
     "stable_glide_duration_s": 0.0,
     "apex_recovery_status": "not_observed",
+    # ``None`` means "no failure": the evaluation completed.  A failed
+    # evaluation carries the exception class name in ``error`` and a unique
+    # ``uuid4().hex`` correlation id in ``error_id``.
+    "error": None,
+    "error_id": None,
     "range_x_m": 0.0,
     "range_y_m": 0.0,
     "horizontal_range_m": 0.0,
@@ -126,10 +144,25 @@ DEFAULT_VALUES: Dict[str, Any] = {
     "diverged": False,
     "device_name": None,
     "model": "unknown",
+    "model_detail": "6dof_rk4",
     "approximate": True,
     "physics_verification_eligible": False,
     "limitations": [],
 }
+
+
+#: Keys whose ``None`` is a *value* rather than a missing measurement.  For
+#: every other key ``None`` means "the backend could not measure it" and is
+#: replaced by the documented default.  ``error`` / ``error_id`` are ``None``
+#: exactly when the evaluation succeeded, so the value has to survive
+#: normalisation.
+_NULL_IS_MEANINGFUL: Tuple[str, ...] = (
+    "glide_entry_time_s",
+    "stability",
+    "device_name",
+    "error",
+    "error_id",
+)
 
 
 def empty_payload(**overrides: Any) -> Dict[str, Any]:
@@ -164,7 +197,7 @@ def normalize_payload(
     for key in PAYLOAD_KEYS:
         if key in payload and payload[key] is not None:
             normalized[key] = payload[key]
-        elif key in payload and key in ("glide_entry_time_s", "stability", "device_name"):
+        elif key in payload and key in _NULL_IS_MEANINGFUL:
             # ``None`` is a meaningful value for these keys.
             normalized[key] = payload[key]
     for key, value in payload.items():

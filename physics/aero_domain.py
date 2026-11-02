@@ -20,9 +20,12 @@ Model chain
     ``C_Lalpha = 2 pi AR / (2 + sqrt(AR^2 (1 + lambda) + 4 AR / pi))`` unless
     ``cfg.cLalpha_per_rad > 0`` overrides it.
 2.  Linear branch ``C_L = cL0 + C_Lalpha alpha`` blended into the post-stall
-    branch ``C_Lmax + post_stall_slope (alpha - alpha_stall)`` by a smooth
-    logistic of sharpness ``cfg.stall_sharpness`` centred on
-    ``cfg.stall_alpha_deg`` (see :func:`stall_blend_weight`).
+    branch by a smooth logistic of sharpness ``cfg.stall_sharpness`` centred on
+    ``cfg.stall_alpha_deg`` (see :func:`stall_blend_weight`).  The post-stall
+    branch starts at the airframe's own stall value and moves onto the
+    Hoerner fully separated flat plate ``2 sin(a) cos^2(a)`` over
+    ``[alpha_stall, POST_STALL_PLATE_BLEND_DEG]``; it never collapses onto an
+    exact ``C_L == 0`` band.
 3.  Prandtl-Glauert compressibility on the slope plus a wave-drag increment
     once the flow approaches transonic.
 4.  Parasite drag ``C_D0(Re) = cd0 (1e5 / Re) ** re_cd0_exponent`` plus induced
@@ -72,7 +75,15 @@ from .config_schema import (
     rad2deg,
     safe_div,
 )
+from . import aero_kernel
 from .geometry_utils import cross, vec3
+
+#: Execution backend of the shared aerodynamic kernel for this scalar path.
+#: The formulas live in :mod:`physics.aero_kernel` and are written once; the
+#: pure-Python backend evaluates them without allocating a single array, which
+#: matters because the 6-DoF integrator evaluates the aerodynamic model four
+#: times per RK4 step.
+_SCALAR = aero_kernel.ScalarMath
 
 __all__ = [
     "helmbold_cl_alpha",
@@ -110,6 +121,10 @@ __all__ = [
     "RE_REFERENCE",
     "DEFAULT_REFERENCE_CHORD_M",
     "AERO_BACKEND",
+    "POST_STALL_PLATE_BLEND_DEG",
+    "POST_STALL_DRAG_BLEND_DEG",
+    "MAX_ABS_LIFT_COEFFICIENT",
+    "STALL_BLEND_ORDER",
 ]
 
 #: Echoed in every payload so the UI never has to guess how the numbers were
@@ -118,6 +133,15 @@ AERO_BACKEND: str = "numpy"
 
 #: Reference Reynolds number of the ``cd0`` correlation.
 RE_REFERENCE: float = 1.0e5
+
+#: Versioned default Reynolds number for the published drag polar.
+#: This is the order-of-magnitude of the best-glide (vertex) condition
+#: (``V approx 2 m/s``), not the cruise operating point (``V approx 8-12 m/s``).
+#: The default is intentionally kept at ``1.0e4`` so the published polar's
+#: numeric contract is stable across versions; callers operating off the vertex
+#: should pass ``reynolds`` explicitly.  Changing this default is a versioned,
+#: next-phase decision (see ``no-finish.md`` section A-6).
+DRAG_POLAR_DEFAULT_REYNOLDS: float = 1.0e4
 
 #: Exponent of the logistic stall blend.  The plain logistic
 #: ``1 / (1 + exp(-k d))`` is numerically indistinguishable from the linear
@@ -135,7 +159,9 @@ ELEVON_LIFT_PER_DEG: float = 0.020
 ELEVON_MOMENT_PER_DEG: float = 0.030
 #: Mechanical travel limit applied when a trim solution would need an
 #: impossible elevon angle; a clamped solution reports ``trimmed = False``.
-ELEVON_MAX_DEG: float = 180.0
+#: Matches the physical +/-45 deg elevon travel limit (the guard is the
+#: constraint, not the configured trim authority).
+ELEVON_MAX_DEG: float = 45.0
 
 #: Mach number at which the transonic wave-drag increment switches on.
 MACH_TRANSONIC: float = 0.75
@@ -158,6 +184,16 @@ try:  # the atmosphere worker owns that module; the fallback below is functional
     from . import atmosphere_domain as _ATMOSPHERE  # type: ignore[no-redef]
 except Exception:  # pragma: no cover - exercised only if the sibling is broken
     _ATMOSPHERE = None
+
+#: Memo of the derived atmosphere state.
+#:
+#: The atmosphere was re-derived from the environment on every aerodynamic
+#: evaluation, although it only changes when the environment does.  The memo
+#: is keyed on the very fields the atmosphere depends on, so a repeated
+#: evaluation of the same air state reuses the derived density, viscosity and
+#: sound speed instead of redoing the ISA / Sutherland integration (§P2-1).
+_ATMOSPHERE_MEMO: Dict[Tuple[Any, ...], Dict[str, float]] = {}
+_ATMOSPHERE_MEMO_LIMIT = 64
 
 
 # --------------------------------------------------------------------------
@@ -214,11 +250,13 @@ def helmbold_cl_alpha(aspect_ratio: float, taper_ratio: float) -> float:
     """Helmbold triangular-wing lift-curve slope ``dC_L / dalpha`` per radian.
 
     ``C_Lalpha = 2 pi AR / (2 + sqrt(AR^2 (1 + lambda) + 4 AR / pi))``
+
+    Thin wrapper around :func:`physics.aero_kernel.helmbold_cl_alpha`, which is
+    the single implementation of this correlation in the project.  The GPU
+    paths used to carry a truncated variant of this formula; routing every
+    caller through one function is what removed that 11.3 % slope error.
     """
-    aspect = max(_finite(aspect_ratio, 1.0), 1.0e-3)
-    taper = clamp(_finite(taper_ratio, 0.7), 0.01, 1.0)
-    denominator = 2.0 + math.sqrt(aspect * aspect * (1.0 + taper) + 4.0 * aspect / math.pi)
-    return 2.0 * math.pi * aspect / denominator
+    return aero_kernel.helmbold_cl_alpha(aspect_ratio, taper_ratio)
 
 
 def prandtl_glauert(mach: float) -> float:
@@ -234,12 +272,10 @@ def prandtl_glauert(mach: float) -> float:
     except (TypeError, ValueError):
         return 1.0
     if not math.isfinite(value):
-        return prandtl_glauert(MACH_CRITICAL if value > 0.0 else 0.0)
-    value = abs(value)
-    if value <= 0.0:
-        return 1.0
-    effective = min(value, MACH_CRITICAL)
-    return 1.0 / math.sqrt(max(1.0 - effective * effective, 1.0e-12))
+        if math.isnan(value):
+            return 1.0
+        return float(aero_kernel.prandtl_glauert(_SCALAR, MACH_CRITICAL)) if value > 0.0 else 1.0
+    return float(aero_kernel.prandtl_glauert(_SCALAR, value))
 
 
 def lift_slope_per_rad(cfg: AircraftConfig, compressible: bool = True, mach: float = 0.0) -> float:
@@ -271,18 +307,16 @@ def ground_effect_factor(height_m: float, span_m: float, enabled: bool = True) -
     """
     if not bool(enabled):
         return 1.0
-    height = max(_finite(height_m), 0.0)
-    span = max(_finite(span_m, 0.2), 1.0e-9)
-    ratio = 16.0 * (height / span) ** 2
-    if not math.isfinite(ratio):
-        return 1.0
-    return ratio / (1.0 + ratio)
+    return float(aero_kernel.ground_effect_factor(_SCALAR, height_m, span_m, True))
 
 
 def parasite_drag_coefficient(cfg: AircraftConfig, reynolds: float) -> float:
     """Reynolds-corrected parasite drag ``C_D0 = cd0 (1e5 / Re) ** exponent``."""
-    value = max(abs(_finite(reynolds, RE_REFERENCE)), 1.0)
-    return _finite(cfg.cd0, 0.02) * (RE_REFERENCE / value) ** _finite(cfg.re_cd0_exponent, 0.0)
+    return float(
+        aero_kernel.parasite_drag_coefficient(
+            _SCALAR, _finite(cfg.cd0, 0.02), reynolds, _finite(cfg.re_cd0_exponent, 0.0)
+        )
+    )
 
 
 def wave_drag_coefficient(mach: float, compressible: bool = True) -> float:
@@ -292,14 +326,7 @@ def wave_drag_coefficient(mach: float, compressible: bool = True) -> float:
     empirical drag-divergence trend growing instead of collapsing like
     ``1 - M^2`` would.
     """
-    if not bool(compressible):
-        return 0.0
-    value = abs(_finite(mach))
-    if value <= MACH_TRANSONIC:
-        return 0.0
-    excess = value - MACH_TRANSONIC
-    supersonic = max(value - 1.0, 0.0)
-    return _WAVE_DRAG_GAIN * excess * excess + _SUPERSONIC_DRAG_GAIN * supersonic ** 3
+    return float(aero_kernel.wave_drag_coefficient(_SCALAR, mach, bool(compressible)))
 
 
 # --------------------------------------------------------------------------
@@ -310,14 +337,14 @@ def effective_stall_alpha_deg(cfg: AircraftConfig) -> float:
 
     When ``cfg.step_trip_ratio > 0``, the fold step acts as a boundary layer trip wire,
     preventing laminar bubble burst and delaying full stall separation by up to several degrees.
+
+    The airframe is symmetric, so the same angle applies in both directions.
+    The previous implementation used a wider *negative* threshold
+    (``max(stall + 15, 30)``) - an empirical recovery assumption with no
+    source in any paper - which made the model stall at 14 deg nose-up but
+    30 deg nose-down and systematically over-predicted inverted recovery.
     """
-    stall_alpha = _finite(cfg.stall_alpha_deg, 14.0)
-    trip_ratio = max(_finite(cfg.step_trip_ratio, 0.0), 0.0)
-    if trip_ratio > 0.0:
-        # Step trip wire delays stall separation: each 0.01 step/c adds ~2.5 deg stall delay (saturating)
-        delay = 250.0 * trip_ratio / (1.0 + 50.0 * trip_ratio)
-        return stall_alpha + delay
-    return stall_alpha
+    return float(aero_kernel.effective_stall_alpha_deg(cfg))
 
 
 def polhamus_lift_coefficient(alpha_deg: float, cfg: AircraftConfig, kp: Optional[float] = None) -> float:
@@ -330,28 +357,40 @@ def polhamus_lift_coefficient(alpha_deg: float, cfg: AircraftConfig, kp: Optiona
     alpha_rad = deg2rad(_finite(alpha_deg))
     cos_a = math.cos(alpha_rad)
     sin_a = math.sin(alpha_rad)
-    k_p = lift_slope_per_rad(cfg, compressible=False) if kp is None else float(kp)
+    if kp is None:
+        explicit = max(_finite(getattr(cfg, "polhamus_kp", 0.0), 0.0), 0.0)
+        k_p = explicit if explicit > 0.0 else lift_slope_per_rad(cfg, compressible=False)
+    else:
+        k_p = float(kp)
     k_v = max(_finite(cfg.polhamus_kv, 0.0), 0.0)
-    return k_p * sin_a * (cos_a ** 2) + k_v * (sin_a ** 2) * cos_a
+    vortex_sign = 1.0 if sin_a >= 0.0 else -1.0
+    return k_p * sin_a * (cos_a ** 2) + k_v * (sin_a ** 2) * cos_a * vortex_sign
 
 
 def stall_blend_weight(alpha_deg: float, cfg: AircraftConfig) -> float:
     """Smooth logistic blend weight between the linear and post-stall branch.
 
-    ``1`` deep post-stall, ``0`` in attached flow, exactly
-    ``0.5 ** STALL_BLEND_ORDER`` at effective stall angle.
+    ``1`` deep post-stall, ``0`` in attached flow.  The weight is exactly
+    zero at and below the stall angle, so the attached-flow branch reproduces
+    ``cL0 + cLalpha alpha`` to machine precision there (the plain logistic is
+    only numerically indistinguishable from zero about 15 deg below the
+    stall, which is not enough).  Above the stall the logistic^4 shape is
+    retained - it is 1.65x sharper than a plain sigmoid - and is renormalised
+    so that it starts from exactly zero at the break.
+
+    Thin wrapper around :func:`physics.aero_kernel.stall_blend_weight`, which
+    is the single implementation of the blend: the GPU paths use the same
+    kernel, so the stall break has the same shape in every path.
     """
-    alpha = _finite(alpha_deg)
-    stall_alpha = effective_stall_alpha_deg(cfg)
-    if alpha >= 0.0:
-        offset = alpha - stall_alpha
-    else:
-        # Negative alpha remains linear in typical inverted/recovery angles,
-        # transitioning to the flat plate curve at deep negative alpha
-        neg_stall = max(stall_alpha + 15.0, 30.0)
-        offset = -alpha - neg_stall
-    sharpness = max(abs(_finite(cfg.stall_sharpness, 1.4)), 1.0e-6)
-    return _logistic(sharpness * offset) ** STALL_BLEND_ORDER
+    return float(
+        aero_kernel.stall_blend_weight(
+            _SCALAR,
+            alpha_deg,
+            effective_stall_alpha_deg(cfg),
+            max(abs(_finite(cfg.stall_sharpness, 1.4)), 1.0e-6),
+            STALL_BLEND_ORDER,
+        )
+    )
 
 
 def flat_plate_lift_coefficient(alpha_deg: float) -> float:
@@ -368,10 +407,16 @@ def flat_plate_lift_coefficient(alpha_deg: float) -> float:
     return 2.0 * math.sin(a) * math.cos(a) * math.cos(a)
 
 
-#: Beyond this |alpha| the unbounded linear post-stall ramp is progressively
-#: replaced by the flat-plate curve; by 85 deg only the flat plate remains.
-POST_STALL_BLEND_START_DEG = 45.0
-POST_STALL_BLEND_END_DEG = 85.0
+#: Angle (deg) at which the post-stall branch has fully moved onto the
+#: Hoerner fully separated flat-plate limit ``2 sin(a) cos^2(a)``.  The
+#: transition *starts* at the stall angle, so the lift curve can never
+#: collapse onto an exact ``C_L == 0`` band between the stall break and the
+#: plate limit.
+POST_STALL_PLATE_BLEND_DEG = 45.0
+
+#: Width (deg) of the smoothstep that moves the separated pressure drag from
+#: zero at the stall angle to the full Hoerner value.
+POST_STALL_DRAG_BLEND_DEG = 15.0
 
 #: Hard ceiling on |C_L|.  A thin aerofoil section cannot exceed roughly
 #: 2*sin(a)*cos^2(a) + a modest attached-flow contribution, so anything beyond
@@ -379,28 +424,40 @@ POST_STALL_BLEND_END_DEG = 85.0
 MAX_ABS_LIFT_COEFFICIENT = 4.0
 
 
+def _smoothstep01(value: float) -> float:
+    """Hermite smoothstep clamped to ``[0, 1]`` (C1 continuous)."""
+    t = clamp(_finite(value), 0.0, 1.0)
+    return t * t * (3.0 - 2.0 * t)
+
+
 def _post_stall_lift_coefficient(alpha: float, cfg: AircraftConfig, linear_at_stall: float) -> float:
-    """Bounded post-stall lift, anchored to the airframe's own lift curve."""
-    sign = 1.0 if alpha >= 0.0 else -1.0
-    abs_alpha = abs(alpha)
-    stall_alpha = effective_stall_alpha_deg(cfg)
-    ref_cl = abs(linear_at_stall)
-    raw = ref_cl + _finite(cfg.post_stall_slope, -0.03) * (abs_alpha - stall_alpha)
-    ceiling = max(abs(_finite(cfg.cl_max, 0.90)), ref_cl, 0.1)
-    ramp = sign * ceiling * math.tanh(max(raw, 0.0) / ceiling)
-    if abs_alpha <= POST_STALL_BLEND_START_DEG:
-        return ramp
-    plate_reference = flat_plate_lift_coefficient(stall_alpha)
-    if abs(plate_reference) < 1.0e-9:
-        plate = 0.0
-    else:
-        plate = flat_plate_lift_coefficient(alpha) * (ref_cl / plate_reference)
-    if abs_alpha >= POST_STALL_BLEND_END_DEG:
-        return plate
-    span = POST_STALL_BLEND_END_DEG - POST_STALL_BLEND_START_DEG
-    t = (abs_alpha - POST_STALL_BLEND_START_DEG) / span
-    weight = t * t * (3.0 - 2.0 * t)  # smoothstep, C1 continuous
-    return (1.0 - weight) * ramp + weight * plate
+    """Post-stall lift anchored on the Hoerner flat-plate limit.
+
+    The branch starts at the airframe's own stall value ``linear_at_stall``
+    and moves onto the fully separated plate curve ``2 sin(a) cos^2(a)``
+    (Hoerner 1965) over ``[alpha_stall, POST_STALL_PLATE_BLEND_DEG]``.
+
+    The transition target is the plate value *at the blend angle*, not the
+    moving plate curve itself.  Blending towards the moving curve produced a
+    spurious dip near 30 deg followed by a secondary peak near 41 deg, because
+    the plate curve itself rises to its 35.26 deg maximum while the attached
+    branch falls.  With a fixed target the composite is strictly decreasing
+    from the stall to the blend angle and joins the plate curve exactly, so
+    the lift can never collapse onto an exact ``C_L == 0`` band (the defect
+    that produced a lift-free, drag-only deep stall: a separated plate at
+    41 deg still carries the Hoerner normal force 0.75, not nothing).
+
+    An airframe with no attached-flow lift at all (``cL0 = 0`` and no lift
+    slope) has no post-stall lift either: the flat-plate term is a property
+    of the airframe's own lift capability.
+
+    Thin wrapper around :func:`physics.aero_kernel.post_stall_lift_coefficient`.
+    """
+    return float(
+        aero_kernel.post_stall_lift_coefficient(
+            _SCALAR, alpha, linear_at_stall, effective_stall_alpha_deg(cfg)
+        )
+    )
 
 
 def lift_coefficient(
@@ -421,57 +478,67 @@ def lift_coefficient(
     attitude can produce an infinite lift (or drag) force.
     ``cl_offset`` carries the elevon lift increment so callers keep one
     coherent ``C_L``; the default zero reproduces the pure airfoil relation.
+
+    Thin wrapper around :func:`physics.aero_kernel.lift_coefficient`, the
+    single implementation of the lift curve.  The GPU paths evaluate the very
+    same kernel, so the lift curve of an airframe no longer depends on
+    whether a GPU was present.
     """
-    alpha = _finite(alpha_deg)
-    slope = lift_slope_per_rad(cfg, compressible=compressible, mach=mach)
-    stall_alpha = effective_stall_alpha_deg(cfg)
-    linear = _finite(cfg.cL0, 0.0) + slope * deg2rad(alpha)
-
-    # Polhamus LEV suction analogy: when cfg.polhamus_kv > 0, compute vortex lift increment
-    kv = max(_finite(cfg.polhamus_kv, 0.0), 0.0)
-    if kv > 0.0:
-        alpha_rad = deg2rad(alpha)
-        sin_a = math.sin(alpha_rad)
-        cos_a = math.cos(alpha_rad)
-        # Delta vortex lift: K_v * sin^2(alpha) * cos(alpha)
-        # Sign preservation for negative alpha:
-        vortex_cl = math.copysign(kv * (sin_a ** 2) * cos_a, alpha_rad)
-        linear = linear + vortex_cl
-
-    linear_at_stall = _finite(cfg.cL0, 0.0) + slope * deg2rad(stall_alpha)
-    if kv > 0.0:
-        stall_rad = deg2rad(stall_alpha)
-        linear_at_stall += math.copysign(kv * (math.sin(stall_rad) ** 2) * math.cos(stall_rad), stall_rad)
-
-    post_stall = _post_stall_lift_coefficient(alpha, cfg, linear_at_stall)
-    weight = stall_blend_weight(alpha, cfg)
-    value = (1.0 - weight) * linear + weight * post_stall + _finite(cl_offset)
-    ceiling = MAX_ABS_LIFT_COEFFICIENT + abs(_finite(cl_offset))
-    return clamp(value, -ceiling, ceiling)
+    params = replace(
+        aero_kernel.params_from_aircraft(cfg), compressible=bool(compressible)
+    )
+    slope = params.lift_slope(_SCALAR, mach)
+    return float(
+        aero_kernel.lift_coefficient(
+            _SCALAR,
+            alpha_deg,
+            params.cL0,
+            slope,
+            params.stall_alpha_deg,
+            params.stall_sharpness,
+            cl_max=params.cl_max,
+            polhamus_kp=params.polhamus_kp,
+            polhamus_kv=params.polhamus_kv,
+            cl_offset=cl_offset,
+        )
+    )
 
 
-def separated_pressure_drag_coefficient(alpha_deg: float, cfg: AircraftConfig) -> float:
-    """Empirical separated-plate pressure drag, C_D = 2 sin²(alpha).
+def separated_pressure_drag_coefficient(
+    alpha_deg: float, cfg: AircraftConfig, reynolds: float = RE_REFERENCE
+) -> float:
+    """Separated-flow pressure drag, Hoerner (1965): ``2 sin^2(a) + C_D0 cos(a)``.
 
-    A C1 smooth transition starts at the lift model's corresponding stall
-    threshold and reaches the plate limit at broadside incidence. This is
-    an uncalibrated thin-plate approximation, not a measured airframe polar.
-    Attached-flow analytic polars remain unchanged. Reverse flow is handled
-    by the same projected-area law; edge-on flow retains parasite drag.
+    The first term is the broadside-plate projected-area drag, the second the
+    parasite drag resolved onto the chord of the separated plate.  The
+    parasite term is dropped for reverse flow (``cos(a) <= 0``): a separated
+    plate beyond 90 deg sees no chord-aligned flow and a negative drag term
+    would make the body gain energy.
+
+    The attached polar is joined by a C1 smoothstep that reaches the full
+    separated value ``POST_STALL_DRAG_BLEND_DEG`` past the stall angle, so the
+    drag builds up immediately behind the stall break instead of only at
+    90 deg.  The former transition (0 at the stall, 1 at 90 deg) made the
+    post-stall drag five times too small at 30 deg, so the polar had no
+    stall     valley at all.  ``reynolds`` selects the Reynolds-corrected parasite
+    drag, which keeps the separated branch consistent with the attached polar.
+
+    Thin wrapper around :func:`physics.aero_kernel.separated_pressure_drag_coefficient`.
     """
-    alpha = (_finite(alpha_deg) + 180.0) % 360.0 - 180.0
-    threshold = effective_stall_alpha_deg(cfg)
-    if alpha < 0.0:
-        threshold = max(threshold + 15.0, 30.0)
-    transition = clamp((abs(alpha) - threshold) / max(90.0 - threshold, 1.0), 0.0, 1.0)
-    weight = transition * transition * (3.0 - 2.0 * transition)
-    return weight * 2.0 * math.sin(deg2rad(alpha)) ** 2
+    return float(
+        aero_kernel.separated_pressure_drag_coefficient(
+            _SCALAR,
+            alpha_deg,
+            effective_stall_alpha_deg(cfg),
+            parasite_drag_coefficient(cfg, reynolds),
+        )
+    )
 
 
 def drag_coefficient(
     alpha_deg: float,
     cfg: AircraftConfig,
-    reynolds: float = 1.0e4,
+    reynolds: float = DRAG_POLAR_DEFAULT_REYNOLDS,
     ground_height_m: Optional[float] = None,
     mach: float = 0.0,
     compressible: bool = True,
@@ -482,12 +549,22 @@ def drag_coefficient(
     ``ground_height_m=None`` evaluates the free-air polar; a height attenuates
     the **induced** part only, because a ground effect does not change the
     profile drag.
+
+    ``reynolds`` defaults to the versioned :data:`DRAG_POLAR_DEFAULT_REYNOLDS`
+    (the vertex/best-glide condition).  Callers operating off that point should
+    pass ``reynolds`` explicitly; the default is intentionally fixed so the
+    published polar's numeric contract is stable across versions.
     """
+    te_fold = trailing_edge_fold_effects(cfg)
     cl = lift_coefficient(alpha_deg, cfg, compressible=compressible, mach=mach, cl_offset=cl_offset)
     induced = cl * cl / _polar_constant(cfg)
     factor = 1.0 if ground_height_m is None else ground_effect_factor(ground_height_m, _span(cfg), True)
-    return parasite_drag_coefficient(cfg, reynolds) + induced * factor + separated_pressure_drag_coefficient(alpha_deg, cfg) + wave_drag_coefficient(
-        mach, compressible
+    return (
+        parasite_drag_coefficient(cfg, reynolds)
+        + te_fold["dcd"]
+        + induced * factor
+        + separated_pressure_drag_coefficient(alpha_deg, cfg, reynolds)
+        + wave_drag_coefficient(mach, compressible)
     )
 
 
@@ -514,19 +591,25 @@ def elevon_effects(elevon_deg: float, cfg: AircraftConfig) -> Dict[str, float]:
         ``dcm``              pitching-moment increment (negative = nose down)
         ``dalpha_trim_deg``  angle of attack nulling ``cm0 + cm_alpha alpha + dcm``
     """
-    deflection = _finite(elevon_deg)
-    authority = elevon_authority(cfg)
-    dcl = authority * ELEVON_LIFT_PER_DEG * deflection
-    dcm = -authority * ELEVON_MOMENT_PER_DEG * deflection
-    cm_alpha = _finite(cfg.cm_alpha, 0.0)
-    if abs(cm_alpha) < 1.0e-12:
-        return {"dcl": dcl, "dcm": dcm, "dalpha_trim_deg": 0.0}
-    return {"dcl": dcl, "dcm": dcm, "dalpha_trim_deg": rad2deg(-(_finite(cfg.cm0) + dcm) / cm_alpha)}
+    effects = aero_kernel.elevon_effects(
+        _SCALAR,
+        elevon_deg,
+        elevon_authority(cfg),
+        _finite(cfg.cm0, 0.0),
+        _finite(cfg.cm_alpha, 0.0),
+    )
+    return {key: float(value) for key, value in effects.items()}
 
 
 def trim_alpha_from_elevon(cfg: AircraftConfig, elevon_deg: float) -> float:
     """Closed-form angle of attack that nulls the static pitching moment."""
-    return float(elevon_effects(elevon_deg, cfg)["dalpha_trim_deg"])
+    elevon = elevon_effects(elevon_deg, cfg)
+    te_fold = trailing_edge_fold_effects(cfg)
+    cm_alpha = _finite(cfg.cm_alpha)
+    if abs(cm_alpha) < 1.0e-12:
+        return 0.0
+    cm_static = _finite(cfg.cm0) + elevon["dcm"] + te_fold["dcm"]
+    return float(rad2deg(-cm_static / cm_alpha))
 
 
 def elevon_for_trim(cfg: AircraftConfig, alpha_deg: float) -> float:
@@ -534,7 +617,8 @@ def elevon_for_trim(cfg: AircraftConfig, alpha_deg: float) -> float:
     gain = elevon_authority(cfg) * ELEVON_MOMENT_PER_DEG
     if gain <= 1.0e-12:
         return 0.0
-    required = -(_finite(cfg.cm0) + _finite(cfg.cm_alpha) * deg2rad(alpha_deg))
+    te_fold = trailing_edge_fold_effects(cfg)
+    required = -(_finite(cfg.cm0) + _finite(cfg.cm_alpha) * deg2rad(alpha_deg) + te_fold["dcm"])
     return clamp(-required / gain, -ELEVON_MAX_DEG, ELEVON_MAX_DEG)
 
 
@@ -548,13 +632,8 @@ def trailing_edge_fold_effects(cfg: AircraftConfig) -> Dict[str, float]:
     Also produces a profile drag increment dcd scaling with sin^2(fold).
     """
     fold_deg = _finite(getattr(cfg, "fold_trailing_deg", 0.0), 0.0)
-    if fold_deg == 0.0:
-        return {"dcl": 0.0, "dcm": 0.0, "dcd": 0.0}
-    rad = deg2rad(fold_deg)
-    dcl = 0.015 * fold_deg
-    dcm = -0.012 * fold_deg
-    dcd = 0.035 * (math.sin(rad) ** 2)
-    return {"dcl": dcl, "dcm": dcm, "dcd": dcd}
+    effects = aero_kernel.trailing_edge_fold_effects(_SCALAR, fold_deg)
+    return {key: float(value) for key, value in effects.items()}
 
 
 # --------------------------------------------------------------------------
@@ -562,7 +641,7 @@ def trailing_edge_fold_effects(cfg: AircraftConfig) -> Dict[str, float]:
 # --------------------------------------------------------------------------
 def drag_polar_minima(
     cfg: AircraftConfig,
-    reynolds: float = 1.0e4,
+    reynolds: float = DRAG_POLAR_DEFAULT_REYNOLDS,
     cl_zero_lift: Optional[float] = None,
     slope_per_rad: Optional[float] = None,
 ) -> Dict[str, float]:
@@ -579,7 +658,8 @@ def drag_polar_minima(
     an angle of attack.
     """
     constant = _polar_constant(cfg)
-    cd0 = parasite_drag_coefficient(cfg, reynolds)
+    te_fold = trailing_edge_fold_effects(cfg)
+    cd0 = parasite_drag_coefficient(cfg, reynolds) + te_fold["dcd"]
     zero_lift = _finite(cfg.cL0) if cl_zero_lift is None else _finite(cl_zero_lift)
     slope = lift_slope_per_rad(cfg) if slope_per_rad is None else _finite(slope_per_rad)
     cl_at_ld_max = math.sqrt(max(cd0, 0.0) * constant)
@@ -601,7 +681,7 @@ def drag_polar(
     alpha_min_deg: float = -8.0,
     alpha_max_deg: float = 20.0,
     points: int = 57,
-    reynolds: float = 1.0e4,
+    reynolds: float = DRAG_POLAR_DEFAULT_REYNOLDS,
 ) -> Dict[str, Any]:
     """Sweep the free-air drag polar over ``[alpha_min_deg, alpha_max_deg]``.
 
@@ -617,19 +697,22 @@ def drag_polar(
     alphas: List[float] = [high if index == count - 1 else low + step * index for index in range(count)]
 
     slope = lift_slope_per_rad(cfg)
+    te_fold = trailing_edge_fold_effects(cfg)
+    elevon = elevon_effects(cfg.elevon_deg, cfg)
+    total_cl_offset = elevon["dcl"] + te_fold["dcl"]
     cols_cl: List[float] = []
     cols_cd: List[float] = []
     cols_ld: List[float] = []
     for alpha in alphas:
-        cl = lift_coefficient(alpha, cfg, compressible=False, mach=0.0)
-        cd = drag_coefficient(alpha, cfg, reynolds=reynolds, ground_height_m=None)
+        cl = lift_coefficient(alpha, cfg, compressible=False, mach=0.0, cl_offset=total_cl_offset)
+        cd = drag_coefficient(alpha, cfg, reynolds=reynolds, ground_height_m=None, cl_offset=total_cl_offset)
         cols_cl.append(cl)
         cols_cd.append(cd)
         cols_ld.append(safe_div(cl, cd, 0.0) if cd > _CD_FLOOR else 0.0)
 
     best_cd = min(range(count), key=lambda i: cols_cd[i])
     best_ld = max(range(count), key=lambda i: cols_ld[i])
-    zero_lift = _finite(cfg.cL0) + elevon_effects(cfg.elevon_deg, cfg)["dcl"]
+    zero_lift = _finite(cfg.cL0) + total_cl_offset
     minima = drag_polar_minima(cfg, reynolds=reynolds, cl_zero_lift=zero_lift, slope_per_rad=slope)
 
     return {
@@ -762,21 +845,16 @@ def center_of_pressure_x(alpha_deg: float, cfg: AircraftConfig) -> float:
     lies around 0.25 MAC (aerodynamic center). As angle of attack increases towards stall
     and separation, the center of pressure shifts aft towards 0.45..0.50 MAC.
     When ``cfg.cp_shift_gain > 0``, the shift is scaled by ``cp_shift_gain``.
+
+    Thin wrapper around :func:`physics.aero_kernel.center_of_pressure_fraction`.
     """
     chord = max(_finite(_geom(cfg)["ref_length_m"], 0.075), 1.0e-9)
-    alpha = abs(_finite(alpha_deg))
-    stall_alpha = effective_stall_alpha_deg(cfg)
-
-    # Shift fraction from 0.25 at alpha=0 towards 0.50 at and beyond stall
-    # Normalized progression with alpha / stall_alpha
-    progression = clamp(alpha / max(stall_alpha, 1.0), 0.0, 1.0)
-    # Smooth progression (Hermite smoothstep)
-    progression_smooth = progression * progression * (3.0 - 2.0 * progression)
-
-    # Baseline thin airfoil CP is at 0.25 c; max aft shift at full separation is up to 0.50 c
-    gain = max(_finite(cfg.cp_shift_gain, 0.0), 0.0)
-    cp_frac = 0.25 + 0.25 * progression_smooth * min(gain, 1.0)
-    return float(cp_frac * chord)
+    fraction = float(
+        aero_kernel.center_of_pressure_fraction(
+            _SCALAR, alpha_deg, effective_stall_alpha_deg(cfg), _finite(cfg.cp_shift_gain, 0.0)
+        )
+    )
+    return float(fraction * chord)
 
 
 # --------------------------------------------------------------------------
@@ -812,6 +890,40 @@ def _fallback_atmosphere(env: EnvironmentConfig) -> Tuple[float, float, float, f
     return density, viscosity / density, math.sqrt(GAMMA_AIR * R_AIR * temperature), temperature
 
 
+def _atmosphere_state(env: EnvironmentConfig) -> Dict[str, float]:
+    """Return the derived atmosphere of ``env``, reusing the last result.
+
+    The key covers every field the atmosphere worker reads, so a changed
+    environment always invalidates the memo while an unchanged one does not
+    pay for the ISA / Sutherland integration twice (§P2-1).
+    """
+    key = (
+        bool(env.isa_mode),
+        float(env.sea_level_temperature_K),
+        float(env.lapse_rate_K_per_m),
+        float(env.sea_level_pressure_Pa),
+        float(env.temperature_K),
+        float(env.pressure_Pa),
+        float(env.humidity_rel),
+        float(env.altitude_m),
+        float(env.gravity),
+    )
+    cached = _ATMOSPHERE_MEMO.get(key)
+    if cached is not None:
+        return cached
+    payload = _ATMOSPHERE.evaluate_atmosphere(env, reference_chord_m=DEFAULT_REFERENCE_CHORD_M)
+    state = {
+        "density_kgm3": float(payload["density_kgm3"]),
+        "kinematic_viscosity_m2s": float(payload["kinematic_viscosity_m2s"]),
+        "sound_speed_mps": float(payload["sound_speed_mps"]),
+        "temperature_K": float(payload["temperature_K"]),
+    }
+    if len(_ATMOSPHERE_MEMO) >= _ATMOSPHERE_MEMO_LIMIT:
+        _ATMOSPHERE_MEMO.clear()
+    _ATMOSPHERE_MEMO[key] = state
+    return state
+
+
 def atmosphere_state(
     env: EnvironmentConfig, speed_mps: float = 0.0, reference_chord_m: float = DEFAULT_REFERENCE_CHORD_M
 ) -> Dict[str, float]:
@@ -833,7 +945,7 @@ def atmosphere_state(
     chord = max(_finite(reference_chord_m, DEFAULT_REFERENCE_CHORD_M), 1.0e-9)
     if _ATMOSPHERE is not None:
         try:
-            payload = _ATMOSPHERE.evaluate_atmosphere(env, reference_chord_m=chord)
+            payload = _atmosphere_state(env)
             density = float(payload["density_kgm3"])
             kinematic = float(payload["kinematic_viscosity_m2s"])
             sound = float(payload["sound_speed_mps"])
@@ -886,7 +998,11 @@ def evaluate_aero(
 
     speed = abs(_finite(speed_mps))
     alpha = _finite(alpha_deg)
-    beta = _finite(beta_deg)
+    # The side force is bounded: a body broadside to the flow carries the
+    # flat-plate limit (2 sin(beta) cos^2(beta) <= 0.77), not an unbounded
+    # linear function of beta.  The audit requires the coefficients to be
+    # clamped and wrapped over beta in [-90, 90] with no singularity.
+    beta = clamp(_finite(beta_deg), -90.0, 90.0)
     state = atmosphere_state(env, speed, reference_chord_m=chord)
     density = max(state["density_kgm3"], 1.0e-6)
     kinematic = state["kinematic_viscosity_m2s"]
@@ -907,168 +1023,51 @@ def evaluate_aero(
     if mach_value <= 0.0:
         mach_value = float(state["mach"])
 
-    compressible = bool(env.compressibility_enabled)
-    lift_scale = max(_finite(env.lift_scale, 1.0), 0.0)
-    drag_scale = max(_finite(env.drag_scale, 1.0), 0.0)
-
-    elevon = elevon_effects(_finite(cfg.elevon_deg), cfg)
-    slope = lift_slope_per_rad(cfg, compressible=compressible, mach=mach_value)
-
-    cl_raw = lift_coefficient(alpha, cfg, compressible=compressible, mach=mach_value, cl_offset=elevon["dcl"])
-    cl = cl_raw * lift_scale
-
-    ground_ratio = ground_effect_factor(ground_height_m, span, bool(env.ground_effect_enabled))
-    cd0 = parasite_drag_coefficient(cfg, re_value)
-    cd = (
-        cd0
-        + (cl * cl / _polar_constant(cfg)) * ground_ratio
-        + separated_pressure_drag_coefficient(alpha, cfg)
-        + wave_drag_coefficient(mach_value, compressible)
-    ) * drag_scale
-
-    # --- derivatives -----------------------------------------------------
+    # The coefficient evaluation itself lives in :mod:`physics.aero_kernel`,
+    # the vectorised kernel that is shared with the GPU paths.  Evaluating it
+    # here through the same code is what makes the 6-DoF path and the GPU
+    # batch agree on the lift, the drag and the moments of the *same*
+    # airframe instead of evaluating two look-alike models.
+    params = aero_kernel.params_from_config(cfg, env)
+    # §A-4: expose whether lift_scale / drag_scale are actively calibrating the
+    # forces (non-neutral values must be visible in the response payload).
+    calibration_active = bool(params.lift_scale != 1.0 or params.drag_scale != 1.0)
     p_rate, q_rate, r_rate = (float(component) for component in vec3(angular_rate))
-    two_v = 2.0 * speed
-    p_hat = safe_div(p_rate * span, two_v)
-    q_hat = safe_div(q_rate * chord, two_v)
-    r_hat = safe_div(r_rate * span, two_v)
-    beta_rad = deg2rad(beta)
-
-    cl_roll = _finite(cfg.cl_roll_rate) * p_hat
-    cm_roll = _finite(cfg.cm_roll_rate) * p_hat
-    cn_roll = _finite(cfg.cn_roll_rate) * p_hat
-
-    cy = _finite(cfg.cy_beta) * beta_rad
-    aileron = _finite(getattr(cfg, "aileron_deg", 0.0))
-    asym_cl = _finite(getattr(cfg, "asymmetry_cl", 0.0))
-    rudder = _finite(getattr(cfg, "rudder_deg", 0.0))
-    cl_control = 0.015 * aileron + 0.25 * asym_cl
-    roll_coeff = (
-        _finite(cfg.cl_beta) * beta_rad
-        + cl_roll
-        + cl_control
-        + _finite(cfg.cl_pitch_rate) * q_hat
-        + _finite(cfg.cl_yaw_rate) * r_hat
+    coefficients = aero_kernel.evaluate_coefficients(
+        _SCALAR,
+        params,
+        alpha_deg=alpha,
+        beta_deg=beta,
+        p_rate=p_rate,
+        q_rate=q_rate,
+        r_rate=r_rate,
+        speed=speed,
+        reynolds=re_value,
+        mach=mach_value,
+        ground_height_m=ground_height_m,
+        density=density,
     )
-    # Nonlinear pitching moment with post-stall saturation (Viterna / flat plate theory):
-    # Attached flow: Cm_alpha * alpha. Post-stall / high-alpha separation:
-    # Pitching moment saturates smoothly and approaches flat-plate cross-flow behavior ~ -sin(2*alpha),
-    # preventing non-physical massive torques (e.g. Cm < -1.0) during apex flow reversal (alpha > 90 deg).
-    stall_rad = deg2rad(effective_stall_alpha_deg(cfg))
-    alpha_rad = deg2rad(alpha)
-    if abs(alpha_rad) <= stall_rad:
-        cm_alpha_term = _finite(cfg.cm_alpha) * alpha_rad
-    else:
-        w_stall = stall_blend_weight(alpha, cfg)
-        linear_val = _finite(cfg.cm_alpha) * math.copysign(stall_rad, alpha_rad)
-        # Flat-plate cross-flow restoring moment:
-        # Physically, normal flow resistance on the aft planform acts to restore
-        # the body into alignment with the relative wind. The restoring moment
-        # scales as sin(alpha) * |cos(alpha)|, ensuring correct sign preservation
-        # for both positive and negative angles of attack up to +/-180 degrees.
-        sin_a = math.sin(alpha_rad)
-        cos_a = math.cos(alpha_rad)
-        flat_plate_cm = _finite(cfg.cm_alpha) * sin_a * abs(cos_a) * stall_rad
-        cm_alpha_term = (1.0 - w_stall) * linear_val + w_stall * flat_plate_cm
-
-    cm = (
-        _finite(cfg.cm0)
-        + cm_alpha_term
-        + _finite(cfg.cm_q) * q_hat
-        + elevon["dcm"]
-        + cm_roll
-        + _finite(cfg.cm_pitch_rate) * q_hat
-        + _finite(cfg.cm_yaw_rate) * r_hat
-    )
-    # Adverse yaw from aileron + rudder effect
-    cn_control = 0.010 * rudder - 0.002 * aileron
-    yaw_coeff = (
-        _finite(cfg.cn_beta) * beta_rad
-        + cn_roll
-        + cn_control
-        + _finite(cfg.cn_pitch_rate) * q_hat
-        + _finite(cfg.cn_yaw_rate) * r_hat
-    )
-
-    # Ground cushion lift increment: scaling with cfg.ground_cushion_lift * exp(-4.0 * h / b)
-    cushion_gain = max(_finite(cfg.ground_cushion_lift, 0.0), 0.0)
-    h_b_ratio = safe_div(max(_finite(ground_height_m, 1.0), 0.0), span, 10.0)
-    ground_proximity = math.exp(-4.0 * h_b_ratio) if bool(env.ground_effect_enabled) else 0.0
-    if cushion_gain > 0.0 and ground_proximity > 0.0:
-        delta_cl_cushion = cushion_gain * ground_proximity
-        cl = cl + delta_cl_cushion
-
-    # Nose-down ground pitching moment increment: scaling with cfg.ground_pitch_coupling * C_L * exp(-4.0 * h / b)
-    pitch_coupling = max(_finite(cfg.ground_pitch_coupling, 0.0), 0.0)
-    if pitch_coupling > 0.0 and ground_proximity > 0.0:
-        # Negative increment produces nose-down pitching moment
-        delta_cm_ground = -pitch_coupling * cl * ground_proximity
-        cm = cm + delta_cm_ground
-
-    # Dynamic center of pressure shift: cp_x_m from leading edge
-    # Baseline AC is at 0.25 chord (or including cfg.cg_offset_x)
-    cp_x = center_of_pressure_x(alpha, cfg)
-    cp_gain = max(_finite(cfg.cp_shift_gain, 0.0), 0.0)
-    if cp_gain > 0.0:
-        # Baseline reference aerodynamic center is at 0.25 MAC
-        # When CP shifts aft, delta_cm = - (x_cp - x_ac) / c * C_L
-        delta_cm_cp = - safe_div(cp_x - 0.25 * chord, chord, 0.0) * cl
-        cm = cm + delta_cm_cp
-
-    dynamic_pressure = 0.5 * density * speed * speed
-    lift_n = dynamic_pressure * area * cl
-    # Left and right wing lift partitioning based on total lift and roll moment
-    # rolling_nm = (lift_left_n - lift_right_n) * (span / 4) approx, or partition from roll_coeff / cl_control
-    d_lift = dynamic_pressure * area * cl_control
-    lift_left_n = 0.5 * lift_n + 0.5 * d_lift
-    lift_right_n = 0.5 * lift_n - 0.5 * d_lift
-    drag_n = dynamic_pressure * area * cd
-    side_n = dynamic_pressure * area * cy
-
-    # Apex low-speed pushover dynamics (AGENTS.md Section 8.2):
-    # At the climb apex (speed < 3.0 m/s) where dynamic pressure approaches zero,
-    # the aft center-of-pressure shift in separated flow and forward-shifted CG eccentricity
-    # produce a physical aerodynamic restoring pitching moment to align the nose with flow.
-    # Note: Bounded and smoothly decayed as the aircraft reaches horizontal glide attitude.
-    if speed < 3.0 and abs(alpha) > 0.1:
-        v_norm = clamp(speed / 3.0, 0.0, 1.0)
-        speed_gate = 1.0 - v_norm * v_norm * (3.0 - 2.0 * v_norm)  # Hermite smoothstep C1 continuous
-        # Effective dynamic pressure floor ensuring restoring authority even as V -> 0:
-        # q_eff = 0.5 * rho * max(V, 0.8)^2 (~0.39 Pa at rho=1.225)
-        q_eff = 0.5 * density * (max(speed, 0.8) ** 2)
-        alpha_gate = math.tanh(abs(alpha) / 8.0)
-        sin_a = math.sin(deg2rad(clamp(alpha, -90.0, 90.0)))
-        pushover_moment = -q_eff * area * chord * 0.85 * sin_a * speed_gate * alpha_gate
-    else:
-        pushover_moment = 0.0
-
-    # Low-speed rotational apparent/viscous damping (Cross-flow resistance):
-    # In low airspeed regime where dynamic pressure q_dyn -> 0, classic q*c/(2V) vanishes.
-    # Fluid cross-flow drag on the rotating planform exerts physical angular damping:
-    if speed < 3.0 and area > 1e-6 and chord > 1e-4:
-        v_norm = clamp(speed / 3.0, 0.0, 1.0)
-        damp_gate = 1.0 - v_norm * v_norm * (3.0 - 2.0 * v_norm)
-        q_rate_val = float(angular_rate[1]) if len(angular_rate) > 1 else 0.0
-        rot_damping = (-0.5 * density * 1.2 * area * (chord ** 2) * abs(q_rate_val) * q_rate_val - 0.00015 * area * chord * density * q_rate_val) * damp_gate
-    else:
-        rot_damping = 0.0
-
-    pitching_nm = (
-        dynamic_pressure * area * chord * cm
-        + pitching_moment_offset_nm(cfg, lift_n, drag_n, side_n)
-        + pushover_moment
-        + rot_damping
-    )
-    rolling_nm = dynamic_pressure * area * span * roll_coeff
-    yawing_nm = dynamic_pressure * area * span * yaw_coeff
-
-    stall_angle = effective_stall_alpha_deg(cfg)
-    # Match both sign-dependent thresholds in stall_blend_weight. The wider
-    # negative threshold is an existing empirical recovery assumption, not
-    # evidence of a measured negative-angle polar for every airframe.
-    stall_threshold = stall_angle if alpha >= 0.0 else max(stall_angle + 15.0, 30.0)
-    stalled = bool(abs(alpha) > stall_threshold)
-    stall_margin = safe_div(stall_threshold - abs(alpha), abs(stall_threshold) if stall_threshold != 0.0 else 1.0, 0.0)
+    cl = float(coefficients["cl"])
+    cd = float(coefficients["cd"])
+    cy = float(coefficients["cy"])
+    cm = float(coefficients["cm"])
+    cl_roll = float(coefficients["cl_roll"])
+    cm_roll = float(coefficients["cm_roll"])
+    cn_roll = float(coefficients["cn_roll"])
+    ground_ratio = float(coefficients["ground_ratio"])
+    lift_n = float(coefficients["lift_n"])
+    drag_n = float(coefficients["drag_n"])
+    side_n = float(coefficients["side_n"])
+    lift_left_n = float(coefficients["lift_left_n"])
+    lift_right_n = float(coefficients["lift_right_n"])
+    dynamic_pressure = float(coefficients["q_dyn"])
+    pitching_nm = float(coefficients["pitching_nm"])
+    rolling_nm = float(coefficients["rolling_nm"])
+    yawing_nm = float(coefficients["yawing_nm"])
+    cp_x = float(coefficients["cp_x_m"])
+    stall_margin = float(coefficients["stall_margin"])
+    stalled = bool(coefficients["stalled"])
+    zero_lift = float(coefficients["cl_zero_lift"])
 
     # Aeroelastic deformation estimates from dynamic pressure and stiffness
     stiffness = max(_finite(cfg.paper_stiffness, 0.35), 0.01)
@@ -1077,7 +1076,6 @@ def evaluate_aero(
     aeroelastic_dihedral = _finite(cfg.aeroelastic_flex, 0.0) * q_scale * 2.5
     aeroelastic_twist = -_finite(cfg.aeroelastic_twist, 0.0) * q_scale * 1.5
 
-    zero_lift = _finite(cfg.cL0) * lift_scale + elevon["dcl"] * lift_scale
     # The reported polar minima are free-air and incompressible (no ground
     # effect, no wave drag, no Prandtl-Glauert), matching the free-air sweep
     # that drag_polar() performs by default.
@@ -1122,6 +1120,7 @@ def evaluate_aero(
         cp_x_m=float(cp_x),
         aeroelastic_dihedral_deg=float(aeroelastic_dihedral),
         aeroelastic_twist_deg=float(aeroelastic_twist),
+        calibration_active=calibration_active,
     )
 
 

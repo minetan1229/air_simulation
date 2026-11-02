@@ -16,6 +16,7 @@ from physics.config_schema import (
     ENVIRONMENT_SCHEMA,
     LAUNCH_SCHEMA,
     OBJECTIVE_DIRECTIONS,
+    SIMULATION_SCHEMA,
     as_dict,
     utc_now_iso,
 )
@@ -29,16 +30,13 @@ meta_bp = Blueprint("meta", __name__)
 @meta_bp.get("/api/v1/meta/schemas")
 @meta_bp.get("/api/v1/meta/schema")
 def meta_schemas():
-    """Single source of truth for the UI sliders, objective list and ranges.
-
-    ``/api/v1/meta/schema`` is the path mandated by SPECIFICATION 3.1;
-    ``/api/v1/meta/schemas`` is kept for the existing clients.
-    """
+    """Single source of truth for the UI sliders, objective list and ranges."""
     return jsonify(
         {
             "aircraft": AIRCRAFT_SCHEMA,
             "environment": ENVIRONMENT_SCHEMA,
             "launch": LAUNCH_SCHEMA,
+            "simulation": SIMULATION_SCHEMA,
             "objectives": [
                 {"name": name, "direction": direction}
                 for name, direction in OBJECTIVE_DIRECTIONS.items()
@@ -65,6 +63,9 @@ def meta_physics_references():
             "title": "Der unverwundene Dreiecksflügel als Trägerfläche höchsten Auftriebs",
             "publication": "Jahrbuch 1942 der deutschen Luftfahrtforschung, I, 111-113",
             "aerosandbox_reference": "aerosandbox.aerodynamics.buildup (AeroBuildup low-AR wing corrections)",
+            "implemented": True,
+            "canonical_module": "physics/aero_kernel.py::helmbold_cl_alpha",
+            "applicability": "Low-aspect-ratio straight wings (AR <= 4). The attached-flow lift slope only; the post-stall branch is the Hoerner flat plate (see hoerner_1965).",
         },
         {
             "id": "polhamus_1966",
@@ -77,6 +78,9 @@ def meta_physics_references():
             "publication": "NASA Technical Note NASA TN D-3767",
             "url": "https://ntrs.nasa.gov/citations/19670003058",
             "aerosandbox_reference": "aerosandbox.aerodynamics.buildup (slender delta wing vortex lift models)",
+            "implemented": True,
+            "canonical_module": "physics/aero_kernel.py::polhamus_attached_branch",
+            "applicability": "Sharp-edge delta wings. The default is inactive (polhamus_kp = polhamus_kv = 0.0), which keeps the airframe's own three-dimensional Helmbold slope; see docs/PHYSICS_MODELS.md section 5.",
         },
         {
             "id": "viterna_corrigan_1982",
@@ -89,6 +93,9 @@ def meta_physics_references():
             "publication": "NASA Lewis Research Center, NASA TM-83021 / DOE/NASA/20320-35",
             "url": "https://ntrs.nasa.gov/citations/19830006272",
             "aerosandbox_reference": "aerosandbox.aerodynamics.airfoil (Airfoil post-stall Viterna method)",
+            "implemented": False,
+            "canonical_module": None,
+            "applicability": "NOT the implemented post-stall model. The simulation uses the Hoerner flat plate (hoerner_1965). Viterna-Corrigan was derived for wind-turbine airfoils and needs the geometric coefficients A_1, A_2, B_1, B_2 from an airfoil data set, which a paper airframe does not have; the coefficients are therefore not estimated. See docs/PHYSICS_MODELS.md section 3.",
         },
         {
             "id": "hoerner_1965",
@@ -100,6 +107,9 @@ def meta_physics_references():
             "title": "Fluid-Dynamic Drag: Practical Information on Aerodynamic Drag and Hydrodynamic Resistance",
             "publication": "Hoerner Fluid Dynamics, Brick Town, NJ",
             "aerosandbox_reference": "aerosandbox.aerodynamics.buildup (crossflow drag and flat-plate normal force)",
+            "implemented": True,
+            "canonical_module": "physics/aero_kernel.py::post_stall_lift_coefficient",
+            "applicability": "Fully separated flat-plate normal force; used for the post-stall lift branch and the separated pressure drag. It carries no free coefficient, which is why it is preferred over Viterna-Corrigan here.",
         },
         {
             "id": "wieselsberger_1922",
@@ -112,6 +122,9 @@ def meta_physics_references():
             "publication": "ZFM, Vol. 12, pp. 145-147; translated in NACA TM 77 (1922)",
             "url": "https://ntrs.nasa.gov/citations/19930090888",
             "aerosandbox_reference": "aerosandbox.aerodynamics.buildup (ground effect reduction factor)",
+            "implemented": True,
+            "canonical_module": "physics/aero_domain.py::ground_effect_factor",
+            "applicability": "Induced-drag reduction near the ground. The factor is 1.0 in free air and stays 1.0 when the model is switched off.",
         },
         {
             "id": "us_standard_atmosphere_1976",
@@ -124,6 +137,9 @@ def meta_physics_references():
             "publication": "NOAA-S/T 76-1562, NASA-TM-X-74335, Washington, D.C.",
             "url": "https://ntrs.nasa.gov/citations/19770009539",
             "aerosandbox_reference": "aerosandbox.atmosphere.Atmosphere",
+            "implemented": True,
+            "canonical_module": "physics/atmosphere_domain.py::isa_temperature",
+            "applicability": "Geopotential barometric lapse rate, 0 to 86 km. The local atmosphere of the console is this profile with the humidity and temperature offset of the environment configuration applied.",
         },
         {
             "id": "sutherland_1893",
@@ -136,6 +152,9 @@ def meta_physics_references():
             "publication": "Philosophical Magazine, 5(36), pp. 507-531",
             "doi": "10.1080/14786449308620508",
             "aerosandbox_reference": "aerosandbox.atmosphere.Atmosphere (dynamic_viscosity calculation)",
+            "implemented": True,
+            "canonical_module": "physics/atmosphere_domain.py::sutherland_viscosity",
+            "applicability": "Dynamic viscosity of air over the flight temperature band; the kinematic viscosity nu = mu / rho follows from it.",
         },
         {
             "id": "prandtl_glauert_1928",
@@ -148,6 +167,51 @@ def meta_physics_references():
             "publication": "Proceedings of the Royal Society of London, Series A, 118(779), pp. 113-119",
             "doi": "10.1098/rspa.1928.0039",
             "aerosandbox_reference": "aerosandbox.aerodynamics.buildup (compressibility scaling)",
+            "implemented": True,
+            "canonical_module": "physics/aero_domain.py::prandtl_glauert",
+            "applicability": "Subsonic compressibility of the lift slope. The model validity envelope is Ma <= 0.3 (physics/flight_sim.py::MODEL_MACH_LIMIT); outside it the telemetry reports model_valid = false.",
+        },
+        {
+            "id": "blevins_1979_newman_1977_added_mass",
+            "aerosandbox_reference": "aerosandbox.aerodynamics.buildup (apparent mass / added inertia extensions)",
+            "domain": "aerodynamics",
+            "model": "Blevins-Newman Thin Planar Wing Added Mass and Inertia Tensor",
+            "equation": "m_add_z = (pi/4)*rho*S*c, I_add_yy = (pi/128)*rho*S*c^3, I_add_xx = (pi/48)*rho*b^3*c^2",
+            "authors": "Blevins, R. D. / Newman, J. N.",
+            "year": 1979,
+            "title": "Formulas for Natural Frequency and Mode Shape / Marine Hydrodynamics",
+            "publication": "Van Nostrand Reinhold / MIT Press",
+            "implemented": True,
+            "canonical_module": "physics/aero_kernel.py::compute_added_mass",
+            "applicability": "Apparent (added) fluid inertia for lightweight planar wings. Activated when added_mass_enabled is true, reducing pitch/roll accelerations and vertical normal acceleration.",
+        },
+        {
+            "id": "wagner_1925_beddoes_leishman_circulation_lag",
+            "aerosandbox_reference": "aerosandbox.aerodynamics.airfoil (unsteady indicial response / circulation lag)",
+            "domain": "aerodynamics",
+            "model": "Wagner-Beddoes-Leishman Indicial Circulation Lag",
+            "equation": "tau_circ = k_circ * c / (2 * V), dCL/dt = (CL_target - CL) / tau_circ",
+            "authors": "Wagner, H. / Beddoes, T. S. and Leishman, J. G.",
+            "year": 1925,
+            "title": "Dynamischer Auftrieb von Tragflugeln / Principles of Helicopter Aerodynamics",
+            "publication": "ZAMM 5(1), pp. 17-35 / Cambridge University Press",
+            "implemented": True,
+            "canonical_module": "physics/aero_kernel.py::unsteady_circulation_lag",
+            "applicability": "Convective circulation development lag for unsteady thin airfoil flow. Smooth first-order lag with relaxation time tau proportional to chord over relative speed.",
+        },
+        {
+            "id": "mccroskey_1981_leishman_lsb_dynamic_stall",
+            "aerosandbox_reference": "aerosandbox.aerodynamics.airfoil (low-Re separation bubble / dynamic stall)",
+            "domain": "aerodynamics",
+            "model": "McCroskey-Leishman Low-Reynolds Laminar Separation Bubble Dynamic Stall Hysteresis",
+            "equation": "delta_alpha = tanh(adot/5) * kappa_lsb * (180/pi) * sqrt(k_red) * sqrt(1e4/Re)",
+            "authors": "McCroskey, W. J. / Leishman, J. G.",
+            "year": 1981,
+            "title": "The Phenomenon of Dynamic Stall / Dynamic Stall of Airfoils at Low Reynolds Numbers",
+            "publication": "NASA TM-81264 / Vertica, Vol. 8",
+            "implemented": True,
+            "canonical_module": "physics/aero_kernel.py::lsb_dynamic_stall_shift",
+            "applicability": "Dynamic stall delay and reattachment hysteresis caused by laminar separation bubbles at low Reynolds numbers. Zero at steady state (adot=0), smoothly shifting effective stall angle.",
         },
     ]
     return jsonify({

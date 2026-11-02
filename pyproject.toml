@@ -13,11 +13,10 @@ authors = [
     {name = "Engineering Team"}
 ]
 dependencies = [
-    "Flask>=3.0.0,<4.0.0",
+    "Flask>=3.1.3,<4.0.0",
     "numpy>=1.24.0",
-    "scipy>=1.11.0",
-    "cupy-cuda12x>=13.0.0",
-    "trimesh>=4.0.0",
+    "scipy>=1.15.3",
+    "trimesh>=5.1.1",
     "requests>=2.28.0",
     "python-dotenv>=1.0.0",
 ]
@@ -30,12 +29,10 @@ dev = [
     "mypy>=1.9.0",
     "types-requests>=2.31.0",
 ]
-torch = [
-    "torch>=2.1.0",
+gpu = [
+    "cupy-cuda12x>=13.0.0",
 ]
-
-# NOTE: ruff / mypy / pytest are configured exclusively in ruff.toml,
-# mypy.ini and pytest.ini.  Tool configuration in pyproject.toml is
-# silently ignored because the dedicated files take precedence, which
-# previously allowed the two sources to drift apart.  Keep this file
-# limited to packaging metadata.
+bridge = [
+    "discord.py>=2.7.1,<3.0",
+    "psutil>=7.2.2",
+]

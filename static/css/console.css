@@ -10,16 +10,38 @@
   --surface-2:  #f1f3f4;
   --ink:        #202124;
   --ink-2:      #5f6368;
-  --muted:      #80868b;
+  --muted:      #5f6368;
   --line:       #dadce0;
   --line-2:     #bdc1c6;
   --accent:     #1a73e8;
   --accent-dk:  #1557b0;
   --accent-bg:  #e8f0fe;
-  --ok:         #34a853;
-  --warn:       #fbbc04;
+  --ok:         #1a7a34;
+  --warn:       #b06000;
   --bad:        #ea4335;
+  /* Text colours.  The fill colours above are tuned for white text on a
+     solid fill; as *text* on a light surface they fall below the WCAG AA
+     ratio of 4.5:1, so the ink variants are kept apart from them. */
+  --accent-ink: #1557b0;   /* accent text on --accent-bg / white */
+  --bad-ink:    #c5221f;   /* red text on a light surface */
+  --ok-ink:     #137333;   /* green text on a light surface */
+  --rail-muted: #8f959c;   /* muted text on the dark top rail */
+  --rail-ok:    #3fb950;   /* green text on the dark top rail */
+  --rail-bad:   #ff7b72;   /* red text on the dark top rail */
   --stage-bg:   #e8eaed;
+
+  /* P2-11: 3Dシーンとチャートで同義色を共通トークンに統一 */
+  --color-stress: #bf3b2b;
+  --color-alt:    #2f6fb5;
+  --color-spd:    #2f7d4f;
+  --color-aoa:    #ad6a05;
+
+  --color-traj-rank1: #ffb300;
+  --color-traj-worst: #e53935;
+  --color-traj-rank2: #b0bec5;
+  --color-traj-rank3: #cd7f32;
+  --color-traj-mid:   #5c9eff;
+  --color-traj-mean:  #00e5ff;
 
   --rail-l: 306px;
   --rail-r: 330px;
@@ -81,7 +103,19 @@ button, input, select, textarea {
 /* ------------------------------------------------------------------ */
 .console {
   display: grid;
-  grid-template-rows: var(--top-h) minmax(0, 1fr) auto var(--dock-h);
+  /* The implicit column is ``auto``, i.e. it is sized to the *min-content*
+     width of its widest row.  The top rail is a single flex row whose
+     min-content width is wider than a 1280 px viewport, so the column grew
+     past the viewport and pushed the right-hand action buttons (record,
+     load, CSV, help) out of reach: the document scrolled to 1392 px.  The
+     explicit ``minmax(0, 1fr)`` lets the column shrink to the viewport and
+     hands the overflow to the rail's own horizontal scroller. */
+  grid-template-columns: minmax(0, 1fr);
+  /* The transport row is ``--dock-h`` tall, but its content needs a little
+     more once the narrow-viewport rules hide the badges: the last five
+     pixels of the footer were clipped and the body cannot scroll.  The row
+     grows with its content instead. */
+  grid-template-rows: var(--top-h) minmax(0, 1fr) auto minmax(var(--dock-h), auto);
   height: 100vh;
   height: 100dvh;
 }
@@ -129,16 +163,19 @@ button, input, select, textarea {
 .brand-title { font-size: 12.5px; font-weight: 600; letter-spacing: 0.02em; white-space: nowrap; }
 .brand-sub {
   font-family: var(--mono);
-  font-size: 8px;
+  font-size: 9px;
   letter-spacing: 0.14em;
-  color: #7f858d;
+  color: var(--rail-muted);
   white-space: nowrap;
 }
 
 .toprail-readouts {
   display: flex;
   align-items: stretch;
-  flex: 0 1 auto;
+  /* The read-outs keep their intrinsic width.  With ``flex: 0 1 auto`` the
+     flex distribution handed them a width one pixel short of their content,
+     and every value then ended in an ellipsis ("READY" -> "REA..."). */
+  flex: 0 0 auto;
   min-width: 0;
   overflow: hidden;
 }
@@ -154,9 +191,11 @@ button, input, select, textarea {
 }
 .readout-key {
   font-family: var(--mono);
-  font-size: 7.5px;
-  letter-spacing: 0.14em;
-  color: #9aa0a6;
+  /* 7.5 px was below the legible floor for a Latin small-caps label; the
+     readouts sit next to 11.5 px values and the row is only 52 px high. */
+  font-size: 9px;
+  letter-spacing: 0.12em;
+  color: #a7adb3;
 }
 .readout-val {
   font-family: var(--mono);
@@ -166,8 +205,8 @@ button, input, select, textarea {
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.readout-val small { font-size: 8.5px; color: #7f858d; margin-left: 1px; }
-.readout-run .readout-val { color: var(--muted); font-weight: 600; }
+.readout-val small { font-size: 9px; color: var(--rail-muted); margin-left: 1px; }
+.readout-run .readout-val { color: #aeb4ba; font-weight: 600; }
 .readout-run[data-run="running"] .readout-val { color: #6ee7a8; }
 .readout-run[data-run="paused"] .readout-val { color: #f5c56b; }
 .readout-run[data-run="done"] .readout-val { color: #7fb2ff; }
@@ -184,6 +223,13 @@ button, input, select, textarea {
   display: flex;
   align-items: center;
   justify-content: flex-end;
+  /* When the actions do not fit, a plain ``flex-end`` pushes the *first*
+     group out of the box on the left: the overflow lands on the readouts,
+     the rail drawer trigger ends up underneath them and is unclickable.
+     ``safe flex-end`` keeps the right alignment as long as it fits and
+     falls back to the start edge otherwise, so the overflow goes to the
+     right where the horizontal scroller can reach it. */
+  justify-content: safe flex-end;
   gap: 8px;
   padding: 0 12px 0 8px;
   border-left: 1px solid #2c2f34;
@@ -193,6 +239,13 @@ button, input, select, textarea {
   scrollbar-width: none;
 }
 .toprail-actions::-webkit-scrollbar {
+  display: none;
+}
+
+/* The rails become off-canvas drawers below 900 px.  Their header moves out
+   of the viewport with them, so the drawer needs a trigger that stays
+   visible -- otherwise the whole configuration panel is unreachable. */
+.rail-toggle {
   display: none;
 }
 
@@ -434,8 +487,8 @@ input:disabled {
 .rail-title { font-size: 12px; font-weight: 600; }
 .rail-title-en {
   font-family: var(--mono);
-  font-size: 8.5px;
-  letter-spacing: 0.16em;
+  font-size: 9.5px;
+  letter-spacing: 0.14em;
   color: var(--muted);
 }
 .rail-head .btn-mini { margin-left: auto; }
@@ -475,8 +528,8 @@ input:disabled {
 .group-name { font-size: 12px; font-weight: 600; }
 .group-en {
   font-family: var(--mono);
-  font-size: 8.5px;
-  letter-spacing: 0.14em;
+  font-size: 9.5px;
+  letter-spacing: 0.12em;
   color: var(--muted);
 }
 .group-note { margin-left: auto; color: var(--muted); font-size: 11px; }
@@ -672,7 +725,7 @@ input[type="range"]:focus-visible { outline: 2px solid var(--accent); outline-of
 .state-pill[data-state="crash"] { color: var(--bad); border-color: #e0b0a8; background: #fdf1ef; }
 .state-pill[data-state="tunnel"] { color: var(--accent-dk); border-color: #a9c8f5; background: var(--accent-bg); }
 .state-pill[data-state="error"],
-.state-pill[data-state="diverged"] { color: #d93025; border-color: #f28b82; background: #fce8e6; font-weight: 600; }
+.state-pill[data-state="diverged"] { color: var(--bad-ink); border-color: #f28b82; background: #fce8e6; font-weight: 600; }
 
 /* recorder ----------------------------------------------------------- */
 .rec-head {
@@ -846,7 +899,7 @@ input[type="range"]:focus-visible { outline: 2px solid var(--accent); outline-of
 .tunnel-preset-btn.active {
   background: #e8f0fe !important;
   border-color: #1a73e8 !important;
-  color: #1a73e8 !important;
+  color: var(--accent-ink) !important;
   font-weight: 700 !important;
 }
 
@@ -854,7 +907,7 @@ input[type="range"]:focus-visible { outline: 2px solid var(--accent); outline-of
 .hud-key { color: var(--muted); }
 .hud-val { font-variant-numeric: tabular-nums; }
 .hud-title {
-  font-size: 8.5px;
+  font-size: 9.5px;
   letter-spacing: 0.16em;
   color: var(--muted);
   border-bottom: 1px solid var(--line);
@@ -863,13 +916,13 @@ input[type="range"]:focus-visible { outline: 2px solid var(--accent); outline-of
 }
 
 .heat-legend { margin-bottom: 6px; }
-.heat-title { font-size: 8.5px; letter-spacing: 0.14em; color: var(--muted); }
+.heat-title { font-size: 9.5px; letter-spacing: 0.14em; color: var(--muted); }
 .heat-bar { margin: 3px 0 1px; line-height: 0; }
 .heat-bar canvas { width: 180px; height: 10px; display: block; }
 .heat-scale {
   display: flex;
   justify-content: space-between;
-  font-size: 8.5px;
+  font-size: 9.5px;
   color: var(--muted);
   width: 180px;
 }
@@ -957,7 +1010,7 @@ input[type="range"]:focus-visible { outline: 2px solid var(--accent); outline-of
   appearance: none;
   background: transparent;
   border: none;
-  color: #80868b;
+  color: var(--ink-2);
   font-size: 14px;
   cursor: pointer;
   padding: 2px 6px;
@@ -1019,7 +1072,7 @@ input[type="range"]:focus-visible { outline: 2px solid var(--accent); outline-of
 }
 .wb-tab small {
   font-family: var(--mono);
-  font-size: 8px;
+  font-size: 9px;
   letter-spacing: 0.14em;
   color: var(--muted);
 }
@@ -1045,14 +1098,14 @@ input[type="range"]:focus-visible { outline: 2px solid var(--accent); outline-of
   margin-right: 2px;
   border-right: 1px solid #2c2f34;
 }
-.toprail .eta-key { color: #9aa0a6; font-family: var(--mono); font-size: 8.5px; letter-spacing: 0.16em; }
+.toprail .eta-key { color: #a7adb3; font-family: var(--mono); font-size: 9.5px; letter-spacing: 0.14em; }
 .toprail .eta-val { color: #e9e7e2; font-size: 13px; font-family: var(--mono); font-weight: 600; }
-.toprail .eta-sub { color: #7f858d; font-size: 10px; font-family: var(--mono); }
+.toprail .eta-sub { color: var(--rail-muted); font-size: 10px; font-family: var(--mono); }
 .header-eta[data-active="1"] { border-right-color: #1a73e8; }
 .header-eta[data-active="1"] .eta-val { color: #8ab4f8; font-weight: 700; text-shadow: 0 0 10px rgba(138, 180, 248, 0.45); }
 .header-eta[data-active="1"] .eta-key { color: #8ab4f8; }
 .header-eta[data-active="1"] .eta-sub { color: #aecbfa; }
-.eta-key { font-family: var(--mono); font-size: 8.5px; letter-spacing: 0.16em; color: var(--muted); }
+.eta-key { font-family: var(--mono); font-size: 9.5px; letter-spacing: 0.16em; color: var(--muted); }
 .eta-val { font-size: 12px; color: var(--ink); }
 .eta-sub { font-size: 10px; color: var(--muted); }
 .wb-eta[data-active="1"] .eta-val { color: var(--accent-dk); }
@@ -1110,7 +1163,7 @@ input[type="range"]:focus-visible { outline: 2px solid var(--accent); outline-of
 }
 .wb-h small {
   font-family: var(--mono);
-  font-size: 8px;
+  font-size: 9px;
   letter-spacing: 0.14em;
   color: var(--muted);
   font-weight: 400;
@@ -1135,7 +1188,7 @@ input[type="range"]:focus-visible { outline: 2px solid var(--accent); outline-of
 .obj-name { font-size: 11.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .obj-dir {
   font-family: var(--mono);
-  font-size: 8.5px;
+  font-size: 9.5px;
   color: var(--muted);
   text-align: right;
 }
@@ -1201,7 +1254,7 @@ input[type="range"]:focus-visible { outline: 2px solid var(--accent); outline-of
 .eta-row-clock {
   font-size: 11.5px;
   font-weight: 700;
-  color: #1a73e8;
+  color: var(--accent-ink);
   font-family: var(--mono);
 }
 .eta-row-left {
@@ -1346,30 +1399,13 @@ input[type="range"]:focus-visible { outline: 2px solid var(--accent); outline-of
   background: var(--ink);
   color: #e9e7e2;
   border-top: 1px solid #000;
-  height: var(--dock-h);
+  /* The transport row is ``--dock-h`` tall, but the narrow-viewport rules
+     hide the badge and the rate buttons and what is left needs a little
+     more: the last five pixels were clipped and the body cannot scroll.
+     The bar grows with its content instead. */
+  height: auto;
+  min-height: var(--dock-h);
   overflow: hidden;
-}
-
-.btn-top-play {
-  background: #23262b;
-  border-color: #383c43;
-  color: #a8c7fa !important;
-  font-weight: 600;
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  padding: 4px 10px;
-  transition: all 0.15s ease;
-}
-.btn-top-play:hover {
-  background: #2b3038;
-  border-color: #4c535e;
-  color: #fff !important;
-}
-.btn-top-play[data-playing="1"] {
-  background: rgba(26, 115, 232, 0.2);
-  border-color: var(--accent);
-  color: #7fb2ff !important;
 }
 
 .tp-controls { display: flex; align-items: center; gap: 4px; }
@@ -1410,18 +1446,6 @@ input[type="range"]:focus-visible { outline: 2px solid var(--accent); outline-of
   color: #fff;
 }
 
-.tp-btn-launch {
-  background: var(--accent);
-  color: #fff;
-  border-radius: var(--radius-sm, 4px);
-  font-weight: 600;
-  padding: 0 12px;
-  box-shadow: 0 1px 4px rgba(26, 115, 232, 0.35);
-}
-.tp-btn-launch:hover:not(:disabled) {
-  background: var(--accent-hover, #1557b0);
-  color: #fff;
-}
 .btn-throw-launch {
   width: 100%;
   padding: 8px 12px;
@@ -1587,6 +1611,8 @@ input[type="range"]:focus-visible { outline: 2px solid var(--accent); outline-of
 .toast[data-tone="error"] { border-left-color: var(--bad); }
 .toast[data-tone="warn"] { border-left-color: var(--warn); }
 .toast[data-tone="ok"] { border-left-color: var(--ok); }
+.toast[data-tone="success"] { border-left-color: var(--ok); }
+.toast[data-tone="info"] { border-left-color: var(--accent); }
 
 .modal {
   position: fixed;
@@ -1618,6 +1644,44 @@ input[type="range"]:focus-visible { outline: 2px solid var(--accent); outline-of
 /* ------------------------------------------------------------------ */
 /* toprail responsive collapses                                        */
 /* ------------------------------------------------------------------ */
+
+/* The top rail needs about 1530 px of actions plus the brand and the
+   read-outs.  Between 1280 px and 1740 px the actions did not fit: the
+   right-hand group (save / load / CSV / record / help) was pushed out of
+   the rail and only reachable by scrolling a rail whose scrollbar is
+   hidden -- the buttons were invisible and undiscoverable.
+   Below 1740 px the rail therefore sheds the diagnostic SOLVER read-out
+   (the same information is in the GPU diagnostic dialog), abbreviates the
+   render read-out, and tightens the mode buttons, the read-out padding
+   and the group gap.  Measured: the deficit is 0 px at 1280 / 1366 /
+   1440 / 1536 / 1600 / 1700 px. */
+@media (max-width: 1800px) {
+  .fleet-mode-selector .btn-mini {
+    padding: 0 5px;
+    font-size: 10.5px;
+  }
+  .toprail .brand {
+    padding: 0 10px;
+  }
+  .toprail-readouts .readout {
+    padding: 0 6px;
+  }
+  .toprail-readouts .readout-solver {
+    display: none;
+  }
+  .toprail-readouts .readout-render .readout-val {
+    display: inline-block;
+    vertical-align: bottom;
+    max-width: 96px;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+  .toprail-actions {
+    gap: 4px;
+  }
+}
+
 @media (max-width: 1560px) {
   .toprail-util-group .btn .btn-text {
     display: none;
@@ -1669,9 +1733,6 @@ input[type="range"]:focus-visible { outline: 2px solid var(--accent); outline-of
     padding: 2px 4px;
     gap: 4px;
   }
-  #top-play-label {
-    display: none;
-  }
   .btn-launch-top .btn-text {
     display: none;
   }
@@ -1694,6 +1755,7 @@ input[type="range"]:focus-visible { outline: 2px solid var(--accent); outline-of
 
 @media (max-width: 900px) {
   .stage { grid-template-columns: minmax(0, 1fr); }
+  .rail-toggle { display: inline-flex; }
   .rail {
     position: absolute;
     top: var(--top-h);
@@ -1763,12 +1825,12 @@ input[type="range"]:focus-visible { outline: 2px solid var(--accent); outline-of
   font-weight: 600;
   border-radius: 3px;
   background: #e8f0fe;
-  color: #1a73e8;
+  color: var(--accent-ink);
 }
 .record-val {
   font-size: 14px;
   font-weight: 700;
-  color: #1a73e8;
+  color: var(--accent-ink);
 }
 .record-title {
   font-size: 13px;
@@ -1846,7 +1908,7 @@ input[type="range"]:focus-visible { outline: 2px solid var(--accent); outline-of
 }
 .record-mode-toggle .btn-mode.active {
   background: #fff;
-  color: #1a73e8;
+  color: var(--accent-ink);
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
   font-weight: 700;
 }
@@ -1861,7 +1923,7 @@ input[type="range"]:focus-visible { outline: 2px solid var(--accent); outline-of
 .record-help-details summary {
   cursor: pointer;
   font-weight: 600;
-  color: #1a73e8;
+  color: var(--accent-ink);
   outline: none;
   user-select: none;
 }
@@ -1877,7 +1939,7 @@ input[type="range"]:focus-visible { outline: 2px solid var(--accent); outline-of
   margin: 0;
 }
 .record-help-content .help-rec {
-  color: #188038;
+  color: var(--ok-ink);
   font-weight: 600;
   border-top: 1px dashed #dadce0;
   padding-top: 4px;
@@ -1945,7 +2007,7 @@ input[type="range"]:focus-visible { outline: 2px solid var(--accent); outline-of
 #btn-gpu-ensemble {
   background: rgba(26, 115, 232, 0.08);
   border-color: rgba(26, 115, 232, 0.4);
-  color: #1a73e8;
+  color: var(--accent-ink);
   font-weight: 600;
 }
 
@@ -1956,12 +2018,12 @@ input[type="range"]:focus-visible { outline: 2px solid var(--accent); outline-of
 }
 
 #top-backend.gpu-active, #top-fps.gpu-active {
-  color: #188038;
+  color: var(--rail-ok);
   font-weight: 700;
 }
 
 #top-fps.gpu-warning {
-  color: #d93025;
+  color: var(--rail-bad);
   font-weight: 700;
 }
 
@@ -2161,12 +2223,13 @@ input[type="range"]:focus-visible { outline: 2px solid var(--accent); outline-of
   font-weight: 700;
   border-radius: 3px;
   text-transform: uppercase;
-  background: #ea4335;
+  /* white on --bad was 3.92:1; the darker fill keeps the label legible */
+  background: var(--bad-ink);
   color: #fff;
 }
 
 .inv-badge-stable_glide {
-  background: #34a853;
+  background: var(--ok-ink);
 }
 
 .inv-badge-low_glide {
@@ -2264,7 +2327,7 @@ input[type="range"]:focus-visible { outline: 2px solid var(--accent); outline-of
   font-family: var(--mono);
   font-weight: 700;
   font-size: 11px;
-  color: var(--accent);
+  color: var(--accent-ink);
 }
 
 .inv-advice-target {
@@ -2515,7 +2578,7 @@ input[type="range"]:focus-visible { outline: 2px solid var(--accent); outline-of
 }
 .champ-sub {
   font-size: 11px;
-  color: var(--accent);
+  color: var(--accent-ink);
   font-family: var(--mono);
 }
 .champ-close-btn {
@@ -2578,7 +2641,7 @@ input[type="range"]:focus-visible { outline: 2px solid var(--accent); outline-of
   color: #b06000;
 }
 .champ-stat-card.champ-avg .champ-stat-label {
-  color: #1a73e8;
+  color: var(--accent-ink);
 }
 .champ-stat-card.champ-min .champ-stat-label {
   color: #c5221f;
@@ -2593,10 +2656,10 @@ input[type="range"]:focus-visible { outline: 2px solid var(--accent); outline-of
 }
 .champ-stat-card.champ-gold .champ-stat-value {
   font-size: 26px;
-  color: #b06000;
+  color: #8c4c00;
 }
 .champ-stat-card.champ-avg .champ-stat-value {
-  color: #1a73e8;
+  color: var(--accent-ink);
 }
 .champ-stat-card.champ-min .champ-stat-value {
   color: #c5221f;
@@ -2720,278 +2783,153 @@ input[type="range"]:focus-visible { outline: 2px solid var(--accent); outline-of
 }
 
 .champ-skip-badge {
-  display: inline-block;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
   padding: 2px 6px;
-  border-radius: 4px;
+  border-radius: 2px;
+  border: 1px solid #f5c2c7;
   font-size: 9.5px;
   font-weight: 600;
   background: #fce8e6;
-  color: #c5221f;
+  color: var(--bad-ink);
   margin-left: 8px;
   vertical-align: middle;
+}
+.champ-skip-badge .ui-icon {
+  width: 12px;
+  height: 12px;
 }
 .champ-promoted-tag {
   display: inline-block;
   padding: 1px 5px;
-  border-radius: 4px;
+  border-radius: 2px;
   font-size: 9px;
   font-weight: 700;
-  background: #e8f0fe;
-  color: #1a73e8;
+  background: var(--accent-bg);
+  color: var(--accent-ink);
   margin-left: 6px;
   vertical-align: middle;
 }
 
-/* 🚀 Quick Launch Dock & 3D Tuning Panel */
-.quick-launch-dock {
-  position: absolute;
-  bottom: 14px;
-  left: 50%;
-  transform: translateX(-50%);
-  z-index: var(--z-hud);
+/* =====================================================================
+   Flight Telemetry HUD (Unslop: Solid clean instrument style)
+   ===================================================================== */
+.flight-telemetry-hud {
+  min-width: 220px;
+  padding: 8px 10px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+}
+.flight-telemetry-header {
   display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 8px;
-  max-width: 90%;
-  pointer-events: auto;
-}
-
-.quick-launch-actions {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  background: rgba(255, 255, 255, 0.94);
-  backdrop-filter: blur(12px);
-  padding: 8px 14px;
-  border-radius: 28px;
-  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.12), 0 1px 4px rgba(0, 0, 0, 0.06);
-  border: 1px solid rgba(218, 220, 224, 0.8);
-}
-
-.btn-main-throw {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  background: var(--blue, #1a73e8);
-  color: #ffffff;
-  border: none;
-  border-radius: 20px;
-  padding: 8px 20px;
-  font-family: inherit;
-  cursor: pointer;
-  box-shadow: 0 2px 8px rgba(26, 115, 232, 0.35);
-  transition: all 0.18s ease;
-}
-.btn-main-throw:hover {
-  background: #1765cc;
-  box-shadow: 0 4px 12px rgba(26, 115, 232, 0.45);
-  transform: translateY(-1px);
-}
-.btn-main-throw:active {
-  transform: translateY(1px);
-  box-shadow: 0 1px 4px rgba(26, 115, 232, 0.25);
-}
-.btn-main-throw .throw-text-wrap {
-  display: flex;
-  flex-direction: column;
-  text-align: left;
-  line-height: 1.1;
-}
-.btn-main-throw .throw-title {
-  font-size: 13px;
-  font-weight: 700;
-  letter-spacing: 0.02em;
-}
-.btn-main-throw .throw-hint {
-  font-size: 9px;
-  opacity: 0.85;
-  font-weight: 500;
-  letter-spacing: 0.05em;
-}
-
-.btn-quick-play {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  background: #ffffff;
-  color: #1a73e8;
-  border: 1px solid #c2e7ff;
-  border-radius: 20px;
-  padding: 8px 18px;
-  font-family: inherit;
-  cursor: pointer;
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.08);
-  transition: all 0.18s ease;
-}
-.btn-quick-play:hover {
-  background: #f0f7ff;
-  border-color: #7fb2ff;
-  transform: translateY(-1px);
-  box-shadow: 0 2px 8px rgba(26, 115, 232, 0.2);
-}
-.btn-quick-play[data-playing="1"] {
-  background: #1a73e8;
-  color: #ffffff;
-  border-color: #1a73e8;
-}
-.btn-quick-play .play-text-wrap {
-  display: flex;
-  flex-direction: column;
-  text-align: left;
-  line-height: 1.1;
-}
-.btn-quick-play .play-title {
-  font-size: 13px;
-  font-weight: 700;
-  letter-spacing: 0.02em;
-}
-.btn-quick-play .play-hint {
-  font-size: 9px;
-  opacity: 0.85;
-  font-weight: 500;
-  letter-spacing: 0.05em;
-}
-
-.btn-quick-reset {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  background: #f1f3f4;
-  color: var(--ink, #3c4043);
-  border: 1px solid #dadce0;
-  border-radius: 18px;
-  padding: 7px 12px;
-  font-family: inherit;
-  font-size: 11.5px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: all 0.15s ease;
-}
-.btn-quick-reset:hover {
-  background: #e8eaed;
-  color: #202124;
-}
-
-.btn-ensemble-throw {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  background: #f1f8e9;
-  color: #1e4620;
-  border: 1px solid #c8e6c9;
-  border-radius: 20px;
-  padding: 7px 16px;
-  font-family: inherit;
-  cursor: pointer;
-  transition: all 0.18s ease;
-}
-.btn-ensemble-throw:hover {
-  background: #e8f5e9;
-  border-color: #a5d6a7;
-  transform: translateY(-1px);
-}
-.btn-ensemble-throw .ensemble-text-wrap {
-  display: flex;
-  flex-direction: column;
-  text-align: left;
-  line-height: 1.1;
-}
-.btn-ensemble-throw .ensemble-title {
-  font-size: 12px;
-  font-weight: 700;
-  color: #188038;
-}
-.btn-ensemble-throw .ensemble-sub {
-  font-size: 9px;
-  color: #2e7d32;
-}
-
-.btn-dock-toggle {
-  background: #f1f3f4;
-  color: var(--ink, #202124);
-  border: 1px solid #dadce0;
-  border-radius: 18px;
-  padding: 7px 14px;
-  font-family: inherit;
-  font-size: 11.5px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: all 0.15s ease;
-}
-.btn-dock-toggle:hover {
-  background: #e8eaed;
-}
-
-.quick-tuning-panel {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(180px, 1fr));
-  gap: 12px;
-  background: rgba(255, 255, 255, 0.96);
-  backdrop-filter: blur(12px);
-  padding: 14px 18px;
-  border-radius: 16px;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
-  border: 1px solid rgba(218, 220, 224, 0.85);
-  width: 100%;
-  max-width: 780px;
-}
-.quick-tuning-panel[hidden] {
-  display: none !important;
-}
-
-.tuning-col {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-.tuning-head {
-  display: flex;
-  align-items: center;
   justify-content: space-between;
+  align-items: center;
+  border-bottom: 1px solid var(--line);
+  padding-bottom: 5px;
+  margin-bottom: 6px;
 }
-.tuning-label {
-  font-size: 11px;
-  font-weight: 600;
-  color: var(--muted, #5f6368);
-}
-.tuning-val {
-  font-size: 12px;
+.flight-telemetry-title {
   font-weight: 700;
-  color: var(--ink, #202124);
-  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--ink);
+  letter-spacing: 0.02em;
 }
-.tuning-slider {
-  width: 100%;
-  height: 4px;
-  border-radius: 2px;
-  accent-color: var(--blue, #1a73e8);
-  cursor: pointer;
-}
-.tuning-presets {
+.flight-telemetry-status-row {
   display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 6px;
+  font-size: 10.5px;
+  color: var(--ink-2);
 }
-.tuning-chip {
-  background: #f1f3f4;
-  color: var(--ink, #3c4043);
-  border: 1px solid #dadce0;
-  border-radius: 12px;
-  padding: 2px 7px;
+.flight-status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--line-2);
+  flex-shrink: 0;
+}
+.flight-telemetry-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px 12px;
+  font-size: 11px;
+}
+.flight-telemetry-k {
+  color: var(--muted);
   font-size: 9.5px;
+}
+.flight-telemetry-v {
+  font-weight: 700;
+  font-size: 13px;
+  color: var(--ink);
+}
+.flight-telemetry-v small {
+  font-size: 10px;
+  font-weight: normal;
+}
+.flight-telemetry-sub {
+  font-size: 9.5px;
+  color: var(--accent-ink);
   font-weight: 500;
-  cursor: pointer;
-  transition: all 0.12s ease;
 }
-.tuning-chip:hover {
-  background: #e8eaed;
+.flight-telemetry-sub-muted {
+  font-size: 9.5px;
+  color: var(--ink-2);
 }
-.tuning-chip.active {
-  background: #e8f0fe;
-  color: #1a73e8;
-  border-color: #1a73e8;
+.flight-telemetry-glide {
   font-weight: 600;
+  font-size: 11.5px;
+  color: var(--ok-ink);
+}
+.hud-phase-pill {
+  font-size: 9.5px;
+  padding: 1px 6px;
+  border-radius: 2px;
+  background: var(--accent-bg);
+  color: var(--accent-ink);
+  font-weight: 600;
+}
+
+/* =====================================================================
+   Guinness Spec Card & Info Panels (Unslop token alignment)
+   ===================================================================== */
+.wb-spec-callout {
+  padding: 10px;
+  background: #fdf8e2;
+  border: 1px solid var(--warn);
+  margin-bottom: 10px;
+}
+.wb-spec-callout-title {
+  font-weight: 700;
+  font-size: 14px;
+  color: var(--warn);
+}
+.wb-spec-callout-sub {
+  color: var(--muted);
+  margin-top: 2px;
+}
+.wb-spec-callout-val {
+  font-size: 18px;
+  font-weight: 800;
+  color: var(--accent-ink);
+  margin-top: 6px;
+}
+.wb-citation-card {
+  background: var(--paper);
+  border: 1px solid var(--line);
+  padding: 8px;
+}
+.wb-citation-heading {
+  font-weight: 600;
+  color: var(--ink);
+  margin-bottom: 4px;
+}
+.wb-citation-text {
+  color: var(--muted);
+  line-height: 1.4;
 }
 
 /* ---------- Flight Result Summary Modal ---------- */
@@ -3097,7 +3035,7 @@ input[type="range"]:focus-visible { outline: 2px solid var(--accent); outline-of
   color: var(--ink-2, #5f6368);
 }
 .flight-result-item.highlight .f-res-label {
-  color: #1a73e8;
+  color: var(--accent-ink);
 }
 .flight-result-item .f-res-val {
   font-size: 18px;
@@ -3206,4 +3144,4 @@ input[type="range"]:focus-visible { outline: 2px solid var(--accent); outline-of
   }
 }
 
-
+

@@ -14,6 +14,10 @@ import threading
 import traceback
 from typing import Any, Dict, Optional, Tuple
 
+import dotenv
+
+dotenv.load_dotenv()
+
 from flask import Flask, Response, jsonify, render_template, request
 from werkzeug.exceptions import HTTPException
 
@@ -27,13 +31,16 @@ from api.core import (
     domain,
 )
 from api.routes import (
+    ga_research_bp,
     jobs_bp,
     mesh_bp,
     meta_bp,
+    origami_bp,
     physics_bp,
     records_bp,
     sim_bp,
 )
+from tools.branch_guard import BranchViolation, assert_branch_allowed, describe_status
 
 logging.basicConfig(
     level=logging.INFO,
@@ -135,18 +142,14 @@ def _check_authentication() -> Optional[Tuple[Response, int]]:
     if not api_key:
         return None  # Auth is optional when API_KEY is not configured
 
-    # Exempt public, health check, UI and read-only diagnostic routes.
+    # Exempt public, health check, UI and diagnostic routes
+    # Note: /api/v1/system/gpu (read-only) is exempt, while /api/v1/system/force-gpu-render is protected.
     path = request.path or "/"
     if (
         request.method == "OPTIONS"
-        or path in ("/", "/healthz", "/healthz/ready", "/healthz/live")
+        or path in ("/", "/healthz", "/healthz/ready", "/healthz/live", "/api/v1/system/gpu")
         or path.startswith(("/static/", "/api/v1/meta/"))
     ):
-        return None
-    # ``/api/v1/system/gpu`` is a read-only capability probe; the sibling
-    # ``/api/v1/system/force-gpu-render`` changes server state and therefore
-    # stays behind the API key.
-    if path == "/api/v1/system/gpu":
         return None
 
     auth_header = request.headers.get("Authorization", "").strip()
@@ -156,9 +159,10 @@ def _check_authentication() -> Optional[Tuple[Response, int]]:
     elif request.headers.get("X-API-Key"):
         token = request.headers.get("X-API-Key", "").strip()
 
-    # The key is deliberately *not* accepted from the query string: query
-    # strings end up in access logs, browser history and Referer headers.
-    if not token or not hmac.compare_digest(token, api_key):
+    # Compare the UTF-8 bytes: hmac.compare_digest rejects non-ASCII str
+    # arguments with a TypeError, which would turn a malformed client token
+    # into a 500 instead of a 401.  The digest itself stays constant time.
+    if not token or not hmac.compare_digest(token.encode("utf-8"), api_key.encode("utf-8")):
         return api_error("Unauthorized: invalid or missing API Key / Bearer token", 401, category="security")
     return None
 
@@ -261,11 +265,13 @@ def healthz_ready():
 # Blueprint Registration
 # ---------------------------------------------------------------------------
 app.register_blueprint(meta_bp)
+app.register_blueprint(origami_bp)
 app.register_blueprint(physics_bp)
 app.register_blueprint(sim_bp)
 app.register_blueprint(mesh_bp)
 app.register_blueprint(jobs_bp)
 app.register_blueprint(records_bp)
+app.register_blueprint(ga_research_bp)
 
 
 # ---------------------------------------------------------------------------
@@ -280,7 +286,22 @@ def main() -> None:
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=5000)
     parser.add_argument("--debug", action="store_true")
+    parser.add_argument(
+        "--allow-protected-branch",
+        action="store_true",
+        help="run even when the checked-out branch is master/main",
+    )
     args = parser.parse_args()
+
+    # Branch guard: the genetic-project phase is isolated from master.  The
+    # server must not be started from a protected branch unless the operator
+    # explicitly overrides it.
+    try:
+        status = assert_branch_allowed(allow_protected=bool(args.allow_protected_branch))
+    except BranchViolation as exc:
+        log.error("branch guard: %s", exc)
+        raise SystemExit(2) from exc
+    log.info("branch guard: %s", describe_status(status))
 
     try:
         parallel = domain("parallel_engine")

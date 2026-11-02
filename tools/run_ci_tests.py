@@ -1,10 +1,8 @@
 """CI test runner script: runs pytest, prints output, and reports summary."""
 
-import json
 import os
 import subprocess
 import sys
-import urllib.request
 from pathlib import Path
 
 # Add project root to sys.path
@@ -12,22 +10,16 @@ project_root = Path(__file__).resolve().parent.parent
 if str(project_root) not in sys.path:
     sys.path.insert(0, str(project_root))
 
-from tools.notify_discord import get_webhook_url
+from tools.notify_discord import get_webhook_url, send_notification
 
 
-def notify_discord(content: str) -> None:
-    webhook_url = get_webhook_url()
-    if not webhook_url:
+def notify_discord(status_type: str, title: str, summary: str, extra_info: str = "") -> None:
+    """Send a coloured embed notification (verify / fail) to the configured webhook."""
+    if not get_webhook_url():
         print("Notice: DISCORD_WEBHOOK_URL not configured. Discord notification skipped.", file=sys.stderr)
         return
     try:
-        payload = {"content": content}
-        req = urllib.request.Request(
-            webhook_url,
-            data=json.dumps(payload).encode("utf-8"),
-            headers={"Content-Type": "application/json", "User-Agent": "Mozilla/5.0"},
-        )
-        urllib.request.urlopen(req, timeout=10)
+        send_notification(status_type, title, summary, extra_info)
     except Exception as exc:
         print(f"Warning: Failed to send Discord webhook: {exc}", file=sys.stderr)
 
@@ -88,8 +80,12 @@ def main() -> int:
             escaped = line.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
             print(f"::error title=Pytest Failure::{escaped}", flush=True)
 
-        msg = f"⚠️ **CI Test Failed (exit code {ret})**:\n```\n{summary_text[:1800]}\n```"
-        notify_discord(msg)
+        notify_discord(
+            "fail",
+            "CI テスト失敗",
+            f"pytest が終了コード {ret} で失敗しました。",
+            f"```\n{summary_text[:1500]}\n```",
+        )
 
         # Also write summary to file for automated issue creation step
         try:
@@ -111,8 +107,12 @@ def main() -> int:
             except Exception as exc:
                 print(f"Warning: could not write GITHUB_STEP_SUMMARY: {exc}", file=sys.stderr)
 
-        msg = f"✅ **CI All Tests Passed**: {summary_text}"
-        notify_discord(msg)
+        notify_discord(
+            "verify",
+            "CI テスト全件パス",
+            "pytest が全テストの通過を確認しました。",
+            f"**結果:** {summary_text}",
+        )
 
     return ret
 

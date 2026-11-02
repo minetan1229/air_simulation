@@ -23,7 +23,6 @@ from physics.config_schema import (
 from physics.job_manager import JOB_MANAGER
 from ..core import (
     RESULT_CACHE,
-    RESULT_CACHE_LIMIT,
     RESULT_CACHE_LOCK,
     SESSION,
     BadRequest,
@@ -31,9 +30,16 @@ from ..core import (
     body,
     domain,
     merge_overlay,
+    result_cache_put,
 )
-
 log = logging.getLogger("paper_airplane")
+
+#: Maximum number of concurrently active (queued + running) optimizer /
+#: investigation jobs.  Admission is serialised with :data:`_JOBS_ADMISSION_LOCK`
+#: so the check-then-act race cannot over-subscribe the slot pool.
+_ADMISSION_LIMIT = 4
+_JOBS_ADMISSION_LOCK = threading.Lock()
+
 jobs_bp = Blueprint("jobs", __name__)
 
 
@@ -83,12 +89,9 @@ def _optimizer_config(payload: Dict[str, Any]) -> OptimizerConfig:
     else:
         dvars = list(dvars_raw)
 
-    base = as_dict(SESSION.aircraft)
-    merge_overlay(base, raw.get("aircraft"), "aircraft")
-    env = as_dict(SESSION.environment)
-    merge_overlay(env, raw.get("environment"), "environment")
-    launch = as_dict(SESSION.launch)
-    merge_overlay(launch, raw.get("launch"), "launch")
+    base = merge_overlay(as_dict(SESSION.aircraft), raw.get("aircraft"), "aircraft")
+    env = merge_overlay(as_dict(SESSION.environment), raw.get("environment"), "environment")
+    launch = merge_overlay(as_dict(SESSION.launch), raw.get("launch"), "launch")
 
     variable_bounds = raw.get("variable_bounds") or {}
     if not isinstance(variable_bounds, dict):
@@ -123,6 +126,10 @@ def _optimizer_config(payload: Dict[str, Any]) -> OptimizerConfig:
 
     if cfg.max_evaluations < 1 or cfg.max_evaluations > 5000:
         raise BadRequest("'max_evaluations' must be within [1, 5000]")
+    if not (0.0 < cfg.sim_duration_s <= 600.0):
+        raise BadRequest("'sim_duration_s' must be within (0, 600] seconds")
+    if not (0.0 < cfg.dt_max <= 1.0):
+        raise BadRequest("'dt_max' must be within (0, 1.0] seconds")
     if cfg.design_variables:
         try:
             cfg.resolved_variables()
@@ -133,56 +140,68 @@ def _optimizer_config(payload: Dict[str, Any]) -> OptimizerConfig:
 
 @jobs_bp.post("/api/v1/optimizer/run")
 def optimizer_run():
-    if JOB_MANAGER.active_count() >= 4:
-        raise BadRequest("server busy: maximum active jobs (4) reached, please wait or cancel running jobs")
     payload = body()
     cfg = _optimizer_config(payload)
 
     optimizer = domain("optimizer_domain")
     dispatch = optimizer.ALGORITHM_DISPATCH
+    backend_name = domain("parallel_engine").backend_name(cfg.processes)
     total = max(1, int(cfg.max_evaluations))
-    job = JOB_MANAGER.create(
-        name=f"{cfg.algorithm} optimizer",
-        total_evaluations=total,
-        backend=domain("parallel_engine").backend_name(cfg.processes),
-        objectives=list(cfg.objectives),
-        algorithm=cfg.algorithm,
-        model_id=SESSION.mesh_model_id,
-    )
-    JOB_MANAGER.start(job.job_id)
-    cfg_dict = as_dict(cfg)
 
-    def progress_cb(evaluated: int, _total: int, _best: float) -> None:
-        try:
-            JOB_MANAGER.update(job.job_id, evaluated, total_evaluations=total)
-        except KeyError:
-            pass
-
-    def cancel_cb() -> bool:
-        return JOB_MANAGER.is_cancel_requested(job.job_id)
-
-    def worker() -> None:
-        try:
-            runner = dispatch[cfg_dict["algorithm"]]
-            result = runner(
-                optimizer.from_dict(OptimizerConfig, cfg_dict), progress_cb, cancel_cb
+    with _JOBS_ADMISSION_LOCK:
+        if JOB_MANAGER.active_count() >= _ADMISSION_LIMIT:
+            raise BadRequest(
+                "server busy: maximum active jobs (4) reached, please wait or cancel running jobs"
             )
-            result["job_id"] = job.job_id
-            with RESULT_CACHE_LOCK:
-                RESULT_CACHE[job.job_id] = result
-                while len(RESULT_CACHE) > RESULT_CACHE_LIMIT:
-                    RESULT_CACHE.pop(next(iter(RESULT_CACHE)))
-            JOB_MANAGER.finish(job.job_id, message=f"{result['evaluations']} evaluations")
-        except Exception as exc:
-            log.error("optimizer job %s failed: %s\n%s", job.job_id, exc, traceback.format_exc())
+        job = JOB_MANAGER.create(
+            name=f"{cfg.algorithm} optimizer",
+            total_evaluations=total,
+            backend=backend_name,
+            objectives=list(cfg.objectives),
+            algorithm=cfg.algorithm,
+            model_id=SESSION.mesh_model_id,
+        )
+        JOB_MANAGER.start(job.job_id)
+        cfg_dict = as_dict(cfg)
+
+        def progress_cb(evaluated: int, _total: int, _best: float) -> None:
             try:
-                JOB_MANAGER.fail(job.job_id, str(exc))
+                JOB_MANAGER.update(job.job_id, evaluated, total_evaluations=total)
             except KeyError:
                 pass
 
-    thread = threading.Thread(target=worker, name=f"optimizer-{job.job_id}", daemon=True)
-    JOB_MANAGER.register_thread(job.job_id, thread)
-    thread.start()
+        def cancel_cb() -> bool:
+            return JOB_MANAGER.is_cancel_requested(job.job_id)
+
+        def worker() -> None:
+            try:
+                runner = dispatch[cfg_dict["algorithm"]]
+                result = runner(
+                    optimizer.from_dict(OptimizerConfig, cfg_dict), progress_cb, cancel_cb
+                )
+                result["job_id"] = job.job_id
+                result_cache_put(job.job_id, result)
+                JOB_MANAGER.finish(job.job_id, message=f"{result['evaluations']} evaluations")
+            except Exception as exc:
+                log.error("optimizer job %s failed: %s\n%s", job.job_id, exc, traceback.format_exc())
+                try:
+                    JOB_MANAGER.fail(job.job_id, str(exc))
+                except KeyError:
+                    pass
+
+        thread = threading.Thread(target=worker, name=f"optimizer-{job.job_id}", daemon=True)
+        JOB_MANAGER.register_thread(job.job_id, thread)
+        try:
+            thread.start()
+        except Exception:
+            # The worker thread never started: release the job slot so the
+            # admission counter does not leak a permanent "running" job.
+            try:
+                JOB_MANAGER.fail(job.job_id, "failed to start worker thread")
+            except KeyError:
+                pass
+            raise
+
     return jsonify(as_dict(JOB_MANAGER.get(job.job_id))), 202
 
 
@@ -235,20 +254,10 @@ def optimizer_result(job_id: str):
 @jobs_bp.post("/api/v1/investigate/run")
 @jobs_bp.post("/api/v1/jobs/investigate")
 def investigate_run():
-    """Start an auto-investigation job.
-
-    ``/api/v1/jobs/investigate`` is the path mandated by SPECIFICATION 3.5;
-    ``/api/v1/investigate/run`` is kept for the existing clients.
-    """
-    if JOB_MANAGER.active_count() >= 4:
-        raise BadRequest("server busy: maximum active jobs (4) reached, please wait or cancel running jobs")
     payload = body()
-    base_air = as_dict(SESSION.aircraft)
-    merge_overlay(base_air, payload.get("aircraft"), "aircraft")
-    env = as_dict(SESSION.environment)
-    merge_overlay(env, payload.get("environment"), "environment")
-    lau = as_dict(SESSION.launch)
-    merge_overlay(lau, payload.get("launch"), "launch")
+    base_air = merge_overlay(as_dict(SESSION.aircraft), payload.get("aircraft"), "aircraft")
+    env = merge_overlay(as_dict(SESSION.environment), payload.get("environment"), "environment")
+    lau = merge_overlay(as_dict(SESSION.launch), payload.get("launch"), "launch")
 
     aircraft_cfg = from_dict(AircraftConfig, base_air, strict=False)
     environment_cfg = from_dict(EnvironmentConfig, env, strict=False).clamp_ranges()
@@ -259,15 +268,20 @@ def investigate_run():
         raise BadRequest("'target_metric' must be 'distance' or 'flight_time'")
 
     total_evals = 100
-    job = JOB_MANAGER.create(
-        name=f"Auto-investigate ({target_metric})",
-        total_evaluations=total_evals,
-        backend="auto_investigate",
-        objectives=[f"max_{target_metric}"],
-        algorithm="sensitivity_and_focused_tuning",
-        model_id=SESSION.mesh_model_id,
-    )
-    JOB_MANAGER.start(job.job_id)
+
+    with _JOBS_ADMISSION_LOCK:
+        if JOB_MANAGER.active_count() >= _ADMISSION_LIMIT:
+            raise BadRequest(
+                "server busy: maximum active jobs (4) reached, please wait or cancel running jobs"
+            )
+        job = JOB_MANAGER.create(
+            name=f"Auto-investigate ({target_metric})",
+            total_evaluations=total_evals,
+            backend="auto_investigate",
+            objectives=[f"max_{target_metric}"],
+            algorithm="sensitivity_and_focused_tuning",
+            model_id=SESSION.mesh_model_id,
+        )
 
     def progress_cb(pct: int, total: int, msg: str) -> None:
         if JOB_MANAGER.is_cancelled(job.job_id) or JOB_MANAGER.is_cancel_requested(job.job_id):
@@ -288,10 +302,7 @@ def investigate_run():
             )
             res_dict = as_dict(res)
             res_dict["job_id"] = job.job_id
-            with RESULT_CACHE_LOCK:
-                RESULT_CACHE[job.job_id] = res_dict
-                while len(RESULT_CACHE) > RESULT_CACHE_LIMIT:
-                    RESULT_CACHE.pop(next(iter(RESULT_CACHE)))
+            result_cache_put(job.job_id, res_dict)
             JOB_MANAGER.finish(job.job_id, message=f"Completed auto-investigation: {res.summary.get('primary_issue', 'OK')}")
         except Exception as exc:
             try:
@@ -306,9 +317,19 @@ def investigate_run():
             except KeyError:
                 pass
 
-    thread = threading.Thread(target=worker, name=f"investigate-{job.job_id}", daemon=True)
-    JOB_MANAGER.register_thread(job.job_id, thread)
-    thread.start()
+        JOB_MANAGER.start(job.job_id)
+
+        thread = threading.Thread(target=worker, name=f"investigate-{job.job_id}", daemon=True)
+        JOB_MANAGER.register_thread(job.job_id, thread)
+        try:
+            thread.start()
+        except Exception:
+            try:
+                JOB_MANAGER.fail(job.job_id, "failed to start worker thread")
+            except KeyError:
+                pass
+            raise
+
     return jsonify(as_dict(JOB_MANAGER.get(job.job_id))), 202
 
 

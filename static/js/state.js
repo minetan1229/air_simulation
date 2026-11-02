@@ -2,12 +2,12 @@
 
 import { Emitter } from "./lib.js";
 
-export const SECTIONS = ["aircraft", "environment", "launch", "simulation"];
+export const SECTIONS = ["aircraft", "environment", "launch", "simulation", "origami", "research"];
 
 export class ConfigStore extends Emitter {
   constructor() {
     super();
-    this.data = { aircraft: {}, environment: {}, launch: {}, simulation: {} };
+    this.data = { aircraft: {}, environment: {}, launch: {}, simulation: {}, origami: {}, research: {} };
     this.schema = { aircraft: {}, environment: {}, launch: {} };
     this.air = {};
     this.mesh = null;
@@ -18,6 +18,9 @@ export class ConfigStore extends Emitter {
   get environment() { return this.data.environment || {}; }
   get launch() { return this.data.launch || {}; }
   get simulation() { return this.data.simulation || {}; }
+  get origami() { return this.data.origami || {}; }
+  /** Local-only GA research state (never pushed to the flight backend). */
+  get research() { return this.data.research || {}; }
 
   /** Replace the local copy with a server snapshot (boot / import). */
   adopt(snapshot) {

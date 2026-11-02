@@ -16,13 +16,14 @@ from physics.config_schema import (
 )
 from ..core import (
     SESSION,
+    SIMULATION_LOCK,
+    SIMULATION_TRAJECTORY_LOCK,
     BadRequest,
     as_float,
     as_int,
     body,
     build,
     domain,
-    merge_environment,
 )
 
 log = logging.getLogger("paper_airplane")
@@ -51,26 +52,23 @@ def simulation_step():
     if not (1 <= n_steps <= 240):
         raise BadRequest("'n_steps' must lie within [1, 240]")
 
-    with SESSION.lock:
-        if payload.get("aircraft"):
-            SESSION.set_aircraft(build(AircraftConfig, payload["aircraft"]))
-        if payload.get("environment"):
-            SESSION.set_environment(
-                merge_environment(payload["environment"], SESSION.environment)
-            )
-        if payload.get("launch"):
-            SESSION.set_launch(build(LaunchConfig, payload["launch"]))
-        if payload.get("simulation"):
-            SESSION.set_settings(build(SimulationSettings, payload["simulation"]))
-
-        simulator = SESSION.simulator_instance()
+    # The shared simulator is mutated by the step itself, so a trajectory must
+    # not be interleaved with another trajectory and the airframe
+    # configuration must not change while it runs.  The trajectory lock is
+    # therefore held for the whole request, while the state lock is only held
+    # for the short critical sections, so read-only endpoints keep answering
+    # during a long batch instead of waiting for its full wall time (§P2-2).
+    with SIMULATION_TRAJECTORY_LOCK:
+        simulator = SESSION.simulator_for_request(payload)
         if n_steps == 1:
-            result = simulator.step(dt=dt, substeps=substeps)
+            with SIMULATION_LOCK:
+                result = simulator.step(dt=dt, substeps=substeps)
             out = dict(result)
         else:
             steps_list = []
             for _ in range(n_steps):
-                res = simulator.step(dt=dt, substeps=substeps)
+                with SIMULATION_LOCK:
+                    res = simulator.step(dt=dt, substeps=substeps)
                 steps_list.append(res)
                 if res.get("terminated", False):
                     break
@@ -91,19 +89,11 @@ def simulation_step():
 @sim_bp.post("/api/v1/simulation/reset")
 def simulation_reset():
     payload = body()
-    with SESSION.lock:
-        if payload.get("aircraft"):
-            SESSION.set_aircraft(build(AircraftConfig, payload["aircraft"]))
-        if payload.get("environment"):
-            SESSION.set_environment(
-                merge_environment(payload["environment"], SESSION.environment)
-            )
-        if payload.get("launch"):
-            SESSION.set_launch(build(LaunchConfig, payload["launch"]))
-        if payload.get("simulation"):
-            SESSION.set_settings(build(SimulationSettings, payload["simulation"]))
-        SESSION.simulator = None
-        state = SESSION.reset()
+    with SIMULATION_TRAJECTORY_LOCK:
+        with SIMULATION_LOCK:
+            SESSION.apply_payload(payload)
+            SESSION.simulator = None
+            state = SESSION.reset_state()
     return jsonify(
         {
             "state": as_dict(state),
@@ -122,36 +112,24 @@ def simulation_launch():
         raise BadRequest("server busy: maximum concurrent simulations reached, please retry")
     try:
         payload = body()
-        with SESSION.lock:
-            if payload.get("aircraft"):
-                SESSION.set_aircraft(build(AircraftConfig, payload["aircraft"]))
-            if payload.get("environment"):
-                SESSION.set_environment(
-                    merge_environment(payload["environment"], SESSION.environment)
-                )
-            if payload.get("launch"):
-                SESSION.set_launch(build(LaunchConfig, payload["launch"]))
-            if payload.get("simulation"):
-                SESSION.set_settings(build(SimulationSettings, payload["simulation"]))
+        # The launch integrates the *shared* simulator, so it must hold the
+        # very same trajectory mutex that /simulation/step holds.  A concurrent
+        # step would otherwise advance the same state machine in the middle of
+        # the integration loop and mix its frames into the recorded trajectory.
+        with SIMULATION_TRAJECTORY_LOCK:
+            with SIMULATION_LOCK:
+                simulator = SESSION.simulator_for_request(payload)
+                simulator.reset(launch=SESSION.launch)
+                duration_s = as_float(payload.get("duration_s", 25.0), "duration_s")
+                if not (0.1 <= duration_s <= 120.0):
+                    raise BadRequest("field 'duration_s' must lie within [0.1, 120.0]")
+                aircraft = SESSION.aircraft
+                environment = SESSION.environment
+                launch = SESSION.launch
+                settings = SESSION.settings
 
-            simulator = SESSION.simulator_instance()
-            simulator.reset(launch=SESSION.launch)
-            duration_s = as_float(payload.get("duration_s", 25.0), "duration_s")
-            if not (0.1 <= duration_s <= 120.0):
-                raise BadRequest("field 'duration_s' must lie within [0.1, 120.0]")
-            aircraft = SESSION.aircraft
-            environment = SESSION.environment
-            launch = SESSION.launch
-            settings = SESSION.settings
-
-        summary = simulator.simulate(duration_s=duration_s, record=True)
-        with SESSION.lock:
-            if (SESSION.aircraft is aircraft and
-                SESSION.environment is environment and
-                SESSION.launch is launch and
-                SESSION.settings is settings):
-                SESSION.simulator = simulator
-        samples = [as_dict(s) for s in simulator.history()]
+                summary = simulator.simulate(duration_s=duration_s, record=True)
+                samples = [as_dict(s) for s in simulator.history()]
 
         parallel = domain("parallel_engine")
         gpu_info = parallel.get_gpu_info()
@@ -176,7 +154,6 @@ def simulation_launch():
                 backend_name_str = f"cupy ({gpu_info.get('device_name', 'RTX 4060')})"
                 device_name_str = gpu_info.get("device_name")
 
-
         return jsonify(
             {
                 "metrics": summary,
@@ -196,7 +173,7 @@ def simulation_launch():
 
 @sim_bp.get("/api/v1/simulation/history")
 def simulation_history():
-    with SESSION.lock:
+    with SIMULATION_LOCK:
         simulator = SESSION.simulator
         if simulator is None:
             raise BadRequest("no simulation has been started; POST /api/v1/simulation/reset first")
@@ -207,7 +184,7 @@ def simulation_history():
 
 @sim_bp.get("/api/v1/simulation/history/<int:index>")
 def simulation_history_frame(index: int):
-    with SESSION.lock:
+    with SIMULATION_LOCK:
         simulator = SESSION.simulator
         if simulator is None:
             raise BadRequest("no simulation has been started")
@@ -278,13 +255,22 @@ def simulation_ensemble():
     launch = build(LaunchConfig, payload.get("launch"), SESSION.launch)
     settings = build(SimulationSettings, payload.get("settings"), SESSION.settings)
 
-    n_trajectories = int(payload.get("n_trajectories", 100))
+    n_trajectories_raw = payload.get("n_trajectories", 100)
+    n_trajectories = as_int(n_trajectories_raw, "n_trajectories")
+    min_traj = getattr(parallel, "MIN_ENSEMBLE_TRAJECTORIES", 1)
+    max_traj = getattr(parallel, "MAX_ENSEMBLE_TRAJECTORIES", 4096)
+    if not (min_traj <= n_trajectories <= max_traj):
+        raise BadRequest(f"'n_trajectories' must lie within [{min_traj}, {max_traj}]")
+
+    max_samples_raw = payload.get("max_sample_tracks", n_trajectories)
+    max_sample_tracks = as_int(max_samples_raw, "max_sample_tracks")
+    if not (0 <= max_sample_tracks <= n_trajectories):
+        raise BadRequest(f"'max_sample_tracks' must lie within [0, {n_trajectories}]")
+
     noise_config = payload.get("noise_config")
     force_cpu = bool(payload.get("force_cpu", False))
-    random_seed = payload.get("random_seed", 42)
-    max_sample_tracks = int(payload.get("max_sample_tracks", n_trajectories))
-    if random_seed is not None:
-        random_seed = int(random_seed)
+    random_seed_raw = payload.get("random_seed", 42)
+    random_seed = as_int(random_seed_raw, "random_seed") if random_seed_raw is not None else None
 
     result = parallel.gpu_ensemble_simulation(
         aircraft=aircraft,

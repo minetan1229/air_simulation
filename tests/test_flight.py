@@ -49,6 +49,13 @@ from physics.geometry_utils import (
 #: integrator tests (free fall, energy, zero-g) need a genuinely quiescent
 #: airframe: with lift, drag *and* the moment derivatives zero the rigid-body
 #: solution is exact, independently of how the attitude evolves.
+#:
+#: The trailing-edge fold has to be zeroed as well: the shared kernel adds its
+#: own increments to the lift, the drag and the pitching moment
+#: (``aero_kernel.trailing_edge_fold_effects``: dCL = 0.015 * fold,
+#: dCm = -0.012 * fold, dCD = 0.035 * sin^2(fold)), so an airframe that leaves
+#: the fold at its 15 deg default is *not* force-free -- it would fly with
+#: CL = 0.225 and Cm = -0.18 and the analytic comparison would be meaningless.
 QUIESCENT_AIRCRAFT: dict = dict(
     cd0=0.0,
     cL0=0.0,
@@ -57,6 +64,7 @@ QUIESCENT_AIRCRAFT: dict = dict(
     post_stall_slope=0.0,
     stall_alpha_deg=89.0,
     elevon_deg=0.0,
+    fold_trailing_deg=0.0,
     cy_beta=0.0,
     cl_beta=0.0,
     cn_beta=0.0,
@@ -94,7 +102,17 @@ CALM_ENVIRONMENT: dict = dict(
 
 #: A trimmed glider: the elevon trims the airframe at a small positive angle of
 #: attack, so it converts its launch energy into a long shallow glide.
-GLIDER = AircraftConfig(name="Paper Glider", elevon_deg=6.0)
+#:
+#: The trailing edge of this airframe is *flat* (``fold_trailing_deg = 0``).  A
+#: trailing-edge fold is a nose-down device: the shared kernel gives it
+#: dCL = 0.015 * fold and dCm = -0.012 * fold, so a 15 deg fold-down adds
+#: CL = +0.225 and Cm = -0.18 to an airframe whose own trim authority is only
+#: cm0 = +0.04 and cm_alpha = -0.9 / rad.  Such an airframe cannot be trimmed
+#: at a positive angle of attack any more (the trimmed alpha becomes negative
+#: and the trimmed lift coefficient with it), so it is a *dart*, not a glider.
+#: The fixture therefore states the flat trailing edge explicitly; the fold
+#: itself is covered by the dedicated trailing-edge-fold tests.
+GLIDER = AircraftConfig(name="Paper Glider", elevon_deg=6.0, fold_trailing_deg=0.0)
 #: A deliberately bad dart: a large elevon trims it nose-down past the stall, the
 #: sheet is heavy and blunt, so it noses over and hits the ground almost at once.
 DART = AircraftConfig(
@@ -615,7 +633,17 @@ def test_evaluate_flight_accepts_dicts_and_dataclasses_identically(glider_flight
     from_dicts = flight_sim.evaluate_flight(
         as_dict(GLIDER), as_dict(EnvironmentConfig()), as_dict(FLIGHT_LAUNCH), 3.0, 0.02
     )
-    assert from_objects == from_dicts == pytest.approx(glider_flight, rel=1e-9, abs=1e-12)
+    # Compare non-numeric fields (e.g. status, limitations list) exactly,
+    # and numeric scalars via pytest.approx.
+    non_numeric = {
+        k: v for k, v in glider_flight.items() if not (isinstance(v, (int, float)) and not isinstance(v, bool))
+    }
+    numeric = {
+        k: v for k, v in glider_flight.items() if isinstance(v, (int, float)) and not isinstance(v, bool)
+    }
+    assert {k: from_objects[k] for k in non_numeric} == {k: from_dicts[k] for k in non_numeric} == non_numeric
+    assert {k: from_objects[k] for k in numeric} == pytest.approx(numeric, rel=1e-9, abs=1e-12)
+    assert {k: from_dicts[k] for k in numeric} == pytest.approx(numeric, rel=1e-9, abs=1e-12)
     # Unknown keys are ignored (the pool pickles plain dicts) and missing keys
     # fall back to the dataclass defaults.
     sparse = flight_sim.evaluate_flight(
@@ -789,15 +817,21 @@ def test_step_payload_is_complete_and_self_consistent():
 
 
 def test_g_load_is_one_in_a_level_trimmed_glide():
-    # At trim the specific force along the body z axis balances the weight, so
-    # the accelerometer relation a_specific = a_inertial - g gives exactly 1 g.
+    # The load factor is the *resultant* specific force divided by g, i.e. the
+    # accelerometer reading.  Only the wing-normal component would miss the
+    # drag deceleration (and the lateral component in a turn), and the
+    # structural model has to carry the complete load.
     simulator = glider_simulator()
     simulator.simulate(duration_s=0.05, record=False)
     packet = simulator.step(dt=0.01)
     body_velocity = world_to_body(packet["quaternion"], np.array(packet["velocity_mps"]) - np.array(packet["wind_velocity_mps"]))
-    lift_load = flight_sim.wind_force_to_body(body_velocity, packet["drag_n"], packet["side_n"], packet["lift_n"])[2]
+    specific_force = flight_sim.wind_force_to_body(
+        body_velocity, packet["drag_n"], packet["side_n"], packet["lift_n"]
+    )
     weight = derived_properties(simulator.aircraft)["mass_kg"] * simulator.environment.gravity
-    assert packet["g_load"] == pytest.approx(abs(lift_load) / weight, rel=1e-9)
+    assert packet["g_load"] == pytest.approx(
+        float(np.linalg.norm(specific_force)) / weight, rel=1e-9
+    )
     assert 0.0 < packet["g_load"] < 5.0
 
 
@@ -846,6 +880,65 @@ def test_wind_coupling_is_exactly_inert_for_a_calm_atmosphere():
     # Above the reference height the log-law profile strengthens the mean wind.
     aloft = flight_sim.wind_vector((0.0, 0.0, -10.0), windy, 0.0)
     assert float(np.linalg.norm(aloft)) > 8.0
+
+
+def test_the_wind_is_sampled_at_the_height_above_the_ground_plane():
+    """The reference path hands the wind solver the z-up coordinate of the point.
+
+    :mod:`physics.wind_domain` evaluates the boundary layer at
+    ``height_agl = z_up - ground_level_m``, so the caller has to pass the z-up
+    coordinate of the *same point* (``z_up = -z_ned``).  The world NED ground
+    plane is ``z_ned = -ground_level_m``, hence ``z_up = -z_ned`` is the
+    altitude above the world origin and the solver forms the height above the
+    ground plane itself.  Two wrong conversions are possible and both are
+    excluded here:
+
+    * passing the height above the ground plane subtracts the ground level
+      twice and samples the wind at the ground;
+    * passing ``ground_level_m - z_ned`` samples the wind at the altitude
+      above the *world origin* instead of the altitude above the ground
+      plane, so a scene on a plateau is flown in the wrong air (the batch
+      path ``physics.gpu_dynamics.wind_batch`` has to use the same
+      conversion, otherwise the two paths fly in different air masses).
+    """
+    from physics import wind_domain
+
+    env = EnvironmentConfig(
+        wind_speed=8.0,
+        wind_direction_deg=45.0,
+        gust_intensity=0.0,
+        thermal_strength=0.0,
+        turbulence_scale=0.0,
+        ground_level_m=100.0,
+    )
+    position = (0.0, 0.0, -105.0)  # 5 m above the ground plane, 105 m above the origin
+    vector = flight_sim.wind_vector(position, env, 0.0)
+
+    def solver_at(z_up: float) -> np.ndarray:
+        return wind_domain.velocity_components(
+            np.array([[0.0, 0.0, z_up]]), env, 0.0, "numpy"
+        )[0]
+
+    # The solver sees the z-up coordinate of the point and forms the height
+    # above the ground plane itself; the vertical component is negated back
+    # into the z-down world frame.
+    expected = solver_at(-position[2])
+    assert np.allclose(
+        vector, np.array([expected[0], expected[1], -expected[2]]), rtol=1.0e-12
+    )
+
+    # The height that shapes the profile is the height above the ground plane
+    # (5 m), not the altitude above the world origin (105 m): the two give
+    # different wind speeds, so the assertion above is discriminating.
+    at_world_origin_height = solver_at(env.ground_level_m - position[2])
+    assert float(np.hypot(vector[0], vector[1])) != pytest.approx(
+        float(np.hypot(at_world_origin_height[0], at_world_origin_height[1])), rel=1.0e-6
+    )
+    # The height above the ground plane is the one the boundary layer uses.
+    at_ground_plane = solver_at(env.ground_level_m + 5.0)
+    assert float(np.hypot(vector[0], vector[1])) == pytest.approx(
+        float(np.hypot(at_ground_plane[0], at_ground_plane[1])), rel=1.0e-12
+    )
 
 
 def test_aerodynamic_bridge_prefers_the_upstream_solver():

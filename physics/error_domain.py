@@ -46,26 +46,11 @@ class ErrorRecord:
         return d
 
     def to_public_dict(self) -> Dict[str, Any]:
-        """Client-safe view of the record.
-
-        The stack trace and the client address stay in the server log; the
-        REST layer must not re-publish what the 500 handler deliberately
-        suppresses (SPECIFICATION 4.1).  ``has_traceback`` tells the operator
-        that a trace exists in the server log without disclosing it.
-        """
-        details = self.details if isinstance(self.details, dict) else {}
-        return {
-            "id": self.id,
-            "timestamp": self.timestamp,
-            "level": self.level,
-            "category": self.category,
-            "message": self.message,
-            "details": dict(list(details.items())[:20]),
-            "method": self.method,
-            "status_code": self.status_code,
-            "path": self.path,
-            "has_traceback": bool(self.traceback_str),
-        }
+        d = asdict(self)
+        has_tb = bool(d.pop("traceback_str", None))
+        d.pop("client_ip", None)
+        d["has_traceback"] = has_tb
+        return d
 
 
 class ErrorLoggerDomain:
@@ -105,6 +90,8 @@ class ErrorLoggerDomain:
             "%(asctime)s [%(levelname)s] [%(name)s] %(message)s"
         )
         self._text_handler.setFormatter(self._text_formatter)
+        self._jsonl_formatter = logging.Formatter("%(message)s")
+        self._file_handler.setFormatter(self._jsonl_formatter)
 
     def record_error(
         self,
@@ -144,20 +131,28 @@ class ErrorLoggerDomain:
 
             self._buffer.append(record)
 
-            # Write to JSONL
+            # Write to JSONL (rotation handled by RotatingFileHandler.emit)
             try:
-                stream = self._file_handler.stream
-                if stream is not None:
-                    line = json.dumps(record.to_dict(), ensure_ascii=False) + "\n"
-                    stream.write(line)
-                    stream.flush()
+                line = json.dumps(record.to_dict(), ensure_ascii=False)
+                jsonl_record = logging.LogRecord(
+                    name="error_domain.jsonl",
+                    level=logging.INFO,
+                    pathname=__file__,
+                    lineno=0,
+                    msg=line,
+                    args=(),
+                    exc_info=None,
+                )
+                self._file_handler.emit(jsonl_record)
             except Exception:
                 pass
 
 
-            # Write to plain text log
+            # Write to plain text log.  The record id is part of the line so a
+            # stderr entry can be joined with the matching JSONL record and
+            # with the ``error_id`` of the physics payload (§P3-6).
             try:
-                text_msg = f"[{record.category}] {record.message}"
+                text_msg = f"[{record.id}] [{record.category}] {record.message}"
                 if record.path:
                     text_msg += f" (Path: {record.method or 'GET'} {record.path})"
                 if record.traceback_str:
@@ -185,11 +180,7 @@ class ErrorLoggerDomain:
         search: Optional[str] = None,
         public: bool = False,
     ) -> List[Dict[str, Any]]:
-        """Retrieve recent errors from in-memory ring buffer with optional filtering.
-
-        ``public=True`` returns the redacted view (no stack trace, no client
-        address) that the REST layer serves to clients.
-        """
+        """Retrieve recent errors from in-memory ring buffer with optional filtering."""
         with self._lock:
             records = list(self._buffer)
 
@@ -248,21 +239,16 @@ class ErrorLoggerDomain:
         }
 
     def public_statistics(self) -> Dict[str, Any]:
-        """Statistics without the absolute server log paths.
-
-        The absolute path of the server log directory is deployment
-        information and must not be published through the REST layer
-        (SPECIFICATION 4.1); the file names and their sizes are enough for an
-        operator to confirm that logging works.
-        """
+        """Summary metrics of recorded errors with sanitized public paths."""
         stats = self.statistics()
-        files = stats.get("log_files", {})
-        stats["log_files"] = {
-            "text": os.path.basename(str(files.get("text", ""))),
-            "jsonl": os.path.basename(str(files.get("jsonl", ""))),
-            "text_size_bytes": files.get("text_size_bytes", 0),
-            "jsonl_size_bytes": files.get("jsonl_size_bytes", 0),
+        log_files = stats.get("log_files", {})
+        public_files = {
+            "text": os.path.basename(log_files.get("text", "")),
+            "jsonl": os.path.basename(log_files.get("jsonl", "")),
+            "text_size_bytes": log_files.get("text_size_bytes", 0),
+            "jsonl_size_bytes": log_files.get("jsonl_size_bytes", 0),
         }
+        stats["log_files"] = public_files
         return stats
 
 

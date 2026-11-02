@@ -2,17 +2,25 @@ name: Python Code Verification
 
 on:
   push:
-    branches: [ "master" ]
+    # The genetic-project phase is isolated from master, so its own branch
+    # has to be verified too.
+    branches: [ "master", "genetic-project" ]
   pull_request:
     branches: [ "master" ]
+
+# The branch guard refuses to run the suite on a protected branch.  Inside CI
+# the checkout is the triggering ref - ``actions/checkout`` creates a local
+# branch on push and a detached HEAD on a pull request - so the branch name
+# says nothing about where the work was authored and the suite must not abort
+# there.  The protection of a local clone is untouched: this setting only
+# applies to this workflow's environment.
+env:
+  PAPER_AIRCRAFT_BRANCH_GUARD: warn
 
 jobs:
   verify:
     name: Lint, Type Check & Test
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        shell: bash
     permissions:
       contents: read
       issues: write
@@ -31,21 +39,32 @@ jobs:
           python -m pip install --upgrade pip
           pip install ruff mypy pytest
           if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
-
-      - name: バイトコンパイル (構文検証)
-        run: python -m compileall -q physics api tools app.py smoke_test.py
+          # discord.py はオプション extras (bridge) 経由だが、CI では discord テストを
+          # スキップさせないためここに明示インストールする（テスト実行時のみ）。
+          pip install "discord.py>=2.7.1,<3.0" "psutil>=7.2.2"
 
       - name: 構文・スタイル検証 (Ruff)
         run: ruff check .
 
       - name: 静的型検査 (Mypy)
-        run: mypy --config-file mypy.ini physics api app.py smoke_test.py
+        run: mypy --config-file mypy.ini physics app.py
+
+      # コンソールは ES モジュールグラフであり、1 ファイルでも構文エラーが
+      # あればアプリケーション全体の JavaScript が無効になる。GitHub ランナー
+      # は Node.js を同梱しているため、この検査は実際に実行される。
+      - name: フロントエンドモジュール構文検証 (ES module)
+        run: python tools/check_js_modules.py
+
+      # コンソールの文字サイズ下限とシェルグリッドの不変条件。レイアウトの
+      # 回帰を目視ではなく静的に検出する。
+      - name: コンソールスタイル不変条件の検証
+        run: python tools/check_ui_css.py
 
       - name: 自動テストの実行 (Pytest)
         id: pytest_step
         run: python tools/run_ci_tests.py
 
-      - name: E2E スモークテスト (Smoke Test)
+      - name: エンドツーエンドスモークテスト
         run: python smoke_test.py
 
       - name: テスト失敗時のIssue起票

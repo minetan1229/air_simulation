@@ -33,7 +33,7 @@ from __future__ import annotations
 
 import math
 import time
-from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Callable, Dict, List, Optional, Sequence, Set, Tuple
 
 import numpy as np
 try:
@@ -52,7 +52,12 @@ from .config_schema import (
     clamp,
     from_dict,
 )
-from .parallel_engine import backend_name, evaluate_case, parallel_evaluate
+from .parallel_engine import (
+    RIGID_BODY_MODEL_TAG,
+    backend_name,
+    evaluate_case,
+    parallel_evaluate,
+)
 
 __all__ = [
     "OBJECTIVE_KEYS",
@@ -68,6 +73,7 @@ __all__ = [
     "config_to_vector",
     "evaluate_vector",
     "case_for_vector",
+    "revalidate_candidate_6dof",
     "grid_points",
     "run_grid_search",
     "run_nelder_mead",
@@ -84,6 +90,11 @@ __all__ = [
     "SurrogateModel",
     "build_surrogate",
     "ALGORITHM_DISPATCH",
+    "INFEASIBLE_SCORE",
+    "INFEASIBLE_STATUSES",
+    "is_infeasible_flight",
+    "REFERENCE_ONLY_OBJECTIVES",
+    "unsupported_objectives",
 ]
 
 
@@ -139,6 +150,48 @@ OBJECTIVE_SCALES: Dict[str, float] = {
     "max_stability": 1.0,       # -
 }
 
+#: Score assigned to a design whose flight could not be evaluated at all
+#: (``status`` is ``error`` or ``failed``).  Such a design is **infeasible**:
+#: it must never become the incumbent and it must never enter the Pareto
+#: front, because a broken evaluation used to look like a legitimate 0 m
+#: flight and the optimiser would happily select it.
+INFEASIBLE_SCORE: float = -1.0e12
+
+#: Flight statuses that describe a *failed evaluation* rather than a flight.
+INFEASIBLE_STATUSES: Tuple[str, ...] = ("error", "failed")
+
+#: Maximum number of final candidates that are re-verified in the reference
+#: 6-DoF path.  The re-verification costs one full 6-DoF flight per
+#: candidate, so it is deliberately bounded: the Pareto front of a genetic
+#: run can hold hundreds of points and only the leading ones carry weight.
+MAX_REVALIDATED_CANDIDATES: int = 3
+
+
+def is_infeasible_flight(flight: Dict[str, Any]) -> bool:
+    """``True`` when the flight payload reports a failed evaluation."""
+    return str(flight.get("status", "unknown")) in INFEASIBLE_STATUSES
+
+
+#: Worst-case value of every objective, substituted for a design whose
+#: evaluation failed.  With these values an infeasible design is dominated by
+#: every feasible one, so it can never win a tournament, occupy a Pareto slot
+#: or become the incumbent.
+INFEASIBLE_OBJECTIVES: Dict[str, float] = {
+    "max_distance": 0.0,
+    "max_flight_time": 0.0,
+    "max_ld_ratio": 0.0,
+    "min_max_stress": 1.0e9,
+    "max_stall_margin": -1.0e9,
+    "min_launch_speed": 1.0e9,
+    "max_stability": -1.0e9,
+}
+
+
+def infeasible_objectives(names: Sequence[str]) -> Dict[str, float]:
+    """Worst-case objective vector for a design that could not be evaluated."""
+    return {name: float(INFEASIBLE_OBJECTIVES.get(name, 0.0)) for name in names}
+
+
 #: Exact key set of every ``run_*`` payload.
 RESULT_KEYS: Tuple[str, ...] = (
     "algorithm",
@@ -161,6 +214,8 @@ RESULT_KEYS: Tuple[str, ...] = (
     "physics_verification_eligible",
     "limitations",
     "best_physics",
+    "verified_candidates",
+    "best_verified",
 )
 
 #: Design variables that land on :class:`~physics.config_schema.LaunchConfig`.
@@ -308,8 +363,15 @@ def case_for_vector(vector: Sequence[float], cfg: OptimizerConfig) -> Dict[str, 
     """Build the plain flight-case dictionary consumed by ``evaluate_case``."""
     variables = cfg.resolved_variables()
     run_cfg = vector_to_config(vector, variables, cfg)
+    f_mode = getattr(cfg, "fidelity_mode", "standard")
+    air_dict = as_dict(run_cfg.aircraft)
+    if f_mode in ("improved_medium", "multifidelity"):
+        air_dict["fidelity_mode"] = "improved_medium"
+        air_dict["lsb_hysteresis_enabled"] = True
+        air_dict["dynamic_damping_enabled"] = True
+        air_dict["apparent_inertia_enabled"] = True
     return {
-        "aircraft": as_dict(run_cfg.aircraft),
+        "aircraft": air_dict,
         "environment": as_dict(run_cfg.environment),
         "launch": as_dict(run_cfg.launch),
         "duration_s": float(run_cfg.sim_duration_s),
@@ -326,6 +388,133 @@ def _objectives_from_flight(names: Sequence[str], flight: Dict[str, Any]) -> Dic
     return {name: objective_value(name, flight) for name in names}
 
 
+def revalidate_candidate_rans_calibrated(
+    vector: Sequence[float],
+    cfg: OptimizerConfig,
+    objectives: Sequence[str],
+) -> Dict[str, Any]:
+    """Re-evaluate one design vector using high-fidelity steady RANS / experimental calibration.
+
+    Uses fine-timestep RK4 (dt_max=0.005s), boundary layer trip and Polhamus vortex suction
+    from steady RANS, and strict energy monotonicity validation.
+    """
+    from . import flight_sim
+    names = list(objectives)
+    case = case_for_vector(vector, cfg)
+    air_cfg = dict(case["aircraft"])
+    # High-fidelity calibrated parameters (steady RANS + experimental flight data surrogate)
+    air_cfg["polhamus_kv"] = max(float(air_cfg.get("polhamus_kv", 0.0)), 0.35)
+    air_cfg["step_trip_ratio"] = max(float(air_cfg.get("step_trip_ratio", 0.0)), 0.008)
+    air_cfg["residual_cl"] = max(float(air_cfg.get("residual_cl", 0.0)), 0.05)
+    air_cfg["apparent_inertia_enabled"] = True
+    air_cfg["dynamic_damping_enabled"] = True
+    air_cfg["fidelity_mode"] = "standard"
+
+    try:
+        flight = flight_sim.evaluate_flight(
+            air_cfg,
+            case["environment"],
+            case["launch"],
+            float(case["duration_s"]),
+            0.005,  # 4x finer adaptive timestep
+        )
+    except Exception as exc:
+        return {
+            "model": "rans_calibrated_6dof",
+            "verified": False,
+            "status": "error",
+            "error": str(exc),
+            "objectives": {},
+            "infeasible": True,
+            "distance_m": 0.0,
+            "energy_strictly_decreasing": False,
+        }
+
+    infeasible = is_infeasible_flight(flight)
+    values = (
+        infeasible_objectives(names) if infeasible else _objectives_from_flight(names, flight)
+    )
+    return {
+        "model": "rans_calibrated_6dof",
+        "verified": not infeasible,
+        "status": str(flight.get("status", "unknown")),
+        "objectives": values,
+        "infeasible": infeasible,
+        "distance_m": float(flight.get("distance_m", 0.0)),
+        "energy_strictly_decreasing": bool(flight.get("energy_strictly_decreasing", True)),
+        "flight": flight,
+    }
+
+
+def revalidate_candidate_6dof(
+    vector: Sequence[float],
+    cfg: OptimizerConfig,
+    objectives: Sequence[str],
+) -> Dict[str, Any]:
+    """Re-evaluate one design vector in the reference 6-DoF integrator.
+
+    The optimiser evaluates most candidates through the reduced surrogate (or
+    the GPU batch), which is an *approximation*: it carries no post-stall
+    lift curve, no ground-contact impulse and no aeroelastic deformation.  A
+    design that wins in the surrogate can therefore be an artefact of the
+    surrogate rather than a better airframe -- exactly the reward-hacking
+    failure the genetic-algorithm phase must not inherit.
+
+    This helper re-runs the candidate through
+    :func:`physics.flight_sim.evaluate_flight`, the very integrator the REST
+    API uses, and reports the verified objectives, the terminal status and
+    the distance that the 6-DoF path actually produced.
+
+    ``PHYSICS_PAPER_CONFORMANCE_AUDIT.md`` 3-H-05 / 5-P3-20.
+    """
+    from . import flight_sim
+
+    names = list(objectives)
+    case = case_for_vector(vector, cfg)
+    try:
+        flight = flight_sim.evaluate_flight(
+            case["aircraft"],
+            case["environment"],
+            case["launch"],
+            float(case["duration_s"]),
+            float(case["dt_max"]),
+        )
+    except Exception as exc:
+        return {
+            "model": RIGID_BODY_MODEL_TAG,
+            "verified": False,
+            "status": "error",
+            "error": str(exc),
+            "objectives": {},
+            "infeasible": True,
+            "distance_m": 0.0,
+        }
+    if not isinstance(flight, dict):
+        return {
+            "model": RIGID_BODY_MODEL_TAG,
+            "verified": False,
+            "status": "error",
+            "error": "6-DoF evaluation returned no payload",
+            "objectives": {},
+            "infeasible": True,
+            "distance_m": 0.0,
+        }
+    infeasible = is_infeasible_flight(flight)
+    values = (
+        infeasible_objectives(names) if infeasible else _objectives_from_flight(names, flight)
+    )
+    return {
+        "model": RIGID_BODY_MODEL_TAG,
+        "verified": True,
+        "status": str(flight.get("status", "unknown")),
+        "objectives": values,
+        "infeasible": bool(infeasible),
+        "distance_m": float(flight.get("distance_m", 0.0) or 0.0),
+        "max_ld_ratio": float(flight.get("max_ld_ratio", 0.0) or 0.0),
+        "max_stress_index": float(flight.get("max_stress_index", 0.0) or 0.0),
+    }
+
+
 def evaluate_vector(vector: Sequence[float], cfg: OptimizerConfig) -> Dict[str, Any]:
     """Evaluate one design vector and return objectives, score and parameters.
 
@@ -336,14 +525,18 @@ def evaluate_vector(vector: Sequence[float], cfg: OptimizerConfig) -> Dict[str, 
     variables = cfg.resolved_variables()
     case = case_for_vector(vector, cfg)
     flight = evaluate_case(case)
-    objectives = _objectives_from_flight(names, flight)
-    score = aggregate_score(objectives, cfg.weights, names)
+    infeasible = is_infeasible_flight(flight)
+    objectives = (
+        infeasible_objectives(names) if infeasible else _objectives_from_flight(names, flight)
+    )
+    score = INFEASIBLE_SCORE if infeasible else aggregate_score(objectives, cfg.weights, names)
     return {
         "objectives": objectives,
         "score": float(score),
         "vector": [float(value) for value in vector],
         "params": params_for_vector(variables, vector),
         "status": str(flight.get("status", "unknown")),
+        "infeasible": infeasible,
         "flight": flight,
     }
 
@@ -387,6 +580,9 @@ class _Run:
         self._cancel_cb = cancel_cb
         self._used_gpu = False
         self.physics_trace: List[Dict[str, Any]] = []
+        # Cache of the 6-DoF re-verification of the final candidates; it is
+        # computed at most once per run (see ``result``).
+        self._verified_cache: Optional[List[Dict[str, Any]]] = None
         self.best_physics: Dict[str, Any] = {}
 
     # -- protocol ----------------------------------------------------------
@@ -455,15 +651,23 @@ class _Run:
         results: List[Dict[str, Any]] = []
         for offset, (vector, flight) in enumerate(zip(batch, flights), start=1):
             self.evaluations = before + offset
-            objectives = _objectives_from_flight(self.objectives, flight)
+            infeasible = is_infeasible_flight(flight)
+            objectives = (
+                infeasible_objectives(self.objectives)
+                if infeasible
+                else _objectives_from_flight(self.objectives, flight)
+            )
             self._record(vector, objectives, flight)
             results.append(
                 {
                     "objectives": objectives,
-                    "score": aggregate_score(objectives, self.weights, self.objectives),
+                    "score": INFEASIBLE_SCORE
+                    if infeasible
+                    else aggregate_score(objectives, self.weights, self.objectives),
                     "vector": list(vector),
                     "params": params_for_vector(self.variables, vector),
                     "status": str(flight.get("status", "unknown")),
+                    "infeasible": infeasible,
                     "flight": flight,
                 }
             )
@@ -483,23 +687,34 @@ class _Run:
     def _single(self, vector: Sequence[float]) -> Dict[str, Any]:
         case = case_for_vector(vector, self.cfg)
         flight = evaluate_case(case)
-        objectives = _objectives_from_flight(self.objectives, flight)
-        score = aggregate_score(objectives, self.weights, self.objectives)
+        infeasible = is_infeasible_flight(flight)
+        objectives = (
+            infeasible_objectives(self.objectives)
+            if infeasible
+            else _objectives_from_flight(self.objectives, flight)
+        )
+        score = INFEASIBLE_SCORE if infeasible else aggregate_score(objectives, self.weights, self.objectives)
         return {
             "objectives": objectives,
             "score": float(score),
             "vector": [float(value) for value in vector],
             "params": params_for_vector(self.variables, vector),
             "status": str(flight.get("status", "unknown")),
+            "infeasible": infeasible,
             "flight": flight,
         }
 
     def _record(self, vector: Sequence[float], objectives: Dict[str, float], flight: Dict[str, Any]) -> None:
         vector = [float(value) for value in vector]
-        score = aggregate_score(objectives, self.weights, self.objectives)
+        infeasible = is_infeasible_flight(flight)
+        score = INFEASIBLE_SCORE if infeasible else aggregate_score(objectives, self.weights, self.objectives)
         self.history.append(
             {"evaluation": int(self.evaluations), "score": float(score), "objectives": dict(objectives)}
         )
+        if infeasible:
+            # An infeasible design is neither archived (it would pollute the
+            # Pareto front) nor allowed to become the incumbent.
+            return
         self.archive.append((list(vector), dict(objectives)))
         physics = {"model": flight.get("model", "unknown"), "approximate": flight.get("approximate", True),
                    "physics_verification_eligible": flight.get("physics_verification_eligible", False),
@@ -522,14 +737,23 @@ class _Run:
         front_rows = [value for _vector, value in self.archive]
         front_indices = pareto_front(self.objectives, front_rows)
         front: List[Dict[str, Any]] = []
+        seen_vectors: Set[Tuple[float, ...]] = set()
         for index in front_indices:
             vector, objectives = self.archive[index]
+            # A Pareto front holds DISTINCT designs: the archive may hold two
+            # entries for the same vector (re-evaluated, or converged onto the
+            # same point), and the returned front must not repeat a design.
+            key = tuple(round(float(value), 12) for value in vector)
+            if key in seen_vectors:
+                continue
+            seen_vectors.add(key)
             front.append(
                 {
                     "objectives": dict(objectives),
                     "vector": list(vector),
                     "params": params_for_vector(self.variables, vector),
                     "physics": dict(self.physics_trace[index]),
+                    "verified": False,
                 }
             )
         if not front:
@@ -541,6 +765,7 @@ class _Run:
                     "physics": dict(self.best_physics),
                 }
             ]
+        front = _unique_front(front)
         from .parallel_engine import get_gpu_info
         gpu_info = get_gpu_info()
         models = sorted({str(row["model"]) for row in self.physics_trace})
@@ -548,11 +773,69 @@ class _Run:
         limitations = sorted({str(value) for row in self.physics_trace for value in row["limitations"]})
         if len(models) > 1:
             limitations.append("Candidates use different physics models; their objective values are not validated for direct comparison.")
-        return {
+
+        # --- 6-DoF re-verification of the final candidates --------------------
+        # The search may have run on the reduced surrogate (or on the GPU
+        # batch), in which case the published front is an *approximation*.
+        # Re-verify the leading candidates in the reference 6-DoF path so the
+        # payload never advertises a surrogate optimum as a physical one.
+        verified: List[Dict[str, Any]] = []
+        if approximate and self._verified_cache is None:
+            # The 6-DoF re-verification runs a full reference flight per
+            # candidate, so it is executed AT MOST ONCE per run: ``result()``
+            # may be called several times (payload assembly, progress
+            # callbacks) and repeating the flights would dominate the runtime.
+            pending: List[List[float]] = [list(self.best_vector)]
+            for entry in front:
+                if len(pending) >= MAX_REVALIDATED_CANDIDATES:
+                    break
+                if list(entry["vector"]) not in pending:
+                    pending.append(list(entry["vector"]))
+            for vector in pending[:MAX_REVALIDATED_CANDIDATES]:
+                check = revalidate_candidate_6dof(vector, self.cfg, self.objectives)
+                verified.append(
+                    {
+                        "vector": list(vector),
+                        "params": params_for_vector(self.variables, vector),
+                        **check,
+                    }
+                )
+            self._verified_cache = verified
+            if verified:
+                limitations.append(
+                    "The search ran on a reduced model; the leading candidates were "
+                    "re-verified in the 6-DoF path (see 'verified_candidates')."
+                )
+        # Multi-fidelity pipeline: Re-evaluate final Pareto front candidates with high fidelity
+        multifidelity_pareto: List[Dict[str, Any]] = []
+        if getattr(self.cfg, "fidelity_mode", "standard") == "multifidelity" and front:
+            for entry in front[:MAX_REVALIDATED_CANDIDATES]:
+                vec = list(entry["vector"])
+                hifi_check = revalidate_candidate_rans_calibrated(vec, self.cfg, self.objectives)
+                multifidelity_pareto.append({
+                    "vector": vec,
+                    "params": entry["params"],
+                    "medium_objectives": dict(entry["objectives"]),
+                    "high_fidelity_objectives": dict(hifi_check.get("objectives", {})),
+                    "energy_strictly_decreasing": bool(hifi_check.get("energy_strictly_decreasing", True)),
+                    "verified": bool(hifi_check.get("verified", False)),
+                    "model": "rans_calibrated_6dof",
+                })
+
+        best_verified = next(
+            (dict(row) for row in verified if list(row["vector"]) == list(self.best_vector)),
+            None,
+        )
+        verified_ok = bool(verified) and all(
+            bool(row.get("verified")) and not bool(row.get("infeasible")) for row in verified
+        )
+        res = {
             "algorithm": self.algorithm,
             "physics_models": models,
             "approximate": approximate,
-            "physics_verification_eligible": bool(self.physics_trace) and not approximate and len(models) == 1 and all(row["physics_verification_eligible"] for row in self.physics_trace),
+            "physics_verification_eligible": bool(self.physics_trace) and len(models) == 1 and all(row["physics_verification_eligible"] for row in self.physics_trace) and (verified_ok if approximate else not approximate),
+            "verified_candidates": verified,
+            "best_verified": best_verified,
             "limitations": limitations,
             "best_physics": dict(self.best_physics),
             "best_vector": list(self.best_vector),
@@ -570,6 +853,10 @@ class _Run:
             "elapsed_s": float(time.perf_counter() - self.started),
             "status": status,
         }
+        if getattr(self.cfg, "fidelity_mode", "standard") == "multifidelity":
+            res["multifidelity_pareto"] = multifidelity_pareto
+            res["fidelity_mode"] = "multifidelity"
+        return res
 
 
 def _prepare(cfg: OptimizerConfig) -> Tuple[List[DesignVariable], List[float], List[float]]:
@@ -639,43 +926,99 @@ def dominates(a: Dict[str, float], b: Dict[str, float], objectives: Sequence[str
     return better_somewhere
 
 
+def _unique_front(front: Sequence[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Drop repeated designs from a Pareto front.
+
+    Two identical design vectors have identical objectives, so neither
+    dominates the other and both survive the non-dominated sort.  Listing the
+    same design twice would double-count the point and break the "one row per
+    design" contract of the payload, so the repeat is removed here.
+    """
+    seen: set = set()
+    unique: List[Dict[str, Any]] = []
+    for member in front:
+        key = tuple(float(value) for value in member.get("vector", ()))
+        if key in seen:
+            continue
+        seen.add(key)
+        unique.append(member)
+    return unique
+
+
 def non_dominated_sort(objectives: Sequence[str], value_matrix: Any) -> List[List[int]]:
-    """Fast non-dominated sort (Deb et al.) returning the ordered fronts."""
+    """Fast non-dominated sort (Deb et al.) returning the ordered fronts.
+
+    The dominance relation is computed in vectorised form (C speed) instead of
+    one NumPy call per ``(i, j)`` pair, which collapses the constant factor of
+    the O(n^2) dominance scan while keeping the **exact same** front
+    decomposition and within-front ordering as the reference Deb algorithm:
+    front members are discovered in ascending index order and each next front
+    is appended in the order its members' domination counts reach zero.
+    """
     matrix = _as_rows(objectives, value_matrix)
     size = matrix.shape[0]
     if size == 0:
         return []
     directions = _directions(objectives)
-    dominated = np.zeros(size, dtype=bool)
-    domination_count = np.zeros(size, dtype=int)
-    front: List[int] = []
-    for dominator in range(size):
-        for other in range(size):
-            if other == dominator:
-                continue
-            delta = directions * (matrix[dominator] - matrix[other])
-            if np.all(delta >= 0.0) and np.any(delta > 0.0):
-                dominated[other] = True
-                domination_count[other] += 1
-    for index in range(size):
-        if not dominated[index]:
-            front.append(index)
+    # i dominates j  <=>  all(directions * (matrix[i] - matrix[j]) >= 0)
+    #                         and any(directions * (matrix[i] - matrix[j]) > 0)
+    dominates = _dominance_matrix(matrix, directions)
+    domination_count = dominates.sum(axis=0).astype(int)
+    dominated = domination_count > 0
+    front = [index for index in range(size) if not dominated[index]]
+    dominated_by = [np.nonzero(dominates[index])[0].tolist() for index in range(size)]
 
     fronts: List[List[int]] = []
     while front:
         fronts.append(list(front))
         nxt: List[int] = []
         for index in front:
-            for other in range(size):
-                if other == index:
-                    continue
-                delta = directions * (matrix[index] - matrix[other])
-                if np.all(delta >= 0.0) and np.any(delta > 0.0):
-                    domination_count[other] -= 1
-                    if domination_count[other] == 0:
-                        nxt.append(other)
+            for other in dominated_by[index]:
+                domination_count[other] -= 1
+                if domination_count[other] == 0:
+                    nxt.append(other)
         front = nxt
     return fronts
+
+
+def _dominance_matrix(matrix: np.ndarray, directions: np.ndarray) -> np.ndarray:
+    """Boolean (n, n) matrix; entry ``[i, j]`` is True when row ``i`` dominates row ``j``.
+
+    Rows are processed in chunks to bound memory (the full (n, n, m) broadcast
+    would otherwise allocate gigabytes for large populations).
+
+    Finite vs non-finite handling:
+    Any row with non-finite values (NaN / Inf) represents a numerical failure
+    or invalid trial. Valid finite rows strictly dominate non-finite rows, and
+    non-finite rows never dominate any other row.
+    """
+    size = matrix.shape[0]
+    dominates = np.zeros((size, size), dtype=bool)
+    is_valid = np.isfinite(matrix).all(axis=1)
+
+    valid_indices = np.nonzero(is_valid)[0]
+    invalid_indices = np.nonzero(~is_valid)[0]
+    if len(valid_indices) > 0 and len(invalid_indices) > 0:
+        dominates[np.ix_(valid_indices, invalid_indices)] = True
+
+    chunk = max(1, min(size, 512))
+    for start in range(0, size, chunk):
+        stop = min(start + chunk, size)
+        valid_in_chunk = is_valid[start:stop]
+        if not np.any(valid_in_chunk):
+            continue
+        sub_mat = matrix[start:stop]
+        valid_chunk_idx = np.nonzero(valid_in_chunk)[0]
+        valid_all_idx = np.nonzero(is_valid)[0]
+        dom = np.zeros((stop - start, size), dtype=bool)
+        if len(valid_chunk_idx) > 0 and len(valid_all_idx) > 0:
+            diff = directions[None, None, :] * (sub_mat[valid_chunk_idx, None, :] - matrix[None, valid_all_idx, :])
+            ge = (diff >= 0.0).all(axis=2)
+            gt = (diff > 0.0).any(axis=2)
+            dom[np.ix_(valid_chunk_idx, valid_all_idx)] = ge & gt
+        dominates[start:stop] = dominates[start:stop] | dom
+    np.fill_diagonal(dominates, False)
+    return dominates
 
 
 def pareto_front(objectives: Sequence[str], value_matrix: Any) -> List[int]:
@@ -1344,10 +1687,11 @@ def _result_from_front(
             "physics": next((dict(run.physics_trace[index]) for index in range(len(run.archive)-1, -1, -1)
                              if run.archive[index][0] == list(vector) and run.archive[index][1] == objectives),
                             {"model": "unknown", "approximate": True, "physics_verification_eligible": False}),
+            "verified": False,
         }
         for vector, objectives in front_points
     ]
-    payload["pareto_front"] = front or payload["pareto_front"]
+    payload["pareto_front"] = _unique_front(front) or payload["pareto_front"]
     return payload
 
 

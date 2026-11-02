@@ -1,39 +1,21 @@
 # Skill: Verification & CI/CD Protocol (段階的検証とCI/CD手順)
 ## Trigger (読み込み条件)
-- コードの追加・変更を行った後、またはコミット・プッシュ前の品質検証フェーズ (Phase 4: Verify)。
+- コード変更後、コミット・プッシュ前の品質検証フェーズ (Phase 4, 6)。
 
 ## Procedure (最小手順)
-
-### 1. 段階的ローカル検証
-以下の順序で実行し、すべてのパスを確認する：
-```powershell
-# 1. 構文検証
+### 1. 段階的ローカル検証（順次全件パス確認）
+```bash
 python -m compileall physics api tools app.py smoke_test.py
-
-# 2. 静的解析 & コード品質検査
 ruff check .
 mypy physics api app.py smoke_test.py
-
-# 3. 単体テスト & 監査テスト
 python -m pytest tests -q
-
-# 4. E2E統合テスト (API連鎖・最適化ジョブ・ETA・3D解析)
 python smoke_test.py
 ```
+### 2. Git & CI 運用
+- ブランチ: `git checkout -b <type>/<desc>` (`feat/`, `fix/`, `docs/`, `test/`等)
+- マージ&プッシュ: ローカル全通過後、実動コードのみ master マージ → `git push`
+- CI/Issue確認: `python tools/check_runs.py` でCI完了確認 → `python tools/check_issues.py` & `python tools/close_resolved_issue.py` でIssueクローズ。
 
-### 2. Git ブランチ & コミット運用
-- **ブランチ作成**: `git checkout -b <type>/<description>`
-- **コミットメッセージ規約**:
-  - `feat(scope): message` : 新機能
-  - `fix(scope): message` : バグ修正
-  - `refactor(scope): message` : 構造改善
-  - `docs(scope): message` : ドキュメント
-  - `test(scope): message` : テスト追加・更新
-  - `chore(scope): message` : 雑務・設定
-- **マージ & プッシュ**: ローカル検証を全て通過した実動コードのみを master にマージし、リモートへプッシュ (`git push`) する。
-- **CI/CD確認**: `tools/check_runs.py` で GitHub Actions の実行状況を点検し、全ジョブグリーンを確認する。
-- **Issue確認・修整**: `tools/check_issues.py` および `tools/read_issues.py` でオープンな課題を点検し、修正実施後に `tools/close_resolved_issue.py` で自動クローズする。
-
-## Verification Criteria (事前合否基準の型)
-- 成功条件: 構文エラーなし、Ruff/Mypy 指摘 0 件、pytest 全パス、smoke_test.py 正常終了（Exit code 0）。
-- 失敗条件: いずれかのコマンドでエラー・失敗が検知された場合。直ちに変更をロールバックまたは原因特定・修正を行うこと。
+## Verification Criteria (事前合否基準)
+- 成功: 構文エラーなし、Ruff/Mypy指摘0件、pytest全パス、smoke_test正常終了(Exit 0)。
+- 失敗: いずれかでエラー検知時。直ちにロールバックまたは原因特定。

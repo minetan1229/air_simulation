@@ -121,10 +121,10 @@ def create_or_update_issue() -> int:
     except urllib.error.HTTPError as exc:
         err_msg = exc.read().decode("utf-8") if exc.fp else str(exc)
         print(f"Error creating/updating issue (HTTP {exc.code}): {err_msg}", file=sys.stderr)
-        return 0  # Do not break the pipeline itself if issue creation fails
+        return 1
     except Exception as exc:
         print(f"Error creating/updating issue: {exc}", file=sys.stderr)
-        return 0
+        return 1
 
     return 0
 

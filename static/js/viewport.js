@@ -23,7 +23,14 @@ import {
   createPanelMaterial,
 } from "./airframe.js";
 import { WindParticles } from "./flowfield.js";
+
+const _root = typeof document !== "undefined" ? getComputedStyle(document.documentElement) : null;
+const _cssColor = (name, fallback) => (_root ? (_root.getPropertyValue(name).trim() || fallback) : fallback);
 import { heatColour } from "./lib.js";
+import {
+  createOrigamiMaterial,
+  setOrigamiAeroelastic,
+} from "./origami.js";
 
 const SIM_TO_THREE = new THREE.Quaternion().setFromAxisAngle(
   new THREE.Vector3(1, 0, 0),
@@ -83,6 +90,9 @@ export class Viewport {
     this.onStats = options.onStats || (() => {});
     this.follow = false;
     this.heatVisible = true;
+    this.flowVisible = true;
+    this.trackVisible = true;
+    this.researchPresentation = false;
     this.trackPoints = [];
     this.ghostPoints = [];
     this.lastPose = new THREE.Vector3();
@@ -364,6 +374,12 @@ export class Viewport {
     this.edgeLines = null;
     this.panelLines = null;
 
+    // Procedural origami model (folded crease pattern).  It replaces the
+    // analytic airframe surface while it is loaded.
+    this.origamiMaterial = createOrigamiMaterial();
+    this.origamiMesh = null;
+    this.origamiSemispan = 0.1;
+
     this.meshHolder = new THREE.Group();
     this.meshHolder.name = "imported";
     this.airframeGroup.add(this.meshHolder);
@@ -395,6 +411,226 @@ export class Viewport {
 
     this.gripGroup.visible = true;
     this.airframeGroup.add(this.gripGroup);
+
+    // Research viewer: the folded solid of a GA genome, the centre of
+    // gravity and the grip (keel) region.  It lives in its own group so the
+    // flight origami panel and the research fold viewer never fight over
+    // the same mesh.
+    this.researchGroup = new THREE.Group();
+    this.researchGroup.name = "research";
+    this.researchGroup.visible = false;
+    this.airframeGroup.add(this.researchGroup);
+
+    this.researchMesh = null;
+    this.researchSemispan = 0.1;
+    this.researchMarkersEnabled = false;
+    this._researchCg = null;
+    this._researchKeel = null;
+
+    // Centre of gravity marker: a solid sphere plus the three body axes.
+    this.cgMarker = new THREE.Group();
+    this.cgMarker.name = "cgMarker";
+    const cgGeo = new THREE.SphereGeometry(0.0045, 20, 20);
+    const cgMat = new THREE.MeshBasicMaterial({ color: 0x1a73e8, depthTest: false, transparent: true, opacity: 0.95 });
+    const cgBall = new THREE.Mesh(cgGeo, cgMat);
+    cgBall.renderOrder = 1001;
+    this.cgMarker.add(cgBall);
+    const axisGeo = new THREE.BufferGeometry().setFromPoints([
+      new THREE.Vector3(-0.018, 0, 0), new THREE.Vector3(0.018, 0, 0),
+      new THREE.Vector3(0, -0.018, 0), new THREE.Vector3(0, 0.018, 0),
+      new THREE.Vector3(0, 0, -0.018), new THREE.Vector3(0, 0, 0.018),
+    ]);
+    this.cgMarker.add(new THREE.LineSegments(axisGeo, new THREE.LineBasicMaterial({
+      color: 0x1a73e8, depthTest: false, transparent: true, opacity: 0.8,
+    })));
+    this.cgMarker.visible = false;
+    this.researchGroup.add(this.cgMarker);
+
+    // Grip / keel region: a translucent slab over the pinchable section.
+    this.keelMarker = new THREE.Mesh(
+      new THREE.BoxGeometry(1, 1, 1),
+      new THREE.MeshBasicMaterial({
+        color: 0xf29900, transparent: true, opacity: 0.22, depthWrite: false, side: THREE.DoubleSide,
+      })
+    );
+    this.keelMarker.visible = false;
+    this.researchGroup.add(this.keelMarker);
+
+    // Edge frame of the grip region so the slab reads as a marked volume.
+    this.keelFrame = new THREE.LineSegments(
+      new THREE.EdgesGeometry(new THREE.BoxGeometry(1, 1, 1)),
+      new THREE.LineBasicMaterial({ color: 0xe37400, transparent: true, opacity: 0.9 })
+    );
+    this.keelFrame.visible = false;
+    this.researchGroup.add(this.keelFrame);
+  }
+
+  /* ------------------------------------------------- research fold viewer */
+
+  /**
+   * Show or hide the flight specific overlays.
+   *
+   * The research viewer looks at a folded sheet, not at a flying aircraft:
+   * the flow field, the launch vector and the wind tunnel would only hide
+   * the fold programme.
+   */
+  setResearchPresentation(on) {
+    const active = Boolean(on);
+    const wasActive = Boolean(this.researchPresentation);
+    this.researchPresentation = active;
+    if (this.particles) {
+      this.particles.setVisible(!active && this.flowVisible !== false);
+    }
+    if (this.launchArrow) this.launchArrow.visible = !active;
+    if (this.gripGroup) this.gripGroup.visible = !active;
+    if (this.tunnelGroup) this.tunnelGroup.visible = active ? false : this.tunnelMode;
+    if (this.trackLine) this.trackLine.visible = !active && this.trackVisible !== false;
+    if (active) {
+      // The follow camera would drag the view back to the aircraft.
+      if (!wasActive) {
+        this.followPref = this.follow;
+        this._cameraModeBeforeResearch = this.cameraMode;
+      }
+      this.follow = false;
+      this.setCameraMode("fixed");
+      this.researchGroup.visible = Boolean(this.researchMesh);
+      this._applyAirframeVisibility(!this.researchMesh);
+      this.focusResearch();
+    } else {
+      this.follow = this.followPref !== false;
+      this.researchGroup.visible = false;
+      this._applyAirframeVisibility(true);
+      this.setCameraMode(this._cameraModeBeforeResearch || "mean");
+    }
+  }
+
+  /**
+   * The camera mode the research mode replaced.
+   *
+   * The console uses it to light the matching camera chip again when the
+   * simulation mode takes over.
+   */
+  previousCameraMode() {
+    return this._cameraModeBeforeResearch || null;
+  }
+
+  /**
+   * Frame the camera on the folded solid of the research viewer.
+   */
+  focusResearch() {
+    if (!this.researchMesh) return;
+    this.researchMesh.geometry.computeBoundingSphere();
+    const sphere = this.researchMesh.geometry.boundingSphere;
+    if (!sphere) return;
+    const origin = this.researchGroup.getWorldPosition(new THREE.Vector3());
+    const target = origin.clone().add(sphere.center);
+    this.frameOn(target, Math.max(sphere.radius * 1.1, 0.1));
+  }
+
+  /**
+   * Show the folded solid of one step of a fold programme.
+   *
+   * The mesh is the vertex buffer the origami domain produced, so it uses
+   * the very same paper material as the flight origami model.
+   *
+   * @param {THREE.BufferGeometry} geometry the folded solid
+   * @param {number} semispan half span of the solid in metres
+   */
+  setResearchGeometry(geometry, semispan) {
+    if (this.researchMesh) {
+      this.researchMesh.geometry.dispose();
+      this.researchGroup.remove(this.researchMesh);
+      this.researchMesh = null;
+    }
+    if (!geometry) {
+      this.clearResearchGeometry();
+      return;
+    }
+    this.researchMesh = new THREE.Mesh(geometry, this.origamiMaterial);
+    this.researchMesh.castShadow = true;
+    this.researchMesh.receiveShadow = true;
+    this.researchGroup.add(this.researchMesh);
+    this.researchSemispan = Math.max(Number(semispan) || 0.1, 1e-3);
+    this.researchGroup.visible = true;
+    this._applyAirframeVisibility(false);
+  }
+
+  /** Remove the research solid and show the analytic airframe again. */
+  clearResearchGeometry() {
+    if (this.researchMesh) {
+      this.researchMesh.geometry.dispose();
+      this.researchGroup.remove(this.researchMesh);
+      this.researchMesh = null;
+    }
+    this.researchGroup.visible = false;
+    this.cgMarker.visible = false;
+    this.keelMarker.visible = false;
+    this.keelFrame.visible = false;
+    this._applyAirframeVisibility(true);
+  }
+
+  /**
+   * Show or hide the analytic airframe.
+   *
+   * The research viewer replaces it with the folded solid of a genome, so
+   * the two never overlap.
+   */
+  _applyAirframeVisibility(show) {
+    if (this.airframeMesh) this.airframeMesh.visible = Boolean(show) && !this.meshObject;
+    if (this.edgeLines) this.edgeLines.visible = Boolean(show);
+    if (this.creaseLines) this.creaseLines.visible = Boolean(show);
+    if (this.panelLines) this.panelLines.visible = Boolean(show) && this.showPanels;
+  }
+
+  /**
+   * Place the centre of gravity and the grip (keel) region of a folded sheet.
+   *
+   * @param {{cg: Array<number>, keel: object}} markers
+   *   `cg` is the centre of gravity in the airframe frame, `keel` describes
+   *   the grip slab: `{x_min, x_max, z_half, y_min, y_max}` in metres.
+   */
+  setResearchMarkers(markers) {
+    const data = markers || {};
+    const cg = Array.isArray(data.cg) ? data.cg : null;
+    if (cg) {
+      this.cgMarker.position.set(Number(cg[0]) || 0, Number(cg[1]) || 0, Number(cg[2]) || 0);
+      this._researchCg = [Number(cg[0]) || 0, Number(cg[1]) || 0, Number(cg[2]) || 0];
+    } else {
+      this._researchCg = null;
+    }
+    const keel = data.keel || null;
+    if (keel) {
+      const xMin = Number(keel.x_min) || 0;
+      const xMax = Number(keel.x_max) || 0;
+      const zHalf = Math.max(Number(keel.z_half) || 0.01, 1e-4);
+      const yMin = Number(keel.y_min) || 0;
+      const yMax = Number(keel.y_max) || 0;
+      const sizeX = Math.max(Math.abs(xMax - xMin), 1e-4);
+      const sizeY = Math.max(Math.abs(yMax - yMin), 1e-4);
+      const sizeZ = zHalf * 2;
+      for (const node of [this.keelMarker, this.keelFrame]) {
+        node.scale.set(sizeX, sizeY, sizeZ);
+        node.position.set(
+          0.5 * (xMin + xMax),
+          0.5 * (yMin + yMax),
+          0
+        );
+      }
+      this._researchKeel = { xMin, xMax, zHalf, yMin, yMax };
+    } else {
+      this._researchKeel = null;
+    }
+    this.setResearchMarkersVisible(this.researchMarkersEnabled);
+  }
+
+  /** Show or hide the centre of gravity and the grip region. */
+  setResearchMarkersVisible(visible) {
+    this.researchMarkersEnabled = Boolean(visible);
+    const on = this.researchMarkersEnabled;
+    this.cgMarker.visible = on && Boolean(this._researchCg);
+    const hasKeel = Boolean(this._researchKeel);
+    this.keelMarker.visible = on && hasKeel;
+    this.keelFrame.visible = on && hasKeel;
   }
 
   _rebuildAirframe(cfg) {
@@ -433,6 +669,55 @@ export class Viewport {
     this.panelLines = new THREE.LineSegments(buildPanelLines(cfg), createPanelMaterial());
     this.panelLines.visible = Boolean(this.showPanels);
     this.airframeGroup.add(this.panelLines);
+  }
+
+  /**
+   * Show a folded origami mesh instead of the analytic airframe surface.
+   *
+   * @param {THREE.BufferGeometry} geometry folded crease pattern geometry
+   * @param {number} semispan half span of the model in metres
+   */
+  setOrigamiGeometry(geometry, semispan) {
+    if (this.origamiMesh) {
+      this.origamiMesh.geometry.dispose();
+      this.airframeGroup.remove(this.origamiMesh);
+    }
+    this.origamiMesh = new THREE.Mesh(geometry, this.origamiMaterial);
+    this.origamiMesh.castShadow = true;
+    this.origamiMesh.receiveShadow = true;
+    this.origamiMesh.visible = !this.meshObject;
+    this.airframeGroup.add(this.origamiMesh);
+    this.origamiSemispan = Math.max(Number(semispan) || 0.1, 1e-3);
+    if (this.airframeMesh) this.airframeMesh.visible = false;
+    if (this.edgeLines) this.edgeLines.visible = false;
+    if (this.creaseLines) this.creaseLines.visible = false;
+    if (this.panelLines) this.panelLines.visible = false;
+  }
+
+  /** Remove the origami mesh and show the analytic airframe again. */
+  clearOrigamiGeometry() {
+    if (this.origamiMesh) {
+      this.origamiMesh.geometry.dispose();
+      this.airframeGroup.remove(this.origamiMesh);
+      this.origamiMesh = null;
+    }
+    if (this.airframeMesh) this.airframeMesh.visible = !this.meshObject;
+    if (this.edgeLines) this.edgeLines.visible = true;
+    if (this.creaseLines) this.creaseLines.visible = true;
+    if (this.panelLines) this.panelLines.visible = Boolean(this.showPanels);
+  }
+
+  /**
+   * Feed the passive aero-elastic state of the flight into the paper
+   * shader: the wing bends with the load and the tip twists.
+   */
+  setOrigamiAeroelastic(bendDeg, twistDeg) {
+    setOrigamiAeroelastic(
+      this.origamiMaterial,
+      bendDeg,
+      twistDeg,
+      this.origamiSemispan
+    );
   }
 
   _buildTracks() {
@@ -817,15 +1102,42 @@ export class Viewport {
   setStress(grid) {
     const target = this.meshObject || this.airframeMesh;
     if (!target || !grid) return;
-    applyStressColors(target.geometry, grid, heatColour);
-    if (target.material) target.material.vertexColors = this.heatVisible;
+    if (target.isMesh && target.geometry) {
+      applyStressColors(target.geometry, grid, heatColour);
+      if (target.material) target.material.vertexColors = this.heatVisible;
+    } else {
+      let applied = false;
+      target.traverse((child) => {
+        if (child.isMesh && child.geometry) {
+          applyStressColors(child.geometry, grid, heatColour);
+          if (child.material) child.material.vertexColors = this.heatVisible;
+          applied = true;
+        }
+      });
+      if (!applied) {
+        console.warn("[Viewport] インポートメッシュに頂点ジオメトリが見つからず、応力ヒートマップをスキップしました");
+      }
+    }
   }
 
   setHeatVisible(visible) {
     this.heatVisible = Boolean(visible);
+    const target = this.meshObject || this.airframeMesh;
+    if (target && target.isMesh) {
+      if (target.material) {
+        target.material.vertexColors = this.heatVisible;
+        target.material.color.set(this.heatVisible ? 0xffffff : 0xf7f2e8);
+        target.material.needsUpdate = true;
+      }
+    } else if (target) {
+      target.traverse((child) => {
+        if (child.isMesh && child.material) {
+          child.material.vertexColors = this.heatVisible;
+          child.material.needsUpdate = true;
+        }
+      });
+    }
     if (!this.airframeMaterial) return;
-    // With the heat map off the vertex colours are ignored entirely, so the
-    // airframe renders as plain paper regardless of the last stress field.
     this.airframeMaterial.vertexColors = this.heatVisible;
     this.airframeMaterial.color.set(this.heatVisible ? 0xffffff : 0xf7f2e8);
     this.airframeMaterial.needsUpdate = true;
@@ -953,7 +1265,8 @@ export class Viewport {
   }
 
   setTrackVisible(visible) {
-    this.trackLine.visible = Boolean(visible);
+    this.trackVisible = Boolean(visible);
+    this.trackLine.visible = this.trackVisible && !this.researchPresentation;
   }
 
   setGhostVisible(visible) {
@@ -1011,7 +1324,8 @@ export class Viewport {
   }
 
   setParticlesVisible(visible) {
-    this.particles.setVisible(visible);
+    this.flowVisible = Boolean(visible);
+    this.particles.setVisible(this.flowVisible && !this.researchPresentation);
   }
 
   setWindField(field) {
@@ -1118,21 +1432,21 @@ export class Viewport {
       let linewidth = 1;
 
       if (isRank1) {
-        col = new THREE.Color(0xffb300); // 1st Gold (最高値)
+        col = new THREE.Color(_cssColor("--color-traj-rank1", "#ffb300")); // 1st Gold (最高値)
         opacity = 0.95;
         linewidth = 2;
       } else if (isWorst) {
-        col = new THREE.Color(0xe53935); // Worst Red (最低値)
+        col = new THREE.Color(_cssColor("--color-traj-worst", "#e53935")); // Worst Red (最低値)
         opacity = 0.70;
         linewidth = 1;
       } else if (isRank2) {
-        col = new THREE.Color(0xb0bec5); // 2nd Silver
+        col = new THREE.Color(_cssColor("--color-traj-rank2", "#b0bec5")); // 2nd Silver
         opacity = 0.70;
       } else if (isRank3) {
-        col = new THREE.Color(0xcd7f32); // 3rd Bronze
+        col = new THREE.Color(_cssColor("--color-traj-rank3", "#cd7f32")); // 3rd Bronze
         opacity = 0.65;
       } else {
-        col = palette[idx % palette.length];
+        col = new THREE.Color(_cssColor("--color-traj-mid", palette[idx % palette.length].toString()));
       }
 
       const mat = new THREE.LineBasicMaterial({
@@ -1156,7 +1470,7 @@ export class Viewport {
           const innerGeom = new THREE.CircleGeometry(0.35, 24);
           innerGeom.rotateX(-Math.PI / 2);
           const innerMat = new THREE.MeshBasicMaterial({
-            color: 0xffb300,
+            color: new THREE.Color(_cssColor("--color-traj-rank1", "#ffb300")),
             transparent: true,
             opacity: 0.90,
             side: THREE.DoubleSide,
@@ -1169,7 +1483,7 @@ export class Viewport {
           const innerGeom = new THREE.CircleGeometry(0.24, 16);
           innerGeom.rotateX(-Math.PI / 2);
           const innerMat = new THREE.MeshBasicMaterial({
-            color: 0xd32f2f,
+            color: new THREE.Color(_cssColor("--color-traj-worst", "#e53935")),
             transparent: true,
             opacity: 0.75,
             side: THREE.DoubleSide,
@@ -1187,9 +1501,9 @@ export class Viewport {
       const midGeom = new THREE.BufferGeometry();
       midGeom.setAttribute("position", new THREE.Float32BufferAttribute(midPositions, 3));
       const midMat = new THREE.LineBasicMaterial({
-        color: 0x5c9eff,
+        color: new THREE.Color(_cssColor("--color-traj-mid", "#5c9eff")),
         transparent: true,
-        opacity: 0.22, // Translucent to prevent visual clutter
+        opacity: 0.22,
         linewidth: 1,
       });
       const midSegments = new THREE.LineSegments(midGeom, midMat);
@@ -1222,7 +1536,7 @@ export class Viewport {
       const meanGeom = new THREE.BufferGeometry();
       meanGeom.setAttribute("position", new THREE.Float32BufferAttribute(meanPositions, 3));
       const meanMat = new THREE.LineBasicMaterial({
-        color: 0x00e5ff, // Vivid cyan for outstanding prominence
+        color: new THREE.Color(_cssColor("--color-traj-mean", "#00e5ff")),
         transparent: true,
         opacity: 1.0,
         linewidth: 4,
@@ -1240,7 +1554,7 @@ export class Viewport {
         const meanRingGeom = new THREE.RingGeometry(0.35, 0.55, 32);
         meanRingGeom.rotateX(-Math.PI / 2);
         const meanRingMat = new THREE.MeshBasicMaterial({
-          color: 0x00e5ff,
+          color: new THREE.Color(_cssColor("--color-traj-mean", "#00e5ff")),
           transparent: true,
           opacity: 0.95,
           side: THREE.DoubleSide,
@@ -1817,7 +2131,7 @@ export class Viewport {
 
   setFollow(enabled) {
     this.follow = Boolean(enabled);
-    this.followTarget.copy(this.lastPose);
+    this.followPref = this.follow;
   }
 
   /** Fit the actual recorded path, including the ground below its start. */

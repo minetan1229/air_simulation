@@ -15,7 +15,7 @@ from physics.config_schema import (
     StateVector,
 )
 from physics.flight_sim import FlightSimulator, compute_ground_stations
-from physics.geometry_utils import quaternion_from_euler
+from physics.geometry_utils import body_to_world, quaternion_from_euler
 
 
 def _total_kinetic_energy(sim: FlightSimulator, state: StateVector) -> float:
@@ -117,7 +117,16 @@ def test_wingtip_strike_physical_dissipation_bound():
 
 
 def test_no_double_rebound_on_wingtip_strike():
-    """Ensure that wingtip strike rebound speed is not overwritten by main body rebound."""
+    """Ensure that wingtip strike rebound speed is not overwritten by main body rebound.
+
+    The contact is resolved as an impulse applied at the *contact point*, so the
+    restitution law applies to the velocity of that point and not to the centre
+    of mass.  A wingtip strike is therefore mostly a rotation (the airframe
+    pivots about the tip) and the centre of mass keeps descending.  The main
+    body rebound must not be applied on top of it: the body branch reverses the
+    centre-of-mass velocity to ``-restitution * vz``, which is a different and
+    much larger result.
+    """
     restitution = 0.8
     settings = SimulationSettings(restitution=restitution)
     sim = FlightSimulator(AircraftConfig(), EnvironmentConfig(ground_level_m=0.0), settings=settings)
@@ -138,10 +147,25 @@ def test_no_double_rebound_on_wingtip_strike():
     )
 
     next_state = sim._apply_ground_contact(state, None)
-    # Wingtip contact restricts restitution to at most 0.5 (rebound vz magnitude <= 0.5 * vz = 0.3)
-    # Main body contact would set new_vz = -restitution * vz = -0.48.
-    rebound_vz = abs(next_state.velocity_mps[2])
-    assert rebound_vz <= 0.5 * vz + 1.0e-6, (
-        f"Wingtip strike rebound speed {rebound_vz} exceeded wingtip limit {0.5 * vz}; "
-        f"double-rebound calculation overwrote wingtip rebound."
+
+    # The restitution law holds at the contact point (the right wingtip).
+    mac = float(sim._derived["mac_m"])
+    semispan = float(sim._derived["wingspan_m"]) * 0.5
+    r_world = body_to_world(q, np.array([-0.3 * mac, semispan, 0.0]))
+    v_point_pre = np.asarray(state.velocity_mps) + np.cross(
+        np.asarray(state.angular_velocity_radps), r_world
+    )
+    v_point_post = np.asarray(next_state.velocity_mps) + np.cross(
+        np.asarray(next_state.angular_velocity_radps), r_world
+    )
+    assert v_point_post[2] == pytest.approx(-restitution * v_point_pre[2], rel=1e-6, abs=1e-9), (
+        f"Restitution law violated at the contact point: "
+        f"v_post={v_point_post[2]} vs -e*v_pre={-restitution * v_point_pre[2]}"
+    )
+
+    # The main body rebound must NOT have been applied on top of the tip
+    # impulse: it would have reversed the centre-of-mass velocity exactly to
+    # -restitution * vz.
+    assert next_state.velocity_mps[2] != pytest.approx(-restitution * vz, rel=1e-6), (
+        "Main body rebound overwrote the wingtip strike result."
     )

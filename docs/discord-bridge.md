@@ -1,101 +1,91 @@
-# Discord Remote Bridge（Antigravity リモート操作）
+# Discord Remote Bridge 仕様 (Discord Bridge Specification)
 
-`tools/discord_bridge.py` は、ローカルの Antigravity (AGY) エージェントを Discord から操作するためのブリッジです。
-作業ディレクトリは `simulation/v3` に固定されており、Discord 上のコマンドでエージェントの実行・監視・停止を行えます。
+本ドキュメントは `tools/discord_bridge.py` と `tools/bridge_*.py` の実際の振る舞いを正本とする。コードと本ドキュメントが乖離した場合はコードを正とする。
 
----
+## 1. 概要
 
-## 1. 起動
+2つのエージェントバックエンドを駆動し、Discord からローカルの `simulation/v3` ワークスペースを遠隔操作するブリッジ。
 
-```powershell
-python tools/discord_bridge.py     # もしくは start_discord_bridge.bat
-```
+| バックエンド | 実行体 | ストリーム形式 | 会話ID | 既定モデル |
+|---|---|---|---|---|
+| `antigravity`（主） | `agy -p <prompt> --model <m> --output-format stream-json --dangerously-skip-permissions` | NDJSON (`event`) | 会話UUID | `gemini-3.8-flash-low` |
+| `kilo`（副・フォールバック） | `kilo run --model <provider/model> --format json --auto -- <prompt>` | NDJSON (`type`) | `ses_*` セッション | `kilo/kilo-auto/free`（**無料**） |
 
-起動時に以下が行われます。
+## 2. ルーティング（`tools/bridge_router.py`）
 
-1. スラッシュコマンド（10 個）を Discord へ同期
-2. 直近のセッションに対応する「返信する」ボタンを永続ビューとして再登録
-3. `on_ready` でシステム情報（CPU / RAM / GPU）を/channel へ通知
+1. **主実行**: 要求バックエンドを1回実行し、NDJSON を `StreamEvent` に正規化して Discord のライブ表示へ流す。
+2. **429 自動継続**: `TooManyRequests` / `RESOURCE_EXHAUSTED` / `quota exceeded` / `out of quota` 等を検出しても**失敗に確定させない**。指数バックオフ（`base` 2s, `cap` 60s, 最大 `BRIDGE_RATE_LIMIT_RETRIES` 3回）後に `continue` で同一処理を再開する（Antigravity: `--conversation` / `--continue`、Kilo: `--session` / `--continue`）。
+   - 強いマーカー（`too many requests` / `resource_exhausted` / `quota exceeded` 等）は全出力から検出。弱いマーカー（単独の `rate limit` / `429`）は stderr・エラー出力に限定し、通常の回答本文での誤検出を防ぐ。
+3. **自動フォールバック**: 主バックエンドが APIエラー・タイムアウト・残りレート0・429継続失敗のいずれかで完了不能なら、**中断せず** Kilo Code の無料モデルへ切り替えて完遂する。切替時は Discord 応答チャンネルと Webhook（メインエージェント宛）へ通知する。
 
----
+## 3. レート制限 / クォータ（`tools/bridge_quota.py`）
 
-## 2. コマンド（スラッシュ / プレフィックスは同一実装）
+- 取得: `agy -p "/quota"` → `group⇥metric⇥N%⇥resetISO` 形式、`agy -p "/credits"` → 残りクレジット。
+- 保持: `QuotaTracker` が既定120秒（`BRIDGE_QUOTA_TTL`）キャッシュする。
+- 枯渇判定: 週次残量（`Weekly Limit Remaining`）が 1% 以下で `is_exhausted`。
+- **推定利用可能回数**: 総量の想定値を持たず、実測した「送信回数 vs 消費%」の傾きから算出する。測定不足時は算出しない（`None`）。
+- 表示: `!quota` / `/quota`（専用 embed）、`/status` にも要約を出力。
 
-| コマンド | 概要 |
-|---|---|
-| `/chat <prompt>` / `!chat <prompt>` | エージェントへプロンプトを送信（並列実行可） |
-| `/chats` / `!chats` | 最近のセッション一覧と会話の切替 |
-| `/resume <id>` / `!resume <id>` | セッション ID（8 文字の短縮 ID 可）から再開 |
-| `/new` / `!new` | 会話コンテキストをリセット |
-| `/abort` / `!abort` | 実行中タスクの停止（🛑 リアクションでも可） |
-| `/model [name]` / `!model [name]` | モデルの切替・表示 |
-| `/models` / `!models` | モデル一覧（`!models refresh` で CLI から再取得） |
-| `/status` / `!status` | CPU・メモリ・GPU・実行中タスク |
-| `/chrome [url]` / `!chrome [url]` | ローカル Chrome の起動（http/https のみ許可） |
-| `/help` / `!help` | コマンド一覧 |
+## 4. 監視エージェント（`tools/bridge_monitor.py`）
 
-DM、許可チャンネル、-bot メンション付きのメッセージは、そのままエージェントへのプロンプトとして送信されます。
+- 監視対象: ホスト稼働（CPU/RAM/GPU）、バックエンド実行ファイルの有無、API応答レイテンシ、連続エラー、レート制限発生数、フォールバック回数、クォータ残量。
+- 監視間隔: `BRIDGE_MONITOR_INTERVAL`（既定60秒）。アラート種別: `backend_unavailable` / `consecutive_errors` / `quota_exhausted` / `fallback`。
+- 通知先: Discord 応答チャンネル（embed）＋ Discord Webhook（メインエージェント宛、`tools/notify_discord.py` 経由）。
+- 表示: `!monitor` / `/monitor`。
 
-### 会話セッションの扱い
+## 5. 認可・ガードレール
 
-- `agy` は `init` イベントの `conversation_id`（UUID）を返します。ブリッジはこれをチャンネルに紐付け、次回以降の入力に `--conversation <id>` を付与します。
-- `/chats` は `~/.gemini/antigravity-cli/brain` および `~/.gemini/antigravity/brain` を走査し、transcript の最初の `USER_INPUT` から初期プロンプトを抽出して一覧表示します。
-- `/resume` は ID の完全一致 → 前方一致の順に解決します。前方一致が複数ある場合は候補を提示し、一致なしの場合は警告しつつ ID をそのまま使用します。
+- **認可 (is_authorized)**: `ALLOWED_USER_IDS` が空の場合、**全ユーザーを拒否**（安全側デフォルト）。空リストは「全許可」ではない。
+- **チャンネル制限**: `ALLOWED_CHANNEL_IDS` が設定済みの場合、該当チャネルのみ許可。
+- **レート制限**: ユーザー単位のトークンバケット（既定: 10 コマンド / 60 秒）。`DISCORD_RATE_LIMIT_MAX` / `DISCORD_RATE_LIMIT_WINDOW` で変更可。
+- **プロンプト長検証**: 既定 4000 文字を超えるプロンプトは拒否（`DISCORD_MAX_PROMPT_LEN`）。
+- **!chrome / /chrome URL 検証**: http/https のみ許可。プライベート IP / ループバック / リンクローカル / クラウドメタデータをブロックリストで拒否。bare な `localhost` ホスト名は許可。
+- **単一インスタンス制御**: ループバックポート（既定 49372、`DISCORD_BRIDGE_LOCK_PORT`）をロックし、二重起動を防止。
+- **`--dangerously-skip-permissions` / `--auto`**: ブリッジ側の認可（`is_authorized()`）は常に適用される。
+- **内部例外**: Discord には Error ID のみを送出。スタックトレースはサーバーログに記録。
+- **タスク ID 一意化**、**モデル名ホワイトリスト**、**起動時永続ビュー再登録**。
 
----
+## 6. コマンド一覧
 
-## 3. 環境変数（`.env`）
-
-| 変数 | 既定値 | 用途 |
+| Slash | Prefix | 概要 |
 |---|---|---|
-| `DISCORD_BOT_TOKEN` | - | Bot トークン（必須） |
-| `ALLOWED_USER_IDS` | 空 | 実行を許可する User ID（カンマ区切り）。空の場合は誰でも実行可能 |
-| `ALLOWED_CHANNEL_IDS` | 空 | 許可チャンネル（カンマ区切り）。空の場合は DM 以外の全チャンネルが対象 |
-| `DEFAULT_MODEL` | `gemini-3.8-flash-low` | 既定モデル |
-| `AGY_CLI_PATH` | `agy` | Antigravity CLI のパス（相対指定時は PATH を参照） |
-| `BRIDGE_MAX_PROMPT_CHARS` | `8000` | プロンプト長の上限 |
-| `BRIDGE_MAX_TASKS_PER_CHANNEL` | `3` | チャンネル同時実行数の上限 |
-| `BRIDGE_MAX_TASKS_GLOBAL` | `8` | 全体同時実行数の上限 |
-| `BRIDGE_TASK_TIMEOUT_SECONDS` | `1800` | 1 ターンの時間制限（`--print-timeout` にも反映） |
-| `BRIDGE_PERSISTENT_VIEW_SESSIONS` | `50` | 起動時に永続ビュー登録するセッション数 |
+| `/chat <prompt>` | `!chat <prompt>` | エージェント実行（並列・429自動継続・自動フォールバック） |
+| `/status` | `!status` | CPU・メモリ・GPU・タスク・バックエンド・クォータ・監視状況 |
+| `/quota` | `!quota` | 残りのレート制限（利用率・推定利用可能回数・クレジット） |
+| `/monitor` | `!monitor` | 監視エージェントの稼働状況とアラート |
+| `/backend [antigravity\|kilo]` | `!backend` | 実行バックエンドの切替（Kilo は無料モデル） |
+| `/models` / `/model [id]` | `!models` / `!m` | モデルの一覧・切替（Antigravity / Kilo Code） |
+| `/chats` / `/resume <id>` | `!chats` / `!resume` | 会話一覧与会話再開（両バックエンド対応） |
+| `/new` | `!new` | 会話コンテキストのリセット |
+| `/chrome [url]` | `!chrome` | ローカル Chrome 起動 |
+| `/abort` | `!abort` | 実行中タスクの停止（🛑 リアクションでも可） |
 
----
+## 7. 環境変数
 
-## 4. 品質ガードレール
+| 変数 | 既定 | 意味 |
+|---|---|---|
+| `DISCORD_BOT_TOKEN` | (必須) | Bot トークン |
+| `ALLOWED_USER_IDS` | (空＝全拒否) | 許可ユーザー ID のカンマ区切り |
+| `ALLOWED_CHANNEL_IDS` | (空＝全チャネル) | 許可チャネル ID のカンマ区切り |
+| `DISCORD_RATE_LIMIT_MAX` | `10` | レート制限の最大コマンド数 |
+| `DISCORD_RATE_LIMIT_WINDOW` | `60.0` | レート制限ウィンドウ秒 |
+| `DISCORD_MAX_PROMPT_LEN` | `4000` | プロンプト最大文字数 |
+| `DISCORD_BRIDGE_LOCK_PORT` | `49372` | 単一インスタンス制御ポート |
+| `DISCORD_DANGEROUS_SKIP_PERMISSIONS` | `0` | 未使用（常に無効） |
+| `DEFAULT_MODEL` | `gemini-3.8-flash-low` | 既定モデル（Antigravity） |
+| `DEFAULT_BACKEND` | `antigravity` | 既定バックエンド |
+| `FALLBACK_MODEL` | `kilo/kilo-auto/free` | フォールバック先モデル（**無料**） |
+| `BRIDGE_FALLBACK_ENABLED` | `1` | フォールバックの有効/無効 |
+| `BRIDGE_RATE_LIMIT_RETRIES` | `3` | 429 自動継続の最大再試行回数 |
+| `BRIDGE_BACKOFF_BASE` / `BRIDGE_BACKOFF_CAP` | `2.0` / `60.0` | 指数バックオフの基底秒・上限秒 |
+| `BRIDGE_TASK_TIMEOUT` | `1800` | 1タスクのタイムアウト秒 |
+| `BRIDGE_MONITOR_INTERVAL` | `60` | 監視エージェントの監視間隔秒 |
+| `BRIDGE_MONITOR_ERROR_THRESHOLD` | `3` | 連続エラーでアラートする回数 |
+| `BRIDGE_QUOTA_TTL` | `120` | クォータのキャッシュ秒 |
+| `AGY_CLI_PATH` / `KILO_CLI_PATH` | (自動検出) | CLI 実行ファイルの明示指定 |
 
-| 観点 | 実装 |
-|---|---|
-| 同時実行の制限 | チャンネル単位・全体単位で実行数を制限し、ホストのリソースを保護 |
-| タイムアウト | CLI の `--print-timeout` とプロセス監視の二重化。超過時はプロセスを停止し部分出力を報告 |
-| デッドロック防止 | stderr を別タスクで常に読み取り（パイプ枯渇による子プロセス停止を防止） |
-| プロセスツリー終了 | POSIX は `killpg`、Windows は `taskkill /T` で子孫まで停止 |
-| 入力検証 | プロンプト長、URL スキーム（http/https のみ）、モデル ID、セッション ID を検証 |
-| 情報の秘匿 | 内部例外は `Error ID` のみ Discord へ提示し、詳細 はサーバログに記録 |
-| イベントループ | ディスク走査・メトリクス取得・ブラウザ起動はすべて `asyncio.to_thread` で実行 |
-| タスク管理 | バックグラウンドタスクを保持し、GC による取りこぼしと未処理例外を防止 |
-| 再起動耐性 | 起動時に永続ビューを再登録し、「返信する」ボタンが再起動後も動作 |
-| 終了処理 | シャットダウン時に実行中の子プロセスを全て停止 |
+## 8. テスト
 
----
-
-## 5. テスト
-
-```powershell
-python -m pytest tests/test_discord_bridge.py -q
-```
-
-テストは次を網羅しています。
-
-- 入力検証（プロンプト長 / URL スキーム / モデル ID / セッション ID）
-- チャネル分割・埋め込み生成
-- 同時実行上限・タスク登録／解除・中断
-- 永続ビューの再登録
-- 実際の子プロセスを起動する実行エンジンの結合テスト（スタブ CLI  使用）
-- CLI タイムアウト時の検出とプロセス停止
-
----
-
-## 6. 関連ツール
-
-- `tools/clear_discord_commands.py` : 古いスラッシュコマンドの一括削除
-- `tools/notify_discord.py` : Webhook 通知（ブリッジとは別系統）
+- `tests/test_discord_bridge.py`: 認可ロジック・レート制限・URL 検証等のユニットテスト。
+- `tests/test_bridge_agents.py`: クォータ解析・レート判定・バックオフ・バックエンドのコマンド生成とパース・**429自動継続**・**フォールバック**・監視エージェントのユニットテスト。
+- 外部ネットワーク（Discord 含む）への実送信はテストで行わない（モックのみ）。

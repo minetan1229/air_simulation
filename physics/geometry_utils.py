@@ -312,11 +312,49 @@ def wind_force_to_body(relative_velocity: ArrayLike, drag: float, side: float, l
     if speed <= 1.0e-12:
         return np.zeros(3)
     drag_axis = velocity / speed
-    horizontal = math.hypot(float(velocity[0]), float(velocity[2]))
-    lift_axis = (np.array([velocity[2], 0.0, -velocity[0]]) / horizontal
-                 if horizontal > 1.0e-12 else np.array([0.0, 0.0, -1.0]))
-    side_axis = np.cross(drag_axis, lift_axis)
-    side_axis /= np.linalg.norm(side_axis)
+    vx = float(velocity[0])
+    vy = float(velocity[1])
+    vz = float(velocity[2])
+    horizontal = math.hypot(vx, vz)
+    ratio = horizontal / speed
+
+    if horizontal > 1.0e-12:
+        az_axis = np.array([vz, 0.0, -vx]) / horizontal
+    else:
+        az_axis = np.array([0.0, 0.0, -1.0])
+
+    down = np.array([0.0, 0.0, -1.0])
+    pole_raw = down - float(down @ drag_axis) * drag_axis
+    pole_norm = float(np.linalg.norm(pole_raw))
+    pole_axis = pole_raw / pole_norm if pole_norm > 1.0e-12 else down
+
+    t = min(max(ratio, 0.0), 1.0)
+    if t <= 0.0:
+        lift_axis = pole_axis
+    elif t >= 1.0:
+        lift_axis = az_axis
+    else:
+        dot_pg = float(np.dot(pole_axis, az_axis))
+        if dot_pg > 0.9999:
+            lift_axis = az_axis
+        elif dot_pg < -0.9999:
+            perp = cross(drag_axis, pole_axis)
+            perp_norm = float(np.linalg.norm(perp))
+            perp = perp / perp_norm if perp_norm > 1.0e-12 else np.array([1.0, 0.0, 0.0])
+            angle = math.pi * t
+            lift_axis = pole_axis * math.cos(angle) + perp * math.sin(angle)
+        else:
+            theta = math.acos(max(-1.0, min(1.0, dot_pg)))
+            s = math.sin(theta)
+            lift_axis = (pole_axis * math.sin((1.0 - t) * theta)
+                         + az_axis * math.sin(t * theta)) / s
+
+    side_axis = cross(drag_axis, lift_axis)
+    side_norm = float(np.linalg.norm(side_axis))
+    if side_norm <= 1.0e-12:
+        side_axis = np.array([1.0, 0.0, 0.0])
+    else:
+        side_axis = side_axis / side_norm
     return -float(drag) * drag_axis + float(side) * side_axis + float(lift) * lift_axis
 
 

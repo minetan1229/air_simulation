@@ -1,80 +1,92 @@
-# Agent Core Protocol (Project-Agnostic OS)
-<!-- 警告: 本ファイルへのプロジェクト固有仕様の記述を厳禁とする -->
+# Agent Core Protocol（常駐コア + 参照索引）
+<!--
+正本: 本規約=常駐最小 / .agents/Knowledge.md=過去知見 / .agents/Project.md=現在地・LoopState / .agents/skills/*=定型手順 / docs/SPECIFICATION.md=詳細仕様
+常駐は本ファイルのみ。詳細・手順・過去知見は .agents/ から遅延オンデマンド参照（全文読込禁止）。
+-->
 
-## 1. Context Minimization (コンテキスト最小化)
-トークン消費抑制と推論精度維持のため、遅延読み込み（Lazy Loading）を徹底せよ。
-- **常駐**: セッション開始時は `AGENTS.md` と `.agents/Knowledge-important.md` のみ。
-- **遅延参照**:
-  - 現在地確認: `.agents/Project.md`（仕様詳細は `docs/SPECIFICATION.md`）。
-  - 過去知見: `.agents/Knowledge.md` を全文読まず grep 抽出。
-  - 定型手順: `.agents/skills/` 内の該当1ファイルのみ参照し完了後即破棄（#15）。
-  - ログ/ソースの全文出力を禁止し、行指定抽出を徹底。
-
-## 2. Anti-Fallacy Rule (テキサスの狙撃兵の誤謬排除)
-事後正当化を厳禁とする。
-- **事前基準固定**: 変更/実行前に「事前仮説」と「反証可能な合否基準」を明文化。
-- **後付け変更禁止**: 結果を見て合否基準を緩めたり偶然の成功を「解決」とみなすことを禁止。
-- **仮説棄却**: 予測不一致時は仮説を棄却し、因果特定まで次の仮説を再構築。
-
-## 3. Autonomous Execution Loop (自律ループ)
-タスクは微小ループとして再帰実行せよ。
-1. **[Observe & Scope]**: Loop State を確認。残存タスクなしは **Phase 6** へ。ある場合は最小サブタスク1つを定義（#16: 初期要件・最上位目的にアンカリング）。
-2. **[Hypothesize]**: 事前仮説と合否基準を宣言（#8: 調査目的の探索的スパイク特例あり）。
-3. **[Execute]**: 最小変更/検証コマンドを1つ実行（#11: 不可逆操作前の先行状態WAL記録、#5: Settle/Syncバリア、#14: 親エージェント単一コミッター原則）。
-4. **[Verify]**: 事前基準と照合。不一致時はロールバックし Phase 2 へ（リトライ上限3回、超過時はエスカレーション）。
-   - #2: 収束メトリクス確認 & 3回連続同エラーで Livelock 中断。
-   - #6: 不可逆検証のモック化、#7: Flaky検証の統計判定 (N>=3)、#9: 因果調査の深さ最大3階層制限。
-5. **[Distill & Loop]**:
-   - 確定事実は `.agents/Knowledge.md` に追記（#12: 前提条件・日付付き、#13: 定期GC/Pruning、#10: 偶発的発見は Project.md へ退避）。
-   - 致命的制約は `.agents/Knowledge-important.md` へ昇格（50行以内）。
-   - Loop State を更新。コンテキスト肥大時は `skills/loop-handover.md` 実行、余裕があれば Phase 1 へ。
-6. **[Finalize & Terminate]**:
-   - 全マイルストーン達成を確認し、ローカル検証（構文・静的解析・テスト全件）を通過させる。
-   - トピックブランチから master へ統合後、リモートへ自動プッシュ (`git push`) を実行。
-   - GitHub Actions CI/CD の実行結果を監視（`tools/check_runs.py`）し、全ジョブグリーンを確認。
-   - GitHub Issue（`tools/check_issues.py` / `tools/read_issues.py`）を確認し、残存課題の修正・解決およびクローズ（`tools/close_resolved_issue.py`）を行って自律ループを正常終了（HALT）。
-
-## 4. Meta-Control & Protocol Governance (プロトコル改定 #17)
-- `AGENTS.md` および `.agents/AGENTS.md` の改変はユーザー明示要求または監査合意時のみ行い、無断での改変を禁止する。
-
-## 4.1 Repository Layout & Tool Hygiene (構成・工具衛生)
-- 運用ツールの正本は `tools/` のみ。`tools/experiments/` は使い捨て調査スクリプト専用の隔離領域で、pytest収集・ruff検査の対象外とする。
-- `tools/experiments/` 配下のスクリプトは**インポート時に数十秒の飛行シミュレーションを実行しうる**ため、テストモジュールから import してはならない。追加するときは同ディレクトリへ置き、`.agents/Knowledge.md` か `.agents/skills/` から参照する（孤立スクリプトを残さない）。
-- 実行時生成物（`runs/`, `jobs/`, `logs/`, `artifacts/`, `models/`, `search/.cache/`）は `.gitignore` で除外し、git に追跡させない。
-- 静的解析の設定は `ruff.toml` / `mypy.ini` / `pytest.ini` に一本化する。`pyproject.toml` に置いた設定は静かに無視され二重正本になるため置かない。
-- `.agents/` のファイル名は `.agents/Project.md`（大文字 `P`）・`.agents/AGENTS.md`（大文字 `AGENTS`）で固定し、大文字小文字を混ぜない。
-
-
-## 5. Webhook & Progress Notification (進捗通知規約)
-- 開始/委譲/完了/異常時は Discord Webhook 通知を実行（詳細は `.agents/skills/notify-webhook.md`）。
-  - コマンド: `python tools/notify_discord.py <status_type> "<title>" "<summary>"`
-  - カラー: `start`(緑), `subagent`(橙), `end`/`finish`(青), `fail`(赤), `warning`(黄), `question`(桃)
-  - セキュリティ: Webhook URL は `DISCORD_WEBHOOK_URL` または `.env` 管理とし直書き厳禁。
-
-## 6. Context-Aware Protocol Maintenance (コンテキスト意識維持)
-- 本ファイルは常駐コンテキストのためトークン消費を抑え簡潔を保つ。物理仕様は `docs/SPECIFICATION.md`、手順は `.agents/skills/` を参照。
-
-## 7. 利用可能なMCPツール一覧 (MCP Tool Inventory)
-- 設定: `.kilo/kilo.jsonc` / 実行基盤: `.kilo/mcp/`（local stdio・外部APIキー不要）/ 導入手順: `.kilo/mcp/README.md`
-- 健全性確認: `python tools/verify_mcp_servers.py`（initialize → tools/list → 実ツールコール）／全カタログは `--list-only`
-- 個別ツール直接呼び出し: `python tools/mcp_call.py <server> <tool> --arg k=v`（`--json '{...}'` 形式も可）
-- 表記: Kiloでは `{server}_{tool}` 形式（例 `context7_resolve-library-id`, `playwright_browser_navigate`）。以下はサーバー別の実ツール名。
-
-| サーバー | ツール | 用途 |
+## 0. 参照マップ（.agents 連携ハブ）
+| 目的 | 参照先（正本） | 読み方・連携トリガー |
 |---|---|---|
-| `context7` | `resolve-library-id`, `query-docs` | 対象ライブラリの最新仕様・API文書の取得 |
-| `sequential-thinking` | `sequentialthinking` | 多段推論の構造化（仮説→反証→再仮説） |
-| `fetch` | `fetch` | Webページ/論文のMarkdown取得（SSRF遮断・robots.txt準拠は有効） |
-| `memory` | `create_entities`, `create_relations`, `add_observations`, `read_graph`, `search_nodes`, `open_nodes`, `delete_entities`, `delete_relations`, `delete_observations` | セッション跨ぎ知識グラフ永続化（保存先 `.kilo/mcp/memory.jsonl`） |
-| `playwright` | `browser_navigate`, `browser_snapshot`, `browser_click`, `browser_type`, `browser_fill_form`, `browser_press_key`, `browser_hover`, `browser_select_option`, `browser_evaluate`, `browser_take_screenshot`, `browser_console_messages`, `browser_network_requests`, `browser_wait_for`, `browser_find`, `browser_drag`, `browser_handle_dialog`, `browser_resize`, `browser_tabs`, `browser_run_code_unsafe`, `browser_close`（他 計25ツール） | Three.js UIの実ブラウザ操作・描画/コンソール確認 |
+| 現在地・ゴール・Loop State | `.agents/Project.md` | §1〜§3（毎ループPhase 1で確認・Phase 5で更新） |
+| 過去知見・既知不具合・回避策 | `.agents/Knowledge.md` | キーワードgrep抽出（全文読込禁止・確定事実追記） |
+| 段階的検証 & CI/CD 手順 | `.agents/skills/verify-and-test.md` | Phase 4, 6 実行時（テスト順序・Git・CI確認） |
+| Discord Webhook 通知 | `.agents/skills/notify-webhook.md` | フェーズ開始/完了/警告時（カラー・レポート連携） |
+| サブエージェント役割分担 | `.agents/skills/subagent-delegation.md` | 並列作業・委譲時（Tier分離・担当境界表） |
+| Discord×Agent ルーティング | `.agents/skills/discord-bridge-routing.md` | 429継続・フォールバック・監視報告の正本 |
+| 常駐プロセスの使用中判定と回収 | `.agents/skills/process-hygiene.md` | メモリ圧迫・残存タスク確認時（`tools/process_hygiene.py`） |
+| コンテキスト圧縮・状態引き継ぎ | `.agents/skills/loop-handover.md` | コンテキスト肥大・セッション終了時 |
+| 詳細物理・API・アーキテクチャ | `docs/SPECIFICATION.md` | 実装・設計変更時（該当章のみ抽出） |
+| ツール・タスク別スキル / MCP | `skill/README.md` / `.kilo/kilo.jsonc` | 該当スキル利用時 / MCP利用時 |
 
-## 8. MCP使い分け行動指針 (MCP Usage Policy)
-1. **ライブラリの実装・API利用の前** → 必ず `context7` で最新仕様を引く（記憶ではなく一次情報を優先）。対象: NumPy/SciPy/CuPy/Flask/Three.js/Playwright/MCP SDK等。
-2. **複雑なバグ調査・多段物理推論**（6DoF数値破綻、CCD、翼端接地、エネルギー保存則、姿勢発散等） → `sequential-thinking` を §2 Anti-Fallacy と併用し、仮説・反証基準・棄却理由まで構造化して進める。
-3. **Web調査・文献収集**（`search/` コーパス追加、原典論文、規格/API仕様ページ） → `fetch` を使用。`--allow-private-ips` / `--ignore-robots-txt` は使用禁止（セキュリティ基線の低下）。
-4. **セッション跨ぎの事実保持**（物理定数、仕様値、既知不具合と回避策） → `memory` にエンティティ/関係/観測として記録し、着手時に `read_graph` / `search_nodes` で想起する。`.agents/Knowledge.md` が確定事実の正本であり、`memory` は検索用索引（正本と重複する長文の二重保管は禁止）。
-5. **UIの動作確認**（Three.js描画、コンソールエラー、DOM状態、ネットワーク要求） → `playwright` を使用。`tools/capture_ui.py` / `tools/verify_repair_ui.py` の補完として「実際に描画されるか」を検証する。
-6. **MCP不要のタスク**（ファイル検索/編集、pytest・ruff・mypy実行等） → 既存ツールのみ使用し、MCP呼び出しでコンテキストを浪費させない。
-7. **MCP呼び出し失敗時** → まず `python tools/verify_mcp_servers.py` で接続とツール取得を切り分け、再導入は `.kilo/mcp/README.md` の手順に従う。
-8. **MCP追加・変更時** → `.kilo/kilo.jsonc` を編集 → `verify_mcp_servers.py` → `kilo mcp list` で `connected` を確認 → Kiloセッションを再読込 → 本節の表を同期する。
-
+---
+
+## 1. Core Protocol（自律ループ連携）
+- **1.1 コンテキスト最小化**: 常駐は本ファイルのみ。`.agents/` 配下は必要時のみ部分抽出。ログ/ソースの全文出力禁止。`memory` MCPは検索索引（長文二重保管禁止）。
+- **1.2 テキサスの狙撃兵の誤謬排除**: 事前に仮説と反証可能な合否基準を明文化。後付け変更や偶然動作での完了認定を禁止。不一致時は仮説棄却・因果特定。値は物理的な値を使用し、意図的に調整された値（報酬ハッキング用の据置き定数）にしない。
+- **1.4 規約統治**: ユーザー明示指示・監査合意なき本ファイル改変禁止。仕様は `docs/SPECIFICATION.md`、知見は `.agents/Knowledge.md` に集約。
+- **1.5 エージェント体制（サブエージェント上限4）**: メインエージェント1つに対し**稼働するサブエージェントは最大4つ**。內訳は次のとおりで、超過時は委譲しない（既存枠の完了待つかメインへ統合）。
+  1. **必須1枠 = 監視（Monitor）エージェント**: システム稼働状態・APIレスポンス・エラー状況・レートリミットを常時監視し、異常・問題を検知したときは**即座にメインエージェントへ報告・アラート**（Discord Webhook＋応答チャンネル）。実務を兼務せず常に1枠を保持する。
+  2. **残り最大3枠 = 実務エージェント**: 実装・検索・Discord応答など担当領域を排他的に分担（境界表は `.agents/skills/subagent-delegation.md`）。
+- **1.6 Discord×Agent ルーティング**: 主エージェントは Antigravity。APIエラー・タイムアウト・残りレート0・429の継続失敗のいずれかで**Kilo Code（既定無料モデル）へ自動フォールバック**し、処理を中断しない。429はバックオフ後に`continue`で自動継続する。監視エージェントが切替を報告する（正本: `.agents/skills/discord-bridge-routing.md`）。
+
+---
+
+## 2. Guardrails（常駐制約）
+- **Strict Rules**: ユーザー明示許可なきファイル削除禁止。事前仮説・合否基準なしの変更/実行禁止。偶然動作での完了禁止。ファイル/ログの全文読込・出力禁止。
+- **Governance**:
+  - *Zero-Placeholder*: `TODO`・`...`・空関数等の省略完全禁止。実動コードのみ記述。
+  - *Single Committer*: サブエージェント委譲時もリポジトリ変更・コミットは親に一元化（`.agents/skills/subagent-delegation.md`）。
+  - *Subagent Cap*: 稼働サブエージェントは最大4（監視1必須・実務3）。上限超過の委譲は拒否する。
+  - *Branch Isolation*: `genetic-project` 開発フェーズ（自律進化研究システム構築中）では `master`/`main` へのコミット・マージ・チェリーピック・PR作成を**厳禁**。`tools/branch_guard.py` が保護ブランチ実行を停止し、テストスイート（`conftest.py`）/ `app.py` / `smoke_test.py` に組み込み済み（`PAPER_AIRCRAFT_BRANCH_GUARD=warn|off` で緩和可）。
+  - *Git & Discord*: ブランチ運用、フェーズ毎通知（`.agents/skills/notify-webhook.md`）。
+- **Critical Traps（詳細・回避策は `.agents/Knowledge.md` 参照）**:
+  - *CI Runner / 文字コード*: Actions の run は `defaults: run: shell: bash` 必須。PowerShell の `Get/Set-Content` でのUTF-8破壊禁止（Python/専用ツールで編集）。
+  - *座標系・風高度・境界接地*: 風場(+z上向き)⇔世界NED(+z下向き)の符号変換（$w_{NED}=-w_{wind}$）。風は地表面からの高度（`z_up=-z_ned`）でサンプル（6DoF参照経路とGPUバッチ経路は同一規約）。水平100km制限・地中即死(`min_alt<-0.05`)・CCD補間・翼端散逸上限。
+  - *評価status / GA既定値*: 失敗した評価を`timeout`/`crashed`等へ**リラベル**しない（パレート前線・incumbentへの混入＝報酬ハッキング経路）。試行回数・目的関数の既定値は`physics/ga_config.py`へ集約し、探索ロジックにハードコードしない。
+  - *429 / フォールバック*: レート制限を失敗扱いせず、バックオフ＋`continue`で自動継続。Antigravity不可時はKilo Code(無料)へ自動切替し、監視エージェントが報告する（正本: `.agents/skills/discord-bridge-routing.md`）。
+  - *既知の物理乖離*: `PHYSICS_PAPER_CONFORMANCE_AUDIT.md` §0.0（P0〜P3は完了）と `no-finish.md` が正本。
+
+---
+
+## 3. Autonomous Execution Loop (自律実行ループ)
+1. *Observe*: `.agents/Project.md` の Loop State 確認。残タスク無ければPhase 6へ。あれば最小サブタスク定義。
+2. *Hypothesize*: 事前仮説・合否基準を宣言。
+3. *Execute*: 最小変更・検証を1つ実行（不可逆操作は先行記録、単一コミッター原則）。
+4. *Verify*: 合否照合（`.agents/skills/verify-and-test.md`）。不一致時はロールバックしPhase 2へ（上限3回）。
+5. *Distill & Loop*: 確定事実は `.agents/Knowledge.md`、現在地は `.agents/Project.md` へ記録。肥大時は `.agents/skills/loop-handover.md` 実行。
+6. *Finalize & Terminate*: ローカル全通過 → 対象ブランチへマージ&push（既定は master。`genetic-project` フェーズは §2 ブランチ隔離に従い master 宛の操作を禁止）→ CI完了確認 → Issue確認クローズ後HALT。
+
+## 3.1 Proactive Improvement Proposal (積極的提案ルール)
+- 現行の係数ベース準定常モデルの枠内で、数値安定性・一貫性の修正を優先しつつ、LSBヒステリシスの簡易追加・付加質量の回転項・動的減衰の強化・実験校正の導入など、現実の紙飛行機挙動に近づけるための改善案を積極的に提案せよ。
+- 大きなアーキテクチャ変更（フルCFD・フルFSI・非定常RANSなど）は計算コストを明示した上で「オプション」として提案し、ユーザーが選択できるようにせよ。
+- 「より現実に近づける」「最高の現実的構成」などの観点で、多忠実度アプローチ（最適化は現行モデル、最終確認のみ高忠実度）を標準的な提案候補として含めよ。
+
+---
+
+## 4. コマンド早見（常駐）
+| 目的 | コマンド / 手順正本 |
+|---|---|
+| 構文 / 静的解析・型 | `python -m compileall physics api tools app.py smoke_test.py` / `ruff check .` / `mypy physics api app.py smoke_test.py` |
+| 単体・監査 / E2E | `python -m pytest tests -q` / `python smoke_test.py`（詳細: `.agents/skills/verify-and-test.md`） |
+| Discord通知 | `python tools/notify_discord.py <status> "<title>" "<summary>"`（詳細: `.agents/skills/notify-webhook.md`） |
+| Discordブリッジ / クォータ / 監視 | `python tools/discord_bridge.py` / 応答チャンネル `!quota` `!monitor` `!backend` `!model`（正本: `.agents/skills/discord-bridge-routing.md`） |
+| MCP確認 / 呼出 | `python tools/verify_mcp_servers.py` / `python tools/mcp_call.py <server> <tool> --arg k=v` |
+| CI点検 / Issue | `python tools/check_runs.py` / `python tools/check_issues.py` / `close_resolved_issue.py` |
+| 常駐プロセス回収 / UI検証 | `python tools/process_hygiene.py --list` / `--apply`（判定基準: `.agents/skills/process-hygiene.md`）/ `python tools/capture_ui.py`（実ブラウザはplaywright MCP） |
+
+---
+
+## 5. 正本維持規約（.agents 同期ルール）
+- **配置**: 過去確定事実→`.agents/Knowledge.md` / 現在地・進捗→`.agents/Project.md` / 定型手順→`.agents/skills/` / 詳細仕様→`docs/SPECIFICATION.md`。
+- **行数上限**: 本ファイル 100行目安 / `Knowledge.md` 80行以内 / `Project.md` 40行以内。`.agents/` や `docs/` に正本がある内容（手順・役割分担表・詳細知見・物理定数・ルーティング規則）は本ファイルに直書きせず、参照リンクに留める。
+
+---
+
+## 6. MCP 使い分け（基盤: `.kilo/kilo.jsonc`）
+1. `context7`: ライブラリ/外部API実装前の最新一次仕様取得。 2. `sequential-thinking`: 6DoF数値破綻・接地散逸・姿勢発散等の多段推論。 3. `fetch`: 論文・外部技術Markdown取得（内部IP遮断/robots.txt準拠）。 4. `memory`: セッション跨ぎ知識の検索索引（正本は `.agents/Knowledge.md`、長文二重保管禁止）。 5. `playwright`: UI/Three.jsの実ブラウザ描画・コンソールエラー検証。
+※定型処理（ファイル編集、pytest等）にMCPを浪費しないこと。失敗時は `tools/verify_mcp_servers.py`。
+
+---
+
+## 8. 物理調査・高忠実度化プロトコル
+9. 物理関連の調査時は、現行モデルの改善余地と現実的な高忠実度化オプション（コスト付き）を積極的に調査・提案せよ。

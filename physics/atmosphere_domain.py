@@ -22,7 +22,7 @@ Models implemented (prompt.md 2.1 / AGENTS.md 8.1):
 
       p_v   = phi * p_sat(T)                     (partial pressure of vapour)
       p_d   = p - p_v                             (partial pressure of dry air)
-      R_moist = (p_d R_air + p_v R_vapour) / p    (specific gas constant)
+      R_moist = p / (p_d / R_air + p_v / R_vapour) (specific gas constant, Dalton harmonic mean)
       rho   = p / (R_moist T)
 
   Because ``R_vapour (461.5) > R_air (287.05)``, humid air is measurably less
@@ -97,12 +97,34 @@ _MIN_VAPOUR_FRACTION: float = 1.0e-6
 # --------------------------------------------------------------------------
 # ISA standard atmosphere
 # --------------------------------------------------------------------------
+#: Geometric altitude of the tropopause (the base of the isothermal layer).
+TROPOPAUSE_ALTITUDE_M = 11000.0
+#: Geometric altitude of the base of the stratospheric lapse layer.
+STRATOSPHERE_BASE_ALTITUDE_M = 20000.0
+#: Geometric altitude of the base of the upper isothermal layer.
+STRATOSPHERE_TOP_ALTITUDE_M = 32000.0
+#: Temperature lapse rate inside the 20-32 km stratospheric layer (ISA).
+STRATOSPHERE_LAPSE_RATE_K_PER_M = 0.001
+
+
 def isa_temperature(
     altitude_m: float,
     sea_level_temperature_K: float = T0_ISA,
     lapse_rate_K_per_m: float = LAPSE_RATE_ISA,
 ) -> float:
-    """ISA tropospheric temperature ``T = T0 - L h`` in kelvin.
+    """ISA temperature profile in kelvin.
+
+    The profile is the standard layered ISA:
+
+    * troposphere (0 - 11 km): ``T = T0 - L h``,
+    * tropopause (11 - 20 km): isothermal at ``T11 = T0 - L * 11 km``,
+    * stratosphere (20 - 32 km): ``T = T11 + 0.001 (h - 20 km)``,
+    * upper isothermal layer (above 32 km): ``T = T32``.
+
+    Below 11 km this is exactly the linear tropospheric profile; above it the
+    previous implementation extrapolated the linear lapse until the
+    temperature went negative (and :func:`isa_pressure` meanwhile floored the
+    temperature at 50 K, so pressure and density stopped being consistent).
 
     Parameters
     ----------
@@ -113,7 +135,19 @@ def isa_temperature(
     lapse_rate_K_per_m:
         Temperature lapse rate ``L`` (ISA uses 6.5e-3 K/m).
     """
-    return float(sea_level_temperature_K) - float(lapse_rate_K_per_m) * float(altitude_m)
+    h = float(altitude_m)
+    t0 = float(sea_level_temperature_K)
+    lapse = float(lapse_rate_K_per_m)
+    t11 = t0 - lapse * TROPOPAUSE_ALTITUDE_M
+    if h <= TROPOPAUSE_ALTITUDE_M:
+        return t0 - lapse * h
+    if h <= STRATOSPHERE_BASE_ALTITUDE_M:
+        return t11
+    if h <= STRATOSPHERE_TOP_ALTITUDE_M:
+        return t11 + STRATOSPHERE_LAPSE_RATE_K_PER_M * (h - STRATOSPHERE_BASE_ALTITUDE_M)
+    return t11 + STRATOSPHERE_LAPSE_RATE_K_PER_M * (
+        STRATOSPHERE_TOP_ALTITUDE_M - STRATOSPHERE_BASE_ALTITUDE_M
+    )
 
 
 def isa_pressure(
@@ -123,7 +157,18 @@ def isa_pressure(
     lapse_rate_K_per_m: float = LAPSE_RATE_ISA,
     gravity: float = G0,
 ) -> float:
-    """ISA tropospheric pressure ``p = p0 (T/T0) ** (g / (L R_air))``.
+    """ISA pressure with the standard layered profile.
+
+    * troposphere (0 - 11 km): ``p = p0 (T/T0) ** (g / (L R_air))``,
+    * tropopause (11 - 20 km): ``p = p11 exp(-g (h - 11 km) / (R T11))``,
+    * stratosphere (20 - 32 km): ``p = p20 (T/T20) ** (-g / (L R_air))``,
+    * upper isothermal layer (above 32 km): ``p = p32 exp(-g (h - 32 km) / (R T32))``.
+
+    Below 11 km this is exactly the tropospheric closed form; above it the
+    previous implementation extrapolated that power law to the top of the
+    atmosphere while flooring the temperature at 50 K, so the reported
+    pressure and density stopped being thermodynamically consistent (and at
+    100 km the column reported sea-level pressure).
 
     ``gravity`` defaults to :data:`config_schema.G0` but the caller
     (:func:`evaluate_atmosphere`) always forwards
@@ -141,14 +186,39 @@ def isa_pressure(
         # Isothermal limit: dp/dh = -rho g with rho = p / (R T0).
         exponent = -g * h / (R_AIR * max(abs(t0), _MIN_TEMPERATURE_K))
         return p0 * math.exp(clamp(exponent, -700.0, 700.0))
-    raw_temp = isa_temperature(h, t0, lapse)
-    # The troposphere reaches the tropopause at ~11 km (T ~ 216.65 K).
-    # Beyond ~45 km the linear lapse rate reaches 0 K. Clamp temperature to
-    # standard tropopause/mesosphere floor to transition into isothermal high-altitude model.
-    temperature = max(raw_temp, 50.0)
-    ratio = max(temperature / max(t0, 1.0), 1.0e-6)
-    exponent = g / (lapse * R_AIR)
-    return p0 * (ratio ** exponent)
+
+    t11 = t0 - lapse * TROPOPAUSE_ALTITUDE_M
+    if h <= TROPOPAUSE_ALTITUDE_M:
+        # Troposphere: the closed-form hydrostatic solution.
+        ratio = max((t0 - lapse * h) / max(t0, 1.0), 1.0e-6)
+        exponent = g / (lapse * R_AIR)
+        return p0 * (ratio ** exponent)
+
+    # Tropopause boundary pressure (continuous with the troposphere).
+    p11 = p0 * ((t11 / max(t0, 1.0)) ** (g / (lapse * R_AIR)))
+    if h <= STRATOSPHERE_BASE_ALTITUDE_M:
+        exponent = -g * (h - TROPOPAUSE_ALTITUDE_M) / (R_AIR * max(abs(t11), _MIN_TEMPERATURE_K))
+        return p11 * math.exp(clamp(exponent, -700.0, 700.0))
+
+    # Base of the stratospheric lapse layer (20 km to 32 km).
+    # Between 11 km and 20 km is an isothermal layer, so T20 == T11.
+    p20 = p11 * math.exp(clamp(-g * (STRATOSPHERE_BASE_ALTITUDE_M - TROPOPAUSE_ALTITUDE_M)
+                               / (R_AIR * max(abs(t11), _MIN_TEMPERATURE_K)), -700.0, 700.0))
+    t20 = t11
+    strat_lapse = STRATOSPHERE_LAPSE_RATE_K_PER_M  # +0.001 K/m
+    if h <= STRATOSPHERE_TOP_ALTITUDE_M:
+        temperature = t20 + strat_lapse * (h - STRATOSPHERE_BASE_ALTITUDE_M)
+        ratio = max(temperature / max(t20, 1.0e-6), 1.0e-6)
+        exponent = -g / (strat_lapse * R_AIR)
+        return p20 * (ratio ** exponent)
+
+    # Upper isothermal layer.
+    t32 = t20 + strat_lapse * (
+        STRATOSPHERE_TOP_ALTITUDE_M - STRATOSPHERE_BASE_ALTITUDE_M
+    )
+    p32 = p20 * ((t32 / max(t20, 1.0e-6)) ** (-g / (strat_lapse * R_AIR)))
+    exponent = -g * (h - STRATOSPHERE_TOP_ALTITUDE_M) / (R_AIR * max(abs(t32), _MIN_TEMPERATURE_K))
+    return p32 * math.exp(clamp(exponent, -700.0, 700.0))
 
 
 def isa_density(

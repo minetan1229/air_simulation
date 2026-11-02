@@ -10,13 +10,28 @@ cd "$SCRIPT_DIR"
 PYTHON_BIN=""
 for cmd in python3 python py; do
     if command -v "$cmd" >/dev/null 2>&1; then
-        PYTHON_BIN="$cmd"
-        break
+        if "$cmd" -c "import sys; exit(0 if sys.version_info >= (3, 10) else 1)" >/dev/null 2>&1; then
+            PYTHON_BIN="$cmd"
+            break
+        fi
     fi
 done
 
 if [ -z "$PYTHON_BIN" ]; then
-    echo "[ERROR] Python 3.10+ is required but not found in PATH." >&2
+    DETECTED_RAW=""
+    for cmd in python3 python py; do
+        if command -v "$cmd" >/dev/null 2>&1; then
+            DETECTED_RAW=$("$cmd" -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')" 2>/dev/null || true)
+            if [ -n "$DETECTED_RAW" ]; then
+                break
+            fi
+        fi
+done
+    if [ -n "$DETECTED_RAW" ]; then
+        echo "[ERROR] Python 3.10+ is required, but detected version is $DETECTED_RAW." >&2
+    else
+        echo "[ERROR] Python 3.10+ is required but no suitable Python was found in PATH." >&2
+    fi
     exit 1
 fi
 
@@ -43,20 +58,18 @@ else
     "$VENV_PYTHON" -m pip install -e ".[dev]"
 fi
 
-echo "[SETUP] Verifying CUDA GPU acceleration..."
-# The GPU backend is optional: a CPU-only machine must still complete the
-# setup, because every domain has a NumPy fallback (SPECIFICATION 2.1).
-if "$VENV_PYTHON" -c "
+echo "[SETUP] Verifying CUDA GPU acceleration (optional; CPU-only environments continue)..."
+"$VENV_PYTHON" -c "
+import importlib.util
+spec = importlib.util.find_spec('cupy')
+if spec is None:
+    print('[WARN] cupy is not installed; running in CPU-only mode. CUDA acceleration is disabled.')
+    raise SystemExit(0)
 import cupy as cp
 dev = cp.cuda.runtime.getDevice()
 props = cp.cuda.runtime.getDeviceProperties(dev)
 name = props['name'].decode('utf-8') if isinstance(props['name'], bytes) else str(props['name'])
 print(f'[SUCCESS] GPU Device {dev} detected: {name}')
-" 2>/dev/null; then
-    echo "[SETUP] GPU acceleration available."
-else
-    echo "[SETUP] WARNING: no usable CUDA device detected."
-    echo "[SETUP]          The simulator will run on the CPU fallback backend."
-fi
+"
 
 echo "[SETUP] Environment setup complete."

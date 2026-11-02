@@ -129,6 +129,11 @@ export class DataPanel {
       environment: { ...this.store.data.environment },
       launch: { ...this.store.data.launch },
       simulation: { ...this.store.data.simulation },
+      // The origami section is a local-only view state: it is never pushed to
+      // the flight backend (§A-16), but it has to survive an export/import
+      // round trip so the selected airframe and fold progression are not lost
+      // (§G-7).
+      origami: { ...(this.store.data.origami || {}) },
     };
   }
 
@@ -198,10 +203,25 @@ export class DataPanel {
     try {
       const payload = await this.api.importBundle(entry.bundle);
       this.store.adopt(payload.bundle);
+      this._restoreLocalViewState(entry.bundle);
       this.store.emit("change", { section: null, bulk: true, origin: "preset" });
       this.notify(`プリセット「${name}」を適用しました`, "ok");
     } catch (error) {
       this.notify(`適用できません: ${error.message}`, "error");
+    }
+  }
+
+  /**
+   * Restore the local-only view sections of an imported bundle.
+   *
+   * The server never receives the origami section (§A-16), so it cannot echo
+   * it back on import.  The values travel inside the exported bundle and are
+   * applied here (§G-7).
+   */
+  _restoreLocalViewState(bundle) {
+    const origami = bundle && bundle.origami;
+    if (origami && typeof origami === "object") {
+      this.store.merge("origami", { ...origami }, "bundle");
     }
   }
 
@@ -223,6 +243,7 @@ export class DataPanel {
     try {
       const payload = await this.api.importBundle(bundle);
       this.store.adopt(payload.bundle);
+      this._restoreLocalViewState(bundle);
       this.store.emit("change", { section: null, bulk: true, origin: "bundle" });
       this.notify("設定バンドルを適用しました", "ok");
     } catch (error) {

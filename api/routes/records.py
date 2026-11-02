@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import math
 from flask import Blueprint, Response, jsonify, request
 
 from physics import storage_domain
@@ -15,7 +16,15 @@ from physics.config_schema import (
     from_dict,
 )
 from physics.error_domain import ERROR_LOGGER
-from ..core import SESSION, BadRequest, NotFound, api_error, as_float, body
+from ..core import (
+    SESSION,
+    SIMULATION_TRAJECTORY_LOCK,
+    BadRequest,
+    NotFound,
+    api_error,
+    as_float,
+    body,
+)
 
 log = logging.getLogger("paper_airplane")
 records_bp = Blueprint("records", __name__)
@@ -78,14 +87,17 @@ def data_import():
     except ValueError as exc:
         raise BadRequest(str(exc)) from exc
 
-    with SESSION.lock:
-        SESSION.set_aircraft(from_dict(AircraftConfig, normalised["aircraft"], strict=False))
-        SESSION.set_environment(
-            from_dict(EnvironmentConfig, normalised["environment"], strict=False).clamp_ranges()
-        )
-        SESSION.set_launch(from_dict(LaunchConfig, normalised["launch"], strict=False))
-        SESSION.set_settings(from_dict(SimulationSettings, normalised["simulation"], strict=False))
-        snapshot = SESSION.current_snapshot()
+    # The configuration must not change while a trajectory is running, so the
+    # trajectory lock is taken first and the state lock second (§P2-2).
+    with SIMULATION_TRAJECTORY_LOCK:
+        with SESSION.lock:
+            SESSION.set_aircraft(from_dict(AircraftConfig, normalised["aircraft"], strict=False))
+            SESSION.set_environment(
+                from_dict(EnvironmentConfig, normalised["environment"], strict=False).clamp_ranges()
+            )
+            SESSION.set_launch(from_dict(LaunchConfig, normalised["launch"], strict=False))
+            SESSION.set_settings(from_dict(SimulationSettings, normalised["simulation"], strict=False))
+            snapshot = SESSION.current_snapshot()
     return jsonify({"ok": True, "bundle": snapshot})
 
 
@@ -103,11 +115,6 @@ def get_record_presets():
 @records_bp.get("/api/v1/records/presets/<key>")
 @records_bp.get("/api/v1/records/preset/<key>")
 def get_record_preset(key: str):
-    """Return one record preset.
-
-    ``/api/v1/records/preset/<name>`` is the path mandated by
-    SPECIFICATION 3.6; the plural form is kept for the existing clients.
-    """
     from physics import records_domain
     try:
         data = records_domain.preset_payload(key)
@@ -128,25 +135,26 @@ def apply_record_preset():
     calibrated = bool(payload.get("calibrated", not apply_throw_only))
     flight_mode = payload.get("flight_mode") or "full_flight"
 
-    with SESSION.lock:
-        try:
-            entry = records_domain.preset(key)
-        except KeyError:
-            raise NotFound(f"Unknown preset key: '{key}'")
+    with SIMULATION_TRAJECTORY_LOCK:
+        with SESSION.lock:
+            try:
+                entry = records_domain.preset(key)
+            except KeyError:
+                raise NotFound(f"Unknown preset key: '{key}'")
 
-        try:
-            new_launch = entry.launch_config(SESSION.launch, calibrated=calibrated, flight_mode=flight_mode)
-        except ValueError as exc:
-            raise BadRequest(str(exc))
-        if not apply_throw_only:
-            SESSION.set_aircraft(entry.aircraft_config(SESSION.aircraft))
-        if not apply_aircraft_only:
-            SESSION.set_launch(new_launch)
-            SESSION.set_environment(entry.environment_config(SESSION.environment))
+            try:
+                new_launch = entry.launch_config(SESSION.launch, calibrated=calibrated, flight_mode=flight_mode)
+            except ValueError as exc:
+                raise BadRequest(str(exc))
+            if not apply_throw_only:
+                SESSION.set_aircraft(entry.aircraft_config(SESSION.aircraft))
+            if not apply_aircraft_only:
+                SESSION.set_launch(new_launch)
+                SESSION.set_environment(entry.environment_config(SESSION.environment))
 
-        SESSION.simulator = None
-        state = SESSION.reset()
-        snapshot = SESSION.current_snapshot()
+            SESSION.simulator = None
+            state = SESSION.reset()
+            snapshot = SESSION.current_snapshot()
 
     chosen_throw, selection = entry.flight_selection(calibrated=calibrated, flight_mode=flight_mode)
     return jsonify({
@@ -181,6 +189,8 @@ def guinness_simulate():
     calibrated = bool(payload.get("calibrated", False))
     flight_mode = payload.get("flight_mode")
     duration_s = as_float(payload.get("duration_s", 60.0), "duration_s")
+    if not (math.isfinite(duration_s) and 0.1 <= duration_s <= 120.0):
+        raise BadRequest("field 'duration_s' must be a finite number between 0.1 and 120.0 seconds")
 
     try:
         result = records_domain.simulate_preset(
@@ -200,38 +210,20 @@ def guinness_simulate():
 @records_bp.get("/api/v1/guinness/verification")
 @records_bp.get("/api/v1/records/guinness")
 def guinness_verification():
-    """Get the Guinness world-record benchmark specification.
-
-    By default this returns the *specification* of the benchmarks: the
-    published records and the preset parameters they are flown with.  It does
-    **not** fly them -- the previous revision simulated every calibrated
-    preset for 45 simulated seconds each, so a plain ``GET`` occupied the
-    server for about a minute and could be triggered repeatedly by any
-    client.
-
-    Pass ``?verify=1`` to additionally run the verification matrix.  The
-    single-record simulation remains available at ``POST
-    /api/v1/guinness/simulate``.
-    """
+    """Get the Guinness world record benchmark specification, or run the verification matrix when ?verify=1."""
     from physics import records_domain
-    category = request.args.get("category")
-    presets = records_domain.list_presets(category=category)
-    keys = [p["key"] for p in presets]
-
-    verify = str(request.args.get("verify", "")).strip().lower() in ("1", "true", "yes", "on")
+    verify = request.args.get("verify") in ("1", "true")
     if verify:
-        report = records_domain.verification_report(keys=keys)
+        category = request.args.get("category")
+        keys = None
+        if category:
+            presets = records_domain.list_presets(category=category)
+            keys = [p["key"] for p in presets]
+        report = records_domain.verification_report(keys=keys, duration_s=60.0)
         return jsonify(report)
 
-    return jsonify({
-        "mode": "specification",
-        "verify": False,
-        "count": len(presets),
-        "presets": presets,
-        "categories": list(records_domain.RECORD_CATEGORIES),
-        "metrics": records_domain.RECORD_METRICS,
-        "note": "Add ?verify=1 to run the verification matrix (slow).",
-    })
+    benchmark = records_domain.preset_payload("toda_29_2s")
+    return jsonify(benchmark)
 
 
 # ---------------------------------------------------------------------------
@@ -240,19 +232,13 @@ def guinness_verification():
 @records_bp.get("/api/v1/errors")
 @records_bp.get("/api/v1/records/errors")
 def list_errors():
-    """Retrieve error history with optional level, category, and text filtering.
-
-    The payload is the redacted view: stack traces and client addresses stay
-    in the server log (SPECIFICATION 4.1).
-    """
+    """Retrieve error history with optional level, category, and text filtering."""
     limit = int(request.args.get("limit", 100))
     limit = max(1, min(limit, 500))
     level = request.args.get("level")
     category = request.args.get("category")
     search = request.args.get("search")
-    logs = ERROR_LOGGER.get_logs(
-        limit=limit, level=level, category=category, search=search, public=True
-    )
+    logs = ERROR_LOGGER.get_logs(limit=limit, level=level, category=category, search=search, public=True)
     return jsonify({
         "errors": logs,
         "count": len(logs),
@@ -262,28 +248,34 @@ def list_errors():
 
 @records_bp.post("/api/v1/errors/report")
 def report_client_error():
-    """Receive client-side (frontend JavaScript/WebGL) errors and persist them.
-
-    The client controls every field, so each one is bounded and validated
-    before it reaches the audit log; otherwise a caller could inject arbitrary
-    content into the operator's log files.
-    """
+    """Receive client-side (frontend JavaScript/WebGL) errors and persist them."""
     payload = body()
-    if not isinstance(payload, dict):
-        return api_error("request body must be a JSON object", 400)
+    message = payload.get("message", "Frontend error")
+    if not isinstance(message, str):
+        raise BadRequest("'message' must be a string")
+    if len(message) > 2000:
+        raise BadRequest("'message' must not exceed 2000 characters")
 
-    message = str(payload.get("message", "Frontend error"))[:2000]
     level = str(payload.get("level", "ERROR")).upper()
-    if level not in ("ERROR", "WARNING", "CRITICAL", "INFO", "DEBUG"):
-        return api_error("level must be one of ERROR, WARNING, CRITICAL, INFO, DEBUG", 400)
-    category = str(payload.get("category", "frontend"))[:64]
+    valid_levels = {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}
+    if level not in valid_levels:
+        raise BadRequest(f"'level' must be one of {', '.join(sorted(valid_levels))}")
+
+    category = str(payload.get("category", "frontend"))
+    if len(category) > 64:
+        raise BadRequest("'category' must not exceed 64 characters")
+
     details = payload.get("details", {})
-    if not isinstance(details, dict):
-        return api_error("details must be a JSON object", 400)
-    details = {str(k)[:64]: str(v)[:500] for k, v in list(details.items())[:20]}
+    if details is not None and not isinstance(details, dict):
+        raise BadRequest("'details' must be a JSON object")
+    if details is None:
+        details = {}
+
     traceback_str = payload.get("stack") or payload.get("traceback")
-    if traceback_str is not None:
-        traceback_str = str(traceback_str)[:4000]
+    if traceback_str is not None and not isinstance(traceback_str, str):
+        raise BadRequest("'stack' or 'traceback' must be a string")
+    if traceback_str and len(traceback_str) > 10000:
+        traceback_str = traceback_str[:10000]
 
     try:
         req_path = payload.get("url") or (request.path if request else None)
@@ -313,7 +305,7 @@ def report_client_error():
 
 @records_bp.get("/api/v1/errors/stats")
 def error_stats():
-    """Get error metrics and log file statuses (without the server paths)."""
+    """Get error metrics and log file statuses."""
     return jsonify(ERROR_LOGGER.public_statistics())
 
 

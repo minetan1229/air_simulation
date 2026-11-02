@@ -83,6 +83,7 @@ __all__ = [
     "wind_field",
     "mean_wind_vector",
     "wind_direction_unit",
+    "wind_flow_components",
     "turbulence_amplitude",
     "boundary_layer_ratio",
     "thermal_geometry",
@@ -124,14 +125,17 @@ _TURBULENCE_CHANNELS: Tuple[Tuple[float, float, float], ...] = (
 )
 _TURBULENCE_WAVELENGTH_BASE_M = 4.0
 _TURBULENCE_WAVELENGTH_MIN_M = 0.50
+#: Ratio of the vertical to the horizontal turbulence standard deviation in the
+#: neutral surface layer (sigma_w / sigma_u ~ 0.5).
+_TURBULENCE_VERTICAL_WEIGHT = 1.0 / math.sqrt(2.0)
 
 #: Thermal plume geometry, see :func:`thermal_geometry`.
 _THERMAL_SIGMA_BASE_M = 0.35
 _THERMAL_SIGMA_PER_MS = 0.45
 _THERMAL_SIGMA_MAX_M = 12.0
-_THERMAL_HEIGHT_BASE_M = 1.20
-_THERMAL_HEIGHT_PER_MS = 1.60
-_THERMAL_HEIGHT_MAX_M = 40.0
+#: The thermal plume ceiling is the ABL reference height (mixed-layer depth
+#: scale already present in :class:`config_schema.EnvironmentConfig`).  No
+#: private hard-coded height coefficients are used.
 _THERMAL_WANDER_BASE_M = 2.00
 _THERMAL_WANDER_PER_MS = 1.00
 _THERMAL_WANDER_PERIOD_S = 24.0
@@ -139,12 +143,28 @@ _THERMAL_ENTRAINMENT_RATIO = 0.25
 
 #: Depth over which the impermeable ground ramps the vertical motion out.
 _GROUND_DAMPING_DEPTH_M = 0.50
+#: Thickness of the wall boundary layer over which the turbulent vertical
+#: velocity is restored above the impermeable surface.
+_TURBULENCE_WALL_LAYER_M = 0.05
+
+#: Safety limit on the number of grid points a single field evaluation may use.
+_MAX_GRID_POINTS = 262144
 
 _MIN_ROUGHNESS_M = 1.0e-6
 _MIN_DIRECTION_SPEED = 1.0e-9
 _MIN_LENGTH_M = 1.0e-9
 
 _BACKEND_CACHE: Dict[str, Any] = {}
+
+
+def _smoothstep01(x):
+    """C1-continuous smoothstep clamped to ``[0, 1]``.
+
+    Works on NumPy, CuPy and torch tensors (it only uses the array's own
+    ``clip`` method) and on plain Python floats.
+    """
+    t = x.clip(0.0, 1.0) if hasattr(x, "clip") else min(max(float(x), 0.0), 1.0)
+    return t * t * (3.0 - 2.0 * t)
 
 
 # ==========================================================================
@@ -539,14 +559,28 @@ def simplex_noise3(points, seed: int = 0) -> np.ndarray:
 # ==========================================================================
 # Mean wind and gusts
 # ==========================================================================
+def wind_flow_components(direction_deg: float) -> Tuple[float, float]:
+    """``(x, y)`` components of the unit flow vector for a meteorological bearing.
+
+    ``wind_direction_deg`` is the bearing the wind blows **FROM**, clockwise
+    from north, with north = ``+y`` and east = ``+x``.  The flow therefore
+    runs along ``-(sin(theta), cos(theta))``.  This is the single definition
+    of the wind sign convention: the 6-DoF path, the GPU ensemble, the GPU
+    optimisation batch and the API all use it, so the same "north wind" can
+    no longer mean three different things.
+    """
+    theta = deg2rad(direction_deg)
+    return (-math.sin(theta), -math.cos(theta))
+
+
 def wind_direction_unit(env: EnvironmentConfig) -> np.ndarray:
     """Unit horizontal vector the wind flows **along** (``north = +y, east = +x``).
 
     ``wind_direction_deg`` is the meteorological "from" bearing, so the returned
     vector is the negative of the "from" direction.
     """
-    theta = deg2rad(env.wind_direction_deg)
-    return np.array([-math.sin(theta), -math.cos(theta), 0.0], dtype=np.float64)
+    flow_x, flow_y = wind_flow_components(env.wind_direction_deg)
+    return np.array([flow_x, flow_y, 0.0], dtype=np.float64)
 
 
 def mean_wind_vector(env: EnvironmentConfig) -> np.ndarray:
@@ -670,16 +704,19 @@ def thermal_geometry(env: EnvironmentConfig) -> Tuple[float, float, float]:
     convective column::
 
         sigma = min(0.35 + 0.45 * w_max, 12.0)   [m]
-        H     = min(1.20 + 1.60 * w_max, 40.0)   [m]
+        H     = reference_height_m                [m]
 
-    The core sits one ``H`` above the ground plane, so the peak vertical speed
-    is exactly ``thermal_strength`` (both exponentials are 1 there).  The
+    The plume ceiling is the atmospheric boundary-layer reference height
+    (the mixed-layer depth scale already present in config), so the height is
+    configuration-derived rather than a private hard-coded constant.  The core
+    sits one ``H`` above the ground plane, so the peak vertical speed is
+    exactly ``thermal_strength`` (both exponentials are 1 there).  The
     horizontal entrainment amplitude is ``0.25 * thermal_strength`` (Rankine
     vortex profile), zero on the axis and far from the plume.
     """
     strength = max(float(env.thermal_strength), 0.0)
     sigma = min(_THERMAL_SIGMA_BASE_M + _THERMAL_SIGMA_PER_MS * strength, _THERMAL_SIGMA_MAX_M)
-    height = min(_THERMAL_HEIGHT_BASE_M + _THERMAL_HEIGHT_PER_MS * strength, _THERMAL_HEIGHT_MAX_M)
+    height = max(float(env.reference_height_m), _MIN_LENGTH_M)
     return strength, max(sigma, _MIN_LENGTH_M), max(height, _MIN_LENGTH_M)
 
 
@@ -693,12 +730,27 @@ def _thermal_core(env: EnvironmentConfig, strength: float, time_s: float) -> Tup
     amplitude = (_THERMAL_WANDER_BASE_M + _THERMAL_WANDER_PER_MS * strength) if strength > 0.0 else 0.0
     x_c = amplitude * math.sin(omega * time + phase_x)
     y_c = amplitude * math.cos(omega * time + phase_y)
-    core_height = float(env.ground_level_m) + _THERMAL_HEIGHT_BASE_M + _THERMAL_HEIGHT_PER_MS * strength
+    _, _, height = thermal_geometry(env)
+    core_height = float(env.ground_level_m) + height
     return x_c, y_c, core_height
 
 
 def _thermal_components(P, env: EnvironmentConfig, time_s: float, ops: _Ops):
-    """Plume velocity ``(u, v, w)`` for an ``(N, 3)`` device array."""
+    """Plume velocity ``(u, v, w)`` for an ``(N, 3)`` device array.
+
+    The column is **rooted at the surface**: below the core the vertical
+    velocity follows the measured surface-layer profile ``w ~ z^(1/3)`` (zero
+    at the ground, rising to the peak at the core height), and above the core
+    it decays with the Gaussian height scale.  The previous symmetric
+    Gaussian in ``z`` was centred 1.2-1.6 m above the ground, so the layer in
+    which a paper glider actually flies (0-1 m) sat on the downward flank and
+    received almost no lift while the strongest updraft was out of reach.
+
+    The horizontal entrainment is an **inflow below the core and an outflow
+    above it** (the classic thermal inflow/outflow pair).  A single sign
+    makes the plume a divergent mass source instead of a mass sink, which
+    pushes a glider radially outwards while it is being lifted.
+    """
     xp = ops.xp
     strength, sigma, height = thermal_geometry(env)
     n = int(P.shape[0])
@@ -707,22 +759,34 @@ def _thermal_components(P, env: EnvironmentConfig, time_s: float, ops: _Ops):
     if strength <= 0.0:
         return xp.zeros((n, 3), dtype=P.dtype)
 
-    x_c, y_c, core_height = _thermal_core(env, strength, time_s)
+    x_c, y_c, _core_height = _thermal_core(env, strength, time_s)
+    ground = float(env.ground_level_m)
     dx = P[:, 0] - x_c
     dy = P[:, 1] - y_c
-    dz = P[:, 2] - core_height
+    z_rel = P[:, 2] - ground
+    core_rel = max(height, _MIN_LENGTH_M)
 
     radial_sq = dx * dx + dy * dy
     gaussian = xp.exp(-radial_sq / (2.0 * sigma * sigma))
-    vertical = xp.exp(-(dz * dz) / (height * height))
+    # Surface-rooted vertical profile: w ~ z^(1/3) up to the core height,
+    # Gaussian decay above it.  The peak is still exactly `strength` at the
+    # core, so the "peak updraft == thermal_strength" contract is preserved.
+    below = z_rel < core_rel
+    z_safe = xp.maximum(z_rel, 0.0)
+    profile_below = xp.power(z_safe / core_rel, 1.0 / 3.0)
+    profile_above = xp.exp(-((z_rel - core_rel) ** 2) / (height * height))
+    vertical = xp.where(below, profile_below, profile_above)
     w = strength * gaussian * vertical
 
     distance = xp.sqrt(radial_sq)
     safe = xp.where(distance > _MIN_LENGTH_M, distance, xp.ones_like(distance))
+    # Entrainment: inflow below the core, outflow above it.
+    split_arg = xp.clip((z_rel - core_rel) / (0.25 * height), -60.0, 60.0)
+    split = 1.0 / (1.0 + xp.exp(split_arg))          # 1 below the core, 0 above
     radial_speed = _THERMAL_ENTRAINMENT_RATIO * strength * (distance / sigma) * gaussian * vertical
-    # Thermal radial divergence/entrainment:
-    u = radial_speed * (dx / safe)
-    v = radial_speed * (dy / safe)
+    radial_sign = 1.0 - 2.0 * split                    # -1 below (inflow), +1 above (outflow)
+    u = radial_sign * radial_speed * (dx / safe)
+    v = radial_sign * radial_speed * (dy / safe)
 
     return xp.stack([u, v, w], axis=-1)
 
@@ -734,16 +798,19 @@ def thermal_updraft(position, env: EnvironmentConfig, time_s: float = 0.0) -> np
 
         w = thermal_strength
             * exp( -( (x-x_c)^2 + (y-y_c)^2 ) / (2 sigma^2) )
-            * exp( -( (z-z_c) / H )^2 )
+            * V(z)
 
-    with ``sigma``/``H`` from :func:`thermal_geometry` and the core position
-    ``(x_c, y_c)`` slowly orbiting on a 24 s period (phases from
-    ``turbulence_seed``).  The first two components are the horizontal
-    entrainment inflow, so the result can be summed straight into
-    :func:`wind_velocity`.
+    where ``V(z)`` is the surface-rooted vertical profile: ``(z/z_core)^(1/3)``
+    for ``z`` below the core height and ``exp( -( (z - z_core) / H )^2 )``
+    above it, with ``z`` measured from the ground plane.  ``sigma``/``H`` come
+    from :func:`thermal_geometry` and the core position ``(x_c, y_c)`` slowly
+    orbits on a 24 s period (phases from ``turbulence_seed``).  The first two
+    components are the horizontal entrainment: an **inflow** below the core
+    and an **outflow** above it, so the column draws air in at its base and
+    spills it out at the top.
 
     Returns a ``(3,)`` vector for a single point and an ``(N, 3)`` array for a
-    batch.  At the core both exponentials equal 1, hence ``w`` is exactly
+    batch.  At the core the profile equals 1, hence ``w`` is exactly
     ``thermal_strength`` -- the plume peak is strictly linear in the strength --
     and the whole field is identically zero for ``thermal_strength == 0``.
     """
@@ -758,9 +825,9 @@ def thermal_updraft(position, env: EnvironmentConfig, time_s: float = 0.0) -> np
 def _turbulence_components(P, env: EnvironmentConfig, drift_host: np.ndarray, ops: _Ops):
     """Three-channel vectorised simplex turbulence for an ``(N, 3)`` device array."""
     xp = ops.xp
-    amplitude = turbulence_amplitude(env)
+    amplitude_ref = turbulence_amplitude(env)
     n = int(P.shape[0])
-    if n == 0 or amplitude <= 0.0:
+    if n == 0 or amplitude_ref <= 0.0:
         return xp.zeros((n, 3), dtype=P.dtype)
 
     scale = max(
@@ -768,13 +835,34 @@ def _turbulence_components(P, env: EnvironmentConfig, drift_host: np.ndarray, op
         _TURBULENCE_WAVELENGTH_BASE_M * max(float(env.turbulence_scale), 0.0),
     )
     seed = int(env.turbulence_seed)
-    drift = ops.const(np.asarray(drift_host, dtype=np.float64) / scale)
+    # ``drift_host`` is a physical displacement in metres (Taylor frozen
+    # turbulence advected by the mean wind).  The sample position ``P`` is
+    # scaled into noise units by the integral length scale ``scale`` so that
+    # the turbulence correlation length equals ``turbulence_scale`` metres and
+    # the pattern advects at the physical mean-wind speed (m/s), not V/scale.
+    drift = ops.const(np.asarray(drift_host, dtype=np.float64))
+
+    # Local mean-wind scaling (M-24): turbulence intensity is a fraction of the
+    # LOCAL mean wind u(z), shaped by the boundary layer, not the reference
+    # wind speed.  Since u(z)/u_ref = boundary_layer_ratio(z), the local
+    # amplitude is turbulence_amplitude(env) * ratio(z).  ``turbulence_amplitude``
+    # itself keeps the documented reference-speed product (gust_intensity *
+    # wind_speed * turbulence_scale) and is unchanged; the per-point local
+    # scaling happens here.
+    heights_agl = ops.to_host(P[:, 2]) - float(env.ground_level_m)
+    if bool(env.boundary_layer_enabled):
+        ratio_host = boundary_layer_ratio(heights_agl, env)
+    else:
+        ratio_host = np.ones(n, dtype=np.float64)
+    local_amplitude = amplitude_ref * ops.const(np.asarray(ratio_host, dtype=np.float64))
 
     channels: List[Any] = []
     for index, offset in enumerate(_TURBULENCE_CHANNELS):
-        sampled = (P - drift) + ops.const(offset)
+        sampled = (P - drift) / scale + ops.const(offset)
         channels.append(_simplex_noise3_points(sampled, seed + index, ops))
-    return xp.stack(channels, axis=-1) * amplitude
+    stacked = xp.stack(channels, axis=-1)
+    weights = xp.array([1.0, 1.0, _TURBULENCE_VERTICAL_WEIGHT], dtype=P.dtype)
+    return stacked * (local_amplitude[:, None] * weights)
 
 
 def velocity_components(points, env: EnvironmentConfig, time_s: float = 0.0, backend: str = "numpy") -> np.ndarray:
@@ -786,17 +874,27 @@ def velocity_components(points, env: EnvironmentConfig, time_s: float = 0.0, bac
     ``torch.cuda``).  The composition is, in order:
 
     1. wind-tunnel mode -> uniform ``(wind_tunnel_speed, 0, 0)`` stream with no
-       turbulence, no boundary layer and no thermals,
+       turbulence, no boundary layer and no thermals.  The stream is the
+       velocity of the air along the tunnel axis, so the bench model is mounted
+       facing the oncoming flow and its air-relative velocity is
+       ``-(wind_tunnel_speed, 0, 0)`` (see
+       :func:`physics.flight_sim.wind_tunnel_bench_quaternion`),
     2. the steady mean wind direction, its magnitude shaped per grid point by
        the log-law ABL profile evaluated at the height above the ground plane
        and scaled by the gust envelope,
-    3. the thermal plume (vertical velocity + horizontal entrainment),
+    3. the thermal plume (vertical velocity + horizontal entrainment).  The
+       column is rooted at the surface (``w ~ z^(1/3)`` up to the core, then a
+       Gaussian decay) and the entrainment is an inflow below the core and an
+       outflow above it, so the plume converges mass at its base,
     4. three decorrelated channels of vectorised 3D simplex turbulence with
        amplitude ``gust_intensity * wind_speed * turbulence_scale``, advected by
-       Taylor's frozen turbulence hypothesis,
-    5. an impermeable ground: the plume and vertical motion are ramped linearly
-       to zero across the lowest 0.5 m, so the vertical component is exactly
-       ``0`` at and below ``env.ground_level_m``.
+       Taylor's frozen turbulence hypothesis.  The vertical component is
+       weighted by ``sigma_w / sigma_u ~ 0.5`` (neutral surface layer) and is
+       mirrored about the ground plane so that the surface blocks the net
+       flux without switching the eddies off,
+    5. an impermeable ground: the MEAN (plume) vertical motion is ramped
+       linearly to zero across the lowest 0.5 m, so the mean vertical
+       component is exactly ``0`` at and below ``env.ground_level_m``.
     """
     backend_name, _ = _resolve_backend(backend)
     return _velocity_device(np.asarray(points, dtype=np.float64), env, float(time_s), backend_name)
@@ -811,27 +909,49 @@ def _velocity_device(points: np.ndarray, env: EnvironmentConfig, time_s: float, 
         return np.zeros((0, 3), dtype=np.float64)
 
     # --- wind tunnel measurement mode (REQ-07, AGENTS.md 5) -----------------------
+    # The stream is the velocity of the **air** along the tunnel axis (+x), not
+    # the air-relative velocity of the model.  A model held on the bench faces
+    # the oncoming flow, so its air-relative velocity is ``-(v, 0, 0)``; the
+    # mounting that realises this is ``physics.flight_sim.wind_tunnel_bench_quaternion``
+    # (bench heading 180 deg).  Both files share this convention, so the tunnel
+    # incidence is evaluated as the requested positive alpha.
     if bool(env.wind_tunnel_enabled):
         speed = float(env.wind_tunnel_speed)
         stream = np.zeros((n, 3), dtype=np.float64)
-        if getattr(env, "wind_tunnel_boundary_correction", False):
-            # When boundary correction is requested:
-            blockage_factor = 1.035
+        tunnel_radius = float(getattr(env, "wind_tunnel_radius_m", 2.5))
+        wall_thickness = float(getattr(env, "wind_tunnel_wall_thickness_m", 0.15))
+        r_wall = np.sqrt(points[:, 1] ** 2 + points[:, 2] ** 2)
+        # Wall boundary-layer damping: the streamwise speed is reduced within
+        # ``wall_thickness`` of the tunnel wall (the wall layer is set by the
+        # distance from the wall, not by the model height).  The damping factor
+        # is exactly 1.0 in the tunnel core and outside the test section, so
+        # the uniform free-stream contract of the flag-off baseline is
+        # preserved everywhere except the physical wall layer.
+        if wall_thickness > 0.0 and tunnel_radius > 0.0:
+            dist_to_wall = tunnel_radius - r_wall
+            in_layer = (dist_to_wall > 0.0) & (dist_to_wall <= wall_thickness)
+            wall_damping = np.ones(n, dtype=np.float64)
+            wall_damping[in_layer] = np.clip(
+                1.0 - np.exp(-dist_to_wall[in_layer] / wall_thickness), 0.0, 1.0
+            )
+        else:
+            wall_damping = np.ones(n, dtype=np.float64)
+        if bool(getattr(env, "wind_tunnel_boundary_correction", False)):
+            # Full boundary correction: blockage contraction, free-stream TI
+            # and the wall layer.  All of blockage / radius / TI / wall
+            # thickness are actually used here.
+            blockage_factor = float(getattr(env, "wind_tunnel_blockage", 1.035))
             v_eff = speed * blockage_factor
-            stream[:, 0] = v_eff
+            stream[:, 0] = v_eff * wall_damping
             if n > 0:
-                ti = 0.005
+                ti = float(getattr(env, "wind_tunnel_turbulence_intensity", 0.005))
                 phase = time_s * 15.0
                 stream[:, 0] += v_eff * ti * np.sin(points[:, 1] * 20.0 + phase)
                 stream[:, 1] += v_eff * ti * np.cos(points[:, 0] * 20.0 + phase)
                 stream[:, 2] += v_eff * ti * np.sin(points[:, 2] * 20.0 + phase * 0.7)
-                r_wall = np.sqrt(points[:, 1]**2 + points[:, 2]**2)
-                tunnel_radius = 2.5
-                wall_damping = np.clip(1.0 - np.exp(-(np.maximum(tunnel_radius - r_wall, 0.0) / 0.15)), 0.0, 1.0)
-                stream[:, 0] *= wall_damping
         else:
-            # Baseline test-contract: strict uniform stream
-            stream[:, 0] = speed
+            # Baseline test-contract: uniform stream with the wall layer only.
+            stream[:, 0] = speed * wall_damping
         return stream
 
 
@@ -842,6 +962,20 @@ def _velocity_device(points: np.ndarray, env: EnvironmentConfig, time_s: float, 
     # --- steady horizontal mean, shaped per point by the ABL log profile ---
     mean_vector = mean_wind_vector(env)
     mean_speed = float(math.hypot(mean_vector[0], mean_vector[1]))
+    # Height convention (single source of truth for every caller): the third
+    # component of a query point is the **z-up altitude on the
+    # ``ground_level_m`` datum** -- the ground plane is the plane
+    # ``z = env.ground_level_m`` of this module, which is the same plane as
+    # ``z = -ground_level_m`` of the world NED frame.  The height above the
+    # ground plane is therefore formed here, once, as ``z - ground_level_m``.
+    # A caller must NOT pass the height above the ground plane (the ground
+    # level would then be subtracted twice) and must NOT pass
+    # ``ground_level_m + z`` (the ground level would be added once and
+    # subtracted once, i.e. the wind would be sampled at the altitude above
+    # sea level instead of at the height above the ground plane).  The 6-DoF
+    # reference path (:func:`physics.flight_sim.wind_vector`) and the batched
+    # path (:func:`physics.gpu_dynamics.wind_batch`) both convert their world
+    # position with ``z_up = -z_ned``.
     heights_agl = points[:, 2] - ground
     if bool(env.boundary_layer_enabled):
         ratio_host = boundary_layer_ratio(heights_agl, env)
@@ -854,7 +988,16 @@ def _velocity_device(points: np.ndarray, env: EnvironmentConfig, time_s: float, 
     # --- thermal plume, faded out by the impermeable ground --------------
     P = ops.const(points)
     thermal = _thermal_components(P, env, time_s, ops)
-    damping = xp.maximum(xp.minimum((P[:, 2] - ground) / _GROUND_DAMPING_DEPTH_M, 1.0), 0.0)
+    height_agl = P[:, 2] - ground
+    # Mean (plume) vertical motion: ramped smoothly to zero across the
+    # ground layer so that the impermeable surface is respected.
+    damping = _smoothstep01(height_agl / _GROUND_DAMPING_DEPTH_M)
+    # Turbulent vertical motion: a thin wall boundary layer restores the
+    # eddy just above the surface.  The previous code applied the full 0.5 m
+    # ramp to the turbulence as well, which switched the turbulent eddies off
+    # in the lowest half metre (where the vertical velocity variance actually
+    # peaks) and left a slope discontinuity at the top of that layer.
+    turb_damping = _smoothstep01(height_agl / _TURBULENCE_WALL_LAYER_M)
 
     # --- turbulence, frozen-field advected by the mean wind ---------------
     drift_host = np.array(
@@ -866,7 +1009,7 @@ def _velocity_device(points: np.ndarray, env: EnvironmentConfig, time_s: float, 
         [
             thermal[:, 0] + ops.const(u_mean) + turbulence[:, 0],
             thermal[:, 1] + ops.const(v_mean) + turbulence[:, 1],
-            (thermal[:, 2] + turbulence[:, 2]) * damping,
+            thermal[:, 2] * damping + turbulence[:, 2] * turb_damping,
         ],
         axis=-1,
     )
@@ -886,6 +1029,12 @@ def wind_velocity(position, env: EnvironmentConfig, time_s: float = 0.0) -> np.n
     return values[0] if flat else values
 
 
+def _check_grid_budget(total_points: int) -> None:
+    """Reject a grid that exceeds the safety limit on the number of points."""
+    if total_points > _MAX_GRID_POINTS:
+        raise ValueError(f"total grid points ({total_points}) exceeds safety limit {_MAX_GRID_POINTS}")
+
+
 def _parse_resolution(resolution: Any) -> Tuple[Tuple[int, int, int], Any]:
     """Normalise ``resolution`` into ``((nx, ny, nz), echoed_value)``."""
     if isinstance(resolution, bool):
@@ -894,12 +1043,14 @@ def _parse_resolution(resolution: Any) -> Tuple[Tuple[int, int, int], Any]:
         count = int(resolution)
         if count < 1:
             raise ValueError(f"resolution must be >= 1, got {count}")
+        _check_grid_budget(count * count * count)
         return (count, count, count), count
     values = [int(v) for v in np.asarray(resolution, dtype=np.int64).reshape(-1)]
     if len(values) == 1:
         count = values[0]
         if count < 1:
             raise ValueError(f"resolution must be >= 1, got {count}")
+        _check_grid_budget(count * count * count)
         return (count, count, count), count
     if len(values) != 3:
         raise ValueError(
@@ -907,8 +1058,7 @@ def _parse_resolution(resolution: Any) -> Tuple[Tuple[int, int, int], Any]:
         )
     if min(values) < 1:
         raise ValueError(f"every resolution component must be >= 1, got {values}")
-    if values[0] * values[1] * values[2] > 262144:
-        raise ValueError(f"total grid points ({values[0] * values[1] * values[2]}) exceeds safety limit 262144")
+    _check_grid_budget(values[0] * values[1] * values[2])
     return (values[0], values[1], values[2]), values
 
 

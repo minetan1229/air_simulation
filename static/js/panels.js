@@ -28,6 +28,35 @@ const FIELD_TABLE = {
     { key: "aeroelastic_flex", label: "翼しなり係数", unit: "", min: 0, max: 2.0, step: 0.02, digits: 2 },
     { key: "aeroelastic_twist", label: "翼端ねじれ係数", unit: "", min: 0, max: 2.0, step: 0.02, digits: 2 },
   ],
+  origami: [
+    { key: "enabled", kind: "toggle", label: "折り紙モデルを使用", section: "origami" },
+    {
+      key: "archetype",
+      kind: "select",
+      label: "機体タイプ",
+      section: "origami",
+      options: [
+        ["classic_dart", "Classic Dart / やり飛行機"],
+        ["nakamura_lock", "Nakamura Lock / へそ飛行機"],
+        ["sky_king", "Sky King / 競技用グライダー"],
+      ],
+    },
+    { key: "progression", label: "折り工程 α", unit: "%", scale: 100, min: 0, max: 100, step: 1, digits: 0, section: "origami" },
+    { key: "genome_enabled", kind: "toggle", label: "無作為折り方（遺伝子）", section: "origami" },
+    {
+      key: "genome_strategy",
+      kind: "select",
+      label: "遺伝子戦略",
+      section: "origami",
+      options: [
+        ["families", "折り族群（折可行的）"],
+        ["free", "完全無作為"],
+      ],
+    },
+    { key: "genome_seed", label: "遺伝子シード", min: 0, max: 9999, step: 1, digits: 0, section: "origami" },
+    { key: "genome_steps", label: "折り手数", min: 2, max: 24, step: 1, digits: 0, section: "origami" },
+    { key: "genome_step", label: "折り手順", min: 0, max: 24, step: 1, digits: 0, section: "origami" },
+  ],
   fold: [
     { key: "fold_leading_deg", label: "前縁折り角", unit: DEG, min: 0, max: 90, step: 0.5, digits: 1 },
     { key: "fold_trailing_deg", label: "後縁折り角", unit: DEG, min: -45, max: 45, step: 0.5, digits: 1 },
@@ -38,9 +67,8 @@ const FIELD_TABLE = {
     { key: "elevon_chord_ratio", label: "操作翼弦比", unit: "", min: 0.05, max: 0.5, step: 0.01, digits: 2 },
   ],
   throw: [
-    { key: "launch_speed", label: "発射初速", unit: "m/s", min: 2, max: 40, step: 0.1, digits: 1 },
-    { key: "launch_angle_deg", label: "発射角（軌道角）", unit: DEG, min: -30, max: 85, step: 0.5, digits: 1 },
-    { key: "release_pitch_deg", label: "迎え角 (AoA)", unit: DEG, min: -30, max: 45, step: 0.5, digits: 1 },
+    { key: "launch_speed", label: "投擲初速", unit: "m/s", min: 2, max: 40, step: 0.1, digits: 1 },
+    { key: "launch_angle_deg", label: "投擲角（軌道角）", unit: DEG, min: -30, max: 85, step: 0.5, digits: 1 },
     { key: "launch_roll_deg", label: "ロール角", unit: DEG, min: -90, max: 90, step: 0.5, digits: 1 },
     { key: "launch_yaw_deg", label: "ヨー角", unit: DEG, min: -90, max: 90, step: 0.5, digits: 1 },
     { key: "launch_height_m", label: "放し高", unit: "m", min: 0, max: 6, step: 0.05, digits: 2 },
@@ -121,6 +149,7 @@ const FIELD_TABLE = {
 
 const HOST_SECTION = {
   airframe: "aircraft",
+  origami: "origami",
   fold: "aircraft",
   throw: "launch",
   atmosphere: "environment",
@@ -216,7 +245,7 @@ export class ParameterPanels {
     const top = make("div", { class: "field-top" }, [label, unit, value]);
 
     if (spec.kind === "toggle") {
-      const input = make("input", { type: "checkbox" });
+      const input = make("input", { type: "checkbox", "aria-label": spec.label });
       input.checked = Boolean(this.store.get(section, spec.key));
       input.addEventListener("change", () => {
         this.store.set(section, spec.key, input.checked, "ui");
@@ -227,7 +256,7 @@ export class ParameterPanels {
       const toggle = make("label", { class: "switch", style: "margin-top:2px" }, [
         input,
         box,
-        make("span", { class: "switch-label muted", text: spec.hint || "有効" }),
+        make("span", { class: "switch-label muted", text: spec.hint || spec.label || "有効" }),
       ]);
       field.append(top, toggle);
       this.controls.push({ spec, section, input, value, kind: "toggle" });

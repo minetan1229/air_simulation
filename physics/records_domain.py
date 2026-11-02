@@ -34,7 +34,7 @@ The 2026 record progression (all indoor, all on unmodified A4):
 
 * **31.2 s** time aloft -- Rao Chongyi, Wang Chenghao, Tang Shuai, Liu Liwen,
   Yang Shian, Jia Siyi and Pan Zichen (China), Kunshan, Jiangsu, 11 February
-  2026.  The stopwatch read 31.22 s.  The airframe was the ``Unite`` (天庁E
+  2026.  The stopwatch read 31.22 s.  The airframe was the ``Unite`` (天鹰),
   designed by Wang Chenghao; the first officially judged throw of the day, by
   Rao Chongyi, flew 29.53 s on the ``Wind Voyager-UR``.
 * **98.43 m (322 ft 11 in)** -- Liu Liwen (China) with Tang Shuai, Yang Shian,
@@ -172,21 +172,21 @@ DESIGN_CLASSES: Dict[str, Dict[str, Any]] = {
 RECORD_METRICS: Dict[str, Dict[str, Any]] = {
     "indoor_duration": {
         "label": "Longest time flying a paper aircraft (indoors)",
-        "label_ja": "紙飛行橁E室冁E��長滞空時間",
+        "label_ja": "紙飛行機・室内最長滞空時間",
         "unit": "s",
         "sim_key": "flight_time_s",
         "higher_is_better": True,
     },
     "indoor_distance": {
         "label": "Farthest flight by a paper aircraft (indoors)",
-        "label_ja": "紙飛行橁E室冁E��長飛距離",
+        "label_ja": "紙飛行機・室内最長飛距離",
         "unit": "m",
         "sim_key": "distance_m",
         "higher_is_better": True,
     },
     "outdoor_launch_altitude": {
         "label": "Highest altitude paper plane launch",
-        "label_ja": "紙飛行橁E最高打ち上げ高度",
+        "label_ja": "紙飛行機・最高打ち上げ高度",
         "unit": "m",
         "sim_key": "max_altitude_m",
         "higher_is_better": True,
@@ -199,60 +199,60 @@ THROW_RULES: Tuple[Dict[str, str], ...] = (
     {
         "key": "blackburn_vertical",
         "label": "Within 10 degrees of vertical",
-        "label_ja": "鉛直から 10 度以冁E",
+        "label_ja": "鉛直から 10 度以内",
         "statement": (
             "Ken Blackburn, holder of the duration record from 1983-1996 and "
             "again from 1998: for maximum height and a good transition to "
             "gliding flight the throw must be within 10 degrees of vertical."
         ),
         "statement_ja": (
-            "滞空記録保持老EケンブラチE��ンの法則: 最大高度と滑空への移行を"
-            "得るには、投擲角�E鉛直から 10 度以冁E��なければならなぁE��E"
+            "1983 年から 1996 年まで、そして 1998 年から再び滞空記録を保持した"
+            "ケン・ブラックバーンの投擲則: 最大高度と滑空への良好な移行を得るには、"
+            "投擲角は鉛直から 10 度以内でなければならない。"
         ),
         "source": "ken_blackburn_1998",
     },
     {
         "key": "blackburn_speed",
         "label": "At least 97 km/h (60 mph)",
-        "label_ja": "少なくとめE97 km/h (60 mph)",
+        "label_ja": "少なくとも 97 km/h (60 mph)",
         "statement": (
             "Ken Blackburn: a speed of at least 60 mph (97 km/h) is required "
             "to throw the plane successfully into the transition."
         ),
         "statement_ja": (
-            "ケンブラチE��ンの法則: 滑空への移行には少なくとめE60 mph "
-            "(97 km/h) の投擲速度が忁E��、E"
+            "ケン・ブラックバーンの投擲則: 滑空への移行を成功させるには少なくとも 60 mph (97 km/h) "
+            "の投擲速度が必要である。"
         ),
         "source": "ken_blackburn_1998",
     },
     {
         "key": "unite_full_power",
         "label": "Full-power throw, no run-up reported",
-        "label_ja": "全力投擲�E�助走の記載なし！E",
+        "label_ja": "全力投擲（助走の記載なし）",
         "statement": (
             "The 2026 duration record was set on the substitute thrower's "
             "first attempt after Rao Chongyi had made more than fifty "
             "consecutive full-power throws and exhausted himself."
         ),
         "statement_ja": (
-            "2026 年の滞空記録は、代琁E��手が入場直後�E初投で達�Eされた、E"
-            "先に公式投擲を行った饒翀逸自身ぁE50 回以上�E連続�E力投擲で"
-            "疲労してぁE��、E"
+            "2026 年の滞空記録は、代理投擲者の初投で達成された。"
+            "先に公式投擲を行った饒翀逸自身が 50 回以上の連続全力投擲で疲労困憊したためである。"
         ),
         "source": "gwr_cn_2026_03",
     },
     {
         "key": "winter_conditions",
         "label": "Dry, cold indoor hall in winter",
-        "label_ja": "冬の乾燥した低温の室冁E��育館",
+        "label_ja": "冬の乾燥した低温の室内体育館",
         "statement": (
             "The team reports that the southern summer made the paper damp "
             "and the air unstable, and that the dry, low-temperature winter "
             "gave the paper and the throw their best behaviour."
         ),
         "statement_ja": (
-            "南�E夏�E湿度が高く紙が湿って気流も不安定になるため、乾燥した"
-            "冬の低温期が最良の条件だったとチ�Eムは報告してぁE��、E"
+            "南方の夏は湿度が高く紙が湿気を含み気流も不安定になるため、"
+            "乾燥した冬の低温期が最良の条件であったとチームは報告している。"
         ),
         "source": "gwr_cn_2026_03",
     },
@@ -274,7 +274,7 @@ SOURCE_NOTES: Dict[str, Dict[str, str]] = {
         "accessed": "2026-07-13",
     },
     "gwr_cn_2026_03": {
-        "title": "中国团队刷新纸飞机滞空吉尼斯世界纪彁E",
+        "title": "中国团队刷新纸飞机滞空吉尼斯世界纪录",
         "publisher": "Guinness World Records China",
         "url": "https://www.guinnessworldrecords.cn/news/2026/3/longest-flying-paper-aircraft-duration",
         "accessed": "2026-07-13",
@@ -409,7 +409,7 @@ COMPETITION_RULES: Tuple[CompetitionRule, ...] = (
     CompetitionRule(
         key="sheet_format",
         label="Unmodified A4 (or equivalent) sheet",
-        label_ja="無加工の A4 判�E�同等品�E�E",
+        label_ja="無加工の A4 判（または同等品）",
         value=A4_SHEET_AREA_M2,
         unit="m2",
         statement=(
@@ -417,35 +417,34 @@ COMPETITION_RULES: Tuple[CompetitionRule, ...] = (
             "available A4 or equivalent sheet."
         ),
         statement_ja=(
-            "紙飛行機�E無加工の commercially available な A4 判�E�また�E同等品�E�E"
-            "で製作しなければならなぁE��E"
+            "紙飛行機は無加工の市販 A4 判（または同等品）の 1 枚紙で製作しなければならない。"
         ),
         source="gwr_duration_2026",
     ),
     CompetitionRule(
         key="max_grammage",
         label="Maximum paper density",
-        label_ja="紙�E寁E��の上限",
+        label_ja="紙の坪量の上限",
         value=MAX_PAPER_GSM,
         unit="g/m2",
         statement="The rules cap the paper at 100 g/m^2.",
-        statement_ja="規則は紙�E坪量を 100 g/m^2 以下に限定する、E",
+        statement_ja="規則は紙の坪量を 100 g/m^2 以下に限定する。",
         source="wikipedia_paper_plane",
     ),
     CompetitionRule(
         key="max_tape",
         label="Permitted tape area",
-        label_ja="使用可能なチE�Eプ面穁E",
+        label_ja="使用可能なテープ面積",
         value=MAX_TAPE_AREA_MM2,
         unit="mm2",
         statement="25 mm x 30 mm of tape is allowed.",
-        statement_ja="チE�Eプ�E 25 mm x 30 mm まで使用できる、E",
+        statement_ja="テープは最大 25 mm x 30 mm まで使用できる。",
         source="wikipedia_paper_plane",
     ),
     CompetitionRule(
         key="max_mass",
         label="Resulting mass ceiling",
-        label_ja="由此得�E皁E��量上限",
+        label_ja="規定から導かれる機体質量上限",
         value=GWR_MASS_CAP_KG,
         unit="kg",
         statement=(
@@ -453,8 +452,8 @@ COMPETITION_RULES: Tuple[CompetitionRule, ...] = (
             "airframe can be heavier than that."
         ),
         statement_ja=(
-            "100 g/m^2 の A4 判は 6.237 g であり、競技に合法性を持つ機体�E"
-            "これより重くできなぁE��E"
+            "100 g/m^2 の A4 判用紙は 6.237 g であり、"
+            "競技規則に適合する機体はこれより重くすることはできない。"
         ),
         source="wikipedia_paper_plane",
     ),
@@ -465,13 +464,13 @@ COMPETITION_RULES: Tuple[CompetitionRule, ...] = (
         value=MAX_RUNUP_M,
         unit="m",
         statement="The throwing events permit a 10 ft (3.04 m) run-up.",
-        statement_ja="投擲種目では 10 ft (3.04 m) の助走が許される、E",
+        statement_ja="投擲種目では 10 ft (3.04 m) の助走が許される。",
         source="wikipedia_paper_plane",
     ),
     CompetitionRule(
         key="indoors_only",
         label="Indoors",
-        label_ja="室冁E��宁E",
+        label_ja="屋内競技限定",
         value=1.0,
         unit="bool",
         statement=(
@@ -479,8 +478,7 @@ COMPETITION_RULES: Tuple[CompetitionRule, ...] = (
             "attempted by an individual and timed to the nearest 1/100 s."
         ),
         statement_ja=(
-            "現行�E二記録はぁE��れも室冁E��達�Eされた。滞空種目は個人で"
-            " Challenge し、E.01 秒単位で計測される、E"
+            "現行の世界記録はいずれも屋内で達成された。滞空種目は個人による挑戦で、1/100 秒単位で計測される。"
         ),
         source="gwr_duration_2026",
     ),
@@ -667,7 +665,10 @@ class RecordPreset:
         source.update(self.launch)
         # The airframe is trimmed for RECORD_TRIM_ALPHA_DEG, so the hand has to
         # leave that much incidence on the wing (see the module constant).
-        source.setdefault("release_pitch_deg", RECORD_TRIM_ALPHA_DEG)
+        # The preset owns this value: every LaunchConfig carries a
+        # ``release_pitch_deg`` already, so a setdefault never fired and the
+        # catalogue endpoint and the apply endpoint could disagree.
+        source["release_pitch_deg"] = RECORD_TRIM_ALPHA_DEG
         source.update(
             {
                 "throw_style": recipe.throw_style,
@@ -774,7 +775,7 @@ def gwr_compliance(aircraft: Any) -> Dict[str, Any]:
         {
             "key": "sheet_area",
             "label": "Unfolded sheet area",
-            "label_ja": "展開面穁E",
+            "label_ja": "展開面積",
             "value": sheet,
             "unit": "m2",
             "limit": A4_SHEET_AREA_M2,
@@ -784,7 +785,7 @@ def gwr_compliance(aircraft: Any) -> Dict[str, Any]:
         {
             "key": "paper_gsm",
             "label": "Paper grammage",
-            "label_ja": "坪釁E",
+            "label_ja": "坪量",
             "value": gsm,
             "unit": "g/m2",
             "limit": MAX_PAPER_GSM,
@@ -794,7 +795,7 @@ def gwr_compliance(aircraft: Any) -> Dict[str, Any]:
         {
             "key": "mass",
             "label": "Total mass",
-            "label_ja": "総質釁E",
+            "label_ja": "総質量",
             "value": mass,
             "unit": "kg",
             "limit": GWR_MASS_CAP_KG,
@@ -1006,6 +1007,9 @@ def _finalise(payload: Dict[str, Any]) -> Dict[str, Any]:
 #: over the top and loops the glider inside 0.2 s.  ``_airframe`` sets
 #: ``elevon_deg`` to null the moment here, and every preset launches with
 #: ``release_pitch_deg = RECORD_TRIM_ALPHA_DEG`` so the wing is already at it.
+#: This constant is the single source of that value: the catalogue never spells
+#: the trim angle out, and :meth:`RecordPreset.launch_config` applies it to every
+#: preset, so the catalogue payload and the applied launch cannot disagree.
 RECORD_TRIM_ALPHA_DEG: float = 3.0
 
 
@@ -1024,8 +1028,8 @@ def _airframe(**overrides: Any) -> Dict[str, Any]:
     """A competition airframe with ``elevon_deg`` trimmed for the launch alpha.
 
     Every preset that uses this must also launch with
-    ``launch.release_pitch_deg = RECORD_TRIM_ALPHA_DEG``; :func:`preset_payload`
-    injects it so the two can never disagree.
+    ``launch.release_pitch_deg = RECORD_TRIM_ALPHA_DEG``; :meth:`RecordPreset.launch_config`
+    injects it from this constant, so the two can never disagree.
     """
     payload = _finalise(_competition_airframe(**overrides))
     if "elevon_deg" in overrides:
@@ -1050,7 +1054,7 @@ def _stable_throw(
 ) -> ThrowRecipe:
     return ThrowRecipe(
         technique="Model-calibrated throw",
-        technique_ja="モチE��輁E��投擲",
+        technique_ja="モデル校正投擲",
         throw_style=style,
         release_speed_mps=speed,
         launch_angle_deg=angle,
@@ -1071,7 +1075,7 @@ RECORD_PRESET_CATALOGUE: Tuple[RecordPreset, ...] = (
     RecordPreset(
         key="unite_31s",
         name="Unite (Tian Ying) - 31.2 s time aloft",
-        name_ja="天应！Enite�E�E- 滞空 31.2 私E",
+        name_ja="天鹰 (Unite) - 滞空 31.2 秒",
         category="indoor_duration",
         design_class="world_record_competition",
         achievement=RecordAchievement(
@@ -1080,12 +1084,12 @@ RECORD_PRESET_CATALOGUE: Tuple[RecordPreset, ...] = (
             unit="s",
             holder="Rao Chongyi, Wang Chenghao, Tang Shuai, Liu Liwen, "
             "Yang Shian, Jia Siyi, Pan Zichen",
-            holder_ja="饒翀逸・王承昊�E唐币E�E劉力斁E�E楊仕安�E賈思�E・潘秭辰",
+            holder_ja="饒翀逸・王承昊・唐帥・劉力文・楊仕安・賈思翼・潘秭辰",
             country="China",
             date="2026-02-11",
             venue="Kunshan Sports Center Gymnasium, Kunshan, Jiangsu",
             aircraft_name="Unite (Tian Ying)",
-            aircraft_name_ja="天应！Enite�E�E",
+            aircraft_name_ja="天鹰 (Unite)",
             team=(
                 "Rao Chongyi",
                 "Wang Chenghao",
@@ -1104,15 +1108,16 @@ RECORD_PRESET_CATALOGUE: Tuple[RecordPreset, ...] = (
                 "exhausted Rao Chongyi."
             ),
             notes_ja=(
-                "計測値は 31.22 秒。同日の公式一投目は饒翀逸ぁE"
-                "「Wind Voyager-UR」で 29.53 秒。最終記録投�E、E0 回以上�E"
-                "連続�E力投擲で疲労した饒翀逸の後を継いだ代琁E��扁E"
-                "劉力斁E��、王承昊設計�E「天应」で記録した、E"
+                "ストップウォッチの計測値は 31.22 秒。"
+                "同日の公式一投目に饒翀逸が「Wind Voyager-UR」で 29.53 秒を出し、"
+                "戸田拓夫の 15 年間の記録を更新していた。"
+                "最終的な世界記録投擲は、50 回以上の連続全力投擲で疲労困憊した饒翀逸の後を継いだ代理投擲者の劉力文が、"
+                "王承昊設計の「天鹰」を投げて樹立した。"
             ),
         ),
         throw=ThrowRecipe(
             technique="Full-power indoor throw, no run-up",
-            technique_ja="全力投擲�E�助走なし�E室冁E��E",
+            technique_ja="全力投擲（助走なし、室内）",
             throw_style="record_overhand",
             release_speed_mps=26.0,
             launch_angle_deg=80.0,
@@ -1152,7 +1157,6 @@ RECORD_PRESET_CATALOGUE: Tuple[RecordPreset, ...] = (
             "launch_height_m": 1.8,
             "launch_roll_deg": 0.0,
             "launch_yaw_deg": 0.0,
-            "release_pitch_deg": 0.0,
             "throw_speed_source": "direct",
             "throw_torque_efficiency": 0.15,
             "throw_runup_m": 0.0,
@@ -1172,14 +1176,14 @@ RECORD_PRESET_CATALOGUE: Tuple[RecordPreset, ...] = (
             "from the 100 g/m^2 A4 rule."
         ),
         notes_ja=(
-            "機体諸允E�E推定値。記録団体が公開してぁE��のは記録値・会場・チ�Eム名�Eみで、E"
-            "寸法�EなぁE��質量�E 100 g/m^2 の A4 規則から導�E、E"
+            "機体諸元は推定値。記録団体が公開しているのは記録値・会場・チーム名のみで、寸法は非公開。"
+            "質量は 100 g/m^2 の A4 規則から算出した。"
         ),
     ),
     RecordPreset(
         key="wind_voyager_ur_29_5s",
         name="Wind Voyager-UR - 29.53 s time aloft",
-        name_ja="Wind Voyager-UR - 滞空 29.53 私E",
+        name_ja="Wind Voyager-UR - 滞空 29.53 秒",
         category="indoor_duration",
         design_class="world_record_competition",
         achievement=RecordAchievement(
@@ -1187,12 +1191,12 @@ RECORD_PRESET_CATALOGUE: Tuple[RecordPreset, ...] = (
             value=29.53,
             unit="s",
             holder="Rao Chongyi (with the same team)",
-            holder_ja="饒翀逸�E�同一チ�Eム�E�E",
+            holder_ja="饒翀逸（同一チーム）",
             country="China",
             date="2026-02-11",
             venue="Kunshan Sports Center Gymnasium, Kunshan, Jiangsu",
             aircraft_name="Wind Voyager-UR",
-            aircraft_name_ja="风行老EWind Voyager-UR",
+            aircraft_name_ja="风行者 Wind Voyager-UR",
             team=("Rao Chongyi",),
             notes=(
                 "The first officially judged throw of the record day. It beat "
@@ -1202,15 +1206,14 @@ RECORD_PRESET_CATALOGUE: Tuple[RecordPreset, ...] = (
                 "final iteration."
             ),
             notes_ja=(
-                "記録当日の最初�E公式投擲。この一本で戸田の 29.2 秒を更新したが、E"
-                "同日の午後に「天应」がさらに記録を更新したため、この机型�E"
-                "前記録として保存された。チームは当�Eの版�E 18 秒しぁE"
-                "飛�Eなかったと語ってぁE��、E"
+                "記録当日の最初の公式投擲。"
+                "この 1 本で戸田拓夫の 29.2 秒を更新したが、同日の午後に「天鹰」がさらに記録を更新したため、"
+                "本機型は前記録として保存された。チームは開発初期のバージョンでは 18 秒しか飛べなかったと語っている。"
             ),
         ),
         throw=ThrowRecipe(
             technique="Full-power indoor throw, no run-up",
-            technique_ja="全力投擲�E�助走なし�E室冁E��E",
+            technique_ja="全力投擲（助走なし、室内）",
             throw_style="record_overhand",
             release_speed_mps=26.0,
             launch_angle_deg=80.0,
@@ -1246,7 +1249,6 @@ RECORD_PRESET_CATALOGUE: Tuple[RecordPreset, ...] = (
             "launch_height_m": 1.8,
             "launch_roll_deg": 0.0,
             "launch_yaw_deg": 0.0,
-            "release_pitch_deg": 0.0,
             "throw_speed_source": "direct",
             "throw_torque_efficiency": 0.15,
             "throw_runup_m": 0.0,
@@ -1259,13 +1261,13 @@ RECORD_PRESET_CATALOGUE: Tuple[RecordPreset, ...] = (
             "temperature_K": 278.0,
         },
         notes="A slightly larger wing than the 'Unite'; a reconstruction, not a measurement.",
-        notes_ja="「天应」より翼面積が大きい。推定値であり実測ではなぁE��E",
+        notes_ja="「天鹰」より翼面積が大きい。推定値であり実測値ではない。",
     ),
     # ---------------------------------------------------------- distance
     RecordPreset(
         key="firefly5_98m",
         name="Firefly5 research prototype - 98.43 m",
-        name_ja="Research 原型机 Firefly5 - 98.43 m",
+        name_ja="研究原型機 Firefly5 - 98.43 m",
         category="indoor_distance",
         design_class="world_record_competition",
         achievement=RecordAchievement(
@@ -1273,12 +1275,12 @@ RECORD_PRESET_CATALOGUE: Tuple[RecordPreset, ...] = (
             value=98.43,
             unit="m",
             holder="Liu Liwen",
-            holder_ja="劉力斁E",
+            holder_ja="劉力文",
             country="China",
             date="2025-12-28",
             venue="Shanghai Automobile Exhibition Center, Shanghai",
             aircraft_name="Firefly5 (research prototype)",
-            aircraft_name_ja="Research 原型机 Firefly5",
+            aircraft_name_ja="研究原型機 Firefly5",
             team=("Tang Shuai", "Yang Shian", "Huang Yizhou", "Qiao Yuchen", "Wang Chenghao"),
             notes=(
                 "98.43 m (322 ft 11 in), indoors, on A4, breaking Dillon "
@@ -1287,13 +1289,14 @@ RECORD_PRESET_CATALOGUE: Tuple[RecordPreset, ...] = (
                 "of testing and refinement, and was thrown without a run-up."
             ),
             notes_ja=(
-                "室冁E98.43 m�E�E22 ft 11 in�E�、A4 判使用、E ヶ月以上�E試験と改良めE"
-                "重�EぁEResearch 原型機とされ、助走なしで投擲された、E"
+                "室内 98.43 m（322 ft 11 in）、A4 判使用。"
+                "ディロン・ルブルの 88.318 m を 10 m 以上上回った。"
+                "6 ヶ月以上の試験と改良を重ねた研究原型機とされ、助走なしで投擲された。"
             ),
         ),
         throw=ThrowRecipe(
             technique="Hard level throw, no run-up",
-            technique_ja="力強く水平に投擲�E�助走なし！E",
+            technique_ja="力強く水平に投擲（助走なし）",
             throw_style="level_push",
             release_speed_mps=27.0,
             launch_angle_deg=15.0,
@@ -1332,7 +1335,6 @@ RECORD_PRESET_CATALOGUE: Tuple[RecordPreset, ...] = (
             "launch_speed": 29.8,
             "launch_angle_deg": 12.0,
             "launch_height_m": 1.85,
-            "release_pitch_deg": 0.0,
             "throw_speed_source": "direct",
             "throw_runup_m": 0.0,
         },
@@ -1349,15 +1351,15 @@ RECORD_PRESET_CATALOGUE: Tuple[RecordPreset, ...] = (
             "the distance record two months earlier."
         ),
         notes_ja=(
-            "滞空機と同じ競技用機体。これ�Eチ�Eムの実際でもあめE- 滞空記録の 7 名�E"
-            "ぁE�� 4 名�E 2 ヶ月前に距離記録も更新してぁE��、E"
+            "滞空機と同じ競技用機体。"
+            "チームの実際の構成でもある（滞空記録の 7 名のうち 4 名が 2 ヶ月前に距離記録も更新した）。"
         ),
     ),
     # ------------------------------------------------------ predecessors
     RecordPreset(
         key="toda_29_2s",
         name="Takuo Toda glider - 29.2 s",
-        name_ja="戸田拓夫機�E滞空 - 29.2 私E",
+        name_ja="戸田拓夫機・滞空 - 29.2 秒",
         category="indoor_duration",
         design_class="world_record_competition",
         achievement=RecordAchievement(
@@ -1370,15 +1372,15 @@ RECORD_PRESET_CATALOGUE: Tuple[RecordPreset, ...] = (
             date="2010-12-19",
             venue="Fukuyama City, Hiroshima",
             aircraft_name="Takuo Toda paper glider",
-            aircraft_name_ja="戸田拓夫 紙飛行橁E",
+            aircraft_name_ja="戸田拓夫 紙飛行機",
             notes=(
                 "Held the record for fifteen years until February 2026. Toda "
                 "later worked with Shinji Suzuki of the University of Tokyo on "
                 "a space launch that was postponed as untrackable."
             ),
             notes_ja=(
-                "2010 年 12 月かめE15 年間保持。戸田は後に東京大学の鈴木真二と"
-                "宁E��打ち上げAlic を企図したが、追跡不�Eとして延期された、E"
+                "2010 年 12 月から 2026 年 2 月まで 15 年間保持。"
+                "戸田は後に東京大学の鈴木真二教授らと宇宙打ち上げプロジェクトを企図したが、追跡困難として延期された。"
             ),
         ),
         throw=ThrowRecipe(
@@ -1416,7 +1418,6 @@ RECORD_PRESET_CATALOGUE: Tuple[RecordPreset, ...] = (
             "launch_height_m": 1.8,
             "launch_roll_deg": 0.0,
             "launch_yaw_deg": 0.0,
-            "release_pitch_deg": 0.0,
             "throw_speed_source": "direct",
             "throw_runup_m": 0.0,
         },
@@ -1427,7 +1428,7 @@ RECORD_PRESET_CATALOGUE: Tuple[RecordPreset, ...] = (
     RecordPreset(
         key="blackburn_27_6s",
         name="Ken Blackburn glider - 27.6 s",
-        name_ja="ケン・ブラチE��ンの滞空 - 27.6 私E",
+        name_ja="ケン・ブラックバーンの滞空 - 27.6 秒",
         category="indoor_duration",
         design_class="compound_origami",
         achievement=RecordAchievement(
@@ -1435,12 +1436,12 @@ RECORD_PRESET_CATALOGUE: Tuple[RecordPreset, ...] = (
             value=27.6,
             unit="s",
             holder="Ken Blackburn",
-            holder_ja="ケン・ブラチE��ー",
+            holder_ja="ケン・ブラックバーン",
             country="United States",
             date="1998-10-08",
             venue="United States (indoors)",
             aircraft_name="Blackburn 'glider'",
-            aircraft_name_ja="Blackburn 製 glider",
+            aircraft_name_ja="Blackburn 製グライダー",
             notes=(
                 "Blackburn held the record from 1983 to 1996 and regained it in "
                 "October 1998; it was confirmed by Guinness officials and "
@@ -1448,15 +1449,15 @@ RECORD_PRESET_CATALOGUE: Tuple[RecordPreset, ...] = (
                 "this module uses for the record machines."
             ),
             notes_ja=(
-                "1983 年から 1996 年まで保持し、E998 年 10 月に再更新、E"
-                "ギネス認定官が確認し、CNN が報じた、ELACKBURN の投擲剁E"
-                "�E�鉛直 10 度以冁E��E0 mph 以上）�E本モジュールの記録機�E構�Eに"
-                "そ�Eまま使ってぁE��、E"
+                "1983 年から 1996 年まで保持し、1998 年 10 月に再更新。"
+                "ギネス認定官が確認し、CNN が報道した。"
+                "ブラックバーンの投擲則（鉛直から 10 度以内、"
+                "60 mph 以上）は本モジュールの記録機構成にそのまま使われている。"
             ),
         ),
         throw=ThrowRecipe(
             technique="Within 10 deg of vertical, at least 60 mph",
-            technique_ja="鉛直から 10 度以冁E��E0 mph 以丁E",
+            technique_ja="鉛直から 10 度以内、60 mph 以上",
             throw_style="record_loft",
             release_speed_mps=26.9,
             launch_angle_deg=80.0,
@@ -1496,7 +1497,6 @@ RECORD_PRESET_CATALOGUE: Tuple[RecordPreset, ...] = (
             "launch_height_m": 1.8,
             "launch_roll_deg": 0.0,
             "launch_yaw_deg": 0.0,
-            "release_pitch_deg": 0.0,
             "throw_speed_source": "direct",
             "throw_runup_m": 0.0,
         },
@@ -1508,9 +1508,8 @@ RECORD_PRESET_CATALOGUE: Tuple[RecordPreset, ...] = (
             "than the 2026 machines'."
         ),
         notes_ja=(
-            "ブラチE��ンの持諁E- 打ち上げは短翼�E�重 Nose で貫通性を確保し、E"
-            "滑空は長翼�E�軽点で飛行時間を ���보する。よって本プリセチE��は質量を"
-            "規則上限に保ち、翼は 2026 年機より小さく設定してぁE��、E"
+            "ブラックバーンの持論（打ち上げは短翼・重ノーズで貫通性を確保し、滑空は長翼・軽点で飛行時間を確保する）に基づき、"
+            "本プリセットは質量を規則上限に保ち、翼は 2026 年機より小さく設定している。"
         ),
     ),
     RecordPreset(
@@ -1534,8 +1533,8 @@ RECORD_PRESET_CATALOGUE: Tuple[RecordPreset, ...] = (
                 "98.43 m in December 2025."
             ),
             notes_ja=(
-                "室内 88.318 m（289 ft 9 in）、2025 年 12 月の劉力文による"
-                "98.43 m まで記録を保持した。"
+                "室内 88.318 m（289 ft 9 in）、"
+                "2025 年 12 月の劉力文による 98.43 m まで記録を保持した。"
             ),
         ),
         throw=ThrowRecipe(
@@ -1571,18 +1570,17 @@ RECORD_PRESET_CATALOGUE: Tuple[RecordPreset, ...] = (
             "launch_speed": 29.5,
             "launch_angle_deg": 12.0,
             "launch_height_m": 1.8,
-            "release_pitch_deg": 0.0,
             "throw_speed_source": "direct",
             "throw_runup_m": 0.0,
         },
         environment={"wind_speed": 0.0, "gust_intensity": 0.0, "thermal_strength": 0.0},
         notes="A lower-aspect, faster machine than the 2025 record.",
-        notes_ja="アスペクト比が低く高速重視�E機体（推定）、E",
+        notes_ja="2025 年の記録機よりアスペクト比が低く、高速重視の機体（推定）。",
     ),
     RecordPreset(
         key="ayoob_69_1m",
         name="John Collins design - 69.14 m",
-        name_ja="ジョン・コリンス設計橁E- 69.14 m",
+        name_ja="ジョン・コリンズ設計機 - 69.14 m",
         category="indoor_distance",
         design_class="scale_performance",
         achievement=RecordAchievement(
@@ -1590,12 +1588,12 @@ RECORD_PRESET_CATALOGUE: Tuple[RecordPreset, ...] = (
             value=69.14,
             unit="m",
             holder="Joe Ayoob (aircraft designed by John Collins)",
-            holder_ja="Joe Ayoob�E�設訁E John Collins�E�E",
+            holder_ja="Joe Ayoob（設計: John Collins）",
             country="United States",
             date="2012-02-29",
             venue="Indoors, United States",
             aircraft_name="John Collins design",
-            aircraft_name_ja="John Collins 設計橁E",
+            aircraft_name_ja="John Collins 設計機",
             notes=(
                 "226 ft 10 in, flown on 29 February 2012. Collins is the author "
                 "of 'The Gliding Flight' (1989) and 'Fantastic Flight' (2004) "
@@ -1603,10 +1601,11 @@ RECORD_PRESET_CATALOGUE: Tuple[RecordPreset, ...] = (
                 "stood for over ten years."
             ),
             notes_ja=(
-                "226 ft 10 in、E012 年 2 朁E29 日。設計老E�E John Collins は"
-                "『The Gliding Flight』著老E��あり、翼型付き Glider の"
-                "「Paperang」系列で 12:1 を趁E��る滑空比を主張してぁE��、E"
-                "こ�E記録は 10 年以上保持された、E"
+                "226 ft 10 in、2012 年 2 月 29 日。"
+                "設計者の John Collins は『The Gliding Flight』（1989）と"
+                "『Fantastic Flight』（2004）の著者であり、"
+                "翼型付きグライダーの「Paperang」系列で 12:1 を超える滑空比を主張していた。"
+                "この記録は 10 年以上保持された。"
             ),
         ),
         throw=ThrowRecipe(
@@ -1636,20 +1635,20 @@ RECORD_PRESET_CATALOGUE: Tuple[RecordPreset, ...] = (
             aeroelastic_compliance=0.6,
             elevon_deg=0.0,
         ),
-        launch={"launch_position_m": (0.0, 0.0, 0.0), "launch_speed": 26.5, "launch_angle_deg": 13.0, "launch_height_m": 1.8, "release_pitch_deg": 0.0, "throw_speed_source": "direct", "throw_runup_m": 0.0},
+        launch={"launch_position_m": (0.0, 0.0, 0.0), "launch_speed": 26.5, "launch_angle_deg": 13.0, "launch_height_m": 1.8, "throw_speed_source": "direct", "throw_runup_m": 0.0},
         environment={"wind_speed": 0.0, "gust_intensity": 0.0, "thermal_strength": 0.0},
         notes=(
             "A laminated, airfoiled machine rather than a folded dart - the "
             "design class that makes a 14:1 glide ratio possible."
         ),
         notes_ja=(
-            "折り紙ではなく積層・翼型機、E4:1 の滑空比を可能にする設計クラス、E"
+            "折り紙ではなく積層・翼型機。14:1 の滑空比を可能にする設計クラス。"
         ),
     ),
     RecordPreset(
         key="kim_77m",
         name="Shin Moo Joon / Julian design - 76.99 m",
-        name_ja="シン・ムジョン / Julian 設計橁E- 76.99 m",
+        name_ja="シン・ムジュン / Julian 設計機 - 76.99 m",
         category="indoor_distance",
         design_class="world_record_competition",
         achievement=RecordAchievement(
@@ -1657,7 +1656,7 @@ RECORD_PRESET_CATALOGUE: Tuple[RecordPreset, ...] = (
             value=76.99,
             unit="m",
             holder="Kim Kyu Tae (aircraft designed by Shin Moo Joon and Chee Yie Jian 'Julian')",
-            holder_ja="Kim Kyu Tae�E�設訁E Shin Moo Joon, Chee Yie Jian「Julian」！E",
+            holder_ja="Kim Kyu Tae（設計: Shin Moo Joon, Chee Yie Jian「Julian」）",
             country="South Korea",
             date="2022-05-19",
             venue="Indoors, South Korea",
@@ -1667,8 +1666,8 @@ RECORD_PRESET_CATALOGUE: Tuple[RecordPreset, ...] = (
                 "Dillon Ruble's 88.318 m that December."
             ),
             notes_ja=(
-                "252 ft 7 in、E022 年 5 月に韓国室冁E��、同年 12 月に"
-                "Dillon Ruble の 88.318 m に更新された、E"
+                "252 ft 7 in、2022 年 5 月に韓国屋内で達成、"
+                "同年 12 月に Dillon Ruble の 88.318 m に更新された。"
             ),
         ),
         throw=ThrowRecipe(
@@ -1703,18 +1702,17 @@ RECORD_PRESET_CATALOGUE: Tuple[RecordPreset, ...] = (
             "launch_speed": 27.5,
             "launch_angle_deg": 13.0,
             "launch_height_m": 1.85,
-            "release_pitch_deg": 0.0,
             "throw_speed_source": "direct",
             "throw_runup_m": 0.0,
         },
         environment={"wind_speed": 0.0, "gust_intensity": 0.0, "thermal_strength": 0.0},
         notes="Reconstruction; no dimensions published.",
-        notes_ja="推定値。寸法�E公開なし、E",
+        notes_ja="推定値。寸法は非公開。",
     ),
     RecordPreset(
         key="kreiger_63_2m",
         name="Stephen Kreiger design - 63.20 m",
-        name_ja="Stephen Kreiger 設計橁E- 63.20 m",
+        name_ja="Stephen Kreiger 設計機 - 63.20 m",
         category="indoor_distance",
         design_class="compound_origami",
         achievement=RecordAchievement(
@@ -1731,7 +1729,7 @@ RECORD_PRESET_CATALOGUE: Tuple[RecordPreset, ...] = (
                 "207 ft 4 in, the first of the modern indoor distance records; "
                 "it stood until Joe Ayoob's 69.14 m in 2012."
             ),
-            notes_ja="207 ft 4 in。現代の室冁E��離記録の第一号、E012 年の Joe Ayoob の 69.14 m に至るまで記録を保持した、E",
+            notes_ja="207 ft 4 in。現代の室内距離記録の第一号。2012 年の Joe Ayoob の 69.14 m に至るまで記録を保持した。",
         ),
         throw=ThrowRecipe(
             technique="Level throw",
@@ -1766,19 +1764,18 @@ RECORD_PRESET_CATALOGUE: Tuple[RecordPreset, ...] = (
             "launch_speed": 23.4,
             "launch_angle_deg": 14.0,
             "launch_height_m": 1.85,
-            "release_pitch_deg": 0.0,
             "throw_speed_source": "direct",
             "throw_runup_m": 0.0,
         },
         environment={"wind_speed": 0.0, "gust_intensity": 0.0, "thermal_strength": 0.0},
         notes="Reconstruction; no dimensions published.",
-        notes_ja="推定値。寸法�E公開なし、E",
+        notes_ja="推定値。寸法は非公開。",
     ),
     # ------------------------------------------------------------ academic
     RecordPreset(
         key="ninomiya_n424",
         name="Ninomiya N-424 - 85 m class research glider",
-        name_ja="二宮康昁EN-424 - 85 m 級研究グライダー",
+        name_ja="二宮康明 N-424 - 85 m 級研究グライダー",
         category="academic",
         design_class="profile_performance",
         achievement=RecordAchievement(
@@ -1786,12 +1783,12 @@ RECORD_PRESET_CATALOGUE: Tuple[RecordPreset, ...] = (
             value=85.0,
             unit="m",
             holder="Yasuaki Ninomiya and E. H. Mathews",
-            holder_ja="二宮康明�EE. H. Mathews",
+            holder_ja="二宮康明・E. H. Mathews",
             country="Japan / South Africa",
             date="1966-1993",
             venue="Research wind tunnels and field trials",
             aircraft_name="N-424 (White Wings series)",
-            aircraft_name_ja="N-424�E��Eワイトウィングスシリーズ�E�E",
+            aircraft_name_ja="N-424（ホワイトウィングスシリーズ）",
             notes=(
                 "Not a Guinness record: this is the published research "
                 "result. Ninomiya and Mathews developed directed design "
@@ -1804,19 +1801,18 @@ RECORD_PRESET_CATALOGUE: Tuple[RecordPreset, ...] = (
                 "optimised wind tunnel."
             ),
             notes_ja=(
-                "ギネス記録ではなく、研究成果として公币E��、E960 年代後半から"
-                "1980 年代にかけて二宮と Mathews は設計戦略を体系化し、E"
-                "飛翔距離めE10 m 趁E��めE85 m 趁E��と引き上げた、E"
-                "後述の記述では、これ�E紙グライダー性能研究の最終形態と"
-                "位置づけられてぁE��、E"
-                "N-424 は 1966 年の『Jet Age Jamboree』に、Mathews の"
-                "『Paper Pilot』シリーズ�E�E984-1993�E��E Göttingen 801 曲板翼と"
-                "小型最適化風洞を用ぁE��、E"
+                "ギネス記録ではなく、研究成果として公表。"
+                "1960 年代後半から1980 年代にかけて二宮と Mathews は設計戦略を体系化し、"
+                "飛翔距離を 10 m 超から 85 m 超へと引き上げた。"
+                "後述の記述では、これが紙グライダー性能研究の最終形態と位置づけられている。"
+                "N-424 は 1966 年の『Jet Age Jamboree』に、"
+                "Mathews の『Paper Pilot』シリーズ（1984-1993）"
+                "は Göttingen 801 曲板翼と小型最適化風洞を用いた。"
             ),
         ),
         throw=ThrowRecipe(
             technique="Catapult / bungee launch (not a hand throw)",
-            technique_ja="Catapult / bungee 打ち上げ�E�手投げではなぁE��E",
+            technique_ja="カタパルト / バンジー打ち上げ（手投げではない）",
             throw_style="direct",
             release_speed_mps=24.0,
             launch_angle_deg=12.0,
@@ -1850,15 +1846,15 @@ RECORD_PRESET_CATALOGUE: Tuple[RecordPreset, ...] = (
             "number in flight."
         ),
         notes_ja=(
-            "Kent paper を贴合�EチE�Eプで積層した機体。折めEA4 ダートとは"
-            "全く違ぁE��類であり、Göttingen 翼型を載せ飛行中臨界レイノルズ数に"
-            "達せられる正因为、E"
+            "ケント紙を接着剤とテープで積層した機体。"
+            "折り紙の A4 ダートとは全く異なる構造であり、"
+            "Göttingen 翼型を載せ飛行中に臨界レイノルズ数に到達できる理由である。"
         ),
     ),
     RecordPreset(
         key="papercopter_27_9s",
         name="Mathews Papercopter - 27.9 s",
-        name_ja="Mathews Papercopter - 27.9 私E",
+        name_ja="Mathews Papercopter - 27.9 秒",
         category="historic",
         design_class="compound_origami",
         achievement=RecordAchievement(
@@ -1880,15 +1876,14 @@ RECORD_PRESET_CATALOGUE: Tuple[RecordPreset, ...] = (
                 "only approximate it."
             ),
             notes_ja=(
-                "環翼�E�リングウィング�E�型。�E側縁�EフラチE�Eが飛行を安定させる、E"
-                "Mathews は飛翔距離 10-15 m、最長滞空 27.9 秒と報告した、E"
-                "本カタログで唯一固定翼ではなぁE��め、本シミュレータの平板翼"
-                "空力モチE��では近似に留まる、E"
+                "内側縁のフラップにより飛行を安定させるリングウィング（環状翼）型。"
+                "Mathews は飛翔距離 10-15 m、最長滞空 27.9 秒を報告した。"
+                "本カタログで唯一固定翼ではないため、本シミュレータの平板翼空力モデルでは近似に留まる。"
             ),
         ),
         throw=ThrowRecipe(
             technique="Level throw with spin-up",
-            technique_ja="自転開始を伴ぁE��平投擲",
+            technique_ja="スピン（自転）を伴う水平投擲",
             throw_style="overhand",
             release_speed_mps=16.0,
             launch_angle_deg=10.0,
@@ -1914,12 +1909,12 @@ RECORD_PRESET_CATALOGUE: Tuple[RecordPreset, ...] = (
         launch={"throw_speed_source": "impulse", "throw_runup_m": 0.0, "throw_wrist_spin_radps": 20.0},
         environment={"wind_speed": 0.0, "gust_intensity": 0.0, "thermal_strength": 0.0},
         notes="Modelled as a low-aspect rotor-like plate; the numbers are indicative only.",
-        notes_ja="低アスペクト比�E回転体としてモチE��化したもので、値は参老E��、E",
+        notes_ja="低アスペクト比の回転体としてモデル化したもので、値は参考値。",
     ),
     RecordPreset(
         key="zongker_17s",
         name="Zongker 'World Record Paper Airplane' - 17 s x 5",
-        name_ja="Zongker「世界記録紙飛行機、E 17 私Ex 5",
+        name_ja="Zongker「世界記録紙飛行機」 - 17 秒 x 5",
         category="historic",
         design_class="compound_origami",
         achievement=RecordAchievement(
@@ -1941,15 +1936,14 @@ RECORD_PRESET_CATALOGUE: Tuple[RecordPreset, ...] = (
                 "rear down. It was the basis of the later space-launch effort."
             ),
             notes_ja=(
-                "『The Paper Airplane Book』！E985�E�で 17 秒�E連綁E5 回飛行を"
-                "公表。機体�E前進飛行型の自動回転翼で、機首後縁を折り返しぁE"
-                "双葉が紙軸上で自転し揚力を得た。後日の宁E��打ち上げ実験�E"
-                "基点となった、E"
+                "『The Paper Airplane Book』（1985）で 17 秒の連続 5 回飛行を公表。"
+                "機体は前進飛行型の自動回転翼で、機首後縁を折り返した双葉が紙軸上で自転し揚力を得た。"
+                "後日の宇宙打ち上げ実験の基点となった。"
             ),
         ),
         throw=ThrowRecipe(
             technique="Level throw, blades spin up in flight",
-            technique_ja="水平投擲�E�双葉�E飛行中に自転開始！E",
+            technique_ja="水平投擲（飛行中に双葉が自転開始）",
             throw_style="overhand",
             release_speed_mps=14.0,
             launch_angle_deg=8.0,
@@ -1975,7 +1969,7 @@ RECORD_PRESET_CATALOGUE: Tuple[RecordPreset, ...] = (
         launch={"throw_speed_source": "impulse", "throw_runup_m": 0.0},
         environment={"wind_speed": 0.0, "gust_intensity": 0.0, "thermal_strength": 0.0},
         notes="Rotor lift is not modelled; the preset reproduces the geometry, not the mechanism.",
-        notes_ja="回転揚力はモチE��化してぁE��ぁE��幾何を再現したも�Eで、機構�E再現ではなぁE��E",
+        notes_ja="回転揚力はモデル化しておらず、幾何を再現したもので、機構の再現ではない。",
     ),
 )
 
@@ -2183,7 +2177,7 @@ def _limitations(
                     "The trajectory leaves the linear lift range, so the "
                     "post-stall blend dominates part of the flight."
                 ),
-                "message_ja": "弾道が線形揚力域を離脱し、後流剥離遷移が飛行�E一部で支配的になる、E",
+                "message_ja": "弾道が線形揚力域を離脱し、後流剥離遷移が飛行の一部で支配的になる。",
             }
         )
     if str(metrics.get("status")) not in ("flying", "landed"):
@@ -2194,7 +2188,7 @@ def _limitations(
                 "message": (
                     f"The run ended with status '{metrics.get('status')}'."
                 ),
-                "message_ja": f"計算�E status '{metrics.get('status')}' で終亁E��た、E",
+                "message_ja": f"計算は status '{metrics.get('status')}' で終了した。",
             }
         )
     if not calibrated:
@@ -2209,8 +2203,8 @@ def _limitations(
                     "does not validate the repaired flight model."
                 ),
                 "message_ja": (
-                    "機体諸允E��投封E�E速�E推定値。�E開されてぁE��のは記録値・"
-                    "会場・日付�E規則のみ。モチE��輁E��投擲と併用して比輁E��ること、E"
+                    "機体諸元および投擲初速は推定値。公開されているのは記録値・会場・日付および規則のみ。"
+                    "モデル校正投擲と併用して比較すること。"
                 ),
             }
         )
@@ -2233,6 +2227,11 @@ def verification_report(
     The report is the honest statement of what this solver can and cannot
     reproduce; it is exposed by the API so the browser never has to imply a
     fidelity the physics does not have.
+
+    The payload states that meaning as data, not as prose the client may drop:
+    ``performance_validated`` is ``False`` on the report and on every row, and
+    ``performance_evidence`` is ``"none"`` because a self-report against a
+    historical calibration recipe cannot be independent evidence.
     """
     selected = keys or preset_keys()
     rows: List[Dict[str, Any]] = []
@@ -2251,6 +2250,8 @@ def verification_report(
                     "reason": entry.calibration_note or "no calibrated throw defined",
                     "measured_value": entry.achievement.value,
                     "unit": entry.achievement.unit,
+                    "performance_validated": False,
+                    "performance_evidence": "none",
                 }
             )
             continue
@@ -2269,6 +2270,7 @@ def verification_report(
                 "flight_mode": simulated["flight_mode"],
                 "launch": simulated["launch"],
                 "performance_validated": False,
+                "performance_evidence": "none",
                 **simulated["comparison"],
                 "max_g_load": simulated["metrics"].get("max_g_load", 0.0),
                 "max_ld_ratio": simulated["metrics"].get("max_ld_ratio", 0.0),
@@ -2284,6 +2286,14 @@ def verification_report(
         "min_ratio": min(ratios) if ratios else 0.0,
         "max_ratio": max(ratios) if ratios else 0.0,
         "duration_s": duration_s,
+        "performance_validated": False,
+        "performance_evidence": "none",
+        "performance_evidence_note": (
+            "Self-report of the solver against a historical calibration recipe. "
+            "The ratios below are not independent evidence of validated flight "
+            "performance, and this report must not be presented as a "
+            "reproduction rate."
+        ),
         "method": (
             "Rows use historical calibration recipes with legacy start-mode "
             "selection; duration entries may begin at the apex and therefore "

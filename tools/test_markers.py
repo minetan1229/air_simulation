@@ -1,0 +1,36 @@
+def main() -> None:
+    with open('physics/records_domain.py', 'r', encoding='utf-8') as f:
+        text = f.read()
+
+    idx1 = text.find('The stopwatch read 31.22 s.  The airframe was the ``Unite`` (')
+    print('1 doc:', idx1 != -1)
+    idx2 = text.find('RECORD_METRICS: Dict[str, Dict[str, Any]] = {')
+    idx2_end = text.find('\n}\n\n#: Documented statements', idx2)
+    print('2 metrics:', idx2 != -1, idx2_end != -1)
+    idx3 = text.find('THROW_RULES: Tuple[Dict[str, str], ...] = (')
+    idx3_end = text.find('\n)\n\n#: Notes on each source', idx3)
+    print('3 throw:', idx3 != -1, idx3_end != -1)
+    idx4 = text.find('"gwr_cn_2026_03": {')
+    print('4 cit:', idx4 != -1)
+    idx5 = text.find('COMPETITION_RULES: Tuple[CompetitionRule, ...] = (')
+    idx5_end = text.find('\n)\n\n\ndef competition_rules() -> List[Dict[str, Any]]:', idx5)
+    print('5 comp:', idx5 != -1, idx5_end != -1)
+    idx6 = text.find('source.setdefault("release_pitch_deg", RECORD_TRIM_ALPHA_DEG)')
+    print('6 lc:', idx6 != -1)
+    idx7 = text.find('def gwr_compliance(')
+    idx7_checks = text.find('checks = [', idx7)
+    idx7_end = text.find('return {\n        "legal":', idx7_checks)
+    print('7 gwr:', idx7_checks != -1, idx7_end != -1)
+    idx8 = text.find('def _stable_throw(')
+    idx8_tech = text.find('technique_ja="', idx8)
+    print('8 stable:', idx8_tech != -1)
+    idx9 = text.find('RECORD_PRESET_CATALOGUE: Tuple[RecordPreset, ...] = (')
+    idx9_end = text.find('\n)\n\n\n# --------------------------------------------------------------------------\n# Lookup and payloads', idx9)
+    print('9 cat:', idx9 != -1, idx9_end != -1)
+    idx10 = text.find('if float(metrics.get("stalled", False)):')
+    idx10_end = text.find('out.append({\n        "key": "performance_unvalidated",', idx10)
+    print('10 lim:', idx10 != -1, idx10_end != -1)
+
+
+if __name__ == "__main__":
+    main()

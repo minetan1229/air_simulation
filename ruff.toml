@@ -1,28 +1,14 @@
 # Ruff configuration for 3D Paper Airplane CFD Simulator
 line-length = 120
-# Keep in sync with requires-python in pyproject.toml (>=3.10); the CI matrix
-# exercises Python 3.10, so 3.11-only syntax must not be assumed.
-target-version = "py310"
+target-version = "py311"
 
 exclude = [
     ".git",
-    ".venv",
-    ".kilo",
-    ".codex",
     "__pycache__",
     ".pytest_cache",
-    ".mypy_cache",
-    ".ruff_cache",
     "models",
-    "runs",
-    "jobs",
-    "logs",
-    "artifacts",
-    "archive",
-    "build",
-    "dist",
-    "wiki-docs",
-    "tools/experiments",
+    # Scratch diagnostics kept in the working tree are not part of the product.
+    "tmp_*.py",
 ]
 
 [lint]

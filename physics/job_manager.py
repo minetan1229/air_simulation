@@ -38,6 +38,7 @@ Path-traversal / security are out of scope here; see
 from __future__ import annotations
 
 import contextlib
+import logging
 import math
 import threading
 import time
@@ -45,7 +46,9 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from typing import Any, Callable, Dict, List, Optional
 
-from .config_schema import JobRecord, as_dict, from_dict, make_uuid, utc_now_iso
+from .config_schema import JobRecord, as_dict, make_uuid, utc_now_iso
+
+log = logging.getLogger("paper_airplane.job_manager")
 
 __all__ = [
     "ETA_ALPHA",
@@ -58,7 +61,6 @@ __all__ = [
     "remaining_evaluations",
     "estimate_remaining",
     "eta_seconds",
-    "eta_from_rate",
     "evals_per_second",
     "ema_recurrence",
     "ema_update",
@@ -143,27 +145,6 @@ def evals_per_second(elapsed_seconds: float, evaluated_count: int) -> float:
     if t_bar <= 0.0:
         return 0.0
     return 1.0 / t_bar
-
-
-def eta_from_rate(
-    evaluated_count: int, total_evaluations: int, evals_per_second_ema: float
-) -> float:
-    """ETA derived from the **EMA-smoothed** throughput.
-
-    ``eta = outstanding / smoothed_rate``.  Smoothing the rate (instead of the
-    remaining time) is what keeps the estimate stable while the job is still
-    warming up: the raw closed form ``(total - n) * elapsed / n`` is dominated
-    by the first, very slow evaluation and therefore *over*-estimates the
-    remaining time, sometimes by a large factor.
-
-    Returns ``0.0`` when nothing is outstanding or when no throughput has been
-    measured yet.
-    """
-    outstanding = remaining_evaluations(evaluated_count, total_evaluations)
-    rate = float(evals_per_second_ema)
-    if outstanding <= 0 or rate <= 0.0:
-        return 0.0
-    return float(outstanding) / rate
 
 
 def ema_recurrence(previous: float, sample: float, alpha: float = ETA_ALPHA) -> float:
@@ -263,8 +244,34 @@ def clamp_progress(value: float) -> float:
 
 
 def _copy_record(record: JobRecord) -> JobRecord:
-    """Deep copy of a :class:`JobRecord` (lists are not shared with the manager)."""
-    return from_dict(JobRecord, as_dict(record))
+    """Copy of a :class:`JobRecord` without sharing mutable state.
+
+    Scalar fields are immutable and copied by value; only ``objectives`` (a
+    list) is duplicated so a caller can never mutate the manager's list.  This
+    avoids the full ``as_dict``/``from_dict`` serialisation round-trip on every
+    progress update.
+    """
+    return JobRecord(
+        job_id=record.job_id,
+        name=record.name,
+        algorithm=record.algorithm,
+        status=record.status,
+        progress=record.progress,
+        evaluated_count=record.evaluated_count,
+        total_evaluations=record.total_evaluations,
+        started_at=record.started_at,
+        updated_at=record.updated_at,
+        finished_at=record.finished_at,
+        eta_seconds=record.eta_seconds,
+        estimated_completion=record.estimated_completion,
+        backend=record.backend,
+        elapsed_seconds=record.elapsed_seconds,
+        evals_per_second=record.evals_per_second,
+        message=record.message,
+        objectives=list(record.objectives),
+        model_id=record.model_id,
+        result_path=record.result_path,
+    )
 
 
 # --------------------------------------------------------------------------
@@ -485,12 +492,7 @@ class JobManager:
         raw_rate = evals_per_second(elapsed, evaluated)
         state.evals_per_second_ema = ema_update(state.evals_per_second_ema, raw_rate, ETA_ALPHA)
         record.evals_per_second = state.evals_per_second_ema
-        # The ETA is derived from the smoothed rate, so the estimate does not
-        # jump upwards when the first (slow) evaluation inflates the raw
-        # mean evaluation time.
-        record.eta_seconds = eta_from_rate(
-            evaluated, record.total_evaluations, state.evals_per_second_ema
-        )
+        record.eta_seconds = estimate_remaining(elapsed, evaluated, record.total_evaluations)
         record.estimated_completion = estimated_completion_iso(record.eta_seconds)
 
     def _finalise(
@@ -656,6 +658,7 @@ class JobManager:
 
     def fail(self, job_id: str, message: str) -> JobRecord:
         """``-> failed`` with the diagnostic ``message`` (progress frozen)."""
+        log.warning("job %s failed: %s", job_id, message)
         with self._lock:
             state = self._require_state(job_id)
             record = state.record
@@ -679,6 +682,7 @@ class JobManager:
             if record.status in TERMINAL_STATUSES:
                 return _copy_record(record)
             message = record.message or "cancelled by request"
+            log.info("job %s cancelled: %s", job_id, message)
             return _copy_record(self._finalise(state, "cancelled", message))
 
     def register_thread(self, job_id: str, thread: Any) -> None:
@@ -759,11 +763,9 @@ class JobManager:
             if state.started and record.status not in TERMINAL_STATUSES:
                 elapsed = self._elapsed_live(state)
                 data["elapsed_seconds"] = elapsed
-                # The stored ETA is the EMA-smoothed estimate, refreshed at most
-                # every :data:`ETA_UPDATE_INTERVAL` seconds by
-                # :meth:`_refresh_eta`.  Recomputing the raw closed form on
-                # every read would bypass the smoothing entirely.
-                eta = float(record.eta_seconds)
+                eta = estimate_remaining(
+                    elapsed, max(record.evaluated_count, 0), record.total_evaluations
+                )
                 data["eta_seconds"] = eta
                 data["estimated_completion"] = estimated_completion_iso(eta)
             return data
@@ -778,9 +780,7 @@ class JobManager:
             elapsed = self._elapsed_live(state) if (state.started and active) else record.elapsed_seconds
             evaluated = max(record.evaluated_count, 0)
             if state.started and active:
-                # EMA-smoothed estimate, refreshed at most every
-                # :data:`ETA_UPDATE_INTERVAL` seconds (see :meth:`_refresh_eta`).
-                eta = float(record.eta_seconds)
+                eta = estimate_remaining(elapsed, evaluated, record.total_evaluations)
                 completion = estimated_completion_iso(eta)
             else:
                 eta = float(record.eta_seconds)
