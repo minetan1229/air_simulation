@@ -642,8 +642,9 @@ def test_evaluate_flight_accepts_dicts_and_dataclasses_identically(glider_flight
         k: v for k, v in glider_flight.items() if isinstance(v, (int, float)) and not isinstance(v, bool)
     }
     assert {k: from_objects[k] for k in non_numeric} == {k: from_dicts[k] for k in non_numeric} == non_numeric
-    assert {k: from_objects[k] for k in numeric} == pytest.approx(numeric, rel=1e-9, abs=1e-12)
-    assert {k: from_dicts[k] for k in numeric} == pytest.approx(numeric, rel=1e-9, abs=1e-12)
+    for key, expected in numeric.items():
+        assert from_objects[key] == pytest.approx(expected, rel=1e-9, abs=1e-12)
+        assert from_dicts[key] == pytest.approx(expected, rel=1e-9, abs=1e-12)
     # Unknown keys are ignored (the pool pickles plain dicts) and missing keys
     # fall back to the dataclass defaults.
     sparse = flight_sim.evaluate_flight(
@@ -1300,6 +1301,5 @@ def test_landing_stops_and_declares_landed_on_max_bounces():
     summary = sim.simulate(duration_s=2.0, record=True)
     assert summary["status"] in ("landed", "crashed")
     assert sim.state.landed is True or sim.state.crashed is True
-
 
 
