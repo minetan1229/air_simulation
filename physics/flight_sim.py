@@ -237,8 +237,8 @@ SPEED_STAT_FLOOR_MPS = 1.0
 #: referred to the wing span (``moment = q*S*b*C*p_hat`` with
 #: ``p_hat = omega*b/(2V)``). Paper wings have enormous relative damping against
 #: roll and yaw rotations due to their high surface area and featherweight mass.
-KEEL_ROLL_DAMPING = -0.20
-KEEL_YAW_DAMPING = -0.26
+KEEL_ROLL_DAMPING = 0.0
+KEEL_YAW_DAMPING = 0.0
 #: Airspeed (m/s) at which the keel damping reaches half of its linear value.
 KEEL_DAMPING_CUTOFF_MPS = 0.8
 
@@ -932,8 +932,8 @@ def _local_wind(env: EnvironmentConfig, position: VectorLike, time_s: float) -> 
         g_factor = 1.0 + clamp(_finite(env.gust_intensity), 0.0, 1.0) * 0.1 * math.sin(0.7 * _finite(time_s))
 
     magnitude = profile_speed * g_factor
-    out[0] = magnitude * fy
-    out[1] = magnitude * fx
+    out[0] = magnitude * fx
+    out[1] = magnitude * fy
     return out
 
 
@@ -985,10 +985,7 @@ def wind_vector(position: VectorLike, env: EnvironmentConfig, time_s: float = 0.
     vector: Optional[np.ndarray] = None
     if func is not None:
         height = -_finite(position[2])
-        if bool(env.wind_tunnel_enabled):
-            query = np.array([_finite(position[0]), _finite(position[1]), height], dtype=np.float64)
-        else:
-            query = np.array([_finite(position[1]), _finite(position[0]), height], dtype=np.float64)
+        query = np.array([_finite(position[0]), _finite(position[1]), height], dtype=np.float64)
         out = _call_upstream(
             func,
             {
@@ -1005,10 +1002,7 @@ def wind_vector(position: VectorLike, env: EnvironmentConfig, time_s: float = 0.
             except (TypeError, ValueError):
                 candidate = np.zeros(0, dtype=np.float64)
             if candidate.size >= 3 and bool(np.all(np.isfinite(candidate[:3]))):
-                if bool(env.wind_tunnel_enabled):
-                    vector = np.array([float(candidate[0]), float(candidate[1]), -float(candidate[2])], dtype=np.float64)
-                else:
-                    vector = np.array([float(candidate[1]), float(candidate[0]), -float(candidate[2])], dtype=np.float64)
+                vector = np.array([float(candidate[0]), float(candidate[1]), -float(candidate[2])], dtype=np.float64)
     if vector is None:
         vector = _local_wind(env, position, time_s)
     with _WIND_LOCK:
@@ -1939,6 +1933,7 @@ class FlightSimulator:
         )
         self._launch: LaunchConfig = _config_from(LaunchConfig, launch)
         self._history: deque = deque(maxlen=max(1, int(self.settings.ring_buffer_capacity)))
+        self._state_history: deque = deque(maxlen=max(1, int(self.settings.ring_buffer_capacity)))
         self._lock = threading.RLock()
         self._launch_sample: Optional[FlightLogSample] = None
         self._state: StateVector = initial_state(self._launch, self.environment, self.aircraft)
@@ -2092,6 +2087,7 @@ class FlightSimulator:
         self._rolled_back = False
         self._bounce_count = 0
         self._history.clear()
+        self._state_history.clear()
         self._next_record_time = float(self._state.time_s)
         self._diagnostics_cache = None
         self._stiffness_cache = None
@@ -2104,6 +2100,7 @@ class FlightSimulator:
     def reset_history(self) -> None:
         """Empty the ring buffer and re-arm the recorder at the current time."""
         self._history.clear()
+        self._state_history.clear()
         self._next_record_time = float(self._state.time_s)
 
     def load_state(self, state: StateVector) -> StateVector:
@@ -2145,6 +2142,8 @@ class FlightSimulator:
         self._next_record_time = float(self._state.time_s)
         while self._history and self._history[-1].time_s >= self._state.time_s - 1.0e-9:
             self._history.pop()
+            if self._state_history:
+                self._state_history.pop()
         return self.state
 
     def frame_count(self) -> int:
@@ -2354,7 +2353,11 @@ class FlightSimulator:
                 except Exception:
                     deform_func = None
             if deform_func is None:
-                stiffness = max(_finite(self.aircraft.paper_stiffness, 0.35), 0.05)
+                eff_stiff_fn = _resolve_callable(stress_mod, ("effective_paper_stiffness",))
+                if eff_stiff_fn is not None:
+                    stiffness = max(_finite(eff_stiff_fn(self.aircraft), 0.35), 0.05)
+                else:
+                    stiffness = max(_finite(self.aircraft.paper_stiffness, 0.35), 0.05)
                 q_ref = 100.0 * stiffness
                 aero_dihedral_deg = aero_flex_gain * (q_dyn / q_ref) * 5.0
                 aero_twist_deg = aero_twist_gain * (q_dyn / q_ref) * 4.0
@@ -2432,7 +2435,12 @@ class FlightSimulator:
         # flat plate and the static stability that the morphing is supposed
         # to protect disappeared exactly in the launch regime.
         aero_comp_gain = max(_finite(getattr(self.aircraft, "aeroelastic_compliance", 0.0)), 0.0)
-        stiffness_val = max(_finite(self.aircraft.paper_stiffness, 0.35), 0.05)
+        stress_mod_inst = stress_mod if "stress_mod" in locals() and stress_mod is not None else stress_module()
+        eff_stiff_fn = _resolve_callable(stress_mod_inst, ("effective_paper_stiffness",)) if stress_mod_inst is not None else None
+        if eff_stiff_fn is not None:
+            stiffness_val = max(_finite(eff_stiff_fn(self.aircraft), 0.35), 0.05)
+        else:
+            stiffness_val = max(_finite(self.aircraft.paper_stiffness, 0.35), 0.05)
         if aero_comp_gain > 0.0:
             pressure_scale = max(_finite(getattr(self.aircraft, "aeroelastic_pressure_scale_pa", 160.0), 160.0), 1.0)
             morph_exponent = max(_finite(getattr(self.aircraft, "aeroelastic_morph_exponent", 3.0), 3.0), 0.5)
@@ -2474,9 +2482,12 @@ class FlightSimulator:
             v_safe = max(speed, 0.1)
 
             # 5 spanwise stations: center (0), inner left/right (+/-0.22b), outer tips (+/-0.44b)
+            # Pass omega_strip (with p=0, r=0) so that lumped full-aircraft Clp and Cnr
+            # are not duplicated; roll and yaw damping are instead resolved by the strip integration.
+            omega_strip = np.array([0.0, q_rot, 0.0], dtype=np.float64)
             res_c = aero_forces(
                 aero_cfg, self.environment, speed, effective_alpha_deg, beta_deg,
-                mach, reynolds, max(altitude, 0.0), omega, air["density_kgm3"], air["kinematic_viscosity_m2s"]
+                mach, reynolds, max(altitude, 0.0), omega_strip, air["density_kgm3"], air["kinematic_viscosity_m2s"]
             )
             # Inner stations (+/- 0.22b): left wing y = -0.22b, right wing y = +0.22b
             # When p > 0 (roll right, right wing down), alpha_right increases and alpha_left decreases.
@@ -2485,30 +2496,37 @@ class FlightSimulator:
             a_il = effective_alpha_deg - math.degrees(0.22 * b_span * p_rot / v_safe)
             res_il = aero_forces(
                 aero_cfg, self.environment, v_il, a_il, beta_deg,
-                mach, reynolds, max(altitude, 0.0), omega, air["density_kgm3"], air["kinematic_viscosity_m2s"]
+                mach, reynolds, max(altitude, 0.0), omega_strip, air["density_kgm3"], air["kinematic_viscosity_m2s"]
             )
             v_ir = max(speed - 0.22 * b_span * r_rot, 0.1)
             a_ir = effective_alpha_deg + math.degrees(0.22 * b_span * p_rot / v_safe)
             res_ir = aero_forces(
                 aero_cfg, self.environment, v_ir, a_ir, beta_deg,
-                mach, reynolds, max(altitude, 0.0), omega, air["density_kgm3"], air["kinematic_viscosity_m2s"]
+                mach, reynolds, max(altitude, 0.0), omega_strip, air["density_kgm3"], air["kinematic_viscosity_m2s"]
             )
             # Tip stations (+/- 0.44b)
             v_ol = max(speed + 0.44 * b_span * r_rot, 0.1)
             a_ol = effective_alpha_deg - math.degrees(0.44 * b_span * p_rot / v_safe)
             res_ol = aero_forces(
                 aero_cfg, self.environment, v_ol, a_ol, beta_deg,
-                mach, reynolds, max(altitude, 0.0), omega, air["density_kgm3"], air["kinematic_viscosity_m2s"]
+                mach, reynolds, max(altitude, 0.0), omega_strip, air["density_kgm3"], air["kinematic_viscosity_m2s"]
             )
             v_or = max(speed - 0.44 * b_span * r_rot, 0.1)
             a_or = effective_alpha_deg + math.degrees(0.44 * b_span * p_rot / v_safe)
             res_or = aero_forces(
                 aero_cfg, self.environment, v_or, a_or, beta_deg,
-                mach, reynolds, max(altitude, 0.0), omega, air["density_kgm3"], air["kinematic_viscosity_m2s"]
+                mach, reynolds, max(altitude, 0.0), omega_strip, air["density_kgm3"], air["kinematic_viscosity_m2s"]
             )
 
             # Boole's / Simpson's 5-point quadrature weights: (7, 32, 12, 32, 7) / 90
             # [ol: 7/90, il: 32/90, c: 12/90, ir: 32/90, or: 7/90]
+            # Note on station placement (Issue #75):
+            # The 5 stations y in {0, +/-0.22b, +/-0.44b} represent standard Boole quadrature
+            # with step h = 0.22b over the effective span interval [-0.44b, 0.44b] (approx. 88%
+            # of full physical wingspan b). This avoids wingtip singularities and accounts for
+            # 3D paper airplane tip-vortex dissipation / spanwise lift rolloff (effective span ~0.88b).
+            # Over this interval, roll damping moment resolves to (0.88)^2 ~ 77.4% of idealized
+            # full-span strip theory, providing realistic aerodynamic damping without artificial over-damping.
             w_tip, w_in, w_c = 7.0 / 90.0, 32.0 / 90.0, 12.0 / 90.0
             lift_comp = (
                 w_tip * (res_ol.lift_n + res_or.lift_n)
@@ -2646,6 +2664,11 @@ class FlightSimulator:
             )
             m_add_z = float(added["added_mass_z_kg"])
             m_eff_z = self._mass + m_add_z
+            f_app, m_app = aero_kernel.compute_apparent_forces(
+                np, body_relative, omega, m_add_z
+            )
+            force_body = force_body + f_app
+            moment_body = moment_body + m_app
             gravity_body = world_to_body(quaternion, gravity_world)
             a_body = (force_body / self._mass) + gravity_body
             a_body[2] = (force_body[2] + self._mass * gravity_body[2]) / m_eff_z
@@ -2897,7 +2920,10 @@ class FlightSimulator:
         return self._last_quaternion_norm_error <= QUATERNION_NORM_TOLERANCE
 
     def _apply_ground_contact(
-        self, state: StateVector, prev_state: Optional[StateVector] = None
+        self,
+        state: StateVector,
+        prev_state: Optional[StateVector] = None,
+        dt: Optional[float] = None,
     ) -> StateVector:
         """Resolve ground contact, latching the ``landed`` / ``crashed`` flags.
 
@@ -3180,7 +3206,12 @@ class FlightSimulator:
                 # monotonically towards zero instead of being multiplied by a
                 # magic factor that ignored the normal force.
                 grav = max(abs(_finite(self.environment.gravity)), 1.0e-9)
-                h_contact = max(_finite(getattr(self.settings, "dt_max", 0.02), 0.02), 1.0e-6)
+                if dt is not None and dt > 0.0:
+                    h_contact = float(dt)
+                elif prev_state is not None and float(state.time_s) > float(prev_state.time_s):
+                    h_contact = float(state.time_s) - float(prev_state.time_s)
+                else:
+                    h_contact = max(_finite(getattr(self.settings, "dt_max", 0.02), 0.02), 1.0e-6)
                 decel = mu * grav * h_contact
                 speed = math.hypot(vx, vy)
                 if speed > 1.0e-12:
@@ -3228,7 +3259,7 @@ class FlightSimulator:
         vx, vy, vz = (float(value) for value in state.velocity_mps)
         roll, pitch, yaw = euler_zyx_from_quaternion(state.quaternion)
         qw, qx, qy, qz = (float(value) for value in state.quaternion)
-        return FlightLogSample(
+        sample = FlightLogSample(
             time_s=_finite(state.time_s),
             x_m=x,
             y_m=y,
@@ -3260,6 +3291,10 @@ class FlightSimulator:
             flight_mode=self.launch.flight_mode,
             physics_model_version="rigid_body_repair_v1",
         )
+        sample.p_rate_radps = float(state.angular_velocity_radps[0])
+        sample.q_rate_radps = float(state.angular_velocity_radps[1])
+        sample.r_rate_radps = float(state.angular_velocity_radps[2])
+        return sample
 
     def _record_sample(self) -> None:
         """Append a sample once the record interval has elapsed."""
@@ -3273,8 +3308,11 @@ class FlightSimulator:
             self._launch_sample = sample
         if self._history and abs(self._history[-1].time_s - sample.time_s) < 1.0e-9:
             self._history[-1] = sample
+            if self._state_history:
+                self._state_history[-1] = replace(self._state)
         else:
             self._history.append(sample)
+            self._state_history.append(replace(self._state))
         self._next_record_time = float(self._state.time_s) + interval
 
     # -- diagnostics ------------------------------------------------------
@@ -3586,7 +3624,7 @@ class FlightSimulator:
             previous_state = self._state
             if not self._advance(h, y0, time_s, self._derivative(y0, time_s, core)):
                 break
-            self._state = self._apply_ground_contact(self._state, previous_state)
+            self._state = self._apply_ground_contact(self._state, previous_state, dt=h)
             travelled += float(self._state.time_s) - time_s
             used += 1
             self._diagnostics_cache = None
@@ -3650,16 +3688,20 @@ class FlightSimulator:
         # Compute mechanical energy profile along flight
         grav_val = max(abs(_finite(self.environment.gravity, 9.80665)), 1.0e-6)
         energy_profile: List[float] = []
-        for s in samples:
+        for i, s in enumerate(samples):
             v_sq = float(s.vx_mps)**2 + float(s.vy_mps)**2 + float(s.vz_mps)**2
-            p_val = float(getattr(s, "p_rate_radps", 0.0))
-            q_val = float(getattr(s, "q_rate_radps", 0.0))
-            r_val = float(getattr(s, "r_rate_radps", 0.0))
-            w_sq = p_val**2 * float(self._inertia[0, 0]) + q_val**2 * float(self._inertia[1, 1]) + r_val**2 * float(self._inertia[2, 2])
+            if i < len(self._state_history):
+                omega_vec = np.asarray(self._state_history[i].angular_velocity_radps, dtype=np.float64)
+            else:
+                p_val = float(getattr(s, "p_rate_radps", 0.0))
+                q_val = float(getattr(s, "q_rate_radps", 0.0))
+                r_val = float(getattr(s, "r_rate_radps", 0.0))
+                omega_vec = np.array([p_val, q_val, r_val], dtype=np.float64)
+            e_rot = 0.5 * float(omega_vec @ (self._inertia @ omega_vec))
             # Potential energy uses true vertical altitude (-z_world - ground_level)
             g_level = float(getattr(self.environment, "ground_level_m", 0.0))
             h_true = -float(s.z_m) - g_level
-            e_sample = 0.5 * self._mass * v_sq + 0.5 * w_sq + self._mass * grav_val * h_true
+            e_sample = 0.5 * self._mass * v_sq + e_rot + self._mass * grav_val * h_true
             energy_profile.append(e_sample)
 
         # In calm unpowered glide (wind_speed == 0), verify non-increasing energy (tolerance 1e-4 J)

@@ -40,13 +40,14 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 import numpy as np
 
 from .. import aero_kernel, gpu_dynamics
-from ..config_schema import AircraftConfig, EnvironmentConfig
+from ..config_schema import AircraftConfig, EnvironmentConfig, clamp
 from ..stress_domain import peak_root_stress_pa
 
 __all__ = [
     "Stage1Case",
     "Stage1Result",
     "BatchScreener",
+    "build_screening_aircraft",
     "PERTURBATION_SPEED_SIGMA",
     "PERTURBATION_ANGLE_SIGMA_RAD",
     "PERTURBATION_RATE_SIGMA_RADPS",
@@ -117,6 +118,83 @@ def _capture_safe_rotation() -> Any:
     finally:
         gpu_dynamics.body_to_world_batch = original_body
         gpu_dynamics.world_to_body_batch = original_world
+
+
+def build_screening_aircraft(
+    record_or_genome: Any,
+    paper_gsm: float = 100.0,
+    base: Optional[AircraftConfig] = None,
+) -> AircraftConfig:
+    """Construct an AircraftConfig for Stage 1 screening faithfully preserving genome parameters.
+
+    Ensures aerodynamic coefficients (cL0, cm0, cd0, cl_alpha, etc.), CG position / static margin,
+    wingspan, wing area, mass, and planform moments of inertia from the genome and Stage 0 geometry
+    screening are correctly reflected and never overwritten by unphysical hard-coded defaults.
+    """
+    import dataclasses
+
+    config = dataclasses.replace(base) if base is not None else AircraftConfig()
+
+    record: Dict[str, Any] = {}
+    genome: Any = None
+    if isinstance(record_or_genome, dict):
+        record = record_or_genome
+        genome = record.get("genome")
+    else:
+        genome = record_or_genome
+
+    # Inherit from existing aircraft config in record if available
+    if isinstance(record.get("aircraft"), AircraftConfig):
+        config = dataclasses.replace(record["aircraft"])
+    elif isinstance(record.get("aircraft"), dict):
+        for k, v in record["aircraft"].items():
+            if hasattr(config, k) and v is not None:
+                setattr(config, k, v)
+
+    # Extract aerodynamic & geometric properties from genome if present
+    if genome is not None:
+        if hasattr(genome, "aircraft") and isinstance(genome.aircraft, AircraftConfig):
+            config = dataclasses.replace(genome.aircraft)
+        meta = getattr(genome, "meta", {}) or {}
+        for aero_key in (
+            "cL0", "cm0", "cd0", "cl_alpha", "stall_alpha_deg", "elevon_deg",
+            "dihedral_deg", "fold_trailing_deg", "step_trip_ratio", "oswald_efficiency"
+        ):
+            if aero_key in meta and meta[aero_key] is not None:
+                setattr(config, aero_key, float(meta[aero_key]))
+
+    # Extract geometry report from Stage 0 if present
+    report = record.get("stage0") or {}
+    area = float(report.get("wing_area_m2", 0.0)) or float(getattr(config, "wing_area_m2", 0.02)) or 0.02
+    span = float(report.get("span_m", 0.0)) or float(getattr(config, "wingspan_m", 0.15)) or 0.15
+    mass = float(report.get("mass_kg", 0.0)) or float(getattr(config, "mass_kg", 0.005)) or 0.005
+    aspect = float(report.get("aspect_ratio", 0.0)) or (span * span / max(area, 1.0e-6))
+
+    config.wing_area_m2 = max(area, 1.0e-6)
+    config.wingspan_m = max(span, 1.0e-3)
+    config.aspect_ratio = max(aspect, 1.0e-3)
+    config.mass_kg = max(mass, 1.0e-9)
+    config.sheet_area_m2 = max(area, 1.0e-6)
+    config.paper_gsm = float(paper_gsm)
+
+    # Chord & CG offset reflection
+    chord = area / max(span, 1.0e-3)
+    x_ac = 0.25 * chord
+    if "cg" in report and isinstance(report["cg"], (tuple, list)) and len(report["cg"]) >= 1:
+        cg_x = float(report["cg"][0])
+        config.cg_offset_x = clamp(cg_x - x_ac, -0.5, 0.5)
+    elif "static_margin_m" in report and report["static_margin_m"] is not None:
+        # Static margin SM = x_np - x_cg  => x_cg - x_np = -SM
+        config.cg_offset_x = clamp(-float(report["static_margin_m"]), -0.5, 0.5)
+
+    # Physical planform moments of inertia: Ixx ~ 1/12 m b^2, Iyy ~ 1/12 m c^2, Izz ~ Ixx + Iyy
+    ixx = mass * span * span / 12.0
+    iyy = mass * chord * chord / 12.0
+    izz = ixx + iyy
+    config.roll_inertia_kgm2 = max(ixx, 1.0e-12)
+    config.pitch_inertia_kgm2 = max(iyy, 1.0e-12)
+    config.yaw_inertia_kgm2 = max(izz, 1.0e-12)
+    return config
 
 
 @dataclass
@@ -326,7 +404,11 @@ class BatchScreener:
         count = states.shape[0]
         y = xp.array(states, dtype=xp.float64, copy=True)
         acc = _new_accumulators(xp, count)
-        steps = max(1, min(self.max_steps, int(math.ceil(duration / self.dt_max))))
+        # Nominal step count based on dt_max, scaled by safety factor (up to max_steps)
+        # to ensure adaptive step size reduction (dt < dt_max) does not exhaust loop steps
+        # before reaching duration (Issue #78). Early exit via _finished() prevents wasted compute.
+        nominal_steps = int(math.ceil(duration / self.dt_max))
+        steps = max(1, min(self.max_steps, nominal_steps * 3))
 
         launch_core = gpu_dynamics._evaluate_state(xp, params, y, wind)
         _seed_accumulators(xp, acc, launch_core, params)
@@ -494,14 +576,14 @@ def _perturb(
     tilt = generator.standard_normal(count) * PERTURBATION_ANGLE_SIGMA_RAD
     rates = generator.standard_normal((count, 3)) * PERTURBATION_RATE_SIGMA_RADPS
 
-    vx = out[:, 0] * scale
-    vy = out[:, 1] * scale
-    vz = out[:, 2] * scale
+    vx = out[:, 3] * scale
+    vy = out[:, 4] * scale
+    vz = out[:, 5] * scale
     cos_t = xp.cos(tilt)
     sin_t = xp.sin(tilt)
-    out[:, 0] = vx * cos_t - vz * sin_t
-    out[:, 2] = vx * sin_t + vz * cos_t
-    out[:, 1] = vy
+    out[:, 3] = vx * cos_t - vz * sin_t
+    out[:, 5] = vx * sin_t + vz * cos_t
+    out[:, 4] = vy
     out[:, 10:13] = out[:, 10:13] + rates
     return out
 
@@ -569,11 +651,12 @@ def _stress(xp: Any, core: Dict[str, Any], params: Any) -> Any:
 
 
 def _stability(xp: Any, params: Any, acc: Dict[str, Any]) -> Any:
-    """The static trim residual of the best glide point.
+    """The static longitudinal stability slope (dCm/dalpha) and trim residual.
 
-    The metric is the pitching moment coefficient of the airframe trimmed at
-    the angle of attack of the best glide point, evaluated with the shared
-    aerodynamic kernel -- the same definition the reference path uses.
+    Evaluates the pitch stiffness (restoring slope dCm/dalpha < 0) around the
+    best glide point, combined with the trim residual |Cm|.  Airframes with
+    positive pitch slope (pitch divergence / instability) are heavily penalized,
+    ensuring only statically stable gliders receive high stability scores.
     """
     air = gpu_dynamics.atmosphere_batch(
         xp, params.env, xp.maximum(acc["trim_altitude"], 0.0), params.chord
@@ -582,10 +665,14 @@ def _stability(xp: Any, params: Any, acc: Dict[str, Any]) -> Any:
         air["kinematic_viscosity_m2s"], 1.0e-12
     )
     mach = acc["trim_speed"] / xp.maximum(air["sound_speed_mps"], 1.0)
+    alt = xp.maximum(acc["trim_altitude"], 0.0)
+    density = air["density_kgm3"]
+    trim_alpha = acc["trim_alpha"]
+
     coefficients = aero_kernel.evaluate_coefficients(
         xp,
         params.aero,
-        alpha_deg=acc["trim_alpha"],
+        alpha_deg=trim_alpha,
         beta_deg=0.0,
         p_rate=0.0,
         q_rate=0.0,
@@ -593,10 +680,35 @@ def _stability(xp: Any, params: Any, acc: Dict[str, Any]) -> Any:
         speed=acc["trim_speed"],
         reynolds=reynolds,
         mach=mach,
-        ground_height_m=xp.maximum(acc["trim_altitude"], 0.0),
-        density=air["density_kgm3"],
+        ground_height_m=alt,
+        density=density,
     )
-    return 1.0 / (1.0 + xp.abs(coefficients["cm"]))
+    coeff_plus = aero_kernel.evaluate_coefficients(
+        xp,
+        params.aero,
+        alpha_deg=trim_alpha + 1.0,
+        beta_deg=0.0,
+        p_rate=0.0,
+        q_rate=0.0,
+        r_rate=0.0,
+        speed=acc["trim_speed"],
+        reynolds=reynolds,
+        mach=mach,
+        ground_height_m=alt,
+        density=density,
+    )
+    # dCm/dalpha per degree
+    cm_alpha_eff = coeff_plus["cm"] - coefficients["cm"]
+    # Static stability requires dCm/dalpha < 0. Typical healthy slope ~ -0.015 / deg.
+    # Score 0 for unstable (>= 0), rising to 1 for healthy restoring slope.
+    stable = cm_alpha_eff < 0.0
+    slope_factor = xp.where(
+        stable,
+        xp.clip(-cm_alpha_eff / 0.015, 0.0, 1.0),
+        xp.zeros_like(cm_alpha_eff),
+    )
+    trim_factor = 1.0 / (1.0 + xp.abs(coefficients["cm"]))
+    return slope_factor * trim_factor
 
 def _make_step(
     xp: Any,
