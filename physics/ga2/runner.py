@@ -47,6 +47,7 @@ __all__ = [
     "EvolutionRunner",
     "OBJECTIVES",
     "default_objective",
+    "select_high_fidelity_candidates",
 ]
 
 #: The objectives the Pareto front of the search is built on.
@@ -92,6 +93,199 @@ def default_objective(records: Dict[str, float]) -> float:
         return 0.0
     quality = max(0.0, min(1.0, stability)) * max(0.0, min(1.0, 1.0 - stress_index))
     return distance * (0.25 + 0.75 * quality) * (1.0 + 0.05 * min(ld_ratio, 20.0))
+
+
+def _dominates_candidate(
+    a: Sequence[float],
+    b: Sequence[float],
+    directions: Sequence[int],
+) -> bool:
+    """True when candidate a dominates candidate b."""
+    strictly_better = False
+    for val_a, val_b, d in zip(a, b, directions):
+        diff = d * (val_a - val_b)
+        if diff < 0.0:
+            return False
+        if diff > 0.0:
+            strictly_better = True
+    return strictly_better
+
+
+def _crowding_distances(
+    front: Sequence[int],
+    vectors: Sequence[Sequence[float]],
+) -> Dict[int, float]:
+    """Calculate NSGA-II crowding distances for members of a Pareto front."""
+    if not front:
+        return {}
+    if len(front) <= 2:
+        return {idx: float("inf") for idx in front}
+
+    distances: Dict[int, float] = {idx: 0.0 for idx in front}
+    num_objectives = len(vectors[0])
+
+    for m in range(num_objectives):
+        sorted_front = sorted(front, key=lambda idx: vectors[idx][m])
+        distances[sorted_front[0]] = float("inf")
+        distances[sorted_front[-1]] = float("inf")
+        obj_min = vectors[sorted_front[0]][m]
+        obj_max = vectors[sorted_front[-1]][m]
+        span = obj_max - obj_min
+        if span <= 1e-12:
+            continue
+        for i in range(1, len(sorted_front) - 1):
+            prev_val = vectors[sorted_front[i - 1]][m]
+            next_val = vectors[sorted_front[i + 1]][m]
+            if math.isinf(distances[sorted_front[i]]):
+                continue
+            distances[sorted_front[i]] += (next_val - prev_val) / span
+
+    return distances
+
+
+def select_high_fidelity_candidates(
+    candidates: Sequence[Dict[str, Any]],
+    limit: int,
+    primary_ratio: float = 0.5,
+) -> List[Dict[str, Any]]:
+    """Select candidate individuals for high-fidelity evaluation.
+
+    Instead of relying purely on a single scalar ranking (such as distance_m),
+    this selection balances exploitation and exploration:
+    1. The primary quota (e.g. 50%) is selected by overall scalar fitness
+       and distance (primary performance objective).
+    2. The remaining quota (e.g. 50%) is selected from non-dominated Pareto
+       fronts (NSGA-II fast non-dominated sort with crowding distance) considering
+       multiple objectives (distance_m, max_ld_ratio, stability, and stress headroom:
+       1.0 - peak_stress_index) and structural/behavioural diversity.
+    """
+    if not candidates or limit <= 0:
+        return []
+    if len(candidates) <= limit:
+        return list(candidates)
+
+    # 1. Primary selection: Sort candidates by primary fitness (with distance_m tie-breaker)
+    primary_quota = max(1, min(limit, int(math.ceil(limit * primary_ratio)))) if limit > 1 else 1
+    sorted_by_primary = sorted(
+        enumerate(candidates),
+        key=lambda item: (
+            float(item[1].get("fitness", 0.0)),
+            float(item[1].get("distance_m", 0.0)),
+        ),
+        reverse=True,
+    )
+
+    selected_indices: List[int] = []
+    selected_set = set()
+
+    for orig_idx, _ in sorted_by_primary[:primary_quota]:
+        selected_indices.append(orig_idx)
+        selected_set.add(orig_idx)
+
+    remaining_needed = limit - len(selected_indices)
+    if remaining_needed <= 0:
+        return [candidates[i] for i in selected_indices]
+
+    # 2. Multi-objective & Diversity selection for the remaining slots
+    # Objectives:
+    # - distance_m (maximise, dir=+1)
+    # - max_ld_ratio (maximise, dir=+1)
+    # - stability (maximise, dir=+1)
+    # - stress_headroom: 1.0 - peak_stress_index (maximise, dir=+1)
+    obj_directions = (1, 1, 1, 1)
+    vectors: List[Tuple[float, float, float, float]] = []
+    for c in candidates:
+        dist = float(c.get("distance_m", 0.0))
+        ld = float(c.get("max_ld_ratio", 0.0))
+        stab = float(c.get("stability", 0.0))
+        stress = float(c.get("peak_stress_index", 1.0))
+        stress_headroom = max(0.0, 1.0 - stress)
+        vectors.append((dist, ld, stab, stress_headroom))
+
+    # Fast non-dominated sorting over unselected candidates
+    unselected = [i for i in range(len(candidates)) if i not in selected_set]
+    fronts: List[List[int]] = []
+    domination_counts = {i: 0 for i in unselected}
+    dominated_sets: Dict[int, List[int]] = {i: [] for i in unselected}
+
+    for i in range(len(unselected)):
+        idx_i = unselected[i]
+        vec_i = vectors[idx_i]
+        for j in range(i + 1, len(unselected)):
+            idx_j = unselected[j]
+            vec_j = vectors[idx_j]
+            if _dominates_candidate(vec_i, vec_j, obj_directions):
+                dominated_sets[idx_i].append(idx_j)
+                domination_counts[idx_j] += 1
+            elif _dominates_candidate(vec_j, vec_i, obj_directions):
+                dominated_sets[idx_j].append(idx_i)
+                domination_counts[idx_i] += 1
+
+    current_front = [i for i in unselected if domination_counts[i] == 0]
+    while current_front:
+        fronts.append(current_front)
+        next_front: List[int] = []
+        for i in current_front:
+            for j in dominated_sets[i]:
+                domination_counts[j] -= 1
+                if domination_counts[j] == 0:
+                    next_front.append(j)
+        current_front = next_front
+
+    # Select candidates from fronts, ordering by diversity and crowding distance
+    # To prevent clustering in one corner of the Pareto front, prioritize individuals
+    # that maximize distance to already selected candidates in normalized objective space.
+    mins = [min(v[m] for v in vectors) for m in range(len(obj_directions))]
+    maxs = [max(v[m] for v in vectors) for m in range(len(obj_directions))]
+    spans = [maxs[m] - mins[m] if (maxs[m] - mins[m]) > 1e-12 else 1.0 for m in range(len(obj_directions))]
+
+    for front in fronts:
+        if len(selected_indices) >= limit:
+            break
+        crowding = _crowding_distances(front, vectors)
+
+        # Greedily select the most diverse candidate from the current front
+        remaining_front = list(front)
+        while remaining_front and len(selected_indices) < limit:
+            best_idx = None
+            best_score: Tuple[float, float, float] = (-1.0, -1.0, -1.0)
+            for idx in remaining_front:
+                # Minimum Euclidean distance to already selected set in normalized objective space
+                vec_norm = [(vectors[idx][m] - mins[m]) / spans[m] for m in range(len(obj_directions))]
+                min_dist_to_selected = min(
+                    math.sqrt(sum(((vectors[s][m] - mins[m]) / spans[m] - vec_norm[m]) ** 2 for m in range(len(obj_directions))))
+                    for s in selected_indices
+                ) if selected_indices else 1.0
+
+                cr = crowding.get(idx, 0.0)
+                cr_val = 1e6 if math.isinf(cr) else cr
+                fit = float(candidates[idx].get("fitness", 0.0))
+                score = (min_dist_to_selected, cr_val, fit)
+                if best_idx is None or score > best_score:
+                    best_score = score
+                    best_idx = idx
+
+            if best_idx is not None:
+                selected_indices.append(best_idx)
+                selected_set.add(best_idx)
+                remaining_front.remove(best_idx)
+
+    # If still needed (fallback), fill from remaining unselected sorted by fitness
+    if len(selected_indices) < limit:
+        remaining = [i for i in range(len(candidates)) if i not in selected_set]
+        remaining.sort(
+            key=lambda i: (
+                float(candidates[i].get("fitness", 0.0)),
+                float(candidates[i].get("distance_m", 0.0)),
+            ),
+            reverse=True,
+        )
+        for idx in remaining:
+            selected_indices.append(idx)
+            if len(selected_indices) >= limit:
+                break
+
+    return [candidates[i] for i in selected_indices[:limit]]
 
 
 @dataclass
@@ -523,8 +717,7 @@ class EvolutionRunner:
         if not candidates:
             return []
         limit = self.profile.stage2_passthrough
-        ordered = sorted(candidates, key=lambda item: float(item.get("distance_m", 0.0)), reverse=True)
-        selected = ordered[:limit]
+        selected = select_high_fidelity_candidates(candidates, limit)
         if self._stage2 is None:
             stage2_module = self._optional_module("stage2")
             if stage2_module is None:
@@ -643,8 +836,7 @@ class EvolutionRunner:
         if not candidates or not self.stage3_enabled:
             return list(candidates)
         limit = self.profile.stage3_passthrough
-        ordered = sorted(candidates, key=lambda item: float(item.get("distance_m", 0.0)), reverse=True)
-        selected = ordered[:limit]
+        selected = select_high_fidelity_candidates(candidates, limit)
         try:
             stage3_module = self._optional_module("stage3")
         except Exception:
