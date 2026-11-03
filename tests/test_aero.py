@@ -102,6 +102,20 @@ def test_separated_pressure_drag_uses_projected_area(cfg, env, alpha):
     assert result.stalled and result.stall_margin < 0.0
 
 
+def test_post_stall_drag_hoerner_asymptotic_limit(cfg, env):
+    """Verify post-stall drag approaches Hoerner flat plate limit without double-counting (Issue #73)."""
+    # At 90 degrees angle of attack, the normal force on a broadside plate is C_D = 2.0.
+    # Prior to fix, parasite drag and induced drag were additively stacked onto separated drag,
+    # producing C_D = 2.0 + C_D0. With convex blending, C_D asymptotically equals 2.0 exactly.
+    res_90 = evaluate_aero(cfg, env, 8.0, 90.0)
+    assert res_90.cd == pytest.approx(2.0, abs=1e-6)
+
+    # At -90 degrees angle of attack
+    res_neg_90 = evaluate_aero(cfg, env, 8.0, -90.0)
+    assert res_neg_90.cd == pytest.approx(2.0, abs=1e-6)
+
+
+
 def test_pressure_drag_transition_is_continuous_and_preserves_attached_polar(cfg):
     # The separated drag starts at the stall angle.  The airframe is
     # symmetric, so the same angle applies in both directions: the previous

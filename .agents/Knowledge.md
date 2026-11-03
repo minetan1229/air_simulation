@@ -77,3 +77,4 @@ ho Sar{c}^3$）と無次元質量比 compute_mass_ratio（$\mu < 5.0$ で mass_
 - **ピッチ減衰係数 cm_q と cm_pitch_rate の明確化 (#76)**: cm_q を主要なピッチ角速度減衰項（既定 -12.0）、cm_pitch_rate を 3x3 レート行列の対角項（既定 0.0）と規定。合算 {m_q,\text{total}} = C_{m_q} + C_{m,\text{pitch\_rate}}$ として ero_kernel.py および light_sim.py の非線形動的減衰参照部に反映し、両方の指定時も物理的減衰方向を保持。
 - **Reynolds数外挿とmodel_validフラグの整合化 (#74)**: docs/PHYSICS_MODELS.md §4.2 に準拠し、6DoF ero_forces および GPU gpu_dynamics.py における clamp / clip を解除。低Re (<1e3) / 高Re (>1e5) でも {D0}(Re)$ をべき乗則で連続外挿し、モデルの適用限界は valuate_model_validity の model_valid / 
 e_ok フラグにより機械可読に通知。
+- **失速後抗力の二重計上解消 (#73)**: drag_coefficient において寄生抗力 {D0}$ と誘導抗力 {Di}$ が Hoerner完全分離抗力（\sin^2\alpha + C_{D0}\cos\alpha$）に単純加算され二重計上されていた問題を修正。付着流極線と分離流極線を smoothstep 凸結合でブレンド（ = (1-w)C_{D,\text{attached}} + w C_{D,\text{separated}} + C_{D,\text{wave}}$）させ、$\alpha = \pm 90^\circ$ で厳密に平板抗力極限  = 2.0$ に収束することを検証。

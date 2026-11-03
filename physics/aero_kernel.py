@@ -995,17 +995,22 @@ def lift_coefficient(
     )
 
     stall_rad = _rad(xp, stall_alpha)
-    linear_at_stall = zero_lift + slope * stall_rad
     kv = xp.maximum(_finite(xp, polhamus_kv, 0.0), 0.0)
     stall_vortex = kv * xp.square(xp.sin(stall_rad)) * xp.cos(stall_rad)
-    linear_at_stall = linear_at_stall + xp.where(kv > 0.0, stall_vortex, 0.0)
+    vortex_inc = xp.where(kv > 0.0, stall_vortex, 0.0)
+    linear_at_stall_pos = zero_lift + slope * stall_rad + vortex_inc
+    linear_at_stall_neg = zero_lift - slope * stall_rad - vortex_inc
 
     ceiling = xp.maximum(xp.abs(_finite(xp, cl_max, 0.90)), 1.0e-6)
     attached = _clamp(xp, linear, -ceiling, ceiling)
-    capped_linear_at_stall = _clamp(xp, linear_at_stall, -ceiling, ceiling)
+    capped_linear_at_stall_pos = _clamp(xp, linear_at_stall_pos, -ceiling, ceiling)
+    capped_linear_at_stall_neg = _clamp(xp, linear_at_stall_neg, -ceiling, ceiling)
+    ref_at_stall = xp.where(
+        alpha >= 0.0, capped_linear_at_stall_pos, xp.abs(capped_linear_at_stall_neg)
+    )
 
     post_stall = post_stall_lift_coefficient(
-        xp, alpha, capped_linear_at_stall, stall_alpha, residual_cl=residual_cl
+        xp, alpha, ref_at_stall, stall_alpha, residual_cl=residual_cl
     )
     weight = stall_blend_weight(xp, alpha, stall_alpha, sharpness, blend_order)
     value = (1.0 - weight) * attached + weight * post_stall + offset
@@ -1083,11 +1088,26 @@ def drag_coefficient(
     )
     parasite = parasite_drag_coefficient(xp, cd0, reynolds, re_exponent)
     induced = cl * cl / xp.maximum(_finite(xp, polar_constant, 1.0), 1.0e-12)
-    separated = separated_pressure_drag_coefficient(
-        xp, alpha_deg, stall_alpha_deg, parasite
+    attached_drag = parasite + induced * _finite(xp, ground_ratio, 1.0)
+
+    # Fully separated plate drag (Hoerner 1965): 2 sin^2(a) + C_D0 cos(a)
+    alpha = (_finite(xp, alpha_deg, 0.0) + 180.0) % 360.0 - 180.0
+    stall_alpha = xp.abs(_finite(xp, stall_alpha_deg, 14.0))
+    angle = _rad(xp, alpha)
+    separated_drag = 2.0 * xp.square(xp.sin(angle)) + parasite * xp.maximum(xp.cos(angle), 0.0)
+
+    weight = _smoothstep01(
+        xp,
+        (xp.abs(alpha) - stall_alpha)
+        / xp.maximum(
+            _f64(xp, _finite(xp, POST_STALL_DRAG_BLEND_DEG, 15.0)), 1.0
+        ),
     )
+    # Blend attached polar and separated polar smoothly to eliminate double counting
+    cd_polar = (1.0 - weight) * attached_drag + weight * separated_drag
     wave = wave_drag_coefficient(xp, mach, compressible)
-    return parasite + induced * _finite(xp, ground_ratio, 1.0) + separated + wave
+    return cd_polar + wave
+
 
 
 # --------------------------------------------------------------------------
@@ -1503,12 +1523,25 @@ def _coefficient_core(
 
     ground_ratio = ground_effect_factor(xp, height, span, ground_effect_enabled)
     cd0 = parasite_drag_coefficient(xp, cd0, reynolds, re_cd0_exponent) + te_fold["dcd"]
+    induced = (cl * cl / xp.maximum(polar, 1.0e-12)) * ground_ratio
+    attached_drag = cd0 + induced
+
+    # Fully separated plate drag (Hoerner 1965): 2 sin^2(a) + C_D0 cos(a)
+    alpha_norm = (alpha + 180.0) % 360.0 - 180.0
+    stall_alpha_val = xp.abs(_finite(xp, stall_alpha_deg, 14.0))
+    angle = _rad(xp, alpha_norm)
+    separated_drag = 2.0 * xp.square(xp.sin(angle)) + cd0 * xp.maximum(xp.cos(angle), 0.0)
+    w_drag = _smoothstep01(
+        xp,
+        (xp.abs(alpha_norm) - stall_alpha_val)
+        / xp.maximum(_f64(xp, POST_STALL_DRAG_BLEND_DEG), 1.0),
+    )
+    cd_polar = (1.0 - w_drag) * attached_drag + w_drag * separated_drag
     cd = (
-        cd0
-        + (cl * cl / xp.maximum(polar, 1.0e-12)) * ground_ratio
-        + separated_pressure_drag_coefficient(xp, alpha, stall_alpha_deg, cd0)
+        cd_polar
         + wave_drag_coefficient(xp, mach, compressible)
     ) * drag_scale
+
 
     # --- rate derivatives --------------------------------------------------
     two_v = 2.0 * speed
