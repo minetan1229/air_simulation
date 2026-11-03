@@ -401,18 +401,34 @@ class Solver3D:
         return cl, cd, cm
 
     def compute_stable_dt(self) -> float:
-        """Compute stable time-step based on 3D minimum cell width."""
-        _, _, _, _, _, c_field = self.get_primitive(self.u)
-        vel_mag = np.sqrt(
-            (self.u[..., 1] / self.u[..., 0]) ** 2
-            + (self.u[..., 2] / self.u[..., 0]) ** 2
-            + (self.u[..., 3] / self.u[..., 0]) ** 2
-        )
-        char_speed = vel_mag + c_field
-        # Cell width estimate from volume^(1/3)
-        h_cell = self.grid.vol ** (1.0 / 3.0)
-        dt_local = self.config.cfl * h_cell / np.maximum(char_speed, 1.0e-6)
+        """Compute stable time-step based on multidimensional convective/acoustic spectral radii across cell faces."""
+        rho, u_vel, v_vel, w_vel, _, c_field = self.get_primitive(self.u)
+
+        # i-direction faces (ni+1, nj, nk)
+        i_ax, i_ay, i_az = self.grid.i_area_x, self.grid.i_area_y, self.grid.i_area_z
+        i_area = np.sqrt(i_ax**2 + i_ay**2 + i_az**2)
+        vn_i_0 = np.abs(u_vel * i_ax[:-1] + v_vel * i_ay[:-1] + w_vel * i_az[:-1])
+        vn_i_1 = np.abs(u_vel * i_ax[1:] + v_vel * i_ay[1:] + w_vel * i_az[1:])
+        lambda_i = 0.5 * ((vn_i_0 + c_field * i_area[:-1]) + (vn_i_1 + c_field * i_area[1:]))
+
+        # j-direction faces (ni, nj+1, nk)
+        j_ax, j_ay, j_az = self.grid.j_area_x, self.grid.j_area_y, self.grid.j_area_z
+        j_area = np.sqrt(j_ax**2 + j_ay**2 + j_az**2)
+        vn_j_0 = np.abs(u_vel * j_ax[:, :-1, :] + v_vel * j_ay[:, :-1, :] + w_vel * j_az[:, :-1, :])
+        vn_j_1 = np.abs(u_vel * j_ax[:, 1:, :] + v_vel * j_ay[:, 1:, :] + w_vel * j_az[:, 1:, :])
+        lambda_j = 0.5 * ((vn_j_0 + c_field * j_area[:, :-1, :]) + (vn_j_1 + c_field * j_area[:, 1:, :]))
+
+        # k-direction faces (ni, nj, nk+1)
+        k_ax, k_ay, k_az = self.grid.k_area_x, self.grid.k_area_y, self.grid.k_area_z
+        k_area = np.sqrt(k_ax**2 + k_ay**2 + k_az**2)
+        vn_k_0 = np.abs(u_vel * k_ax[:, :, :-1] + v_vel * k_ay[:, :, :-1] + w_vel * k_az[:, :, :-1])
+        vn_k_1 = np.abs(u_vel * k_ax[:, :, 1:] + v_vel * k_ay[:, :, 1:] + w_vel * k_az[:, :, 1:])
+        lambda_k = 0.5 * ((vn_k_0 + c_field * k_area[:, :, :-1]) + (vn_k_1 + c_field * k_area[:, :, 1:]))
+
+        lambda_total = np.maximum(lambda_i + lambda_j + lambda_k, 1.0e-12)
+        dt_local = self.config.cfl * self.grid.vol / lambda_total
         return float(np.min(dt_local))
+
 
     def step_rk2(self, dt: float) -> float:
         """Advance solution one step using Heun's 2-stage Runge-Kutta scheme."""
