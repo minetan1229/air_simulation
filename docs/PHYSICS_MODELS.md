@@ -215,6 +215,41 @@ python tools/check_gpu_parity.py
 
 ---
 
+## 9. メッシュ空力（`physics/mesh_domain.py`）の定式化監査 (Issue #69)
+
+`panel_aerodynamics` は名称に「panel」を含むが、**古典的な境界積分パネル法ではない**。実装は次の
+**局所代数モデル**である。
+
+- 未知数（ソース/ダブレット強度）を解く連立方程式は持たない。
+- 影響係数行列・境界条件（non-penetration）・wake 方程式を構成しない。
+- 各パネルの局所迎角 `alpha_local = asin(-n·d)` から `C_L` を直接評価し、`q C_L A` を合算する。
+- 抗力は `PANEL_PROFILE_DRAG_CD = 0.02` の固定値で `D = C_D0 q A` を加算する。
+
+### 9.1 座標系・局所量の定義
+
+- Body 軸: `x` 前方、`y` 右、`z` 下（NED 系と整合）。
+- 幾何迎角 `alpha` に対する流れ方向は `d = (-cos(alpha), 0, +sin(alpha))`。
+- 局所迎角は法線ベクトルのみから計算され、局所速度誘導（隣接パネルからの downwash）は含まない。
+
+### 9.2 有限翼効果・翼端効果の扱い
+
+- 誘導速度 / 誘導抗力 / 翼端渦 / パネル間干渉は**未実装**（`models_induced_drag=False`）。
+- そのため、同一面積・同一迎角では AR や sweep を変えても `C_L` はほぼ不変で、Helmbold の有限翼傾斜
+  のような AR 依存は再現しない。
+- ねじり（法線の回転）は局所迎角に反映されるため、`C_L` 低下は再現される。
+
+### 9.3 固定 `C_D0=0.02` の適用範囲
+
+- 0.02 は薄い紙翼の低速域での簡易プロフィール抗力として据え置く定数で、Re 依存・翼型依存は持たない。
+- よって高忠実度の粘性解析結果としては扱わない。比較・最適化用途では「簡易モデル」であることを明示する。
+
+### 9.4 検証テスト
+
+- `tests/test_advanced_physics_audit.py`
+  - `test_mesh_panel_model_declares_local_algebraic_formulation`
+  - `test_mesh_panel_model_shows_limited_finite_wing_response_against_helmbold`
+  - `test_mesh_panel_drag_and_planform_sensitivity_limits`
+
 *本書は Issue #47 の 3D CFD ロードマップ（`docs/CFD_ROADMAP.md`）とは別物である。
 CFD ロードマップは **3 次元 Navier–Stokes ソルバ** の導入計画であり、本書が扱う
 **6DoF パネル法 + 経験モデル** の正本とは層が異なる。*

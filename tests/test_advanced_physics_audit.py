@@ -10,7 +10,7 @@ import math
 import numpy as np
 import pytest
 
-from physics import flight_sim, mesh_domain, wind_domain
+from physics import aero_domain, flight_sim, mesh_domain, wind_domain
 from physics.config_schema import (
     AircraftConfig,
     EnvironmentConfig,
@@ -201,3 +201,146 @@ def test_panel_method_resolution_consistency_and_lift():
     # Lift must increase monotonically with dynamic pressure
     res_higher_q = mesh_domain.panel_aerodynamics(fine_panels, alpha_deg=5.0, dynamic_pressure_pa=q * 2.0)
     assert abs(float(res_higher_q["total_lift_n"])) > lift_fine
+
+
+# ==============================================================================
+# Issue #69: メッシュ空力モデルの定式化・有限翼効果・抗力仮定の監査
+# ==============================================================================
+
+def _wing_mesh(
+    *,
+    span_m: float,
+    area_m2: float,
+    taper_ratio: float = 1.0,
+    sweep_deg: float = 0.0,
+    tip_twist_deg: float = 0.0,
+    nx: int = 12,
+    ny: int = 12,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Create a symmetric trapezoid wing mesh in body axes (x fwd, z down)."""
+    taper = float(np.clip(taper_ratio, 0.05, 1.0))
+    half_span = 0.5 * float(span_m)
+    root = 2.0 * float(area_m2) / (float(span_m) * (1.0 + taper))
+    tip = taper * root
+    sweep = math.radians(float(sweep_deg))
+    tip_twist = math.radians(float(tip_twist_deg))
+
+    vertices: list[tuple[float, float, float]] = []
+    for i in range(nx + 1):
+        fx = i / nx
+        for j in range(ny + 1):
+            eta = j / ny
+            y = -half_span + 2.0 * half_span * eta
+            station = abs(y) / max(half_span, 1.0e-9)
+            chord = root + (tip - root) * station
+            x_le = -abs(y) * math.tan(sweep)
+            x = x_le + (0.5 - fx) * chord
+
+            twist = tip_twist * station
+            pivot = x_le + 0.25 * chord
+            x_local = x - pivot
+            z = -x_local * math.sin(twist)
+            x = pivot + x_local * math.cos(twist)
+            vertices.append((x, y, z))
+
+    faces: list[list[int]] = []
+    stride = ny + 1
+    for i in range(nx):
+        for j in range(ny):
+            a = i * stride + j
+            b = a + 1
+            c = a + stride
+            d = c + 1
+            faces.append([a, d, b])
+            faces.append([a, c, d])
+    return np.asarray(vertices, dtype=np.float64), np.asarray(faces, dtype=np.int64)
+
+
+def _cl_from_result(result: dict[str, float], q_pa: float, area_m2: float) -> float:
+    return float(result["total_lift_n"]) / max(float(q_pa) * float(area_m2), 1.0e-12)
+
+
+def test_mesh_panel_model_declares_local_algebraic_formulation():
+    verts, faces = _wing_mesh(span_m=0.24, area_m2=0.018, sweep_deg=20.0)
+    panels = mesh_domain.build_panels(verts, faces, nx=12, ny=12)
+    result = mesh_domain.panel_aerodynamics(panels, alpha_deg=6.0, dynamic_pressure_pa=40.0)
+
+    assert result["formulation"] == "local-algebraic-panel-load"
+    assert result["is_boundary_element_panel_method"] is False
+    assert result["solves_influence_matrix"] is False
+    assert result["models_panel_interaction"] is False
+    assert result["models_induced_drag"] is False
+    assert result["profile_drag_cd"] == pytest.approx(mesh_domain.PANEL_PROFILE_DRAG_CD, rel=0.0)
+    assert np.median([row["alpha_local_deg"] for row in result["panels"]]) == pytest.approx(6.0, abs=0.3)
+
+
+def test_mesh_panel_model_shows_limited_finite_wing_response_against_helmbold():
+    alpha_deg = 5.0
+    alpha_rad = math.radians(alpha_deg)
+    q = 55.0
+    area = 0.02
+    span_low, span_high = 0.16, 0.40  # AR: 1.28 -> 8.0 (same area)
+
+    low_verts, low_faces = _wing_mesh(span_m=span_low, area_m2=area, taper_ratio=1.0)
+    high_verts, high_faces = _wing_mesh(span_m=span_high, area_m2=area, taper_ratio=1.0)
+    low = mesh_domain.panel_aerodynamics(mesh_domain.build_panels(low_verts, low_faces), alpha_deg, q)
+    high = mesh_domain.panel_aerodynamics(mesh_domain.build_panels(high_verts, high_faces), alpha_deg, q)
+    cl_low = _cl_from_result(low, q, area)
+    cl_high = _cl_from_result(high, q, area)
+    panel_ratio = cl_high / max(cl_low, 1.0e-12)
+
+    helmbold_low = aero_domain.helmbold_cl_alpha(span_low * span_low / area, 1.0) * alpha_rad
+    helmbold_high = aero_domain.helmbold_cl_alpha(span_high * span_high / area, 1.0) * alpha_rad
+    helmbold_ratio = helmbold_high / max(helmbold_low, 1.0e-12)
+
+    assert panel_ratio == pytest.approx(1.0, rel=0.08)
+    assert helmbold_ratio > 1.25
+
+
+def test_mesh_panel_drag_and_planform_sensitivity_limits():
+    q = 60.0
+    area = 0.02
+    alpha = 8.0
+
+    rect = mesh_domain.panel_aerodynamics(
+        mesh_domain.build_panels(*_wing_mesh(span_m=0.24, area_m2=area, taper_ratio=1.0)),
+        alpha,
+        q,
+    )
+    swept = mesh_domain.panel_aerodynamics(
+        mesh_domain.build_panels(*_wing_mesh(span_m=0.24, area_m2=area, taper_ratio=1.0, sweep_deg=30.0)),
+        alpha,
+        q,
+    )
+    pointed_tip = mesh_domain.panel_aerodynamics(
+        mesh_domain.build_panels(*_wing_mesh(span_m=0.24, area_m2=area, taper_ratio=0.08)),
+        alpha,
+        q,
+    )
+    twisted = mesh_domain.panel_aerodynamics(
+        mesh_domain.build_panels(*_wing_mesh(span_m=0.24, area_m2=area, taper_ratio=1.0, tip_twist_deg=-10.0)),
+        alpha,
+        q,
+    )
+
+    cl_rect = _cl_from_result(rect, q, area)
+    cl_swept = _cl_from_result(swept, q, area)
+    cl_tip = _cl_from_result(pointed_tip, q, area)
+    cl_twisted = _cl_from_result(twisted, q, area)
+
+    assert cl_swept == pytest.approx(cl_rect, rel=0.10)
+    assert cl_tip == pytest.approx(cl_rect, rel=0.12)
+    assert cl_twisted < 0.85 * cl_rect
+
+    # Fixed-profile drag model: with equal area and q, drag stays almost alpha-insensitive.
+    rect_alpha0 = mesh_domain.panel_aerodynamics(
+        mesh_domain.build_panels(*_wing_mesh(span_m=0.24, area_m2=area, taper_ratio=1.0)),
+        0.0,
+        q,
+    )
+    rect_alpha20 = mesh_domain.panel_aerodynamics(
+        mesh_domain.build_panels(*_wing_mesh(span_m=0.24, area_m2=area, taper_ratio=1.0)),
+        20.0,
+        q,
+    )
+    assert rect_alpha20["total_drag_n"] == pytest.approx(rect_alpha0["total_drag_n"], rel=1.0e-12)

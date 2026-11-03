@@ -117,7 +117,11 @@ SCALE_FACTORS: Dict[str, float] = {
     "in": 0.0254,
 }
 
-#: Profile drag coefficient used by the panel method (thin low-aspect sheet).
+#: Fixed profile-drag coefficient used by :func:`panel_aerodynamics`.
+#:
+#: The model is intentionally a local algebraic load build-up (per-panel
+#: ``C_L`` + fixed ``C_D0``) and not a boundary-integral panel solver, so this
+#: value has no Reynolds-number or airfoil-shape dependence.
 PANEL_PROFILE_DRAG_CD = 0.02
 
 #: Local incidence at which the panel lift curve begins to taper off.
@@ -1401,7 +1405,7 @@ def panel_aerodynamics(
     env: Optional[Any] = None,
     cg_m: Optional[Sequence[float]] = None,
 ) -> Dict[str, Any]:
-    """Static panel method: local incidence, lift, rotational lift and moment.
+    """Static mesh panel-load model: local incidence, lift and pitching moment.
 
     Frame / signs
     -------------
@@ -1410,8 +1414,14 @@ def panel_aerodynamics(
     is ``d = (-cos a, 0, +sin a)`` so that ``alpha > 0`` (nose up) produces
     ``alpha_local > 0`` on a wing panel whose normal points up.
 
-    Model
+    Model (implemented formulation)
     -----
+    This routine **does not** solve a classical boundary-element panel method
+    (no source/vortex strengths, no influence-coefficient matrix, no
+    no-penetration linear system).  It is a local algebraic panel-load model:
+    each panel computes ``C_L`` from its own incidence and contributes force
+    directly.
+
     * ``alpha_local = asin(-dot(n, d))`` -- the panel inclination removed from
       the geometric angle of attack.
     * ``C_L = 2*pi*sin(alpha_local)`` blended past ``STALL_ALPHA_DEG`` into the
@@ -1459,6 +1469,12 @@ def panel_aerodynamics(
             "backend": "numpy",
             "alpha_deg": float(alpha_deg),
             "dynamic_pressure_pa": q,
+            "formulation": "local-algebraic-panel-load",
+            "is_boundary_element_panel_method": False,
+            "solves_influence_matrix": False,
+            "models_panel_interaction": False,
+            "models_induced_drag": False,
+            "profile_drag_cd": float(PANEL_PROFILE_DRAG_CD),
         }
 
     if cg_m is not None:
@@ -1563,6 +1579,12 @@ def panel_aerodynamics(
         "reference_chord_m": float(chord_extent),
         "reference_cg_m": (float(reference_cg[0]), float(reference_cg[1]), float(reference_cg[2])),
         "prandt_glauert": float(prandt_glauert),
+        "formulation": "local-algebraic-panel-load",
+        "is_boundary_element_panel_method": False,
+        "solves_influence_matrix": False,
+        "models_panel_interaction": False,
+        "models_induced_drag": False,
+        "profile_drag_cd": float(PANEL_PROFILE_DRAG_CD),
     }
 
 
