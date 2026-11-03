@@ -334,24 +334,39 @@ def _repair_genes(genes: Sequence[HybridFoldGene]) -> List[HybridFoldGene]:
 
     A gene may only address the groups that the earlier folds created, so
     the references are clamped to the groups that exist when the fold is
-    performed.  A programme that was crossed over or mutated can carry a
-    dangling reference; the repair turns it into a valid one instead of
-    failing the fold.
+    performed. If a gene requires target layers but no layers exist (e.g.
+    preceding folds were disabled), the fold is disabled rather than
+    degenerating into a whole-sheet fold.
     """
     available = 0
     repaired: List[HybridFoldGene] = []
     for gene in genes:
-        layers = tuple(
-            value
-            for value in sorted({int(item) for item in gene.target_layers})
-            if 0 <= value < available
-        )
+        enabled = gene.enabled
+        had_target_layers = bool(gene.target_layers)
+        if had_target_layers:
+            valid = tuple(
+                value
+                for value in sorted({int(item) for item in gene.target_layers})
+                if 0 <= value < available
+            )
+            if valid:
+                layers = valid
+            elif available > 0:
+                # Fallback: clamp dangling layer reference to the latest available layer
+                layers = (available - 1,)
+            else:
+                # No layers exist at all: disable fold to prevent degenerating to whole-sheet fold
+                layers = gene.target_layers
+                enabled = False
+        else:
+            layers = ()
+
         join = gene.join_group
         if join is not None and not (0 <= int(join) < available):
             join = None
         repaired.append(
             HybridFoldGene(
-                enabled=gene.enabled,
+                enabled=enabled,
                 origin=gene.origin,
                 crease_angle_deg=gene.crease_angle_deg,
                 fold_angle_deg=gene.fold_angle_deg,
@@ -367,9 +382,9 @@ def _repair_genes(genes: Sequence[HybridFoldGene]) -> List[HybridFoldGene]:
                 label=gene.label,
             )
         )
-        if gene.creates_pair and gene.enabled:
+        if gene.creates_pair and enabled:
             available += 2
-        elif gene.creates_group and join is None and gene.enabled:
+        elif gene.creates_group and join is None and enabled:
             available += 1
     return repaired
 
@@ -607,9 +622,9 @@ def hybrid_to_origami(genome: HybridGenome) -> origami_genome.OrigamiGenome:
 
     The *layer* of a gene is resolved against the groups the earlier folds
     created: an empty scope cuts the whole sheet, a scope names the groups
-    the earlier folds created.  A gene that points at a group that does not
-    exist falls back to the untouched sheet, so the programme stays
-    executable.
+    the earlier folds created. If target layers were specified but cannot
+    be resolved, it falls back to an available group or is skipped, avoiding
+    unintended whole-sheet folds.
     """
     genes = _repair_genes(genome.genes)
     steps: List[origami_genome.FoldStep] = []
@@ -621,6 +636,11 @@ def hybrid_to_origami(genome: HybridGenome) -> origami_genome.OrigamiGenome:
         scope = tuple(
             created[value] for value in gene.target_layers if 0 <= value < len(created)
         )
+        if gene.target_layers and not scope:
+            if created:
+                scope = (created[-1],)
+            else:
+                continue
         set_group_pair: Optional[Tuple[str, str]] = None
         if gene.creates_pair:
             set_group = ""

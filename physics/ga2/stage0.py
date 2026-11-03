@@ -388,6 +388,11 @@ def _model_programme(genes: Sequence[HybridFoldGene]) -> _Estimate:
         scope = tuple(
             created[value] for value in gene.target_layers if 0 <= value < len(created)
         )
+        if gene.target_layers and not scope:
+            if created:
+                scope = (created[-1],)
+            else:
+                continue
         if not scope:
             base_folds += 1
 
