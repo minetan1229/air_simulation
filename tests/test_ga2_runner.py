@@ -97,3 +97,63 @@ def test_the_screener_reports_the_backend_it_used(tmp_path: Path) -> None:
     assert described["screener"]["backend"] in ("cupy", "numpy")
     assert described["profile"]["tier"] == "small_long"
     assert "vram" in described
+
+
+def test_stage2_mapping_with_skipped_individuals(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Verify Stage 2 preserves 1:1 mapping when some individuals fail geometry and are skipped (Issue #99)."""
+    runner = EvolutionRunner(profile=_profile(population=4))
+
+    class DummyStage2:
+        def screen(self, cases: list) -> list:
+            from physics.ga2.stage2 import Stage2Report
+
+            reports = []
+            for case in cases:
+                reports.append(
+                    Stage2Report(
+                        index=case.index,
+                        feasible=True,
+                        buckling_margin=3.0,
+                        max_tip_deflection_m=0.01,
+                        pitch_stability_margin=2.0,
+                        reasons=[],
+                    )
+                )
+            return reports
+
+    runner._stage2 = DummyStage2()
+    runner._stage2_module = pytest.importorskip("physics.ga2.stage2")
+
+    rec0 = {"index": 100, "distance_m": 15.0, "key": "key0_abc", "genome": {"genes": []}}
+    rec1 = {"index": 101, "distance_m": 14.0, "key": "key1_def", "genome": {"genes": []}}
+    rec2 = {"index": 102, "distance_m": 13.0, "key": "key2_ghi", "genome": {"genes": []}}
+
+    monkeypatch.setattr(runner, "_genome_of", lambda r: object())
+
+    call_count = [0]
+
+    class DummyGeom:
+        wing_area_m2 = 0.02
+        span_m = 0.2
+        mass_kg = 0.005
+        chord_m = 0.1
+
+    def conditional_geometry(genome: Any) -> Any:
+        call_count[0] += 1
+        if call_count[0] == 2:
+            return None  # rec1 fails geometry
+        return DummyGeom()
+
+    monkeypatch.setattr(runner, "_exact_geometry", conditional_geometry)
+    monkeypatch.setattr(runner, "_aircraft_from_geometry", lambda g: object())
+    monkeypatch.setattr(runner, "_reference_refly", lambda survivors: None)
+
+    survivors = runner._stage2_structure([rec0, rec1, rec2])
+
+    assert len(survivors) == 2
+    assert survivors[0]["index"] == 100
+    assert survivors[0]["stage2"]["feasible"] is True
+    assert survivors[1]["index"] == 102
+    assert survivors[1]["stage2"]["feasible"] is True
+    assert rec1["stage2"] == {"feasible": False, "reasons": ["geometry failed"]}
+

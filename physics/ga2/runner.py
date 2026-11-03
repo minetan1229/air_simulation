@@ -430,7 +430,7 @@ class EvolutionRunner:
             genome = self._genome_of(record)
             if genome is None:
                 continue
-            report = self._stage0.quick_screen(genome)
+            report = self._stage0.evaluate(genome)
             if not report.valid:
                 record["stage0"] = report.to_dict()
                 continue
@@ -523,8 +523,21 @@ class EvolutionRunner:
         if not candidates:
             return []
         limit = self.profile.stage2_passthrough
-        ordered = sorted(candidates, key=lambda item: float(item.get("distance_m", 0.0)), reverse=True)
-        selected = ordered[:limit]
+        ordered = sorted(candidates, key=lambda item: float(item.get("fitness", 0.0)), reverse=True)
+        # Diversity: cap how many candidates share the same genome key family
+        # (first 4 chars of the key hash) so the high-fidelity stages see a
+        # spread of designs rather than near-duplicates of the longest flight.
+        selected: List[Dict[str, Any]] = []
+        key_family_count: Dict[str, int] = {}
+        max_per_family = max(1, limit // 3)
+        for item in ordered:
+            key_family = str(item.get("key", ""))[:4]
+            if key_family_count.get(key_family, 0) >= max_per_family:
+                continue
+            selected.append(item)
+            key_family_count[key_family] = key_family_count.get(key_family, 0) + 1
+            if len(selected) >= limit:
+                break
         if self._stage2 is None:
             stage2_module = self._optional_module("stage2")
             if stage2_module is None:
@@ -532,6 +545,7 @@ class EvolutionRunner:
             self._stage2_module = stage2_module
             self._stage2 = stage2_module.StaticFsiScreener(paper_gsm=self.paper_gsm)
         cases: List[Any] = []
+        cases_records: List[Dict[str, Any]] = []
         stage2_api: Any = self._stage2_module
         for record in selected:
             genome = self._genome_of(record)
@@ -549,9 +563,10 @@ class EvolutionRunner:
                 "chord_m": float(geometry.chord_m),
                 "aspect_ratio": float(geometry.span_m) ** 2 / max(float(geometry.wing_area_m2), 1.0e-9),
             }
+            rec_idx = int(record.get("index", id(record)))
             cases.append(
                 stage2_api.Stage2Case(
-                    index=int(record.get("index", len(cases))),
+                    index=rec_idx,
                     aircraft=aircraft,
                     dynamic_pressure_pa=self._dynamic_pressure(record),
                     load_factor=float(record.get("peak_load_factor", 1.0)),
@@ -561,11 +576,16 @@ class EvolutionRunner:
                     thickness_m=max(self.paper_gsm * 1.0e-3 / 800.0, 1.0e-6),
                 )
             )
+            cases_records.append(record)
         if not cases:
             return []
         reports = self._stage2.screen(cases)
+        record_by_index = {int(r.get("index", id(r))): r for r in cases_records}
         survivors: List[Dict[str, Any]] = []
-        for record, report in zip(selected, reports):
+        for report in reports:
+            record = record_by_index.get(int(report.index))
+            if record is None:
+                continue
             record["stage2"] = report.to_dict()
             if report.feasible:
                 survivors.append(record)
@@ -643,8 +663,21 @@ class EvolutionRunner:
         if not candidates or not self.stage3_enabled:
             return list(candidates)
         limit = self.profile.stage3_passthrough
-        ordered = sorted(candidates, key=lambda item: float(item.get("distance_m", 0.0)), reverse=True)
-        selected = ordered[:limit]
+        ordered = sorted(candidates, key=lambda item: float(item.get("fitness", 0.0)), reverse=True)
+        # Diversity: cap how many candidates share the same genome key family
+        # (first 4 chars of the key hash) so the high-fidelity stages see a
+        # spread of designs rather than near-duplicates of the longest flight.
+        selected: List[Dict[str, Any]] = []
+        key_family_count: Dict[str, int] = {}
+        max_per_family = max(1, limit // 3)
+        for item in ordered:
+            key_family = str(item.get("key", ""))[:4]
+            if key_family_count.get(key_family, 0) >= max_per_family:
+                continue
+            selected.append(item)
+            key_family_count[key_family] = key_family_count.get(key_family, 0) + 1
+            if len(selected) >= limit:
+                break
         try:
             stage3_module = self._optional_module("stage3")
         except Exception:
@@ -653,6 +686,7 @@ class EvolutionRunner:
             return list(candidates)
         self._stage3_module = stage3_module
         requests: List[Any] = []
+        requests_records: List[Dict[str, Any]] = []
         for record in selected:
             genome = self._genome_of(record)
             if genome is None:
@@ -661,9 +695,10 @@ class EvolutionRunner:
             if geometry is None:
                 continue
             aircraft = self._aircraft_from_geometry(geometry)
+            rec_idx = int(record.get("index", id(record)))
             requests.append(
                 stage3_module.Stage3Request(
-                    index=int(record.get("index", len(requests))),
+                    index=rec_idx,
                     genome=genome.to_dict(),
                     aircraft=dict(vars(aircraft)),
                     launch={
@@ -676,11 +711,16 @@ class EvolutionRunner:
                     glide_steps=int(self.profile.stage3_glide_steps),
                 )
             )
+            requests_records.append(record)
         if not requests:
             return list(candidates)
         results = stage3_module.run_stage3_parallel(requests, self.profile)
+        record_by_index = {int(r.get("index", id(r))): r for r in requests_records}
         resolved: List[Dict[str, Any]] = []
-        for record, result in zip(selected, results):
+        for result in results:
+            record = record_by_index.get(int(result.index))
+            if record is None:
+                continue
             record["stage3"] = result.to_dict()
             if result.lift_to_drag > 0.0:
                 record["lift_to_drag"] = float(result.lift_to_drag)
