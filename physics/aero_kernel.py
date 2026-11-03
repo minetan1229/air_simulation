@@ -736,20 +736,23 @@ def lsb_dynamic_stall_shift(
     abs_adot_rad = xp.abs(adot_rad)
     c = xp.maximum(_finite(xp, mac_m, 0.1), 1.0e-6)
     v = xp.maximum(_finite(xp, speed_mps, 0.0), 0.1)
-    re = xp.maximum(_finite(xp, reynolds, 1.0e4), 1.0e3)
+    re = xp.maximum(_finite(xp, reynolds, 1.0e4), 1.0)
     k_lsb = xp.maximum(_finite(xp, kappa_lsb, 1.5), 0.0)
 
     # Reduced pitch rate
     k_red = (abs_adot_rad * c) / (2.0 * v)
-    # Reynolds scaling factor (bounded)
-    f_re = _clamp(xp, xp.sqrt(1.0e4 / re), 0.2, 2.0)
+    # LSB hysteresis is a low-Reynolds-number mechanism.  Do not smear a
+    # low-Re correction into the calibrated high-Re regime; outside the
+    # declared envelope the static polar is the only supported result.
+    low_re = (re >= 1.0e3) & (re <= 5.0e4)
+    f_re = _clamp(xp, xp.sqrt(1.0e4 / xp.maximum(re, 1.0e3)), 0.2, 2.0)
 
     # Regularized smooth direction to prevent chattering and numerical energy injection
     smooth_sign = xp.tanh(adot / 5.0)
     # Scale from nondimensional delay to degrees using (180 / pi)
     delta_deg = smooth_sign * k_lsb * (180.0 / math.pi) * xp.sqrt(xp.maximum(k_red, 0.0)) * f_re
     # Physical clamp on maximum dynamic stall overshoot (+/- 10 degrees)
-    return _clamp(xp, delta_deg, -10.0, 10.0)
+    return xp.where(low_re, _clamp(xp, delta_deg, -10.0, 10.0), 0.0)
 
 
 def lsb_dynamic_stall_hysteresis(
@@ -779,18 +782,22 @@ def lsb_dynamic_stall_hysteresis(
     adot_rad = _rad(xp, adot)
     c = xp.maximum(_finite(xp, mac_m, 0.1), 1.0e-6)
     v = xp.maximum(_finite(xp, speed_mps, 0.0), 0.1)
-    re = xp.maximum(_finite(xp, reynolds, 1.0e4), 1.0e3)
+    re = xp.maximum(_finite(xp, reynolds, 1.0e4), 1.0)
     k_lsb = xp.maximum(_finite(xp, kappa_lsb, 1.5), 0.0)
     k_reatt = xp.maximum(_finite(xp, kappa_reatt, 1.0), 0.0)
     a_stall_0 = xp.abs(_finite(xp, stall_alpha_deg, 14.0))
 
     k_red = xp.sqrt(xp.maximum((xp.abs(adot_rad) * c) / (2.0 * v), 0.0))
-    f_re = _clamp(xp, xp.sqrt(1.0e4 / re), 0.2, 2.0)
-    delta_reatt = _clamp(xp, delta_alpha0_deg * xp.sqrt(2.0e4 / re), 0.5, 6.0)
+    low_re = (re >= 1.0e3) & (re <= 5.0e4)
+    f_re = _clamp(xp, xp.sqrt(1.0e4 / xp.maximum(re, 1.0e3)), 0.2, 2.0)
+    delta_reatt = _clamp(
+        xp, delta_alpha0_deg * xp.sqrt(2.0e4 / xp.maximum(re, 1.0e3)), 0.5, 6.0
+    )
 
     shift_up = k_lsb * k_red * f_re * (180.0 / math.pi)
     shift_down = -(delta_reatt + k_reatt * k_red * f_re * (180.0 / math.pi))
-    delta_shift = xp.where(adot >= 0.0, shift_up, shift_down)
+    delta_shift = xp.where(adot > 0.0, shift_up, shift_down)
+    delta_shift = xp.where(low_re, delta_shift, 0.0)
 
     is_prev = _flag_array(xp, is_stalled_prev)
     eff_stall = xp.where(

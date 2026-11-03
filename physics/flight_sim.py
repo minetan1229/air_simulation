@@ -1957,6 +1957,10 @@ class FlightSimulator:
         self._is_stalled_prev: bool = False
         self._energy_history: List[float] = []
         self._last_dt: float = 0.01
+        # Dynamic aero states are committed once per accepted step.  RK4
+        # stages must see the same history; mutating these filters from k2/k3
+        # makes the result depend on the number of derivative evaluations.
+        self._commit_dynamic_state: bool = False
         self._refresh_derived()
         if bool(self.settings.collision_enabled) and not self._state.crashed:
             self._state = self._apply_ground_contact(self._state)
@@ -2353,8 +2357,9 @@ class FlightSimulator:
                 ScalarMath, self._aero_twist_lag, aero_twist_deg, dt_step, lag_tau
             )
         )
-        self._aero_dihedral_lag = aero_dihedral_deg
-        self._aero_twist_lag = aero_twist_deg
+        if self._commit_dynamic_state:
+            self._aero_dihedral_lag = aero_dihedral_deg
+            self._aero_twist_lag = aero_twist_deg
 
         # Finite difference pitch rate / alpha rate estimation
         prev_a = getattr(self, "_prev_alpha_deg", alpha_deg)
@@ -2362,8 +2367,9 @@ class FlightSimulator:
             alpha_dot = (alpha_deg - prev_a) / dt_step
         else:
             alpha_dot = 0.0
-        self._prev_alpha_deg = alpha_deg
-        self._alpha_dot_deg_s = alpha_dot
+        if self._commit_dynamic_state:
+            self._prev_alpha_deg = alpha_deg
+            self._alpha_dot_deg_s = alpha_dot
 
         # Dynamic LSB Hysteresis (item 3 & multi-fidelity)
         lsb_active = bool(
@@ -2387,7 +2393,8 @@ class FlightSimulator:
                 kappa_lsb=lsb_kappa,
             )
             lsb_shift_deg = float(eff_stall_a) - base_stall_a
-            self._is_stalled_prev = bool(curr_stalled)
+            if self._commit_dynamic_state:
+                self._is_stalled_prev = bool(curr_stalled)
         self._lsb_shift_deg = lsb_shift_deg
 
         effective_alpha_deg = alpha_deg - aero_twist_deg
@@ -2554,7 +2561,8 @@ class FlightSimulator:
                     k_circ=k_circ,
                 )
             )
-            self._unsteady_cl_lag = cl_lagged
+            if self._commit_dynamic_state:
+                self._unsteady_cl_lag = cl_lagged
             result.lift_n = cl_lagged * q_s
 
         force_body = wind_force_to_body(body_relative, result.drag_n, result.side_n, result.lift_n)
@@ -2696,6 +2704,7 @@ class FlightSimulator:
         self, y0: np.ndarray, h: float, time_s: float, k1: Optional[np.ndarray] = None
     ) -> np.ndarray:
         """One classical RK4 sweep, renormalising the quaternion afterwards."""
+        self._commit_dynamic_state = False
         if k1 is None:
             k1 = self._derivative(y0, time_s)
         k2 = self._derivative(y0 + 0.5 * h * k1, time_s + 0.5 * h)
@@ -3440,6 +3449,12 @@ class FlightSimulator:
             if self._within_limits(candidate) and self._step_is_acceptable(previous, candidate):
                 candidate.time_s = time_s + step
                 self._state = candidate
+                # Commit dynamic aerodynamic history only after the step has
+                # passed all guards.  Rejected trials must not advance LSB,
+                # circulation, or aeroelastic memory.
+                self._commit_dynamic_state = True
+                self._compute_dynamics(_pack(candidate), candidate.time_s)
+                self._commit_dynamic_state = False
                 self._diagnostics_cache = None
                 if attempt > 0:
                     self._rolled_back = True
