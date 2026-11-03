@@ -101,6 +101,15 @@ class Solver2D:
         f_r[..., 2] = rho_r * v_r_vel * vn_r + p_r * ny
         f_r[..., 3] = rho_r * h_r * vn_r
 
+        # Right-handed tangent: t = (-ny, nx). 2D Euler has four waves:
+        # acoustic (un±c), entropy (un), and tangential shear (un).
+        tx = -ny
+        ty = nx
+        vt_l = u_l_vel * tx + v_l_vel * ty
+        vt_r = u_r_vel * tx + v_r_vel * ty
+        vt_roe = u_roe * tx + v_roe * ty
+        dvt = vt_r - vt_l
+
         # Wave speeds with Harten entropy fix
         dvn = vn_r - vn_l
         d_p = p_r - p_l
@@ -115,26 +124,30 @@ class Solver2D:
         lambda2 = np.where(lambda2 < delta, 0.5 * (lambda2**2 + delta**2) / delta, lambda2)
         lambda3 = np.where(lambda3 < delta, 0.5 * (lambda3**2 + delta**2) / delta, lambda3)
 
-        # Wave amplitudes
+        # Wave amplitudes: entropy, two acoustics, and shear
         alpha2 = (d_p + rho_roe * c_roe * dvn) / (2.0 * c_roe2)
         alpha3 = (d_p - rho_roe * c_roe * dvn) / (2.0 * c_roe2)
         alpha1 = d_rho - (alpha2 + alpha3)
+        alpha_s = rho_roe * dvt
 
-        # Dissipation flux
+        # Dissipation flux (entropy + shear share |un| = lambda1)
         diss = np.empty_like(u_l)
         diss[..., 0] = lambda1 * alpha1 + lambda2 * alpha2 + lambda3 * alpha3
         diss[..., 1] = (
             lambda1 * alpha1 * u_roe
+            + lambda1 * alpha_s * tx
             + lambda2 * alpha2 * (u_roe + c_roe * nx)
             + lambda3 * alpha3 * (u_roe - c_roe * nx)
         )
         diss[..., 2] = (
             lambda1 * alpha1 * v_roe
+            + lambda1 * alpha_s * ty
             + lambda2 * alpha2 * (v_roe + c_roe * ny)
             + lambda3 * alpha3 * (v_roe - c_roe * ny)
         )
         diss[..., 3] = (
             lambda1 * alpha1 * (0.5 * q2_roe)
+            + lambda1 * alpha_s * vt_roe
             + lambda2 * alpha2 * (h_roe + c_roe * vn_roe)
             + lambda3 * alpha3 * (h_roe - c_roe * vn_roe)
         )
@@ -142,13 +155,14 @@ class Solver2D:
         num_flux = np.asarray(0.5 * (f_l + f_r - diss), dtype=np.float64)
         return num_flux
 
-    def evaluate_residuals(self) -> np.ndarray:
+    def evaluate_residuals(self, u_state: np.ndarray | None = None) -> np.ndarray:
         """Compute spatial residual R(U) = sum(Flux * face_len)."""
-        res = np.zeros_like(self.u)
+        u = self.u if u_state is None else u_state
+        res = np.zeros_like(u)
 
         # 1. i-faces (periodic / wrap-around around airfoil in i)
-        u_left = np.roll(self.u, 1, axis=0)  # i-1 cell
-        u_right = self.u                     # i cell
+        u_left = np.roll(u, 1, axis=0)  # i-1 cell
+        u_right = u                     # i cell
         nx_i = self.grid.i_nx[:-1, :]
         ny_i = self.grid.i_ny[:-1, :]
         len_i = self.grid.i_len[:-1, :, np.newaxis]
@@ -160,8 +174,8 @@ class Solver2D:
         res -= np.roll(f_i, -1, axis=0)
 
         # 2. Interior j-faces
-        u_bottom = self.u[:, :-1, :]
-        u_top = self.u[:, 1:, :]
+        u_bottom = u[:, :-1, :]
+        u_top = u[:, 1:, :]
         nx_j = self.grid.j_nx[:, 1:-1]
         ny_j = self.grid.j_ny[:, 1:-1]
         len_j = self.grid.j_len[:, 1:-1, np.newaxis]
@@ -177,7 +191,7 @@ class Solver2D:
         ny_w = self.grid.j_ny[:, 0]
         len_wall = self.grid.j_len[:, 0, np.newaxis]
 
-        u_first = self.u[:, 0, :]
+        u_first = u[:, 0, :]
         rho_w, u_w_vel, v_w_vel, p_w, _ = self.get_primitive(u_first)
         vn_w = u_w_vel * nx_w + v_w_vel * ny_w
         # Reflect normal velocity: v_ghost = v_inner - 2 * vn * n
@@ -200,7 +214,7 @@ class Solver2D:
         ny_far = self.grid.j_ny[:, -1]
         len_far = self.grid.j_len[:, -1, np.newaxis]
 
-        u_inner = self.u[:, -1, :]
+        u_inner = u[:, -1, :]
         u_outer = np.broadcast_to(self.u_free, u_inner.shape)
         # Flux leaves domain at outer boundary
         f_far = self.compute_flux(u_inner, u_outer, nx_far, ny_far) * len_far
@@ -254,16 +268,17 @@ class Solver2D:
         return float(np.min(dt_local))
 
     def step_rk2(self, dt: float) -> float:
-        """Advance solution one step using 2-stage Runge-Kutta scheme."""
+        """Advance solution one step using Heun's 2-stage Runge-Kutta scheme."""
         vol_4 = self.grid.vol[..., np.newaxis]
+        u_n = self.u
 
-        # Stage 1
-        res1 = self.evaluate_residuals()
-        u1 = self.u - (dt / vol_4) * res1
+        # Stage 1: residual at U^n, then intermediate state
+        res1 = self.evaluate_residuals(u_n)
+        u1 = u_n - (dt / vol_4) * res1
 
-        # Stage 2
-        res2 = self.evaluate_residuals()
-        self.u = 0.5 * (self.u + u1 - (dt / vol_4) * res2)
+        # Stage 2: residual at the intermediate state (not U^n)
+        res2 = self.evaluate_residuals(u1)
+        self.u = 0.5 * (u_n + u1 - (dt / vol_4) * res2)
 
         # Return L2 norm of density residual
         l2_res = float(np.sqrt(np.mean((res1[..., 0] / self.grid.vol) ** 2)))
