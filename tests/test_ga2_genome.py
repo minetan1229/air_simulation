@@ -163,3 +163,44 @@ def test_a_gene_rejects_a_dangling_layer() -> None:
     )
     assert gene.target_layers == (3, 7)
     assert gene.target_layer == 3
+
+
+def test_disabled_preceding_crease_does_not_convert_to_full_sheet_fold() -> None:
+    """Verify that when earlier fold genes are disabled, subsequent localized folds
+    with unresolved target_layers are safely skipped instead of mutating into whole-sheet folds (Issue #100).
+    """
+    from physics.ga2.genome import HybridGenome, hybrid_to_origami
+
+    # Gene 1 creates group 1 (e.g. wing fold)
+    # Gene 2 targets group 1 (e.g. winglet fold with target_layers=(0,))
+    gene1 = HybridFoldGene(
+        enabled=False,  # Disabled by mutation!
+        origin=(0.1, 0.5),
+        crease_angle_deg=10.0,
+        fold_angle_deg=45.0,
+        creates_group=True,
+    )
+    gene2 = HybridFoldGene(
+        enabled=True,
+        origin=(0.8, 0.2),
+        crease_angle_deg=80.0,
+        fold_angle_deg=90.0,
+        target_layers=(0,),  # Pointed to group created by gene1
+    )
+    # Gene 3 is intentionally a whole-sheet fold (target_layers=())
+    gene3 = HybridFoldGene(
+        enabled=True,
+        origin=(0.5, 0.0),
+        crease_angle_deg=90.0,
+        fold_angle_deg=180.0,
+        target_layers=(),
+    )
+
+    genome = HybridGenome(genes=[gene1, gene2, gene3])
+    pattern = hybrid_to_origami(genome)
+
+    # gene2 should be skipped (not turned into group=() which cuts entire sheet)
+    # Only gene3 should remain as a step
+    assert len(pattern.steps) == 1
+    assert pattern.steps[0].group == ()  # gene3
+

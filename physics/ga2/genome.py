@@ -346,12 +346,19 @@ def _repair_genes(genes: Sequence[HybridFoldGene]) -> List[HybridFoldGene]:
             for value in sorted({int(item) for item in gene.target_layers})
             if 0 <= value < available
         )
+        # Issue #100: a gene whose target_layers reference groups that were
+        # never created (e.g. because the creating fold was disabled) must be
+        # disabled, not silently converted into a whole-sheet fold.
+        if gene.target_layers and not layers:
+            enabled = False
+        else:
+            enabled = gene.enabled
         join = gene.join_group
         if join is not None and not (0 <= int(join) < available):
             join = None
         repaired.append(
             HybridFoldGene(
-                enabled=gene.enabled,
+                enabled=enabled,
                 origin=gene.origin,
                 crease_angle_deg=gene.crease_angle_deg,
                 fold_angle_deg=gene.fold_angle_deg,
@@ -621,6 +628,7 @@ def hybrid_to_origami(genome: HybridGenome) -> origami_genome.OrigamiGenome:
         scope = tuple(
             created[value] for value in gene.target_layers if 0 <= value < len(created)
         )
+
         set_group_pair: Optional[Tuple[str, str]] = None
         if gene.creates_pair:
             set_group = ""
