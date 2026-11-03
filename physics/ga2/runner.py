@@ -725,6 +725,7 @@ class EvolutionRunner:
             self._stage2_module = stage2_module
             self._stage2 = stage2_module.StaticFsiScreener(paper_gsm=self.paper_gsm)
         cases: List[Any] = []
+        cases_records: List[Dict[str, Any]] = []
         stage2_api: Any = self._stage2_module
         for record in selected:
             genome = self._genome_of(record)
@@ -742,9 +743,10 @@ class EvolutionRunner:
                 "chord_m": float(geometry.chord_m),
                 "aspect_ratio": float(geometry.span_m) ** 2 / max(float(geometry.wing_area_m2), 1.0e-9),
             }
+            rec_idx = int(record.get("index", id(record)))
             cases.append(
                 stage2_api.Stage2Case(
-                    index=int(record.get("index", len(cases))),
+                    index=rec_idx,
                     aircraft=aircraft,
                     dynamic_pressure_pa=self._dynamic_pressure(record),
                     load_factor=float(record.get("peak_load_factor", 1.0)),
@@ -754,14 +756,19 @@ class EvolutionRunner:
                     thickness_m=max(self.paper_gsm * 1.0e-3 / 800.0, 1.0e-6),
                 )
             )
+            cases_records.append(record)
         if not cases:
             return []
         reports = self._stage2.screen(cases)
+        record_by_index = {int(r.get("index", id(r))): r for r in cases_records}
         survivors: List[Dict[str, Any]] = []
-        for record, report in zip(selected, reports):
-            record["stage2"] = report.to_dict()
+        for report in reports:
+            matched = record_by_index.get(int(report.index))
+            if matched is None:
+                continue
+            matched["stage2"] = report.to_dict()
             if report.feasible:
-                survivors.append(record)
+                survivors.append(matched)
         self._reference_refly(survivors)
         return survivors
 
@@ -845,6 +852,7 @@ class EvolutionRunner:
             return list(candidates)
         self._stage3_module = stage3_module
         requests: List[Any] = []
+        requests_records: List[Dict[str, Any]] = []
         for record in selected:
             genome = self._genome_of(record)
             if genome is None:
@@ -853,9 +861,10 @@ class EvolutionRunner:
             if geometry is None:
                 continue
             aircraft = self._aircraft_from_geometry(geometry)
+            rec_idx = int(record.get("index", id(record)))
             requests.append(
                 stage3_module.Stage3Request(
-                    index=int(record.get("index", len(requests))),
+                    index=rec_idx,
                     genome=genome.to_dict(),
                     aircraft=dict(vars(aircraft)),
                     launch={
@@ -868,15 +877,20 @@ class EvolutionRunner:
                     glide_steps=int(self.profile.stage3_glide_steps),
                 )
             )
+            requests_records.append(record)
         if not requests:
             return list(candidates)
         results = stage3_module.run_stage3_parallel(requests, self.profile)
+        record_by_index = {int(r.get("index", id(r))): r for r in requests_records}
         resolved: List[Dict[str, Any]] = []
-        for record, result in zip(selected, results):
-            record["stage3"] = result.to_dict()
+        for result in results:
+            matched = record_by_index.get(int(result.index))
+            if matched is None:
+                continue
+            matched["stage3"] = result.to_dict()
             if result.lift_to_drag > 0.0:
-                record["lift_to_drag"] = float(result.lift_to_drag)
-                resolved.append(record)
+                matched["lift_to_drag"] = float(result.lift_to_drag)
+                resolved.append(matched)
         return resolved
 
     # ------------------------------------------------------------------

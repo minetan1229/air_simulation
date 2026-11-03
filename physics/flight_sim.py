@@ -3071,6 +3071,7 @@ class FlightSimulator:
         r_ltip = np.array([-0.3 * mac, -semispan, 0.0], dtype=np.float64)
         r_rtip = np.array([-0.3 * mac, semispan, 0.0], dtype=np.float64)
         r_keel = np.array([0.0, 0.0, GROUND_KEEL_DEPTH_M], dtype=np.float64)
+        r_tail = np.array([-0.7 * mac, 0.0, GROUND_KEEL_DEPTH_M], dtype=np.float64)
 
         def _resolve_contact(r_body: np.ndarray, e_coef: float) -> float:
             """Resolve the impulsive contact at one station.
@@ -3115,7 +3116,27 @@ class FlightSimulator:
         # about that point instead of a flat landing.
         z_keel = float(state.position_m[2]) + float(body_to_world(state.quaternion, r_keel)[2])
         alt_keel = -z_keel - _finite(self.environment.ground_level_m)
-        impact_speed = max(vz, 0.0)
+        # Impact speed from the fastest downward contact-point velocity among
+        # stations actually at/below ground, including the rotational term
+        # v_point = v + omega x r (same convention as _resolve_contact).  Using
+        # only the CG vertical speed vz misses strikes by a rotating wingtip or
+        # nose (vz ~ 0 but contact point moving fast) and overstates impacts
+        # where the contact point rebounds upward while vz > 0.
+        def _station_v_normal(r_body: np.ndarray) -> float:
+            r_world = body_to_world(state.quaternion, r_body)
+            v_point = velocity + np.cross(rates, r_world)
+            return float(v_point[2])  # +z is down; positive => into the ground
+
+        impact_speed = 0.0
+        for station_alt, r_body in (
+            (alt_nose, r_nose),
+            (alt_ltip, r_ltip),
+            (alt_rtip, r_rtip),
+            (alt_tail, r_tail),
+            (altitude_cg, r_keel),  # keel acts under the CG
+        ):
+            if station_alt <= 0.0:
+                impact_speed = max(impact_speed, max(_station_v_normal(r_body), 0.0))
 
         if tip_contact and altitude_cg > 0.0:
             # A wingtip fold is usually less elastic than the fuselage; the
