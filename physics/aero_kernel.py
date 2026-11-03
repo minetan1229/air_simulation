@@ -90,6 +90,7 @@ __all__ = [
     "first_order_lag",
     "compute_mass_ratio",
     "compute_added_mass",
+    "compute_apparent_forces",
     "evaluate_model_validity",
     "unsteady_circulation_lag",
     "lsb_dynamic_stall_shift",
@@ -688,6 +689,58 @@ def compute_added_mass(
         "added_inertia_zz_kgm2": i_zz,
     }
 
+
+def compute_apparent_forces(
+    xp: Any,
+    body_velocity: Any,
+    omega: Any,
+    added_mass_z_kg: Any,
+) -> Tuple[Any, Any]:
+    """Apparent-mass Coriolis and Munk terms for a body moving through fluid.
+
+    The fluid momentum carried by the body is ``P_A = [0, 0, m_z * w]`` (added
+    mass acts only in the z direction).  In body axes with z down:
+
+        Fluid Coriolis force:   F_app = omega x P_A
+        Munk apparent moment:   M_app = -v_rel x P_A
+
+    Expanding:
+
+        F_app_x = + q * m_z * w
+        F_app_y = - p * m_z * w
+        F_app_z = 0
+
+        M_app_x = - v * m_z * w   (roll apparent moment)
+        M_app_y = + u * m_z * w   (pitch apparent moment)
+        M_app_z = 0
+
+    The inertial (added-mass) term ``-dP_A/dt`` is handled separately by the
+    caller through the effective mass ``m_eff_z = m + m_add_z``; this function
+    returns only the rotational coupling terms.  These terms transfer energy
+    between body motion and fluid kinetic energy; they do not conserve power
+    by themselves.
+    """
+    v_arr = xp.asarray(body_velocity, dtype=xp.float64)
+    w_arr = xp.asarray(omega, dtype=xp.float64)
+    m_z = xp.asarray(added_mass_z_kg, dtype=xp.float64)
+
+    u = v_arr[..., 0]
+    v = v_arr[..., 1]
+    w = v_arr[..., 2]
+    p = w_arr[..., 0]
+    q = w_arr[..., 1]
+
+    fx = q * m_z * w
+    fy = -p * m_z * w
+    fz = xp.zeros_like(fx)
+    force_apparent = xp.stack((fx, fy, fz), axis=-1)
+
+    mx = -v * m_z * w
+    my = u * m_z * w
+    mz = xp.zeros_like(mx)
+    moment_apparent = xp.stack((mx, my, mz), axis=-1)
+
+    return force_apparent, moment_apparent
 
 
 def unsteady_circulation_lag(

@@ -534,6 +534,18 @@ def apply_correction(
         updated = dict(result)
         for index, target in enumerate(model.target_names):
             if target in updated and index < prediction.size:
-                updated[target] = float(updated[target]) + float(prediction[index])
+                val = float(updated[target]) + float(prediction[index])
+                # Physical bound guards (M-26):
+                # Parasitic and total drag coefficients cannot be negative or smaller than laminar skin friction
+                if target in ("cd", "screening_cd", "cd0"):
+                    val = max(val, 0.005)
+                # Lift coefficients bounded within physical limits for low-Re paper gliders [-2.5, 2.5]
+                elif target in ("cl", "screening_cl", "cL0"):
+                    val = max(-2.5, min(2.5, val))
+                # Pitching moment coefficient bounded within [-1.5, 1.5]
+                elif target in ("cm", "cm0"):
+                    val = max(-1.5, min(1.5, val))
+                updated[target] = val
         corrected.append(updated)
     return corrected
+
