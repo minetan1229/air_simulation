@@ -3085,14 +3085,18 @@ class FlightSimulator:
             instead of being injected as a constant angular rate.
             """
             nonlocal velocity, rates
+            R_b2w = quaternion_to_matrix(state.quaternion)
+            R_w2b = R_b2w.T
             r_world = body_to_world(state.quaternion, r_body)
-            v_point = velocity + np.cross(rates, r_world)
+            rates_world = R_b2w @ rates
+            v_point = velocity + np.cross(rates_world, r_world)
             v_normal = float(v_point[2])  # +z points down
             if v_normal <= 0.0:
                 return 0.0
             normal = np.array([0.0, 0.0, 1.0], dtype=np.float64)
-            lever = np.cross(r_world, normal)
-            inv_term = 1.0 / mass + float(lever @ (inertia_inv @ lever))
+            normal_body = R_w2b @ normal
+            lever_body = np.cross(r_body, normal_body)
+            inv_term = 1.0 / mass + float(lever_body @ (inertia_inv @ lever_body))
             m_eff = 1.0 / max(inv_term, 1.0e-18)
             j_normal = -(1.0 + e_coef) * m_eff * v_normal
             impulse = np.array([0.0, 0.0, j_normal], dtype=np.float64)
@@ -3102,7 +3106,8 @@ class FlightSimulator:
                 j_t = min(mu * abs(j_normal), m_eff * tangential_speed)
                 impulse = impulse - j_t * (tangential / tangential_speed)
             velocity = velocity + impulse / mass
-            rates = rates + inertia_inv @ np.cross(r_world, impulse)
+            impulse_body = R_w2b @ impulse
+            rates = rates + inertia_inv @ np.cross(r_body, impulse_body)
             return abs(j_normal)
 
         # Check wingtip strikes before main body contact (altitude_cg > 0 but wingtip below ground)
@@ -3115,17 +3120,28 @@ class FlightSimulator:
         # about that point instead of a flat landing.
         z_keel = float(state.position_m[2]) + float(body_to_world(state.quaternion, r_keel)[2])
         alt_keel = -z_keel - _finite(self.environment.ground_level_m)
-        impact_speed = max(vz, 0.0)
+        R_b2w = quaternion_to_matrix(state.quaternion)
+        rates_world = R_b2w @ rates
+
+        def _point_normal_velocity(r_body: np.ndarray) -> float:
+            r_world = body_to_world(state.quaternion, r_body)
+            return float((velocity + np.cross(rates_world, r_world))[2])
 
         if tip_contact and altitude_cg > 0.0:
             # A wingtip fold is usually less elastic than the fuselage; the
             # tip-specific value is optional and falls back to the body one.
             e_tip = tip_restitution if tip_restitution >= 0.0 else restitution
             touched = False
+            # Impact speed from contact-point velocity BEFORE the impulse
+            # modifies velocity (Issue #96: rotational contact-point velocity).
+            tip_speeds = []
             if alt_ltip <= 0.0:
+                tip_speeds.append(max(_point_normal_velocity(r_ltip), 0.0))
                 touched = _resolve_contact(r_ltip, e_tip) > 0.0 or touched
             if alt_rtip <= 0.0:
+                tip_speeds.append(max(_point_normal_velocity(r_rtip), 0.0))
                 touched = _resolve_contact(r_rtip, e_tip) > 0.0 or touched
+            impact_speed = max(tip_speeds) if tip_speeds else 0.0
             if touched:
                 self._bounce_count += 1
                 if impact_speed > CRASH_IMPACT_SPEED_MPS:
@@ -3144,6 +3160,9 @@ class FlightSimulator:
                     body_station = np.array(
                         [-0.7 * mac, 0.0, GROUND_KEEL_DEPTH_M], dtype=np.float64
                     )
+                # Impact speed from contact-point velocity BEFORE the impulse
+                # modifies velocity (Issue #96: rotational contact-point velocity).
+                impact_speed = max(_point_normal_velocity(body_station), 0.0)
                 if impact_speed > 0.0:
                     _resolve_contact(body_station, restitution)
                 self._bounce_count += 1
@@ -3152,9 +3171,8 @@ class FlightSimulator:
                     _finite(getattr(self.settings, "ground_crush_stroke_m", 0.031), 0.031), 1.0e-6
                 )
                 # Load factor from the structural stop distance: n = 1 + v^2/(2 g d).
-                # The previous formulation assumed a fixed 0.08 s contact time
-                # (equivalent to a 31 mm stroke) and capped the result at 15 g, so
-                # every landing faster than ~12 m/s reported the same load.
+                # Impact speed is the contact-point normal velocity (including
+                # rotational contribution per Issue #96), not just CG vz.
                 impact_g = 1.0 + impact_speed * impact_speed / (2.0 * grav * d_stop)
                 air = atmosphere_state(self.environment, 0.0, self._chord)
                 impact_stress = stress_metrics(
