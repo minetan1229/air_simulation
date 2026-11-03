@@ -215,6 +215,6 @@ python tools/check_gpu_parity.py
 
 ---
 
-*本書は Issue #47 の 3D CFD ロードマップ（`docs/CFD_ROADMAP.md`）とは別物である。
-CFD ロードマップは **3 次元 Navier–Stokes ソルバ** の導入計画であり、本書が扱う
-**6DoF パネル法 + 経験モデル** の正本とは層が異なる。*
+*本書は Issue #47 の CFD ロードマップ（`docs/CFD_ROADMAP.md`）とは別物である。
+`physics/cfd/` には 2D・3D 圧縮性 Euler ソルバの試作実装があるが、粘性を含む Navier–Stokes/RANS
+ソルバではなく、本書が扱う **6DoF パネル法 + 経験モデル** の正本とも別経路である。CFD の機能と検証状況はロードマップを参照する。*
