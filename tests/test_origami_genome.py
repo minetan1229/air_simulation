@@ -619,3 +619,36 @@ def test_genome_to_aircraft_config_matches_wingspan_m() -> None:
     final_bounds = states_scaled[-1]["bounds"]
     final_span = final_bounds["max"][2] - final_bounds["min"][2]
     assert final_span == pytest.approx(target, rel=1e-3)
+
+
+def test_unfolded_sheet_inertia_matches_analytic_thin_plate() -> None:
+    """Verify folded geometry inertia tensor matches analytic thin plate formulas
+    including within-panel 2nd moments of area (Issue #113).
+    """
+    genome = og.OrigamiGenome(steps=[], sheet=list(og.SHEET_OUTLINE))
+    geom = og.fold_genome(genome, paper_gsm=100.0)
+
+    # Sheet outline is in x-y plane (or x-z plane in origami coords)
+    # Check that roll, pitch, yaw inertias match analytic m*(a^2+b^2)/12 formulas
+    m = geom.mass_kg
+    # Dimension in x (length) and in second axis
+    lx = geom.length_m
+    span = geom.span_m
+
+    # For an unfolded flat rectangular sheet of mass m, width W, length L:
+    # Principal moments about CG:
+    # I_xx = m * (span^2) / 12  or m * (L^2) / 12 depending on orientation
+    # I_zz = m * (lx^2 + span^2) / 12
+    # Prior to fix, all moments collapsed to 0 (1e-12) because there was only 1 panel whose centroid is CG.
+    assert geom.pitch_inertia_kgm2 > 1.0e-8, "Pitch inertia must include within-panel inertia"
+    assert geom.roll_inertia_kgm2 > 1.0e-8, "Roll inertia must include within-panel inertia"
+    assert geom.yaw_inertia_kgm2 > 1.0e-8, "Yaw inertia must include within-panel inertia"
+
+    # Perpendicular axis theorem for flat 2D lamina in x-z plane:
+    # I_yy (perpendicular to lamina plane) must equal I_xx + I_zz
+    assert math.isclose(
+        geom.pitch_inertia_kgm2,
+        geom.roll_inertia_kgm2 + geom.yaw_inertia_kgm2,
+        rel_tol=1e-3,
+    )
+
