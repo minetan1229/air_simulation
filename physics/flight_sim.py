@@ -2275,7 +2275,13 @@ class FlightSimulator:
         return self._timestep_from(core, y, time_s)
 
     # -- aerodynamics / dynamics core ------------------------------------
-    def _compute_dynamics(self, y: np.ndarray, time_s: float) -> Dict[str, Any]:
+    def _compute_dynamics(
+        self,
+        y: np.ndarray,
+        time_s: float,
+        dt: Optional[float] = None,
+        lag_states: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
         """Aerodynamics plus rigid-body dynamics at an arbitrary 13-state.
 
         Returns the world-frame acceleration, the body angular acceleration
@@ -2283,6 +2289,7 @@ class FlightSimulator:
         specific force used for the G load and the raw :class:`AeroResult`.
         """
         position = vec3(y[0:3])
+
         velocity = vec3(y[3:6])
         quaternion = quaternion_normalize(y[6:10])
         omega = vec3(y[10:13])
@@ -2353,25 +2360,31 @@ class FlightSimulator:
                 aero_twist_deg = aero_twist_gain * (q_dyn / q_ref) * 4.0
 
         # Simple first-order lag filter on quasi-static deformations (Task item 3)
+        l_states = lag_states or {}
+        curr_dihedral_lag = float(l_states.get("_aero_dihedral_lag", getattr(self, "_aero_dihedral_lag", 0.0)))
+        curr_twist_lag = float(l_states.get("_aero_twist_lag", getattr(self, "_aero_twist_lag", 0.0)))
+        curr_prev_alpha = float(l_states.get("_prev_alpha_deg", getattr(self, "_prev_alpha_deg", alpha_deg)))
+        curr_is_stalled = bool(l_states.get("_is_stalled_prev", getattr(self, "_is_stalled_prev", False)))
+        curr_unsteady_cl = float(l_states.get("_unsteady_cl_lag", getattr(self, "_unsteady_cl_lag", 0.0)))
+
         lag_tau = max(_finite(getattr(self.aircraft, "aeroelastic_tau_s", 0.0), 0.0), 0.0)
-        dt_step = getattr(self, "_last_dt", 0.01)
+        dt_step = float(dt) if dt is not None else getattr(self, "_last_dt", 0.01)
         next_dihedral_lag = float(
             aero_kernel.first_order_lag(
-                ScalarMath, self._aero_dihedral_lag, aero_dihedral_deg, dt_step, lag_tau
+                ScalarMath, curr_dihedral_lag, aero_dihedral_deg, dt_step, lag_tau
             )
         )
         next_twist_lag = float(
             aero_kernel.first_order_lag(
-                ScalarMath, self._aero_twist_lag, aero_twist_deg, dt_step, lag_tau
+                ScalarMath, curr_twist_lag, aero_twist_deg, dt_step, lag_tau
             )
         )
         aero_dihedral_deg = next_dihedral_lag
         aero_twist_deg = next_twist_lag
 
         # Finite difference pitch rate / alpha rate estimation
-        prev_a = getattr(self, "_prev_alpha_deg", alpha_deg)
         if dt_step > 1.0e-6:
-            alpha_dot = (alpha_deg - prev_a) / dt_step
+            alpha_dot = (alpha_deg - curr_prev_alpha) / dt_step
         else:
             alpha_dot = 0.0
 
@@ -2381,12 +2394,12 @@ class FlightSimulator:
             or getattr(self.aircraft, "fidelity_mode", "standard") in ("improved_medium", "multifidelity")
         )
         lsb_shift_deg = 0.0
-        curr_stalled = getattr(self, "_is_stalled_prev", False)
+        eff_stalled = curr_is_stalled
         if lsb_active:
             lsb_kappa = float(getattr(self.aircraft, "lsb_kappa", 1.5))
-            prev_stalled = getattr(self, "_is_stalled_prev", False)
+            prev_stalled = curr_is_stalled
             base_stall_a = float(getattr(self.aircraft, "stall_alpha_deg", 14.0))
-            eff_stall_a, curr_stalled = aero_kernel.lsb_dynamic_stall_hysteresis(
+            eff_stall_a, eff_stalled = aero_kernel.lsb_dynamic_stall_hysteresis(
                 ScalarMath,
                 alpha_deg,
                 alpha_dot,
@@ -2398,6 +2411,8 @@ class FlightSimulator:
                 kappa_lsb=lsb_kappa,
             )
             lsb_shift_deg = float(eff_stall_a) - base_stall_a
+            curr_stalled = eff_stalled
+
 
         effective_alpha_deg = alpha_deg - aero_twist_deg
         effective_dihedral_deg = float(self.aircraft.dihedral_deg) + aero_dihedral_deg
@@ -2548,15 +2563,16 @@ class FlightSimulator:
 
         # Unsteady Aerodynamics: Circulation lag (item 1)
         ref_area = max(self._derived.get("ref_area_m2", 0.015), 1.0e-6)
-        next_cl_lag = getattr(self, "_unsteady_cl_lag", 0.0)
+        next_cl_lag = curr_unsteady_cl
         if bool(getattr(self.aircraft, "unsteady_aero_enabled", False)):
             q_s = max(q_dyn * ref_area, 1.0e-9)
             cl_target = result.lift_n / q_s
             k_circ = float(getattr(self.aircraft, "unsteady_k_circ", 2.0))
+            base_cl = curr_unsteady_cl if abs(curr_unsteady_cl) > 1.0e-9 else cl_target
             next_cl_lag = float(
                 aero_kernel.unsteady_circulation_lag(
                     ScalarMath,
-                    getattr(self, "_unsteady_cl_lag", cl_target),
+                    base_cl,
                     cl_target,
                     dt_step,
                     self._chord,
@@ -2565,6 +2581,7 @@ class FlightSimulator:
                 )
             )
             result.lift_n = next_cl_lag * q_s
+
 
         force_body = wind_force_to_body(body_relative, result.drag_n, result.side_n, result.lift_n)
 
@@ -2692,11 +2709,12 @@ class FlightSimulator:
                 "_aero_twist_lag": next_twist_lag,
                 "_prev_alpha_deg": alpha_deg,
                 "_alpha_dot_deg_s": alpha_dot,
-                "_is_stalled_prev": bool(curr_stalled),
+                "_is_stalled_prev": bool(eff_stalled),
                 "_lsb_shift_deg": lsb_shift_deg,
                 "_unsteady_cl_lag": next_cl_lag,
             },
         }
+
 
     def _apply_lag_states(self, lag_states: Optional[Dict[str, Any]]) -> None:
         """Apply committed unsteady and deformation lag states to the instance."""
@@ -3480,11 +3498,16 @@ class FlightSimulator:
                 candidate.time_s = time_s + step
                 self._state = candidate
                 self._diagnostics_cache = None
+                self._last_dt = step
                 if attempt > 0:
                     self._rolled_back = True
-                if hasattr(self, "_last_dynamics_core") and self._last_dynamics_core:
-                    self._apply_lag_states(self._last_dynamics_core.get("lag_states"))
+                # Re-evaluate dynamics at the accepted state with the actual step dt
+                # so that committed lag states correspond to the true physical step
+                accepted_core = self._compute_dynamics(_pack(candidate), time_s + step, dt=step)
+                self._apply_lag_states(accepted_core.get("lag_states"))
+                self._last_dynamics_core = accepted_core
                 return True
+
             self._step_rejections += 1
             step *= 0.5
         self._diagnostics_cache = None

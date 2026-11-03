@@ -1397,3 +1397,52 @@ def test_reynolds_extrapolation_and_model_validity():
     assert bool(diag_normal["re_ok"]) is True
 
 
+def test_compute_dynamics_is_side_effect_free():
+    """Verify _compute_dynamics and stiffness probes do not mutate internal lag history (Issue #77)."""
+    aircraft = AircraftConfig(
+        fidelity_mode="improved_medium",
+        dynamic_damping_enabled=True,
+        apparent_inertia_enabled=True,
+        lsb_hysteresis_enabled=True,
+        aeroelastic_flex=0.5,
+        aeroelastic_tau_s=0.05,
+    )
+    env = EnvironmentConfig(wind_speed=3.0)
+    launch = LaunchConfig(launch_speed=8.0, launch_height_m=5.0)
+    sim = FlightSimulator(aircraft, env, launch)
+
+    y = np.zeros(13, dtype=np.float64)
+    y[2] = -5.0
+    y[3] = 8.0
+    y[6] = 1.0
+
+    # Initial lag snapshot
+    initial_dihedral = sim._aero_dihedral_lag
+    initial_twist = sim._aero_twist_lag
+    initial_alpha = sim._prev_alpha_deg
+    initial_stalled = sim._is_stalled_prev
+    initial_cl_lag = sim._unsteady_cl_lag
+
+    # Call _compute_dynamics multiple times directly with large/small times
+    for t in (0.0, 0.5, 1.0, 2.0):
+        core = sim._compute_dynamics(y, t, dt=0.02)
+        assert core is not None
+
+    # Internal state must remain completely unmutated
+    assert sim._aero_dihedral_lag == initial_dihedral
+    assert sim._aero_twist_lag == initial_twist
+    assert sim._prev_alpha_deg == initial_alpha
+    assert sim._is_stalled_prev == initial_stalled
+    assert sim._unsteady_cl_lag == initial_cl_lag
+
+    # Stiffness estimate probe also must not mutate internal lag state
+    core = sim._compute_dynamics(y, 0.0, dt=0.01)
+    _ = sim._stiffness_estimate(y, 0.0, core)
+    assert sim._aero_dihedral_lag == initial_dihedral
+    assert sim._aero_twist_lag == initial_twist
+    assert sim._prev_alpha_deg == initial_alpha
+    assert sim._is_stalled_prev == initial_stalled
+    assert sim._unsteady_cl_lag == initial_cl_lag
+
+
+
