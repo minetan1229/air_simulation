@@ -2309,6 +2309,8 @@ class FlightSimulator:
             mass_ratio=mass_ratio,
         )
         model_valid = bool(validity_res["valid"])
+        model_uncertainty_high = bool(validity_res.get("extrapolation_risk", False))
+        model_validity_warnings = tuple(str(item) for item in validity_res.get("validity_warnings", ()))
 
         # Dynamic pressure
         q_dyn = 0.5 * max(air["density_kgm3"], 1.0e-6) * speed * speed
@@ -2674,6 +2676,8 @@ class FlightSimulator:
             "trailing_edge_bend_deg": trailing_edge_bend_deg,
             "geometric_alpha_deg": alpha_deg,
             "model_valid": model_valid,
+            "model_uncertainty_high": model_uncertainty_high,
+            "model_validity_warnings": model_validity_warnings,
             "speed_capped": speed_capped,
             "mass_ratio": mass_ratio,
             "mass_ratio_warning": mass_ratio_warning,
@@ -3324,6 +3328,8 @@ class FlightSimulator:
             "trailing_edge_bend_deg": core.get("trailing_edge_bend_deg", 0.0),
             "geometric_alpha_deg": core["geometric_alpha_deg"],
             "model_valid": bool(core.get("model_valid", True)),
+            "model_uncertainty_high": bool(core.get("model_uncertainty_high", False)),
+            "model_validity_warnings": list(core.get("model_validity_warnings", ())),
             "mass_ratio": float(core.get("mass_ratio", 10.0)),
             "mass_ratio_warning": bool(core.get("mass_ratio_warning", False)),
         }

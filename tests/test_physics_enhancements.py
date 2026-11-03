@@ -293,7 +293,7 @@ def test_polhamus_kv_planform_estimation() -> None:
 
 
 def test_flight_sim_diagnostics_extended_validity() -> None:
-    """Verify flight_sim incorporates model_valid, mass_ratio, and mass_ratio_warning."""
+    """Verify flight_sim reports model validity and uncertainty diagnostics."""
     cfg = AircraftConfig(mass_kg=0.003, added_mass_enabled=True)
     env = EnvironmentConfig()
     launch = LaunchConfig(launch_speed=8.0, launch_height_m=1.2)
@@ -303,10 +303,29 @@ def test_flight_sim_diagnostics_extended_validity() -> None:
     packet = sim.step(0.01)
     diag = sim._diagnostics()
     assert "model_valid" in diag
+    assert "model_uncertainty_high" in diag
+    assert "model_validity_warnings" in diag
     assert "mass_ratio" in diag
     assert "mass_ratio_warning" in diag
     assert diag["mass_ratio"] < 5.0
     assert diag["mass_ratio_warning"] is True
+    assert isinstance(diag["model_validity_warnings"], list)
+
+
+def test_model_validity_emits_reynolds_warning_and_uncertainty_flag() -> None:
+    """Out-of-envelope Reynolds numbers must carry explicit uncertainty warnings."""
+    nominal = aero_kernel.evaluate_model_validity(ScalarMath, mach=0.1, reynolds=2.0e4)
+    assert nominal["valid"] is True
+    assert nominal["extrapolation_risk"] is False
+    assert nominal["uncertainty_level"] == "nominal"
+    assert nominal["validity_warnings"] == ()
+
+    outside = aero_kernel.evaluate_model_validity(ScalarMath, mach=0.1, reynolds=5.0e2)
+    assert outside["valid"] is False
+    assert outside["re_ok"] is False
+    assert outside["extrapolation_risk"] is True
+    assert outside["uncertainty_level"] == "elevated"
+    assert any("re_out_of_range" in token for token in outside["validity_warnings"])
 
 
 def test_calibration_tool_functionality() -> None:

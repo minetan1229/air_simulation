@@ -877,6 +877,23 @@ def evaluate_model_validity(
     full_valid = base_valid & alpha_ok & mu_ok
     valid = xp.where(_flag_array(xp, strict_checks), full_valid, base_valid)
     mass_ratio_warning = mu < 5.0
+    validity_warnings = []
+
+    def _scalar_false(flag: Any) -> bool:
+        try:
+            return bool(flag) is False
+        except Exception:
+            return False
+
+    if _scalar_false(mach_ok):
+        validity_warnings.append(f"mach>{mach_limit:.3f}")
+    if _scalar_false(re_ok):
+        validity_warnings.append(f"re_out_of_range[{re_min:.1e},{re_max:.1e}]")
+    if _scalar_false(alpha_ok):
+        validity_warnings.append(f"alpha>|{stall_alpha_margin_deg:.1f}deg|")
+    if _scalar_false(mu_ok):
+        validity_warnings.append(f"mass_ratio<{min_mass_ratio:.2f}")
+    extrapolation_risk = bool(validity_warnings)
 
     return {
         "valid": valid,
@@ -886,6 +903,9 @@ def evaluate_model_validity(
         "alpha_ok": alpha_ok,
         "mass_ratio_ok": mu_ok,
         "mass_ratio_warning": mass_ratio_warning,
+        "validity_warnings": tuple(validity_warnings),
+        "extrapolation_risk": extrapolation_risk,
+        "uncertainty_level": "elevated" if extrapolation_risk else "nominal",
     }
 
 

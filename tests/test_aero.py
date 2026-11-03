@@ -362,6 +362,27 @@ def test_reynolds_scaling_consistency_and_boundary_handling(cfg: AircraftConfig,
         assert cd0_val > 0.0
 
 
+def test_default_cd0_exponent_keeps_parasite_drag_reynolds_invariant() -> None:
+    """Default ``re_cd0_exponent = 0`` means no Reynolds correction on ``C_D0``."""
+    airframe = AircraftConfig(cd0=0.024, re_cd0_exponent=0.0)
+    values = [parasite_drag_coefficient(airframe, re) for re in (1.0e3, 1.0e4, 1.0e5, 1.0e6)]
+    assert values == pytest.approx([airframe.cd0] * len(values), rel=1e-12, abs=1e-15)
+
+
+def test_reynolds_changes_drag_but_not_lift_stall_or_pitching_moment(
+    cfg: AircraftConfig, env: EnvironmentConfig
+) -> None:
+    """Only drag branch carries Reynolds dependence in the coefficient model."""
+    alpha = 7.0
+    low = evaluate_aero(cfg, env, 8.0, alpha, reynolds=2.0e3)
+    high = evaluate_aero(cfg, env, 8.0, alpha, reynolds=2.0e5)
+    assert low.cd != pytest.approx(high.cd, rel=1e-5)
+    assert low.cl == pytest.approx(high.cl, rel=1e-12, abs=1e-15)
+    assert low.cm == pytest.approx(high.cm, rel=1e-12, abs=1e-15)
+    assert low.stalled == high.stalled
+    assert low.stall_margin == pytest.approx(high.stall_margin, rel=1e-12, abs=1e-15)
+
+
 # ==========================================================================
 # 4. Induced-drag polar optimum (theoretical C_Li)
 # ==========================================================================
