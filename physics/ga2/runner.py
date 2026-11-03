@@ -676,26 +676,33 @@ class EvolutionRunner:
         if not candidates:
             return []
         cases: List[stage1_module.Stage1Case] = []
+        cases_records: List[Dict[str, Any]] = []
         for record in candidates:
             genome = self._genome_of(record)
             if genome is None:
                 continue
             aircraft = self._screening_aircraft(record)
             state = self._launch_state(aircraft)
+            rec_idx = int(record.get("index", id(record)))
             cases.append(
                 stage1_module.Stage1Case(
-                    index=int(record.get("index", len(cases))),
+                    index=rec_idx,
                     aircraft=aircraft,
                     initial_state=state,
                     duration_s=float(self.profile.stage1_duration_s),
                     label=str(record.get("key", "")),
                 )
             )
+            cases_records.append(record)
         if not cases:
             return []
         results = self.screener.screen(cases, repeats=self.profile.stage1_chunk_repeats)
+        record_by_index = {int(r.get("index", id(r))): r for r in cases_records}
         flown: List[Dict[str, Any]] = []
-        for record, result in zip(candidates, results):
+        for result in results:
+            record = record_by_index.get(int(result.index))
+            if record is None:
+                continue
             record["stage1"] = result.to_dict()
             record["distance_m"] = result.distance_m
             record["max_ld_ratio"] = result.max_ld_ratio
@@ -787,6 +794,7 @@ class EvolutionRunner:
 
         aircraft: List[AircraftConfig] = []
         states: List[Any] = []
+        valid_records: List[Dict[str, Any]] = []
         for record in records:
             genome = self._genome_of(record)
             if genome is None:
@@ -797,6 +805,7 @@ class EvolutionRunner:
             frame = self._aircraft_from_geometry(geometry)
             aircraft.append(frame)
             states.append(self._launch_state(frame))
+            valid_records.append(record)
         if not states:
             return
         xp = self.screener.xp
@@ -822,7 +831,7 @@ class EvolutionRunner:
         peak_stress = pull(summary["peak_stress_pa"])
         crashed = pull(summary["crashed"])
         landed = pull(summary["landed"])
-        for index, record in enumerate(records[:count]):
+        for index, record in enumerate(valid_records[:count]):
             record["reference"] = {
                 "distance_m": float(distance[index]),
                 "flight_time_s": float(flight_time[index]),
