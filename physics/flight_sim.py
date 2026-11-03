@@ -254,7 +254,7 @@ KEEL_DAMPING_CUTOFF_MPS = 0.8
 ALLOWABLE_STRESS_PA_PER_GSM = 2.0e4
 #: Allowable-stress closed form (mirrors ``physics.stress_domain``):
 #: ``A = BASE * (gsm/100)^EXPONENT * (OFFSET + GAIN * stiffness)``.
-ALLOWABLE_BASE_PA = 2500.0
+ALLOWABLE_BASE_PA = 30_000_000.0
 ALLOWABLE_GSM_EXPONENT = 0.5
 ALLOWABLE_STIFFNESS_OFFSET = 0.6
 ALLOWABLE_STIFFNESS_GAIN = 0.8
@@ -932,8 +932,8 @@ def _local_wind(env: EnvironmentConfig, position: VectorLike, time_s: float) -> 
         g_factor = 1.0 + clamp(_finite(env.gust_intensity), 0.0, 1.0) * 0.1 * math.sin(0.7 * _finite(time_s))
 
     magnitude = profile_speed * g_factor
-    out[0] = magnitude * fx
-    out[1] = magnitude * fy
+    out[0] = magnitude * fy
+    out[1] = magnitude * fx
     return out
 
 
@@ -985,7 +985,10 @@ def wind_vector(position: VectorLike, env: EnvironmentConfig, time_s: float = 0.
     vector: Optional[np.ndarray] = None
     if func is not None:
         height = -_finite(position[2])
-        query = np.array([_finite(position[0]), _finite(position[1]), height], dtype=np.float64)
+        if bool(env.wind_tunnel_enabled):
+            query = np.array([_finite(position[0]), _finite(position[1]), height], dtype=np.float64)
+        else:
+            query = np.array([_finite(position[1]), _finite(position[0]), height], dtype=np.float64)
         out = _call_upstream(
             func,
             {
@@ -1002,7 +1005,10 @@ def wind_vector(position: VectorLike, env: EnvironmentConfig, time_s: float = 0.
             except (TypeError, ValueError):
                 candidate = np.zeros(0, dtype=np.float64)
             if candidate.size >= 3 and bool(np.all(np.isfinite(candidate[:3]))):
-                vector = np.array([float(candidate[0]), float(candidate[1]), -float(candidate[2])], dtype=np.float64)
+                if bool(env.wind_tunnel_enabled):
+                    vector = np.array([float(candidate[0]), float(candidate[1]), -float(candidate[2])], dtype=np.float64)
+                else:
+                    vector = np.array([float(candidate[1]), float(candidate[0]), -float(candidate[2])], dtype=np.float64)
     if vector is None:
         vector = _local_wind(env, position, time_s)
     with _WIND_LOCK:
@@ -1145,10 +1151,9 @@ def aero_forces(
             "alpha_deg": _finite(alpha_deg),
             "beta_deg": _finite(beta_deg),
             "mach": _finite(mach),
-            "reynolds": None if reynolds is None else clamp(
-                _finite(reynolds, 1.0e5), MODEL_REYNOLDS_MIN, MODEL_REYNOLDS_MAX
-            ),
+            "reynolds": None if reynolds is None else max(_finite(reynolds, 0.0), 0.0),
             "ground_height_m": max(_finite(ground_height_m, 1.0), 0.0),
+
             "angular_rate": vec3(angular_rate),
             "density_kgm3": density,
             "kinematic_viscosity_m2s": kinematic_viscosity,
@@ -1957,6 +1962,7 @@ class FlightSimulator:
         self._is_stalled_prev: bool = False
         self._energy_history: List[float] = []
         self._last_dt: float = 0.01
+        self._last_dynamics_core: Optional[Dict[str, Any]] = None
         self._refresh_derived()
         if bool(self.settings.collision_enabled) and not self._state.crashed:
             self._state = self._apply_ground_contact(self._state)
@@ -2349,18 +2355,18 @@ class FlightSimulator:
         # Simple first-order lag filter on quasi-static deformations (Task item 3)
         lag_tau = max(_finite(getattr(self.aircraft, "aeroelastic_tau_s", 0.0), 0.0), 0.0)
         dt_step = getattr(self, "_last_dt", 0.01)
-        aero_dihedral_deg = float(
+        next_dihedral_lag = float(
             aero_kernel.first_order_lag(
                 ScalarMath, self._aero_dihedral_lag, aero_dihedral_deg, dt_step, lag_tau
             )
         )
-        aero_twist_deg = float(
+        next_twist_lag = float(
             aero_kernel.first_order_lag(
                 ScalarMath, self._aero_twist_lag, aero_twist_deg, dt_step, lag_tau
             )
         )
-        self._aero_dihedral_lag = aero_dihedral_deg
-        self._aero_twist_lag = aero_twist_deg
+        aero_dihedral_deg = next_dihedral_lag
+        aero_twist_deg = next_twist_lag
 
         # Finite difference pitch rate / alpha rate estimation
         prev_a = getattr(self, "_prev_alpha_deg", alpha_deg)
@@ -2368,8 +2374,6 @@ class FlightSimulator:
             alpha_dot = (alpha_deg - prev_a) / dt_step
         else:
             alpha_dot = 0.0
-        self._prev_alpha_deg = alpha_deg
-        self._alpha_dot_deg_s = alpha_dot
 
         # Dynamic LSB Hysteresis (item 3 & multi-fidelity)
         lsb_active = bool(
@@ -2377,6 +2381,7 @@ class FlightSimulator:
             or getattr(self.aircraft, "fidelity_mode", "standard") in ("improved_medium", "multifidelity")
         )
         lsb_shift_deg = 0.0
+        curr_stalled = getattr(self, "_is_stalled_prev", False)
         if lsb_active:
             lsb_kappa = float(getattr(self.aircraft, "lsb_kappa", 1.5))
             prev_stalled = getattr(self, "_is_stalled_prev", False)
@@ -2393,8 +2398,6 @@ class FlightSimulator:
                 kappa_lsb=lsb_kappa,
             )
             lsb_shift_deg = float(eff_stall_a) - base_stall_a
-            self._is_stalled_prev = bool(curr_stalled)
-        self._lsb_shift_deg = lsb_shift_deg
 
         effective_alpha_deg = alpha_deg - aero_twist_deg
         effective_dihedral_deg = float(self.aircraft.dihedral_deg) + aero_dihedral_deg
@@ -2545,11 +2548,12 @@ class FlightSimulator:
 
         # Unsteady Aerodynamics: Circulation lag (item 1)
         ref_area = max(self._derived.get("ref_area_m2", 0.015), 1.0e-6)
+        next_cl_lag = getattr(self, "_unsteady_cl_lag", 0.0)
         if bool(getattr(self.aircraft, "unsteady_aero_enabled", False)):
             q_s = max(q_dyn * ref_area, 1.0e-9)
             cl_target = result.lift_n / q_s
             k_circ = float(getattr(self.aircraft, "unsteady_k_circ", 2.0))
-            cl_lagged = float(
+            next_cl_lag = float(
                 aero_kernel.unsteady_circulation_lag(
                     ScalarMath,
                     getattr(self, "_unsteady_cl_lag", cl_target),
@@ -2560,8 +2564,7 @@ class FlightSimulator:
                     k_circ=k_circ,
                 )
             )
-            self._unsteady_cl_lag = cl_lagged
-            result.lift_n = cl_lagged * q_s
+            result.lift_n = next_cl_lag * q_s
 
         force_body = wind_force_to_body(body_relative, result.drag_n, result.side_n, result.lift_n)
 
@@ -2594,8 +2597,9 @@ class FlightSimulator:
             q_hat = omega[1] * self._chord / two_v
             r_hat = omega[2] * span / two_v
             base_lp = float(getattr(self.aircraft, "cl_roll_rate", -0.40))
-            base_mq = float(getattr(self.aircraft, "cm_q", -12.0))
+            base_mq = float(getattr(self.aircraft, "cm_q", -12.0)) + float(getattr(self.aircraft, "cm_pitch_rate", 0.0))
             base_nr = float(getattr(self.aircraft, "cn_yaw_rate", -0.30))
+
             cl_p_nl, cm_q_nl, cn_r_nl = aero_kernel.nonlinear_dynamic_damping(
                 ScalarMath,
                 effective_alpha_deg,
@@ -2683,12 +2687,41 @@ class FlightSimulator:
             "speed_capped": speed_capped,
             "mass_ratio": mass_ratio,
             "mass_ratio_warning": mass_ratio_warning,
+            "lag_states": {
+                "_aero_dihedral_lag": next_dihedral_lag,
+                "_aero_twist_lag": next_twist_lag,
+                "_prev_alpha_deg": alpha_deg,
+                "_alpha_dot_deg_s": alpha_dot,
+                "_is_stalled_prev": bool(curr_stalled),
+                "_lsb_shift_deg": lsb_shift_deg,
+                "_unsteady_cl_lag": next_cl_lag,
+            },
         }
+
+    def _apply_lag_states(self, lag_states: Optional[Dict[str, Any]]) -> None:
+        """Apply committed unsteady and deformation lag states to the instance."""
+        if not lag_states:
+            return
+        if "_aero_dihedral_lag" in lag_states:
+            self._aero_dihedral_lag = float(lag_states["_aero_dihedral_lag"])
+        if "_aero_twist_lag" in lag_states:
+            self._aero_twist_lag = float(lag_states["_aero_twist_lag"])
+        if "_prev_alpha_deg" in lag_states:
+            self._prev_alpha_deg = float(lag_states["_prev_alpha_deg"])
+        if "_alpha_dot_deg_s" in lag_states:
+            self._alpha_dot_deg_s = float(lag_states["_alpha_dot_deg_s"])
+        if "_is_stalled_prev" in lag_states:
+            self._is_stalled_prev = bool(lag_states["_is_stalled_prev"])
+        if "_lsb_shift_deg" in lag_states:
+            self._lsb_shift_deg = float(lag_states["_lsb_shift_deg"])
+        if "_unsteady_cl_lag" in lag_states:
+            self._unsteady_cl_lag = float(lag_states["_unsteady_cl_lag"])
 
     def _derivative(self, y: np.ndarray, time_s: float, core: Optional[Dict[str, Any]] = None) -> np.ndarray:
         """Right-hand side of the 13-state ODE (position, velocity, quaternion, rate)."""
         if core is None:
             core = self._compute_dynamics(y, time_s)
+        self._last_dynamics_core = core
         return np.concatenate(
             [
                 core["velocity"],
@@ -3449,6 +3482,8 @@ class FlightSimulator:
                 self._diagnostics_cache = None
                 if attempt > 0:
                     self._rolled_back = True
+                if hasattr(self, "_last_dynamics_core") and self._last_dynamics_core:
+                    self._apply_lag_states(self._last_dynamics_core.get("lag_states"))
                 return True
             self._step_rejections += 1
             step *= 0.5

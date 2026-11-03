@@ -74,3 +74,6 @@ ho Sar{c}^3$）と無次元質量比 compute_mass_ratio（$\mu < 5.0$ で mass_
 - **付加慣性ヨー軸次元整合性 (#84)**: physics/flight_sim.py のヨー軸付加慣性 {zz,\text{add}}$ が $\rho \cdot h \cdot c^3$（単位 $\mathrm{kg\cdot m}$）となっていた不整合を、垂直平板（キール）回転モデルに基づき {zz,\text{add}} = \frac{\pi}{128}\rho h c^4$（単位 $\mathrm{kg\cdot m^2}$）として compute_added_mass へ統一集約。
 - **風中静止時の剛性評価 (#85)**: _stiffness_estimate の有限差分速度摂動が対地速度ベースだったため無風以外の対気速度下で摂動がスキップされる問題を修正。対気相対速度ベクトル方向での差分摂動を行い、風中ゼロ対地速度時も局所空力剛性を正しく推定。
 - **風軸分解の特異点直交性検証 (#86)**: wind_force_to_body は body $ 軸や $ 軸と平行な特異流向を含む全3D流向で厳密に正規直交右手系（$\|\text{lift}\|=\|\text{side}\|=1.0$, $|\text{drag}\cdot\text{lift}| \le 10^{-12}$, $|\text{drag}\cdot\text{side}| \le 10^{-12}$）を構成していることを 100,000 回の乱数・特異点スイープで数理検証。
+- **ピッチ減衰係数 cm_q と cm_pitch_rate の明確化 (#76)**: cm_q を主要なピッチ角速度減衰項（既定 -12.0）、cm_pitch_rate を 3x3 レート行列の対角項（既定 0.0）と規定。合算 {m_q,\text{total}} = C_{m_q} + C_{m,\text{pitch\_rate}}$ として ero_kernel.py および light_sim.py の非線形動的減衰参照部に反映し、両方の指定時も物理的減衰方向を保持。
+- **Reynolds数外挿とmodel_validフラグの整合化 (#74)**: docs/PHYSICS_MODELS.md §4.2 に準拠し、6DoF ero_forces および GPU gpu_dynamics.py における clamp / clip を解除。低Re (<1e3) / 高Re (>1e5) でも {D0}(Re)$ をべき乗則で連続外挿し、モデルの適用限界は valuate_model_validity の model_valid / 
+e_ok フラグにより機械可読に通知。

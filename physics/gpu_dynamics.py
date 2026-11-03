@@ -385,20 +385,36 @@ def wind_batch(
     # brought back explicitly.  ``np.asarray`` on a CuPy array raises
     # "Implicit conversion to a NumPy array is not allowed".
     host_positions = positions.get() if hasattr(positions, "get") else np.asarray(positions)
-    points = np.stack(
-        (
-            np.asarray(host_positions[:, 0], dtype=np.float64),
-            np.asarray(host_positions[:, 1], dtype=np.float64),
-            -np.asarray(host_positions[:, 2], dtype=np.float64),
-        ),
-        axis=-1,
-    )
-    values = velocity_components(points, params.env, float(time_s), params.wind_backend)
-    values = np.asarray(values, dtype=np.float64)
-    wind = xp.asarray(
-        np.stack((values[:, 0], values[:, 1], -values[:, 2]), axis=-1),
-        dtype=xp.float64,
-    )
+    if bool(getattr(params.env, "wind_tunnel_enabled", False)):
+        points = np.stack(
+            (
+                np.asarray(host_positions[:, 0], dtype=np.float64),
+                np.asarray(host_positions[:, 1], dtype=np.float64),
+                -np.asarray(host_positions[:, 2], dtype=np.float64),
+            ),
+            axis=-1,
+        )
+        values = velocity_components(points, params.env, float(time_s), params.wind_backend)
+        values = np.asarray(values, dtype=np.float64)
+        wind = xp.asarray(
+            np.stack((values[:, 0], values[:, 1], -values[:, 2]), axis=-1),
+            dtype=xp.float64,
+        )
+    else:
+        points = np.stack(
+            (
+                np.asarray(host_positions[:, 1], dtype=np.float64),
+                np.asarray(host_positions[:, 0], dtype=np.float64),
+                -np.asarray(host_positions[:, 2], dtype=np.float64),
+            ),
+            axis=-1,
+        )
+        values = velocity_components(points, params.env, float(time_s), params.wind_backend)
+        values = np.asarray(values, dtype=np.float64)
+        wind = xp.asarray(
+            np.stack((values[:, 1], values[:, 0], -values[:, 2]), axis=-1),
+            dtype=xp.float64,
+        )
     if out is None:
         return wind
     out[...] = wind
@@ -506,8 +522,8 @@ def build_params(
         speed = float(env.wind_speed)
         wind = xp.stack(
             (
-                ones * (speed * flow_x),
                 ones * (speed * flow_y),
+                ones * (speed * flow_x),
                 zeros,
             ),
             axis=-1,
@@ -664,20 +680,11 @@ def _evaluate_state(
     )
     mach = speed / xp.maximum(air["sound_speed_mps"], 1.0)
     reynolds = speed * params.chord / xp.maximum(air["kinematic_viscosity_m2s"], 1.0e-12)
-    # The canonical 6-DoF path evaluates the aerodynamic model only inside its
-    # validated Reynolds envelope: ``flight_sim.aero_forces`` clamps the
-    # Reynolds number to ``[MODEL_REYNOLDS_MIN, MODEL_REYNOLDS_MAX]`` before it
-    # reaches the shared kernel.  The batch path used the raw Reynolds number,
-    # so for an airframe whose chord is short enough to run above the envelope
-    # (a GA airframe reaches Re ~ 1.7e5 at the release speed) the two paths
-    # evaluated the *same* kernel with a *different* parasite drag: the
-    # Reynolds correction ``cd0 (1e5/Re) ** exponent`` gave the batch 1.5 %
-    # less drag than the canonical path, which moved the load factor by
-    # 1.1e-3 and the peak wing-root stress by the same factor.  The envelope is
-    # a property of the model, so the batch has to apply it as well.
-    reynolds = xp.clip(
-        reynolds, float(MODEL_REYNOLDS_MIN), float(MODEL_REYNOLDS_MAX)
-    )
+    # The aerodynamic model extrapolates outside [MODEL_REYNOLDS_MIN, MODEL_REYNOLDS_MAX]
+    # following PHYSICS_MODELS.md §4.2, and publishes validity via model_valid.
+    # Lower bound 1.0 guards against division by zero in the kernel.
+    reynolds = xp.maximum(reynolds, 1.0)
+
 
     coefficients = aero_kernel.evaluate_coefficients(
         xp,
@@ -1443,12 +1450,9 @@ def simulate_batch(
     trim_reynolds = acc["trim_speed"] * params.chord / xp.maximum(
         trim_air["kinematic_viscosity_m2s"], 1.0e-12
     )
-    # The same Reynolds envelope the canonical path applies to its trim
-    # residual (``flight_sim._trim_residual_cm`` goes through
-    # ``aero_forces``), so the trim sees the same model validity.
-    trim_reynolds = xp.clip(
-        trim_reynolds, float(MODEL_REYNOLDS_MIN), float(MODEL_REYNOLDS_MAX)
-    )
+    # The model extrapolates outside the envelope; lower bound 1.0 guards division by zero.
+    trim_reynolds = xp.maximum(trim_reynolds, 1.0)
+
     trim_mach = acc["trim_speed"] / xp.maximum(trim_air["sound_speed_mps"], 1.0)
     trim_coefficients = aero_kernel.evaluate_coefficients(
         xp,

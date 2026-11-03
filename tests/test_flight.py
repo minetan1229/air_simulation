@@ -1363,3 +1363,37 @@ def test_wind_force_to_body_orthonormality():
         assert abs(float(np.dot(drag_axis, lift_axis))) < 1.0e-12
         assert abs(float(np.dot(drag_axis, side_axis))) < 1.0e-12
         assert abs(float(np.dot(lift_axis, side_axis))) < 1.0e-12
+
+
+def test_reynolds_extrapolation_and_model_validity():
+    """Verify Reynolds number is extrapolated without clamping in forces, and model_valid reflects envelope (#74)."""
+    from physics import aero_kernel
+    from physics.aero_kernel import ScalarMath
+
+    aircraft = AircraftConfig(re_cd0_exponent=0.15)
+    env = EnvironmentConfig()
+
+    launch = LaunchConfig(launch_speed=8.0, launch_height_m=5.0)
+    sim = FlightSimulator(aircraft, env, launch)
+
+    # 1. Low Re outside envelope (Re = 200 < MODEL_REYNOLDS_MIN = 1000)
+    forces_low = flight_sim.aero_forces(aircraft, env, speed_mps=1.0, alpha_deg=0.0, beta_deg=0.0, reynolds=200.0)
+    forces_ref = flight_sim.aero_forces(aircraft, env, speed_mps=1.0, alpha_deg=0.0, beta_deg=0.0, reynolds=1000.0)
+    # Parasite drag ~ (1e5 / Re)^0.15 => Re=200 must have strictly greater cd than Re=1000
+    assert forces_low.cd > forces_ref.cd
+
+    # 2. High Re outside envelope (Re = 200,000 > MODEL_REYNOLDS_MAX = 100,000)
+    forces_high = flight_sim.aero_forces(aircraft, env, speed_mps=1.0, alpha_deg=0.0, beta_deg=0.0, reynolds=200000.0)
+    assert forces_high.cd < forces_ref.cd
+
+
+    # 3. Model validity flag correctly indicates False outside [1e3, 1e5]
+    diag_low = aero_kernel.evaluate_model_validity(ScalarMath, mach=0.05, reynolds=200.0, alpha_deg=0.0)
+    assert bool(diag_low["valid"]) is False
+    assert bool(diag_low["re_ok"]) is False
+
+    diag_normal = aero_kernel.evaluate_model_validity(ScalarMath, mach=0.05, reynolds=10000.0, alpha_deg=0.0)
+    assert bool(diag_normal["valid"]) is True
+    assert bool(diag_normal["re_ok"]) is True
+
+

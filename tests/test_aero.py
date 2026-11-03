@@ -138,6 +138,31 @@ def test_pitch_damping_opposes_rotation_with_standard_rate_normalization(cfg, en
         assert (rotating.pitching_moment_nm - zero.pitching_moment_nm) * pitch_rate < 0.0
 
 
+def test_pitch_damping_dual_derivatives_consistency(env):
+    """Verify cm_q and cm_pitch_rate combine additively and damp rotation (Issue #76)."""
+    speed = 10.0
+    # 1. Base case: default cm_q = -12.0, cm_pitch_rate = 0.0
+    cfg_base = AircraftConfig(cm_q=-12.0, cm_pitch_rate=0.0)
+    chord = derived_properties(cfg_base)["ref_length_m"]
+    res_base = evaluate_aero(cfg_base, env, speed, 0.0, angular_rate=(0.0, 1.0, 0.0))
+    dcm_base = res_base.cm - evaluate_aero(cfg_base, env, speed, 0.0).cm
+    assert dcm_base == pytest.approx(-12.0 * chord / (2.0 * speed), rel=1e-12)
+
+    # 2. Both set: cm_q = -10.0, cm_pitch_rate = -2.0 -> total -12.0
+    cfg_dual = AircraftConfig(cm_q=-10.0, cm_pitch_rate=-2.0)
+    res_dual = evaluate_aero(cfg_dual, env, speed, 0.0, angular_rate=(0.0, 1.0, 0.0))
+    dcm_dual = res_dual.cm - evaluate_aero(cfg_dual, env, speed, 0.0).cm
+    assert dcm_dual == pytest.approx(-12.0 * chord / (2.0 * speed), rel=1e-12)
+    assert dcm_dual == pytest.approx(dcm_base, rel=1e-12)
+
+    # 3. Only cm_pitch_rate set: cm_q = 0.0, cm_pitch_rate = -8.0
+    cfg_rate = AircraftConfig(cm_q=0.0, cm_pitch_rate=-8.0)
+    res_rate = evaluate_aero(cfg_rate, env, speed, 0.0, angular_rate=(0.0, 1.0, 0.0))
+    dcm_rate = res_rate.cm - evaluate_aero(cfg_rate, env, speed, 0.0).cm
+    assert dcm_rate == pytest.approx(-8.0 * chord / (2.0 * speed), rel=1e-12)
+
+
+
 def _analytic_config() -> AircraftConfig:
     """Airframe with an exactly known lift slope and an analytic stall peak.
 

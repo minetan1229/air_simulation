@@ -304,6 +304,10 @@ class AircraftConfig:
     cn_beta: float = 0.08
     # Rate derivatives are damping terms: paper airplanes have very small inertia
     # and large surface area, so aerodynamic roll/yaw damping must be strong.
+    # cm_q is the primary pitch damping derivative (default: -12.0).
+    # cm_pitch_rate is the pitch-rate derivative entry in the 3x3 rate matrix
+    # (default: 0.0). Total pitch damping is the sum (cm_q + cm_pitch_rate),
+    # preserving both the classical primary setting and matrix completeness.
     # Cross-coupling terms (cl_pitch_rate, cn_pitch_rate, cm_roll_rate) are zero
     # for symmetric airframes so pitching does not cause unnatural rolling or spinning.
     cl_roll_rate: float = -0.40
@@ -312,6 +316,7 @@ class AircraftConfig:
     cl_pitch_rate: float = 0.0
     cm_pitch_rate: float = 0.0
     cn_pitch_rate: float = 0.0
+
     cl_yaw_rate: float = 0.0
     cm_yaw_rate: float = 0.0
     cn_yaw_rate: float = -0.30
