@@ -160,6 +160,33 @@ class Solver3D:
         f_r[..., 3] = rho_r * w_r_vel * vn_r + p_r * nz
         f_r[..., 4] = rho_r * h_r * vn_r
 
+        # Orthonormal tangents t1, t2 ⊥ n. 3D Euler has five waves:
+        # acoustic (un±c), entropy (un), and two tangential shears (un).
+        use_k = np.abs(nz) < 0.9
+        refx = np.where(use_k, 0.0, 1.0)
+        refy = np.zeros_like(nx)
+        refz = np.where(use_k, 1.0, 0.0)
+        t1x = ny * refz - nz * refy
+        t1y = nz * refx - nx * refz
+        t1z = nx * refy - ny * refx
+        t1n = np.maximum(np.sqrt(t1x**2 + t1y**2 + t1z**2), 1.0e-12)
+        t1x = t1x / t1n
+        t1y = t1y / t1n
+        t1z = t1z / t1n
+        t2x = ny * t1z - nz * t1y
+        t2y = nz * t1x - nx * t1z
+        t2z = nx * t1y - ny * t1x
+        t2n = np.maximum(np.sqrt(t2x**2 + t2y**2 + t2z**2), 1.0e-12)
+        t2x = t2x / t2n
+        t2y = t2y / t2n
+        t2z = t2z / t2n
+
+        du_vel = u_r_vel - u_l_vel
+        dv_vel = v_r_vel - v_l_vel
+        dw_vel = w_r_vel - w_l_vel
+        vt1_roe = u_roe * t1x + v_roe * t1y + w_vel_roe * t1z
+        vt2_roe = u_roe * t2x + v_roe * t2y + w_vel_roe * t2z
+
         # Wave speeds
         dvn = vn_r - vn_l
         d_p = p_r - p_l
@@ -177,26 +204,36 @@ class Solver3D:
         alpha4 = (d_p + rho_roe * c_roe * dvn) / (2.0 * c_roe2)
         alpha5 = (d_p - rho_roe * c_roe * dvn) / (2.0 * c_roe2)
         alpha1 = d_rho - (alpha4 + alpha5)
+        alpha_s1 = rho_roe * (du_vel * t1x + dv_vel * t1y + dw_vel * t1z)
+        alpha_s2 = rho_roe * (du_vel * t2x + dv_vel * t2y + dw_vel * t2z)
 
         diss = np.empty_like(u_l)
         diss[..., 0] = lambda1 * alpha1 + lambda4 * alpha4 + lambda5 * alpha5
         diss[..., 1] = (
             lambda1 * alpha1 * u_roe
+            + lambda1 * alpha_s1 * t1x
+            + lambda1 * alpha_s2 * t2x
             + lambda4 * alpha4 * (u_roe + c_roe * nx)
             + lambda5 * alpha5 * (u_roe - c_roe * nx)
         )
         diss[..., 2] = (
             lambda1 * alpha1 * v_roe
+            + lambda1 * alpha_s1 * t1y
+            + lambda1 * alpha_s2 * t2y
             + lambda4 * alpha4 * (v_roe + c_roe * ny)
             + lambda5 * alpha5 * (v_roe - c_roe * ny)
         )
         diss[..., 3] = (
             lambda1 * alpha1 * w_vel_roe
+            + lambda1 * alpha_s1 * t1z
+            + lambda1 * alpha_s2 * t2z
             + lambda4 * alpha4 * (w_vel_roe + c_roe * nz)
             + lambda5 * alpha5 * (w_vel_roe - c_roe * nz)
         )
         diss[..., 4] = (
             lambda1 * alpha1 * (0.5 * q2_roe)
+            + lambda1 * alpha_s1 * vt1_roe
+            + lambda1 * alpha_s2 * vt2_roe
             + lambda4 * alpha4 * (h_roe + c_roe * vn_roe)
             + lambda5 * alpha5 * (h_roe - c_roe * vn_roe)
         )
@@ -204,13 +241,14 @@ class Solver3D:
         num_flux = np.asarray(0.5 * (f_l + f_r - diss) * area[..., np.newaxis], dtype=np.float64)
         return num_flux
 
-    def evaluate_residuals(self) -> np.ndarray:
+    def evaluate_residuals(self, u_state: np.ndarray | None = None) -> np.ndarray:
         """Compute spatial residual R(U) for 3D cells."""
-        res = np.zeros_like(self.u)
+        u = self.u if u_state is None else u_state
+        res = np.zeros_like(u)
 
         # 1. i-faces (periodic / wrap-around around airfoil in i)
-        u_left_i = np.roll(self.u, 1, axis=0)
-        u_right_i = self.u
+        u_left_i = np.roll(u, 1, axis=0)
+        u_right_i = u
         f_i = self.compute_flux(
             u_left_i,
             u_right_i,
@@ -222,8 +260,8 @@ class Solver3D:
         res -= np.roll(f_i, -1, axis=0)
 
         # 2. Interior j-faces
-        u_bottom_j = self.u[:, :-1, :, :]
-        u_top_j = self.u[:, 1:, :, :]
+        u_bottom_j = u[:, :-1, :, :]
+        u_top_j = u[:, 1:, :, :]
         f_j = self.compute_flux(
             u_bottom_j,
             u_top_j,
@@ -243,7 +281,7 @@ class Solver3D:
         ny_w = ay_w / np.maximum(area_w, 1.0e-12)
         nz_w = az_w / np.maximum(area_w, 1.0e-12)
 
-        u_first_j = self.u[:, 0, :, :]
+        u_first_j = u[:, 0, :, :]
         rho_w, u_w, v_w, w_w, p_w, _ = self.get_primitive(u_first_j)
         vn_w = u_w * nx_w + v_w * ny_w + w_w * nz_w
 
@@ -268,14 +306,14 @@ class Solver3D:
         ax_far = self.grid.j_area_x[:, -1, :]
         ay_far = self.grid.j_area_y[:, -1, :]
         az_far = self.grid.j_area_z[:, -1, :]
-        u_inner_j = self.u[:, -1, :, :]
+        u_inner_j = u[:, -1, :, :]
         u_outer_j = np.broadcast_to(self.u_free, u_inner_j.shape)
         f_far_j = self.compute_flux(u_inner_j, u_outer_j, ax_far, ay_far, az_far)
         res[:, -1, :, :] -= f_far_j
 
         # 3. k-faces (Spanwise: k=0 symmetry plane, k=nk outer farfield)
-        u_in_k = self.u[:, :, :-1, :]
-        u_out_k = self.u[:, :, 1:, :]
+        u_in_k = u[:, :, :-1, :]
+        u_out_k = u[:, :, 1:, :]
         f_k = self.compute_flux(
             u_in_k,
             u_out_k,
@@ -291,7 +329,7 @@ class Solver3D:
         ay_sym = self.grid.k_area_y[:, :, 0]
         az_sym = self.grid.k_area_z[:, :, 0]
 
-        u_root = self.u[:, :, 0, :]
+        u_root = u[:, :, 0, :]
         u_sym = np.array(u_root)
         u_sym[..., 2] = -u_sym[..., 2]  # reflect v_vel
         f_sym = self.compute_flux(u_sym, u_root, ax_sym, ay_sym, az_sym)
@@ -301,7 +339,7 @@ class Solver3D:
         ax_tip = self.grid.k_area_x[:, :, -1]
         ay_tip = self.grid.k_area_y[:, :, -1]
         az_tip = self.grid.k_area_z[:, :, -1]
-        u_tip = self.u[:, :, -1, :]
+        u_tip = u[:, :, -1, :]
         u_tip_outer = np.broadcast_to(self.u_free, u_tip.shape)
         f_tip = self.compute_flux(u_tip, u_tip_outer, ax_tip, ay_tip, az_tip)
         res[:, :, -1, :] -= f_tip
@@ -377,14 +415,15 @@ class Solver3D:
         return float(np.min(dt_local))
 
     def step_rk2(self, dt: float) -> float:
-        """Advance solution one step using 2-stage Runge-Kutta scheme."""
+        """Advance solution one step using Heun's 2-stage Runge-Kutta scheme."""
         vol_5 = self.grid.vol[..., np.newaxis]
+        u_n = self.u
 
-        res1 = self.evaluate_residuals()
-        u1 = self.u - (dt / vol_5) * res1
+        res1 = self.evaluate_residuals(u_n)
+        u1 = u_n - (dt / vol_5) * res1
 
-        res2 = self.evaluate_residuals()
-        self.u = 0.5 * (self.u + u1 - (dt / vol_5) * res2)
+        res2 = self.evaluate_residuals(u1)
+        self.u = 0.5 * (u_n + u1 - (dt / vol_5) * res2)
 
         l2_res = float(np.sqrt(np.mean((res1[..., 0] / self.grid.vol) ** 2)))
         return l2_res
