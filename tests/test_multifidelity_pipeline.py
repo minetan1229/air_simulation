@@ -173,24 +173,48 @@ class TestFidelityTimingRatio:
         _ = FlightSimulator(ac_std, env, launch, settings).simulate(duration_s=0.5)
         _ = FlightSimulator(ac_med, env, launch, settings).simulate(duration_s=0.5)
 
-        n_repeats = 6
-        t0 = time.perf_counter()
-        for _ in range(n_repeats):
+        n_samples = 10
+        ratios: List[float] = []
+        baseline_samples: List[float] = []
+        medium_samples: List[float] = []
+        for _ in range(n_samples):
+            t0 = time.perf_counter()
             sim_std = FlightSimulator(ac_std, env, launch, settings)
             sim_std.simulate(duration_s=1.5)
-        t_std = time.perf_counter() - t0
+            t_std = time.perf_counter() - t0
 
-        t1 = time.perf_counter()
-        for _ in range(n_repeats):
+            t1 = time.perf_counter()
             sim_med = FlightSimulator(ac_med, env, launch, settings)
             sim_med.simulate(duration_s=1.5)
-        t_med = time.perf_counter() - t1
+            t_med = time.perf_counter() - t1
 
-        ratio = t_med / max(t_std, 1.0e-6)
-        print(f"\n[Timing Benchmark] Baseline: {t_std:.4f}s, Improved Medium: {t_med:.4f}s, Ratio: {ratio:.2f}x")
+            baseline_samples.append(t_std)
+            medium_samples.append(t_med)
+            ratios.append(t_med / max(t_std, 1.0e-6))
 
-        # Must fall within required [2.0, 5.0]x realistic multi-fidelity range (with 1.8x lower margin for CPU background fluctuation)
-        assert 1.8 <= ratio <= 5.0, f"Execution ratio {ratio:.2f}x is outside realistic range [1.8, 5.0]x"
+        ratios_arr = np.asarray(ratios, dtype=float)
+        median_ratio = float(np.median(ratios_arr))
+        lower_quartile_ratio = float(np.percentile(ratios_arr, 25))
+
+        print(
+            "\n[Timing Benchmark] "
+            f"baseline_samples={[f'{t:.4f}' for t in baseline_samples]} "
+            f"medium_samples={[f'{t:.4f}' for t in medium_samples]} "
+            f"ratios={[f'{r:.2f}' for r in ratios]} "
+            f"median={median_ratio:.2f}x p25={lower_quartile_ratio:.2f}x"
+        )
+
+        # p25 is the minimum-performance floor (regression guard), median is the
+        # upper realism bound.  Paired sampling cancels host/runtime noise so a
+        # single slow machine does not flip the verdict.
+        assert lower_quartile_ratio >= 1.8, (
+            f"Execution ratio p25 {lower_quartile_ratio:.2f}x is below the "
+            f"regression floor 1.8x"
+        )
+        assert median_ratio <= 5.0, (
+            f"Execution ratio median {median_ratio:.2f}x is above the "
+            f"realism ceiling 5.0x"
+        )
 
 
 

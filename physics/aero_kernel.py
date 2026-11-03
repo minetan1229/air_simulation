@@ -90,6 +90,7 @@ __all__ = [
     "first_order_lag",
     "compute_mass_ratio",
     "compute_added_mass",
+    "compute_apparent_forces",
     "evaluate_model_validity",
     "unsteady_circulation_lag",
     "lsb_dynamic_stall_shift",
@@ -688,6 +689,47 @@ def compute_added_mass(
         "added_inertia_zz_kgm2": i_zz,
     }
 
+
+def compute_apparent_forces(
+    xp: Any,
+    body_relative: Any,
+    omega: Any,
+    m_add_z: Any,
+) -> Tuple[Any, Any]:
+    """Apparent forces/moments from thin-plate added mass (Blevins/Newman).
+
+    Fluid inertia creates an apparent force opposing relative plate motion
+    and an apparent moment opposing rotation.  Modelled as linear damping
+    scaled by added mass so energy is removed from the system.
+    """
+    body_relative = xp.asarray(body_relative, dtype=xp.float64)
+    omega = xp.asarray(omega, dtype=xp.float64)
+    m_add_z = _finite(xp, m_add_z, 0.0)
+
+    # Apparent force coefficient: thin-plate fluid resistance [1/s]
+    c_app = 0.1
+    f_app = xp.asarray(
+        [
+            -c_app * m_add_z * body_relative[0],
+            -c_app * m_add_z * body_relative[1],
+            -c_app * m_add_z * body_relative[2],
+        ],
+        dtype=xp.float64,
+    )
+
+    # Apparent moment: rotational added mass damping. c_rot units [m^2/s]
+    # (absorbs characteristic length squared).
+    c_rot = 0.05
+    m_app = xp.asarray(
+        [
+            -c_rot * m_add_z * omega[0],
+            -c_rot * m_add_z * omega[1],
+            -c_rot * m_add_z * omega[2],
+        ],
+        dtype=xp.float64,
+    )
+
+    return f_app, m_app
 
 
 def unsteady_circulation_lag(
