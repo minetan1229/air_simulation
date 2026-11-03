@@ -738,12 +738,22 @@ def hybrid_from_origami(genome: origami_genome.OrigamiGenome) -> HybridGenome:
     )
 
 
-def archetype_hybrid_genomes() -> List[HybridGenome]:
+def archetype_hybrid_genomes(
+    max_steps: int = MAX_FOLD_STEPS,
+) -> List[HybridGenome]:
     """The known good indoor designs of the specification.
 
     The classic dart, the Nakamura lock (the "heso" glider) and the Sky King
     competition glider are the three designs a human would try first; they
     are the warm start of the search.
+
+    These hand designs naturally use 11 to 14 creases, which exceeds
+    :data:`MAX_FOLD_STEPS`.  To keep the step-count rule consistent across the
+    initial population, mutation and crossover, every archetype is clamped to
+    ``max_steps`` by keeping a valid prefix of its folds (a fold only ever
+    references groups created by earlier folds, so a prefix is dependency
+    safe).  The clamp is recorded in ``meta`` so a dropped fold is never
+    silent.
     """
     genomes: List[HybridGenome] = []
     for key in ARCHETYPE_KEYS:
@@ -752,9 +762,20 @@ def archetype_hybrid_genomes() -> List[HybridGenome]:
         except Exception:  # pragma: no cover - depends on the engine
             continue
         genome = hybrid_from_origami(source)
+        original = len(genome.genes)
+        if original > max_steps:
+            genome.genes = genome.genes[:max_steps]
+            genome.meta = {
+                **genome.meta,
+                "archetype": key,
+                "seeded": True,
+                "clamped_to_max_steps": True,
+                "original_step_count": original,
+            }
+        else:
+            genome.meta = {**genome.meta, "archetype": key, "seeded": True}
         genome.key = key
         genome.label = f"archetype {key}"
-        genome.meta = {**genome.meta, "archetype": key, "seeded": True}
         genomes.append(genome)
     return genomes
 
