@@ -30,7 +30,6 @@ from physics.ga2.genome import (  # noqa: E402
     HybridFoldGene,
     HybridGenome,
     archetype_hybrid_genomes,
-    crease_segment,
 )
 from physics.origami_genome import (  # noqa: E402
     fold_genome,
@@ -139,26 +138,35 @@ def test_creases_that_only_run_parallel_are_not_a_hot_spot() -> None:
 def test_the_overlap_test_sees_the_creases_that_share_a_line_and_only_those() -> None:
     """The overlap test must tell collinear creases from parallel ones.
 
-    The two elevon folds of the known designs lie on one line and overlap
-    each other; the trailing edge fold runs parallel to them 31 mm away
-    and never touches them.
+    Two segments on the same line that share an interval report an overlap;
+    two segments that run parallel but are offset never touch; two segments
+    that cross at a single point but do not share a line report none.
+    The segments are expressed in normalised sheet coordinates and converted
+    to metres inside ``_segments_overlap``.
     """
-    designs = {item.key: item for item in archetype_hybrid_genomes()}
-    assert "nakamura_lock" in designs
-    genome = designs["nakamura_lock"]
-    creases = {
-        gene.label: crease_segment(
-            gene.origin, gene.crease_angle_deg, gene.length_ratio
-        )
-        for gene in genome.genes
-        if gene.enabled
-    }
-    assert stage0_module._segments_overlap(
-        *creases["elevon_l"], *creases["elevon_r"]
-    ) is not None
-    assert stage0_module._segments_overlap(
-        *creases["elevon_l"], *creases["trailing_l"]
-    ) is None
+    # Collinear segments that share an interval -> overlap.
+    overlap = stage0_module._segments_overlap(
+        (0.2, 0.5), (0.8, 0.5), (0.5, 0.5), (1.0, 0.5)
+    )
+    assert overlap is not None
+
+    # Parallel, offset segments -> no overlap.
+    assert (
+        stage0_module._segments_overlap((0.2, 0.4), (0.8, 0.4), (0.5, 0.6), (1.0, 0.6))
+        is None
+    )
+
+    # Segments meeting only at an endpoint share no interval -> no overlap.
+    assert (
+        stage0_module._segments_overlap((0.2, 0.5), (0.5, 0.5), (0.5, 0.5), (1.0, 0.5))
+        is None
+    )
+
+    # Crossing segments that do not share a line -> no overlap.
+    assert (
+        stage0_module._segments_overlap((0.2, 0.2), (0.8, 0.8), (0.8, 0.2), (0.2, 0.8))
+        is None
+    )
 
 
 def test_the_screen_flies_the_case_and_reports_a_finite_summary() -> None:
