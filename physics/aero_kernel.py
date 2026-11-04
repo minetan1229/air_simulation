@@ -324,6 +324,9 @@ def _clamp(xp: Any, value: Any, low: Any, high: Any) -> Any:
     (An explicit ``asarray`` would break the fusion, because a traced
     value cannot be converted on the host.)
     """
+    # CuPy's clip doesn't accept plain floats, so wrap in asarray for scalars
+    if isinstance(value, (int, float)):
+        return float(xp.clip(xp.asarray(value), low, high))
     return xp.clip(value, low, high)
 
 
@@ -1283,7 +1286,6 @@ class AeroParams:
     cm_alpha: Any = 0.0
     cm_q: Any = 0.0
     cm_roll_rate: Any = 0.0
-    cm_pitch_rate: Any = 0.0
     cm_yaw_rate: Any = 0.0
     cl_beta: Any = 0.0
     cl_roll_rate: Any = 0.0
@@ -1368,7 +1370,6 @@ _CORE_BUNDLE_FIELDS: Tuple[str, ...] = (
     "cm_alpha",
     "cm_q",
     "cm_roll_rate",
-    "cm_pitch_rate",
     "cm_yaw_rate",
     "cl_beta",
     "cl_roll_rate",
@@ -1466,7 +1467,6 @@ def _coefficient_core(
     cm_alpha: Any,
     cm_q: Any,
     cm_roll_rate: Any,
-    cm_pitch_rate: Any,
     cm_yaw_rate: Any,
     cl_beta: Any,
     cl_roll_rate: Any,
@@ -1655,7 +1655,6 @@ def _coefficient_core(
         + elevon["dcm"]
         + te_fold["dcm"]
         + cm_roll
-        + cm_pitch_rate * q_hat
         + cm_yaw_rate * r_hat
     )
 
@@ -2064,6 +2063,8 @@ def params_from_aircraft(cfg: AircraftConfig) -> AeroParams:
     callers that evaluate a bare polar (:func:`physics.aero_domain.lift_coefficient`
     and friends) must not see an environment factor.
     """
+    # Apply config clamping to merge deprecated cm_pitch_rate into cm_q, etc.
+    cfg = cfg.clamp_ranges()
     geom = derived_properties(cfg)
     aspect = max(_finite_scalar(geom.get("aspect_ratio"), 1.0), 1.0e-3)
     taper = clamp(_finite_scalar(geom.get("taper_ratio"), 0.7), 0.01, 1.0)
@@ -2089,7 +2090,6 @@ def params_from_aircraft(cfg: AircraftConfig) -> AeroParams:
         cm_alpha=_finite_scalar(cfg.cm_alpha, 0.0),
         cm_q=_finite_scalar(cfg.cm_q, 0.0),
         cm_roll_rate=_finite_scalar(cfg.cm_roll_rate, 0.0),
-        cm_pitch_rate=_finite_scalar(cfg.cm_pitch_rate, 0.0),
         cm_yaw_rate=_finite_scalar(cfg.cm_yaw_rate, 0.0),
         cl_beta=_finite_scalar(cfg.cl_beta, 0.0),
         cl_roll_rate=_finite_scalar(cfg.cl_roll_rate, 0.0),
