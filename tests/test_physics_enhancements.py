@@ -218,6 +218,23 @@ def test_lsb_dynamic_stall_hysteresis_loop() -> None:
     assert abs(loop_area) > 0.0
 
 
+def test_lsb_hysteresis_is_limited_to_low_reynolds_numbers() -> None:
+    """High-Re flow must not inherit a low-Re laminar-bubble correction."""
+    low_re = aero_kernel.lsb_dynamic_stall_shift(
+        ScalarMath, 40.0, 0.075, 6.0, 2.5e4
+    )
+    high_re = aero_kernel.lsb_dynamic_stall_shift(
+        ScalarMath, 40.0, 0.075, 6.0, 8.0e4
+    )
+    assert low_re > 0.0
+    assert high_re == 0.0
+
+    _, stalled_high_re = aero_kernel.lsb_dynamic_stall_hysteresis(
+        ScalarMath, 15.0, -40.0, 14.0, 0.075, 6.0, 8.0e4, True
+    )
+    assert stalled_high_re is True
+
+
 def test_added_mass_complete_rotational_coupling() -> None:
     """Verify added mass couples into rotational inertia and reduces pitch acceleration."""
     env = EnvironmentConfig()
