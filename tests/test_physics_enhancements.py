@@ -418,3 +418,62 @@ def test_boole_quadrature_strip_moments() -> None:
     assert math.isfinite(moments[0])
     assert math.isfinite(moments[1])
     assert math.isfinite(moments[2])
+
+
+def test_reynolds_invariant_when_exponent_zero() -> None:
+    """Issue #68: exponent=0 => C_D0 is Reynolds-invariant."""
+    cd0 = 0.02
+    for re in (1.0e3, 5.0e4, 1.0e5, 5.0e5):
+        cd = aero_kernel.parasite_drag_coefficient(
+            ScalarMath, cd0=cd0, reynolds=re, exponent=0.0
+        )
+        assert cd == cd0, f"C_D0 should be Re-invariant at exponent=0, got {cd} at Re={re}"
+
+
+def test_reynolds_outside_envelope_triggers_validity_warning() -> None:
+    """Issue #68: Reynolds outside calibrated range surfaces extrapolation risk without overstating validity."""
+    base = dict(mach=0.05, reynolds=5.0e4, alpha_deg=5.0, mass_ratio=10.0)
+
+    res_in = aero_kernel.evaluate_model_validity(ScalarMath, **base)
+    assert res_in["re_ok"] is True
+    assert res_in["extrapolation_risk"] is False
+    assert res_in["uncertainty_level"] == "nominal"
+    assert res_in["validity_warnings"] == ()
+
+    res_low = aero_kernel.evaluate_model_validity(
+        ScalarMath, **dict(base, reynolds=1.0e2)
+    )
+    assert res_low["re_ok"] is False
+    assert res_low["extrapolation_risk"] is True
+    assert res_low["uncertainty_level"] == "elevated"
+    assert len(res_low["validity_warnings"]) >= 1
+
+    res_high = aero_kernel.evaluate_model_validity(
+        ScalarMath, **dict(base, reynolds=1.0e6)
+    )
+    assert res_high["re_ok"] is False
+    assert res_high["extrapolation_risk"] is True
+    assert res_high["uncertainty_level"] == "elevated"
+    assert len(res_high["validity_warnings"]) >= 1
+
+
+def test_reynolds_affects_drag_branch_not_lift() -> None:
+    """Issue #68: Re affects drag branch; lift is unchanged for identical state."""
+    alpha = 5.0
+    stall = 14.0
+    params_same = dict(
+        cL0=0.0, slope_per_rad=4.0, stall_alpha_deg=stall,
+        sharpness=5.0, cl_max=1.2, residual_cl=0.0,
+    )
+    lift_low = aero_kernel.lift_coefficient(ScalarMath, alpha, **params_same)
+    lift_high = aero_kernel.lift_coefficient(ScalarMath, alpha, **params_same)
+    assert lift_low == pytest.approx(lift_high), "Lift should not depend on Re"
+
+    # Drag branch is Re-dependent when exponent > 0
+    cd_low = aero_kernel.parasite_drag_coefficient(
+        ScalarMath, cd0=0.02, reynolds=1.0e3, exponent=0.5
+    )
+    cd_high = aero_kernel.parasite_drag_coefficient(
+        ScalarMath, cd0=0.02, reynolds=5.0e5, exponent=0.5
+    )
+    assert cd_low != pytest.approx(cd_high), "Drag should depend on Re when exponent > 0"

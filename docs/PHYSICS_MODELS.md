@@ -108,34 +108,41 @@ OTHERS 燃焼しない。検証: `tests/test_physics_model_registry.py`。
 
 ---
 
-## 4. レイノルズ数依存性 (Issue #50)
+## 4. レイノルズ数依存性 (Issue #50, #68)
+
+レイノルズ数は機体の特性長（MAC、平均弦長）を用いて定義する：
+
+```
+Re = rho * V * c / mu
+```
+
+- `rho`: 空気密度 [kg/m³]
+- `V`: 流速 [m/s]
+- `c`: 特性長/平均弦長 [m]
+- `mu`: 動的粘性 [Pa·s]
 
 ### 4.1 どの係数が Re に依存するか
 
 | 係数 | 依存形 | 式 | 正本 |
 |---|---|---|---|
-| 抗力係数 `C_D0` | **依存** | `C_D0(Re) = cd0 · (1e5 / Re)^re_cd0_exponent` | `physics/aero_domain.py::parasite_drag_coefficient` |
+| 抗力係数 `C_D0` | **依存** | `C_D0(Re) = cd0 · (1e5 / Re)^re_cd0_exponent` | `physics/aero_kernel.py::parasite_drag_coefficient` |
 | 揚力傾斜 `C_Lα` | **非依存** | `helmbold_cl_alpha(AR, λ)` | `physics/aero_kernel.py` |
 | 失速後揚力 | **非依存** | `post_stall_lift_coefficient` | `physics/aero_kernel.py` |
 | 誘導抗力 `C_L²/(π e AR)` | **非依存** | — | `physics/aero_domain.py` |
 | 翼根曲げ応力 | **非依存** | 幾何と `nz` のみ | `physics/stress_domain.py` |
 
 `re_cd0_exponent` の既定は **0**（`AircraftConfig`）。既定機体では `C_D0` は Re に依存しない。
-**指数が 0 でない** ときのみ Re 依存が現れる。
+**指数が 0 でない** ときのみ Re 依存が現れる。exponent = 0 のとき `C_D0` は任意の Re で `cd0` と一致する。
 
 ### 4.2 範囲外 (Re ≪ 1e3 / Re ≫ 1e5) の扱い
 
 - **クランプしない**。`C_D0(Re)` は範囲外でも式に従い **外挿** される（値を丸めない）。
-- **警告ではなく**: テレメトリの `model_valid` フラグが外挿的事实を **機械可読に** 伝える。
-  `physics/flight_sim.py`:
-  - `MODEL_MACH_LIMIT = 0.3`
-  - `MODEL_REYNOLDS_MIN = 1.0e3`
-  - `MODEL_REYNOLDS_MAX = 1.0e5`
-  - `model_valid = (mach <= MODEL_MACH_LIMIT) and (MODEL_REYNOLDS_MIN <= reynolds <= MODEL_REYNOLDS_MAX)`
-- テレメトリは `model_valid` を **必ず** 出力する（`physics/flight_sim.py` の応答 `model_valid`）。
-  UI は範囲外で **区別表示** する。
-- 検証: `tests/test_aero.py`（`C_D0` の Re 依存形と単調性）、
-  `tests/test_flight.py`（`model_valid` が範囲内で `True` / 範囲外で `False`）。
+- `physics/aero_kernel.py::evaluate_model_validity` が Re 範囲外検出の正本。戻り値に以下を追加：
+  - `extrapolation_risk`: Re（または Mach）が校正範囲外で `True`
+  - `uncertainty_level`: `"elevated"`（範囲外時）/ `"nominal"`（範囲内時）
+  - `validity_warnings`: 範囲外パラメータの説明メッセージ（空タプルなら正常）
+- 校正範囲: `MODEL_REYNOLDS_MIN = 1.0e3` 〜 `MODEL_REYNOLDS_MAX = 1.0e5`（`physics/aero_kernel.py`）
+- 検証: `tests/test_physics_enhancements.py`（`C_D0` の Re 依存形と単調性、`evaluate_model_validity` の警告フィールド）
 
 ### 4.3 遷移の連続性
 

@@ -43,7 +43,7 @@ import math
 from dataclasses import dataclass
 from dataclasses import fields as _dataclass_fields
 from dataclasses import MISSING as _MISSING
-from typing import Any, Dict, Tuple
+from typing import Any, Dict, List, Tuple
 
 from .config_schema import (
     AircraftConfig,
@@ -940,6 +940,23 @@ def evaluate_model_validity(
     valid = xp.where(_flag_array(xp, strict_checks), full_valid, base_valid)
     mass_ratio_warning = mu < 5.0
 
+    # Reynolds-envelope warning: surface out-of-range use without overstating
+    # validity.  exponent == 0 in parasite_drag_coefficient keeps C_D0
+    # Reynolds-invariant, so the model is deliberately Re-invariant there;
+    # everything else that consumes reynolds is flagged when outside the
+    # calibrated envelope.
+    extrapolation_risk = False
+    validity_warnings: List[str] = []
+    try:
+        extrapolation_risk = bool(xp.any(~re_ok))
+    except (AttributeError, TypeError):
+        extrapolation_risk = not bool(re_ok)
+    if extrapolation_risk:
+        validity_warnings.append(
+            f"reynolds={float(re)} outside calibrated range [{re_min}, {re_max}]"
+        )
+    uncertainty_level = "elevated" if extrapolation_risk or not mach_ok else "nominal"
+
     return {
         "valid": valid,
         "base_valid": base_valid,
@@ -948,6 +965,9 @@ def evaluate_model_validity(
         "alpha_ok": alpha_ok,
         "mass_ratio_ok": mu_ok,
         "mass_ratio_warning": mass_ratio_warning,
+        "extrapolation_risk": extrapolation_risk,
+        "uncertainty_level": uncertainty_level,
+        "validity_warnings": tuple(validity_warnings),
     }
 
 
