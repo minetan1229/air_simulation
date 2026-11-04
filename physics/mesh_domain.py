@@ -24,7 +24,19 @@ Analytic formulas used (all exact for polyhedra):
 * volume centroid tetra-decomposition ``sum_i V_i c_i / sum_i V_i`` with
   ``V_i = dot(a_i, b_i x c_i)/6`` and ``c_i = (a_i + b_i + c_i)/4``
 * inertia ``sum_tets r x (r x dm)`` with a parallel-axis shift to the centre of
-  mass, divided by the total mass to yield a mass-normalised tensor.
+  the mass, divided by the total mass to yield a mass-normalised tensor.
+
+Model fidelity
+---------------
+The panel routine :func:`panel_aerodynamics` is a **simple local-incidence
+mesh model**, not a boundary-integral panel method.  Each panel is evaluated
+independently from its local flow angle only: there is **no influence
+coefficient matrix**, **no coupled linear system**, **no inter-panel
+interference**, **no induced downwash**, **no wingtip vortex** and **no
+induced drag**.  Lift uses ``C_L = 2*pi*sin(alpha_local)`` blended into the
+flat-plate law past ``STALL_ALPHA_DEG``, and drag is a fixed profile value
+(``PANEL_PROFILE_DRAG_CD``).  Treat it as a low-fidelity geometry-first
+estimate, not a high-fidelity CFD substitute.
 """
 
 from __future__ import annotations
@@ -117,7 +129,9 @@ SCALE_FACTORS: Dict[str, float] = {
     "in": 0.0254,
 }
 
-#: Profile drag coefficient used by the panel method (thin low-aspect sheet).
+#: Profile drag coefficient used by the simple panel method (thin low-aspect sheet).
+#: Fixed value 0.02 -- no source traceability, no Reynolds dependence.  A
+#: low-fidelity placeholder; not a calibrated viscous-drag model.
 PANEL_PROFILE_DRAG_CD = 0.02
 
 #: Local incidence at which the panel lift curve begins to taper off.
@@ -1401,7 +1415,7 @@ def panel_aerodynamics(
     env: Optional[Any] = None,
     cg_m: Optional[Sequence[float]] = None,
 ) -> Dict[str, Any]:
-    """Static panel method: local incidence, lift, rotational lift and moment.
+    """Static local-incidence panel method: lift, rotational lift and moment.
 
     Frame / signs
     -------------
@@ -1412,6 +1426,14 @@ def panel_aerodynamics(
 
     Model
     -----
+    This is a **simple local-incidence mesh model**, not a boundary-integral
+    panel method.  Each panel is evaluated independently from its local flow
+    angle; there is **no influence-coefficient matrix**, **no coupled linear
+    system**, **no inter-panel interference**, **no induced downwash**, **no
+    wingtip vortex** and **no induced drag**.  The result is a low-fidelity
+    geometry-first estimate and must not be treated as a high-fidelity CFD
+    result.
+
     * ``alpha_local = asin(-dot(n, d))`` -- the panel inclination removed from
       the geometric angle of attack.
     * ``C_L = 2*pi*sin(alpha_local)`` blended past ``STALL_ALPHA_DEG`` into the
@@ -1422,7 +1444,8 @@ def panel_aerodynamics(
       thin-airfoil reference; pass ``cg_m`` to override it.
     * ``lambda = q * (C_L + C_L_rot) * area`` along ``l = n - (n.d) d``,
       the in-plane lift direction.
-    * profile drag ``0.02 * q * area`` summed over the panels.
+    * profile drag ``0.02 * q * area`` summed over the panels
+      (``PANEL_PROFILE_DRAG_CD`` -- fixed, Reynolds-independent placeholder).
 
     ``env`` may supply ``lift_scale`` / ``drag_scale`` multipliers and, when
     ``compressibility_enabled`` is set together with ``temperature_K`` and

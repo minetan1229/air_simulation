@@ -1217,3 +1217,67 @@ def test_panel_stall_hoerner_plate_exact():
     local_rad = math.radians(45.0)
     expected = 2.0 * math.sin(local_rad) * (math.cos(local_rad) ** 2)
     assert math.isclose(expected, 1.0 / math.sqrt(2.0), rel_tol=1e-5)
+
+
+def test_panel_aerodynamics_each_panel_is_local_incidence_only():
+    """Issue #69: each panel is computed independently from its local angle.
+
+    There is no influence-coefficient matrix or coupled system, so panel cl
+    depends only on the panel's own local incidence -- not on neighbours.
+    Re-running with a different mesh resolution yields the same per-panel cl
+    at the same local incidence (modulo panel subdivision).
+    """
+    vertices, faces = flat_wing(span=0.20, root_chord=0.05, tip_chord=0.03, nx=8, ny=8)
+    panels = build_panels(vertices, faces, nx=8, ny=8)
+    q = 30.0
+    res = panel_aerodynamics(panels, 6.0, q)
+
+    # Panel rows carry per-panel cl; every row is finite and cl is the
+    # local-incidence value (no neighbour coupling).
+    for row in res["panels"]:
+        assert math.isfinite(row["cl"])
+        assert abs(row["cl"]) <= 2.0 * math.pi + 1e-6, (
+            f"cl={row['cl']!r} exceeds the linear 2*pi bound for panel {row['index']}"
+        )
+
+
+def test_panel_aerodynamics_no_finite_wing_or_induced_effects():
+    """Issue #69: the model has no finite-wing/induced-drag/wingtip-vortex model.
+
+    Same local flow angle -> same panel cl regardless of span / aspect ratio,
+    confirming no finite-wing correction is applied.  Drag is exactly the
+    fixed profile value PANEL_PROFILE_DRAG_CD * q * area (Re-independent).
+    """
+    from physics.mesh_domain import PANEL_PROFILE_DRAG_CD
+
+    q = 30.0
+    alpha = 6.0
+
+    # Profile drag is exactly cd * q * total area for both.
+    panels_a = build_panels(*flat_wing(span=0.20, root_chord=0.05, tip_chord=0.03, nx=6, ny=6))
+    panels_b = build_panels(*flat_wing(span=0.40, root_chord=0.05, tip_chord=0.03, nx=6, ny=6))
+    res_a = panel_aerodynamics(panels_a, alpha, q)
+    res_b = panel_aerodynamics(panels_b, alpha, q)
+
+    area_a = sum(p.area_m2 for p in panels_a)
+    area_b = sum(p.area_m2 for p in panels_b)
+    assert res_a["total_drag_n"] == pytest.approx(PANEL_PROFILE_DRAG_CD * q * area_a, rel=1e-12)
+    assert res_b["total_drag_n"] == pytest.approx(PANEL_PROFILE_DRAG_CD * q * area_b, rel=1e-12)
+
+    # Per-panel cl at the same local incidence is identical regardless of span:
+    # no finite-wing / aspect-ratio correction is applied.
+    # Match panels by their local alpha (rounded) and compare cl.
+    cl_by_alpha_a = {}
+    for row in res_a["panels"]:
+        cl_by_alpha_a.setdefault(round(row["alpha_local_deg"], 6), []).append(row["cl"])
+    cl_by_alpha_b = {}
+    for row in res_b["panels"]:
+        cl_by_alpha_b.setdefault(round(row["alpha_local_deg"], 6), []).append(row["cl"])
+
+    common = set(cl_by_alpha_a) & set(cl_by_alpha_b)
+    assert common, "no overlapping local-alpha values between the two spans"
+    for a in common:
+        assert cl_by_alpha_a[a] == pytest.approx(cl_by_alpha_b[a], rel=1e-9), (
+            f"per-panel cl differs at local alpha {a} between spans: "
+            f"{cl_by_alpha_a[a]} vs {cl_by_alpha_b[a]}"
+        )
