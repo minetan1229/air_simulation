@@ -1368,7 +1368,6 @@ _CORE_BUNDLE_FIELDS: Tuple[str, ...] = (
     "cm_alpha",
     "cm_q",
     "cm_roll_rate",
-    "cm_pitch_rate",
     "cm_yaw_rate",
     "cl_beta",
     "cl_roll_rate",
@@ -1466,7 +1465,6 @@ def _coefficient_core(
     cm_alpha: Any,
     cm_q: Any,
     cm_roll_rate: Any,
-    cm_pitch_rate: Any,
     cm_yaw_rate: Any,
     cl_beta: Any,
     cl_roll_rate: Any,
@@ -1655,7 +1653,6 @@ def _coefficient_core(
         + elevon["dcm"]
         + te_fold["dcm"]
         + cm_roll
-        + cm_pitch_rate * q_hat
         + cm_yaw_rate * r_hat
     )
 
