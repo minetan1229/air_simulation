@@ -700,22 +700,22 @@ class EvolutionRunner:
         record_by_index = {int(r.get("index", id(r))): r for r in cases_records}
         flown: List[Dict[str, Any]] = []
         for result in results:
-            record = record_by_index.get(int(result.index))
-            if record is None:
+            matched_record = record_by_index.get(int(result.index))
+            if matched_record is None:
                 continue
-            record["stage1"] = result.to_dict()
-            record["distance_m"] = result.distance_m
-            record["max_ld_ratio"] = result.max_ld_ratio
-            record["stability"] = result.stability
-            record["peak_stress_index"] = result.peak_stress_index
-            record["cl"] = result.cl
-            record["cd"] = result.cd
-            record["screening_cl"] = result.cl
-            record["screening_cd"] = result.cd
-            record["status"] = result.status
-            record["fitness"] = default_objective(record)
+            matched_record["stage1"] = result.to_dict()
+            matched_record["distance_m"] = result.distance_m
+            matched_record["max_ld_ratio"] = result.max_ld_ratio
+            matched_record["stability"] = result.stability
+            matched_record["peak_stress_index"] = result.peak_stress_index
+            matched_record["cl"] = result.cl
+            matched_record["cd"] = result.cd
+            matched_record["screening_cl"] = result.cl
+            matched_record["screening_cd"] = result.cd
+            matched_record["status"] = result.status
+            matched_record["fitness"] = default_objective(matched_record)
             if result.status not in ("crashed", "degenerate"):
-                flown.append(record)
+                flown.append(matched_record)
         self._correct_screening(flown)
         return flown
 
