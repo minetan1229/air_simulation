@@ -195,6 +195,33 @@ class TestEnergyConservation:
         # Check initial vs final energy
         assert profile[-1] < profile[0], f"Terminal energy ({profile[-1]}) must be lower than initial ({profile[0]})"
 
+    def test_energy_non_increasing_under_dt_refinement(self) -> None:
+        """Issue #131: refined dt must not create energy (integration vs model)."""
+        aircraft = AircraftConfig(
+            mass_kg=0.0035,
+            wing_area_m2=0.018,
+            wingspan_m=0.22,
+            fidelity_mode="standard",
+            dynamic_damping_enabled=False,
+            apparent_inertia_enabled=True,
+            lsb_hysteresis_enabled=False,
+        )
+        env = EnvironmentConfig(wind_speed=0.0, gust_intensity=0.0)
+        launch = LaunchConfig(launch_speed=6.5, launch_angle_deg=2.0)
+        for dt_max in (0.01, 0.005):
+            settings = SimulationSettings(
+                dt_min=0.001,
+                dt_max=dt_max,
+                record_interval_s=0.02,
+                duration_s=3.0,
+                collision_enabled=False,
+            )
+            sim = FlightSimulator(aircraft, env, launch, settings)
+            res = sim.simulate(duration_s=3.0)
+            assert res["energy_strictly_decreasing"], (
+                f"Apparent-only glide injected energy at dt_max={dt_max}"
+            )
+
 
 class TestFidelityTimingRatio:
     """Verifies H1: Improved medium-fidelity runtime cost multiplier.
