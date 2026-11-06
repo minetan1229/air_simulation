@@ -133,6 +133,29 @@ def test_the_layer_references_never_point_into_the_future() -> None:
         available += 2 if gene.creates_pair else 1
 
 
+def test_the_archetypes_fit_the_step_cap_and_the_seed_honours_it() -> None:
+    """Issue #91: archetypes are not silently truncated; seed_population
+    threads max_steps through to archetype_hybrid_genomes."""
+    from physics.ga2.genome import MAX_FOLD_STEPS as CAP
+
+    for genome in archetype_hybrid_genomes():
+        assert genome.step_count <= CAP
+        assert not genome.meta.get("clamped_to_max_steps", False)
+    assert archetype_hybrid_genomes()[0].step_count > 8
+    rng = random.Random(23)
+    population = seed_population(50, rng, max_steps=15)
+    assert all(g.step_count <= 15 for g in population)
+    # Propagation is distinguishable from the old default-only behaviour:
+    # a small cap must actually clamp archetypes and be recorded.
+    clamped = archetype_hybrid_genomes(max_steps=5)
+    assert all(g.step_count <= 5 for g in clamped)
+    assert any(g.meta.get("clamped_to_max_steps") for g in clamped)
+    assert any(g.meta.get("original_step_count", 0) > 5 for g in clamped)
+    rng2 = random.Random(23)
+    capped_pop = seed_population(50, rng2, max_steps=5)
+    assert all(g.step_count <= 5 for g in capped_pop)
+
+
 def test_the_warm_start_follows_the_fractions_of_the_specification() -> None:
     rng = random.Random(17)
     population = seed_population(1000, rng)

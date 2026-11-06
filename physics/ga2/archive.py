@@ -75,7 +75,7 @@ DEFAULT_METRIC_NAMES: Tuple[str, str, str] = ("wing_loading", "aspect_ratio", "f
 DEFAULT_METRIC_RANGES: Dict[str, Tuple[float, float]] = {
     "wing_loading": (1.0, 200.0),
     "aspect_ratio": (1.0, 12.0),
-    "fold_count": (3.0, 8.0),
+    "fold_count": (3.0, 15.0),
 }
 
 
