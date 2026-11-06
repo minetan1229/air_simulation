@@ -145,15 +145,21 @@ def test_pitch_damping_opposes_rotation_with_standard_rate_normalization(cfg, en
     speed = 9.0
     chord = derived_properties(cfg)["ref_length_m"]
     zero = evaluate_aero(cfg, env, speed, 0.0)
+    # cm_pitch_rate is merged into cm_q inside evaluate_aero (via clamp_ranges)
+    cfg_clamped = cfg.clamp_ranges()
     for pitch_rate in (-1.0, 1.0):
         rotating = evaluate_aero(cfg, env, speed, 0.0, angular_rate=(0.0, pitch_rate, 0.0))
-        expected = (cfg.cm_q + cfg.cm_pitch_rate) * pitch_rate * chord / (2.0 * speed)
+        expected = cfg_clamped.cm_q * pitch_rate * chord / (2.0 * speed)
         assert rotating.cm - zero.cm == pytest.approx(expected, rel=1e-12)
         assert (rotating.pitching_moment_nm - zero.pitching_moment_nm) * pitch_rate < 0.0
 
 
 def test_pitch_damping_dual_derivatives_consistency(env):
-    """Verify cm_q and cm_pitch_rate combine additively and damp rotation (Issue #76)."""
+    """Verify cm_q and cm_pitch_rate combine additively and damp rotation (Issue #76).
+
+    cm_pitch_rate is merged into cm_q during clamp_ranges() inside evaluate_aero,
+    then ignored in evaluation.
+    """
     speed = 10.0
     # 1. Base case: default cm_q = -12.0, cm_pitch_rate = 0.0
     cfg_base = AircraftConfig(cm_q=-12.0, cm_pitch_rate=0.0)
@@ -162,14 +168,14 @@ def test_pitch_damping_dual_derivatives_consistency(env):
     dcm_base = res_base.cm - evaluate_aero(cfg_base, env, speed, 0.0).cm
     assert dcm_base == pytest.approx(-12.0 * chord / (2.0 * speed), rel=1e-12)
 
-    # 2. Both set: cm_q = -10.0, cm_pitch_rate = -2.0 -> total -12.0
+    # 2. Both set: cm_q = -10.0, cm_pitch_rate = -2.0 -> total -12.0 (merged in clamp_ranges)
     cfg_dual = AircraftConfig(cm_q=-10.0, cm_pitch_rate=-2.0)
     res_dual = evaluate_aero(cfg_dual, env, speed, 0.0, angular_rate=(0.0, 1.0, 0.0))
     dcm_dual = res_dual.cm - evaluate_aero(cfg_dual, env, speed, 0.0).cm
     assert dcm_dual == pytest.approx(-12.0 * chord / (2.0 * speed), rel=1e-12)
     assert dcm_dual == pytest.approx(dcm_base, rel=1e-12)
 
-    # 3. Only cm_pitch_rate set: cm_q = 0.0, cm_pitch_rate = -8.0
+    # 3. Only cm_pitch_rate set: cm_q = 0.0, cm_pitch_rate = -8.0 -> merged to -8.0
     cfg_rate = AircraftConfig(cm_q=0.0, cm_pitch_rate=-8.0)
     res_rate = evaluate_aero(cfg_rate, env, speed, 0.0, angular_rate=(0.0, 1.0, 0.0))
     dcm_rate = res_rate.cm - evaluate_aero(cfg_rate, env, speed, 0.0).cm
@@ -734,14 +740,15 @@ def test_evaluate_aero_forces_match_their_definitions(cfg: AircraftConfig, env: 
     r_hat = rates[2] * span / (2.0 * speed)
     expected_cl = cfg.cl_beta * deg2rad(beta) + cfg.cl_roll_rate * p_hat + cfg.cl_pitch_rate * q_hat + cfg.cl_yaw_rate * r_hat
     expected_cn = cfg.cn_beta * deg2rad(beta) + cfg.cn_roll_rate * p_hat + cfg.cn_pitch_rate * q_hat + cfg.cn_yaw_rate * r_hat
+    # cm_pitch_rate is merged into cm_q in clamp_ranges() inside evaluate_aero
+    cfg_clamped = cfg.clamp_ranges()
     expected_cm = (
-        cfg.cm0
-        + cfg.cm_alpha * deg2rad(alpha)
-        + cfg.cm_q * q_hat
+        cfg_clamped.cm0
+        + cfg_clamped.cm_alpha * deg2rad(alpha)
+        + cfg_clamped.cm_q * q_hat
         + elevon_effects(cfg.elevon_deg, cfg)["dcm"]
-        + cfg.cm_roll_rate * p_hat
-        + cfg.cm_pitch_rate * q_hat
-        + cfg.cm_yaw_rate * r_hat
+        + cfg_clamped.cm_roll_rate * p_hat
+        + cfg_clamped.cm_yaw_rate * r_hat
     )
     assert result.rolling_moment_nm == pytest.approx(dynamic * area * span * expected_cl, rel=1e-9)
     assert result.yawing_moment_nm == pytest.approx(dynamic * area * span * expected_cn, rel=1e-9)

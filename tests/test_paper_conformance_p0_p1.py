@@ -149,13 +149,16 @@ def test_wind_components_match_the_meteorological_convention(direction_deg: floa
 
 def test_reference_path_uses_the_shared_wind_vector() -> None:
     env = EnvironmentConfig(wind_speed=4.0, wind_direction_deg=0.0)
-    # z-down world frame: 5 m above the ground plane.
+    # z-down world frame (NED): 5 m above the ground plane.
     position = (0.0, 0.0, -5.0)
     vector = flight_sim.wind_vector(position, env, 0.0)
     height = -position[2] - env.ground_level_m
     expected = wind_domain.wind_velocity([0.0, 0.0, height], env, 0.0)
-    assert float(vector[0]) == pytest.approx(float(expected[0]), abs=1e-9)
-    assert float(vector[1]) == pytest.approx(float(expected[1]), abs=1e-9)
+    # wind_domain: x=East, y=North, z=Up
+    # NED: x=North, y=East, z=Down
+    # So NED x = wind_domain y, NED y = wind_domain x, NED z = -wind_domain z
+    assert float(vector[0]) == pytest.approx(float(expected[1]), abs=1e-9)
+    assert float(vector[1]) == pytest.approx(float(expected[0]), abs=1e-9)
     # The wind domain is z-up, the flight dynamics world frame is z-down.
     assert float(vector[2]) == pytest.approx(-float(expected[2]), abs=1e-9)
 

@@ -150,8 +150,8 @@ def test_viscosity_and_transport_properties():
 def test_wind_directions_and_coordinate_transformation():
     """Verify meteorological wind directions (from which wind blows) and flow vectors.
 
-    Wind domain: +y is North, +x is East, +z is Up.
-    NED world frame: +x is Forward/X, +y is Lateral/Y, +z is Down.
+    Wind domain: +x is East, +y is North, +z is Up.
+    NED world frame: +x is North, +y is East, +z is Down.
     The canonical wind flow components: flow = -(sin(theta), cos(theta)).
     """
     speed = 10.0
@@ -183,11 +183,13 @@ def test_wind_directions_and_coordinate_transformation():
     assert math.isclose(w_w[1], 0.0, abs_tol=1e-9)
     assert math.isclose(w_w[2], 0.0, abs_tol=1e-9)
 
-    # In flight_sim.wind_vector, vertical component is inverted: w_ned = -w_wind
+    # In flight_sim.wind_vector, wind domain (x=East,y=North,z=Up) is converted to NED (x=North,y=East,z=Down)
+    # Vertical component is inverted: z_ned = -z_wind
     pos_ned = np.array([0.0, 0.0, -10.0])  # 10m above ground
     w_sim_n = flight_sim.wind_vector(pos_ned, env_n, 0.0)
-    assert math.isclose(w_sim_n[0], 0.0, abs_tol=1e-9)
-    assert math.isclose(w_sim_n[1], -speed, rel_tol=1e-9)
+    # North wind blows from North (+x_ned) to South (-x_ned) -> velocity = (-speed, 0, 0)
+    assert math.isclose(w_sim_n[0], -speed, rel_tol=1e-9)
+    assert math.isclose(w_sim_n[1], 0.0, abs_tol=1e-9)
     assert math.isclose(w_sim_n[2], 0.0, abs_tol=1e-9)
 
 

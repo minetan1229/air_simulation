@@ -324,7 +324,7 @@ def _clamp(xp: Any, value: Any, low: Any, high: Any) -> Any:
     (An explicit ``asarray`` would break the fusion, because a traced
     value cannot be converted on the host.)
     """
-    return xp.clip(value, low, high)
+    return xp.clip(xp.asarray(value), low, high)
 
 
 def _safe_div(xp: Any, numerator: Any, denominator: Any, default: Any = 0.0) -> Any:

@@ -498,7 +498,7 @@ def build_params(
                 "area", "chord", "span", "aspect", "oswald", "cL0", "cl_alpha",
                 "cl_max", "stall_alpha_deg", "stall_sharpness", "polhamus_kp",
                 "polhamus_kv", "cd0", "re_cd0_exponent", "cm0", "cm_alpha",
-                "cm_q", "cm_roll_rate", "cm_pitch_rate", "cm_yaw_rate",
+                "cm_q", "cm_roll_rate", "cm_yaw_rate",
                 "cl_beta", "cl_roll_rate", "cl_pitch_rate", "cl_yaw_rate",
                 "cn_beta", "cn_roll_rate", "cn_pitch_rate", "cn_yaw_rate",
                 "cy_beta", "aileron_deg", "asymmetry_cl", "rudder_deg",
