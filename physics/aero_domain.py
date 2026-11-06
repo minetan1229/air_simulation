@@ -1000,8 +1000,9 @@ def evaluate_aero(
     default to the values derived from ``speed_mps`` and the environment.
     Optional local density and kinematic viscosity override the environment
     atmosphere for dynamic pressure and Reynolds number, respectively. An
-    explicit Reynolds number still takes precedence. ``cm_q`` multiplies the
-    standard nondimensional pitch rate ``q * chord / (2 * speed)`` once.
+    explicit Reynolds number still takes precedence. ``cm_q`` is the sole
+    pitch-rate derivative; ``cm_pitch_rate`` is deprecated (merged into
+    ``cm_q`` by ``AircraftConfig.clamp_ranges`` and ignored here).
     """
     geom = _geom(cfg)
     area = max(_finite(geom["ref_area_m2"], 0.015), 1.0e-9)

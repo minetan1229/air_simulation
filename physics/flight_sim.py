@@ -2632,7 +2632,7 @@ class FlightSimulator:
             q_hat = omega[1] * self._chord / two_v
             r_hat = omega[2] * span / two_v
             base_lp = float(getattr(self.aircraft, "cl_roll_rate", -0.40))
-            base_mq = float(getattr(self.aircraft, "cm_q", -12.0)) + float(getattr(self.aircraft, "cm_pitch_rate", 0.0))
+            base_mq = float(getattr(self.aircraft, "cm_q", -12.0))
             base_nr = float(getattr(self.aircraft, "cn_yaw_rate", -0.30))
 
             cl_p_nl, cm_q_nl, cn_r_nl = aero_kernel.nonlinear_dynamic_damping(

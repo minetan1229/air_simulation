@@ -59,3 +59,11 @@ progress.md
 sim_process.pid
 watchdog_status.txt
 *.patch
+
+# Simulation and debug outputs
+best_*
+checkpoints/
+*.jsonl
+diff_master.txt
+debug_energy.py
+.local/
