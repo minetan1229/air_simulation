@@ -173,7 +173,7 @@ class ScalingProfile:
     seed_fraction_mutant: float = 0.08
     seed_fraction_random: float = 0.90
     min_fold_steps: int = 3
-    max_fold_steps: int = 8
+    max_fold_steps: int = 15
     archive_capacity: int = 20000
 
     # ------------------------------------------------------------------
