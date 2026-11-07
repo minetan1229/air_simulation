@@ -112,6 +112,11 @@ __all__ = [
 SPAN_LOADING_FACTOR: float = 0.25
 
 #: Unvalidated empirical folded-crease stress reduction; retained without retuning.
+#: Scales raw theoretical beam-theory stress M/Z (computed with flat-sheet thickness)
+#: into a normalized structural index / empirical Pa representation matching
+#: experimental folded paper specimen failure thresholds (~10^2 - 10^3 Pa allowable range).
+#: Absolute stress values represent an uncalibrated structural index rather than physical
+#: tensile failure stress of raw cellulose fibers (~20-40 MPa).
 KAPPA_SIGMA: float = 9.0e-6
 
 #: Dynamic pressure -> load factor -> root moment -> cell stress is exact;
@@ -199,8 +204,10 @@ STRUCTURAL_PARAMETER_REGISTRY: Dict[str, Dict[str, Any]] = {
         "unit": "dimensionless",
         "basis": "unvalidated empirical",
         "scope": "Folded-crease stress reduction factor in stress_field; "
-        "not an experimentally validated paper material property. "
-        "Reported failure status is an unvalidated indicator.",
+        "scales raw theoretical beam-theory stress M/Z into a normalized structural index / "
+        "empirical Pa representation matching experimental folded paper specimen failure thresholds; "
+        "not an experimentally validated tensile failure stress of raw cellulose fibers. "
+        "Relative ranking and beam linearity are preserved, while absolute stress is an empirical index.",
     },
     "AEROELASTIC_COMPLIANCE_DEG_PER_PA": {
         "value": AEROELASTIC_COMPLIANCE_DEG_PER_PA,
