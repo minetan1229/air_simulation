@@ -39,7 +39,7 @@ def test_added_mass_positive_definite_diagonal() -> None:
     mac = 0.0826
     span = 0.22
     added = aero_kernel.compute_added_mass(ScalarMath, rho, area, mac, wingspan_m=span)
-    
+
     for key in ("added_mass_z_kg", "added_inertia_xx_kgm2", "added_inertia_yy_kgm2", "added_inertia_zz_kgm2"):
         val = float(added[key])
         assert val > 0.0, f"Component {key} must be positive, got {val}"
