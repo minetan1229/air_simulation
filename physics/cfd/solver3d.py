@@ -259,8 +259,9 @@ class Solver3D:
             self.grid.i_area_y[:-1],
             self.grid.i_area_z[:-1],
         )
-        res += f_i
-        res -= np.roll(f_i, -1, axis=0)
+        # f_i points +i: left cell outward + -> +f_i, right cell outward -.
+        res -= f_i
+        res += np.roll(f_i, -1, axis=0)
 
         # 2. Interior j-faces
         u_bottom_j = u[:, :-1, :, :]
@@ -272,8 +273,9 @@ class Solver3D:
             self.grid.j_area_y[:, 1:-1, :],
             self.grid.j_area_z[:, 1:-1, :],
         )
-        res[:, 1:, :, :] += f_j
-        res[:, :-1, :, :] -= f_j
+        # f_j points +j: bottom cell outward + -> +f_j, top cell outward -.
+        res[:, 1:, :, :] -= f_j
+        res[:, :-1, :, :] += f_j
 
         # Wall boundary at j=0 (Solid slip wall)
         ax_w = self.grid.j_area_x[:, 0, :]
@@ -303,7 +305,8 @@ class Solver3D:
         u_ghost_j[..., 4] = rho_w * e_ghost
 
         f_wall = self.compute_flux(u_ghost_j, u_first_j, ax_w, ay_w, az_w)
-        res[:, 0, :, :] += f_wall
+        # j=0 outward is -j -> contribution -f_wall.
+        res[:, 0, :, :] -= f_wall
 
         # Farfield boundary at j=nj
         ax_far = self.grid.j_area_x[:, -1, :]
@@ -312,7 +315,8 @@ class Solver3D:
         u_inner_j = u[:, -1, :, :]
         u_outer_j = np.broadcast_to(self.u_free, u_inner_j.shape)
         f_far_j = self.compute_flux(u_inner_j, u_outer_j, ax_far, ay_far, az_far)
-        res[:, -1, :, :] -= f_far_j
+        # j=nj outward is +j -> contribution +f_far.
+        res[:, -1, :, :] += f_far_j
 
         # 3. k-faces (Spanwise: k=0 symmetry plane, k=nk outer farfield)
         u_in_k = u[:, :, :-1, :]
@@ -324,8 +328,9 @@ class Solver3D:
             self.grid.k_area_y[:, :, 1:-1],
             self.grid.k_area_z[:, :, 1:-1],
         )
-        res[:, :, 1:, :] += f_k
-        res[:, :, :-1, :] -= f_k
+        # f_k points +k: in-cell outward + -> +f_k, out-cell outward -.
+        res[:, :, 1:, :] -= f_k
+        res[:, :, :-1, :] += f_k
 
         # Root symmetry plane (k=0, normal points along +y, so mirror v_velocity)
         ax_sym = self.grid.k_area_x[:, :, 0]
@@ -336,7 +341,8 @@ class Solver3D:
         u_sym = np.array(u_root)
         u_sym[..., 2] = -u_sym[..., 2]  # reflect v_vel
         f_sym = self.compute_flux(u_sym, u_root, ax_sym, ay_sym, az_sym)
-        res[:, :, 0, :] += f_sym
+        # k=0 outward is -k -> contribution -f_sym.
+        res[:, :, 0, :] -= f_sym
 
         # Wing tip outer farfield (k=nk)
         ax_tip = self.grid.k_area_x[:, :, -1]
@@ -345,7 +351,8 @@ class Solver3D:
         u_tip = u[:, :, -1, :]
         u_tip_outer = np.broadcast_to(self.u_free, u_tip.shape)
         f_tip = self.compute_flux(u_tip, u_tip_outer, ax_tip, ay_tip, az_tip)
-        res[:, :, -1, :] -= f_tip
+        # k=nk outward is +k -> contribution +f_tip.
+        res[:, :, -1, :] += f_tip
 
         return res
 
