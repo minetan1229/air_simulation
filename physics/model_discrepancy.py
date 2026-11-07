@@ -62,10 +62,11 @@ def discrepancy_report(
     trim_panel = math.degrees(reference_cl / panel) if panel > 0 else 0.0
     trim_helmbold = math.degrees(reference_cl / helmbold) if helmbold > 0 else 0.0
     guidance = (
-        "Panel method (2*pi) is 2.2x stiffer than Helmbold (3D, AR=2.67) "
-        "for the default airframe. Use Helmbold for flight prediction and "
-        "GA ranking; use panel method only for visualisation/local incidence "
-        "diagnostics. Do not compare flight distance/time across models."
+        f"Panel method (2*pi) is {ratio:.2f}x stiffer than Helmbold (3D, "
+        f"AR={aspect_ratio:.2f}, lam={taper_ratio:.2f}) for this airframe. "
+        "Use Helmbold for flight prediction and GA ranking; use panel method "
+        "only for visualisation/local incidence diagnostics. Do not compare "
+        "flight distance/time across models."
     )
     return ModelDiscrepancyReport(
         aspect_ratio=float(aspect_ratio),
