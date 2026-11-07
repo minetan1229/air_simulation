@@ -326,7 +326,16 @@ def wind_force_to_body(relative_velocity: ArrayLike, drag: float, side: float, l
     down = np.array([0.0, 0.0, -1.0])
     pole_raw = down - float(down @ drag_axis) * drag_axis
     pole_norm = float(np.linalg.norm(pole_raw))
-    pole_axis = pole_raw / pole_norm if pole_norm > 1.0e-12 else down
+    if pole_norm > 1.0e-12:
+        pole_axis = pole_raw / pole_norm
+    else:
+        # Down vector is parallel to drag axis (|vz| / speed == 1).
+        # Fall back to body x-axis so that pole_axis is strictly orthogonal to drag_axis.
+        ref_x = -1.0 if drag_axis[2] < 0.0 else 1.0
+        ref = np.array([ref_x, 0.0, 0.0])
+        ref_raw = ref - float(ref @ drag_axis) * drag_axis
+        ref_norm = float(np.linalg.norm(ref_raw))
+        pole_axis = ref_raw / ref_norm if ref_norm > 1.0e-12 else np.array([0.0, 1.0, 0.0])
 
     t = min(max(ratio, 0.0), 1.0)
     if t <= 0.0:
