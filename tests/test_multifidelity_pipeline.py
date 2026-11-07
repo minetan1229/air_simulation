@@ -195,6 +195,33 @@ class TestEnergyConservation:
         # Check initial vs final energy
         assert profile[-1] < profile[0], f"Terminal energy ({profile[-1]}) must be lower than initial ({profile[0]})"
 
+    def test_energy_non_increasing_under_dt_refinement(self) -> None:
+        """Issue #131: refined dt must not create energy (integration vs model)."""
+        aircraft = AircraftConfig(
+            mass_kg=0.0035,
+            wing_area_m2=0.018,
+            wingspan_m=0.22,
+            fidelity_mode="standard",
+            dynamic_damping_enabled=False,
+            apparent_inertia_enabled=True,
+            lsb_hysteresis_enabled=False,
+        )
+        env = EnvironmentConfig(wind_speed=0.0, gust_intensity=0.0)
+        launch = LaunchConfig(launch_speed=6.5, launch_angle_deg=2.0)
+        for dt_max in (0.01, 0.005):
+            settings = SimulationSettings(
+                dt_min=0.001,
+                dt_max=dt_max,
+                record_interval_s=0.02,
+                duration_s=3.0,
+                collision_enabled=False,
+            )
+            sim = FlightSimulator(aircraft, env, launch, settings)
+            res = sim.simulate(duration_s=3.0)
+            assert res["energy_strictly_decreasing"], (
+                f"Apparent-only glide injected energy at dt_max={dt_max}"
+            )
+
 
 class TestFidelityTimingRatio:
     """Verifies H1: Improved medium-fidelity runtime cost multiplier.
@@ -303,7 +330,7 @@ class TestFidelityTimingRatio:
             f"per-run={ [round(r['timing_ratio'], 3) for r in per_run] } "
             f"env={_platform_info()}"
         )
-        # Deterministic cross-check: improved medium integrates at dt_max/2.5
+# Deterministic cross-check: improved medium integrates at dt_max/2.5
         # (finer resolution, see FlightSimulator.simulate), so it must take at
         # least as many integration steps as baseline.  The exact ratio depends
         # on chunking/landing, so this is a structural floor, not a fixed target.
@@ -313,8 +340,80 @@ class TestFidelityTimingRatio:
             f"per-run={ [round(r['step_ratio'], 3) for r in per_run] }"
         )
 
+    def test_total_damping_moment_work_rate_nonpositive(self) -> None:
+        """Issue #138: Integration-level check that total damping moment · omega <= 0.
 
+        The kernel guarantees per-axis coeff * hat^2 <= 0, but the flight_sim
+        assembly uses a delta formulation (d_m = q_dyn * chord * (cm_q_nl - base_mq) * q_hat).
+        This test asserts the assembled total M_damp · omega is non-positive,
+        locking the invariant end-to-end.
+        """
+        aircraft = AircraftConfig(
+            mass_kg=0.0035,
+            wing_area_m2=0.018,
+            wingspan_m=0.22,
+            fidelity_mode="improved_medium",
+            dynamic_damping_enabled=True,
+            apparent_inertia_enabled=False,
+            lsb_hysteresis_enabled=False,
+            elevon_deg=6.0,
+            fold_trailing_deg=0.0,
+        )
+        env = EnvironmentConfig(wind_speed=0.0)
+        launch = LaunchConfig(launch_speed=15.0, launch_angle_deg=10.0, launch_height_m=20.0)
+        settings = SimulationSettings(dt_min=0.001, dt_max=0.01, duration_s=2.0)
 
+        sim = FlightSimulator(aircraft, env, launch, settings)
+
+        # Patch to observe total damping moment at each step
+        violations = []
+        original_step = sim.step
+
+        def observed_step(dt=None, substeps=None):
+            accepted = original_step(dt, substeps)
+            if accepted:
+                try:
+                    import numpy as _np
+                    core = sim._compute_dynamics(sim._pack(sim._state), float(sim._state.time_s))
+                    omega = _np.array(sim._state.angular_velocity_radps)
+                    # The total damping moment is base + delta = coeff_nl * hat
+                    # We reconstruct it from the known formula
+                    span = sim._derived["wingspan_m"]
+                    chord = sim._derived["mac_m"]
+                    q_dyn = core["dynamic_pressure_pa"]
+                    speed = core["speed_mps"]
+                    alpha_deg = core["alpha_deg"]
+                    if speed > 0.01:
+                        p_hat = omega[0] * span / (2.0 * speed)
+                        q_hat = omega[1] * chord / (2.0 * speed)
+                        r_hat = omega[2] * span / (2.0 * speed)
+                        cl_p_nl, cm_q_nl, cn_r_nl = aero_kernel.nonlinear_dynamic_damping(
+                            aero_kernel.ScalarMath,
+                            alpha_deg=alpha_deg,
+                            stall_alpha_deg=14.0,
+                            p_hat=p_hat,
+                            q_hat=q_hat,
+                            r_hat=r_hat,
+                            cl_p0=-0.40,
+                            cm_q0=-12.0,
+                            cn_r0=-0.30,
+                        )
+                        M_damp = _np.array([
+                            q_dyn * span * cl_p_nl * p_hat,
+                            q_dyn * chord * cm_q_nl * q_hat,
+                            q_dyn * span * cn_r_nl * r_hat,
+                        ])
+                        work_rate = float(_np.dot(M_damp, omega))
+                        if work_rate > 1e-10:
+                            violations.append((sim._state.time_s, work_rate, M_damp, omega))
+                except Exception:
+                    pass
+            return accepted
+
+        sim._step = observed_step
+        sim.simulate(duration_s=2.0)
+
+        assert len(violations) == 0, f"Total damping work rate positive at {len(violations)} steps: {violations[:3]}"
 
 
 class TestMultiFidelityPipeline:

@@ -2632,7 +2632,7 @@ class FlightSimulator:
             q_hat = omega[1] * self._chord / two_v
             r_hat = omega[2] * span / two_v
             base_lp = float(getattr(self.aircraft, "cl_roll_rate", -0.40))
-            base_mq = float(getattr(self.aircraft, "cm_q", -12.0)) + float(getattr(self.aircraft, "cm_pitch_rate", 0.0))
+            base_mq = float(getattr(self.aircraft, "cm_q", -12.0))
             base_nr = float(getattr(self.aircraft, "cn_yaw_rate", -0.30))
 
             cl_p_nl, cm_q_nl, cn_r_nl = aero_kernel.nonlinear_dynamic_damping(
@@ -2659,16 +2659,17 @@ class FlightSimulator:
             or getattr(self.aircraft, "fidelity_mode", "standard") in ("improved_medium", "multifidelity")
         )
         if apparent_active:
+            # Effective mass/inertia only (Issue #131): the former explicit
+            # Coriolis/Munk external forces (compute_apparent_forces) did net
+            # positive body work (F_app.v + M_app.w > 0, ~60% of aero
+            # dissipation) and injected mechanical energy. Keep m_eff/J_eff,
+            # which attenuate acceleration passively; coupling is documented
+            # as a limitation for Issue #136 (GPU parity).
             added = aero_kernel.compute_added_mass(
                 ScalarMath, rho_val, ref_area, self._chord, wingspan_m=span
             )
             m_add_z = float(added["added_mass_z_kg"])
             m_eff_z = self._mass + m_add_z
-            f_app, m_app = aero_kernel.compute_apparent_forces(
-                np, body_relative, omega, m_add_z
-            )
-            force_body = force_body + f_app
-            moment_body = moment_body + m_app
             gravity_body = world_to_body(quaternion, gravity_world)
             a_body = (force_body / self._mass) + gravity_body
             a_body[2] = (force_body[2] + self._mass * gravity_body[2]) / m_eff_z

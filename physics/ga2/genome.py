@@ -67,8 +67,10 @@ SYMMETRY_MODES: Tuple[str, ...] = ("symmetric", "left", "right")
 #: The shortest programme the search allows.
 MIN_FOLD_STEPS = 3
 
-#: The longest programme the search allows.
-MAX_FOLD_STEPS = 8
+#: The longest programme the search allows. Raised to cover the
+#: longest archetype programme (15 folds); the former value 8 silently
+#: truncated every hand design (Issue #91).
+MAX_FOLD_STEPS = 15
 
 #: The archetypes that seed the initial population.
 ARCHETYPE_KEYS: Tuple[str, ...] = ("classic_dart", "nakamura_lock", "sky_king")
@@ -845,7 +847,7 @@ def seed_population(
     """
     rng = rng or random.Random()
     total = max(1, int(size))
-    archetypes = archetype_hybrid_genomes()
+    archetypes = archetype_hybrid_genomes(max_steps=max_steps)
     archetype_count = int(round(total * float(archetype_fraction)))
     mutant_count = int(round(total * float(mutant_fraction)))
     random_count = max(0, total - archetype_count - mutant_count)

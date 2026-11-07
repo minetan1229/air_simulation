@@ -1283,7 +1283,6 @@ class AeroParams:
     cm_alpha: Any = 0.0
     cm_q: Any = 0.0
     cm_roll_rate: Any = 0.0
-    cm_pitch_rate: Any = 0.0
     cm_yaw_rate: Any = 0.0
     cl_beta: Any = 0.0
     cl_roll_rate: Any = 0.0
@@ -1368,7 +1367,6 @@ _CORE_BUNDLE_FIELDS: Tuple[str, ...] = (
     "cm_alpha",
     "cm_q",
     "cm_roll_rate",
-    "cm_pitch_rate",
     "cm_yaw_rate",
     "cl_beta",
     "cl_roll_rate",
@@ -1466,7 +1464,6 @@ def _coefficient_core(
     cm_alpha: Any,
     cm_q: Any,
     cm_roll_rate: Any,
-    cm_pitch_rate: Any,
     cm_yaw_rate: Any,
     cl_beta: Any,
     cl_roll_rate: Any,
@@ -1655,7 +1652,6 @@ def _coefficient_core(
         + elevon["dcm"]
         + te_fold["dcm"]
         + cm_roll
-        + cm_pitch_rate * q_hat
         + cm_yaw_rate * r_hat
     )
 
@@ -2089,7 +2085,6 @@ def params_from_aircraft(cfg: AircraftConfig) -> AeroParams:
         cm_alpha=_finite_scalar(cfg.cm_alpha, 0.0),
         cm_q=_finite_scalar(cfg.cm_q, 0.0),
         cm_roll_rate=_finite_scalar(cfg.cm_roll_rate, 0.0),
-        cm_pitch_rate=_finite_scalar(cfg.cm_pitch_rate, 0.0),
         cm_yaw_rate=_finite_scalar(cfg.cm_yaw_rate, 0.0),
         cl_beta=_finite_scalar(cfg.cl_beta, 0.0),
         cl_roll_rate=_finite_scalar(cfg.cl_roll_rate, 0.0),
