@@ -48,6 +48,8 @@ __all__ = [
     "Stage1Result",
     "BatchScreener",
     "build_screening_aircraft",
+    "rank_correlation",
+    "wind_rank_report",
     "PERTURBATION_SPEED_SIGMA",
     "PERTURBATION_ANGLE_SIGMA_RAD",
     "PERTURBATION_RATE_SIGMA_RADPS",
@@ -270,11 +272,17 @@ def _backend() -> Tuple[Any, str]:
 class BatchScreener:
     """The batched 6-DoF screening stage.
 
-    The screener keeps its device buffers between calls, so a generation
-    that is split into chunks does not re-allocate anything: the state
-    buffer, the summary accumulators and the captured graph are created once
-    and reused for every chunk of the same size.
+    Stage 1 is an INTENTIONAL MEAN-WIND SCREENER (Issue #81): the spatial /
+    vertical shear and time-varying gust field of :mod:`physics.wind_domain`
+    is NOT sampled per stage here -- ``use_mean_wind_only=True`` makes every
+    RK4 substep reuse the per-individual drawn mean wind.  The guarantee
+    envelope is therefore a fast screen only; the variable-wind truth is
+    re-evaluated downstream (reference integrator with
+    ``sample_wind_stages`` in the runner, stage 2/3) and the rank swap is
+    quantified by :func:`wind_rank_report` below, not assumed.
     """
+
+    MEAN_WIND_SCREENER = True
 
     def __init__(
         self,
@@ -840,3 +848,59 @@ def _merge(first: Dict[str, Any], second: Dict[str, Any], xp: Any) -> Dict[str, 
     merged["trim_cl"] = xp.where(better, second["trim_cl"], first["trim_cl"])
     merged["trim_cd"] = xp.where(better, second["trim_cd"], first["trim_cd"])
     return merged
+
+
+def rank_correlation(stage1_values: Any, reference_values: Any) -> float:
+    """Spearman rank correlation between Stage 1 and reference rankings."""
+    left = list(stage1_values)
+    right = list(reference_values)
+    count = len(left)
+    if count < 2 or len(right) != count:
+        return 0.0
+    order_l = sorted(range(count), key=lambda i: left[i])
+    order_r = sorted(range(count), key=lambda i: right[i])
+    ranks_l = [0.0] * count
+    ranks_r = [0.0] * count
+    for pos, idx in enumerate(order_l):
+        ranks_l[idx] = float(pos)
+    for pos, idx in enumerate(order_r):
+        ranks_r[idx] = float(pos)
+    mean_l = sum(ranks_l) / count
+    mean_r = sum(ranks_r) / count
+    num = sum((ranks_l[i] - mean_l) * (ranks_r[i] - mean_r) for i in range(count))
+    den_l = math.sqrt(sum((v - mean_l) ** 2 for v in ranks_l))
+    den_r = math.sqrt(sum((v - mean_r) ** 2 for v in ranks_r))
+    if den_l <= 0.0 or den_r <= 0.0:
+        return 0.0
+    return num / (den_l * den_r)
+
+
+def wind_rank_report(
+    stage1_scores: Any,
+    reference_scores: Any,
+    top_k: int = 10,
+) -> Dict[str, float]:
+    """Quantify the mean-wind screening error of Stage 1 (Issue #81).
+
+    Reports the Spearman rank correlation between Stage 1 (mean-wind only)
+    and the variable-wind reference evaluation, plus the *miss rate*: the
+    fraction of the reference top-k that fell outside the Stage 1 top-k.
+    A miss rate of 0 means screening never lost a true elite; a large miss
+    rate means the final decision must not rest on Stage 1 alone.
+    """
+    left = list(stage1_scores)
+    right = list(reference_scores)
+    count = len(left)
+    if count < 2:
+        return {"rank_correlation": 0.0, "miss_rate": 0.0, "top_k": 0.0}
+    order_l = sorted(range(count), key=lambda i: left[i], reverse=True)
+    order_r = sorted(range(count), key=lambda i: right[i], reverse=True)
+    k = max(1, min(int(top_k), count))
+    top_l = set(order_l[:k])
+    top_r = order_r[:k]
+    misses = sum(1 for idx in top_r if idx not in top_l)
+    return {
+        "rank_correlation": float(rank_correlation(left, right)),
+        "miss_rate": float(misses / k),
+        "top_k": float(k),
+    }
