@@ -28,13 +28,17 @@ flowchart TD
         Aero["空気力学・翼型 (aero_domain.py)"]
         Wind["3D風場・乱流 (wind_domain.py)"]
         Stress["構造負荷・応力 (stress_domain.py)"]
-        Mesh["3Dメッシュ・パネル法 (mesh_domain.py)"]
+        Mesh["3Dメッシュ取込・形状/慣性計測 (mesh_domain.py)"]
+        MeshPanelAero["面局所荷重近似 (オフライン解析のみ)"]
         FlightSim["6DoF RK4積分 (flight_sim.py)"]
         Opt["多目的最適化 (optimizer_domain.py)"]
     end
 
     UI -->|パラメータ設定 / 操作| Router
     Router --> PhysicsCore
+    Mesh -->|面積・翼幅・質量・慣性をAircraftConfigへ| FlightSim
+    Mesh --> MeshPanelAero
+    MeshPanelAero -.->|飛行/GA経路には未接続| FlightSim
     Router --> JobMgr
     JobMgr -->|並列バッチ / 最適化| Opt
     PhysicsCore -->|計算結果 JSON| UI

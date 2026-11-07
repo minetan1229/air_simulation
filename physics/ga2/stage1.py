@@ -28,6 +28,38 @@ The physics is the shared one: the aerodynamic coefficients come from
 6-DoF reference path.  The only difference is the time step: the screen
 integrates with a fixed step (a graph cannot have a data dependent one) and
 the survivors are re-simulated with the adaptive reference integrator.
+
+Wind model
+----------
+Stage 1 uses a **mean-wind approximation** (``params.use_mean_wind_only = True``)
+for the GPU RK4 integration.  The wind vector is drawn once per case at the
+start of the pass and held constant for all RK4 stages and all integration
+steps.  This is a deliberate low-fidelity screening approximation:
+
+* It avoids the cost of sampling the full log-law boundary layer, thermal
+  plume and turbulence channels at every RK4 stage and every step.
+* It yields a consistent *ranking* under identical wind, which is sufficient
+  for coarse screening when the population is large.
+* It does **not** capture: spatial wind shear, thermal plume variability,
+  turbulence decorrelation, or gust timing along the trajectory.
+
+The mean wind is drawn per case by :func:`_draw_wind` (a small horizontal
+perturbation for the indoor/perturbation ensemble) and held in
+``params.mean_wind``.  The GPU RK4 step uses ``params.use_mean_wind_only = True``,
+which bypasses the full :func:`physics.wind_domain.velocity_components`
+evaluation and simply broadcasts the mean wind to all cases.
+
+This approximation is **intentional** and is the primary reason Stage 1 is
+orders of magnitude faster than the full evaluation.  However, it introduces
+a ranking error that must be quantified:
+
+* Candidates that perform well in steady wind may fail in shear/turbulence.
+* Candidates that exploit gust timing or shear layer transitions are
+  systematically under-ranked.
+* The Stage 2 / reference evaluation must re-evaluate survivors with the
+  full wind field to correct the ranking.
+
+See Issue #81 for the quantification of this screening error.
 """
 
 from __future__ import annotations
@@ -366,6 +398,108 @@ class BatchScreener:
             totals["time"] / max(duration * float(passes), 1.0e-9), 1.0
         )
         return self._finalise(cases, totals)
+
+    def evaluate_full_wind(
+        self,
+        cases: Sequence[Stage1Case],
+        duration: Optional[float] = None,
+    ) -> List[Stage1Result]:
+        """Evaluate the same cases with the full wind field (not mean wind only).
+
+        This re-simulates the given cases with the full wind field evaluation
+        (log-law boundary layer, thermal plume, turbulence) at each RK4 stage,
+        as opposed to the mean-wind-only approximation used in :meth:`screen`.
+
+        The comparison between :meth:`screen` and :meth:`evaluate_full_wind`
+        quantifies the screening error introduced by the mean-wind approximation.
+
+        Parameters
+        ----------
+        cases:
+            Cases to evaluate. Must be the same cases that were passed to
+            :meth:`screen` for a meaningful comparison.
+        duration:
+            Flight duration in seconds. If None, uses the maximum duration
+            from the cases.
+
+        Returns
+        -------
+        list[Stage1Result]
+            Results with the full wind field evaluation. The ``Stage1Result``
+            objects have the same fields as :meth:`screen` but reflect the
+            full wind field evaluation.
+        """
+        if not cases:
+            return []
+        xp = self.xp
+        count = len(cases)
+        duration = max(float(case.duration_s) for case in cases) if duration is None else float(duration)
+        states = np.stack(
+            [np.asarray(case.initial_state, dtype=np.float64) for case in cases]
+        )
+        aircraft = [case.aircraft for case in cases]
+        params = gpu_dynamics.build_params(
+            xp,
+            aircraft,
+            self.env,
+            wind_override=np.zeros((count, 3), dtype=np.float64),
+        )
+
+        generator = _generator(xp, self.seed)
+        wind = _draw_wind(xp, generator, count, True)
+        # Disable mean-wind-only mode to use full wind field evaluation
+        params.mean_wind = wind
+        params.use_mean_wind_only = False
+        params.sample_wind_stages = True
+
+        device_states = xp.asarray(states)
+        totals: Optional[Dict[str, Any]] = None
+        passes = 1
+        for repeat in range(passes):
+            perturbed = _perturb(xp, device_states, generator, True, repeat)
+            summary = self._integrate_full_wind(params, perturbed, wind, duration)
+            totals = summary if totals is None else _merge(totals, summary, xp)
+        assert totals is not None
+        return self._finalise(cases, totals)
+
+    def _integrate_full_wind(
+        self,
+        params: Any,
+        states: Any,
+        wind: Any,
+        duration: float,
+    ) -> Dict[str, Any]:
+        """Internal integration with full wind field sampling at each RK4 stage."""
+        xp = self.xp
+        count = states.shape[0]
+        y = xp.array(states, dtype=xp.float64, copy=True)
+        acc = _new_accumulators(xp, count)
+        nominal_steps = int(math.ceil(self.duration_s / self.dt_max))
+        steps = max(1, min(self.max_steps, nominal_steps * 3))
+
+        launch_core = gpu_dynamics._evaluate_state(xp, params, states, wind)
+        _seed_accumulators(xp, acc, launch_core, params)
+
+        step = _make_step(xp, params, xp.array(states, dtype=xp.float64, copy=True), wind, acc, duration, self.dt_max)
+        graph = self._capture(states.shape[0], steps, step)
+        if graph is not None:
+            import cupy as cp
+            stream = cp.cuda.Stream(non_blocking=True)
+            with _capture_safe_rotation():
+                with stream:
+                    stream.begin_capture(mode=_CAPTURE_MODE_RELAXED)
+                    step()
+                    graph = stream.end_capture()
+            graph.launch(stream)
+            stream.synchronize()
+            self._graphs[(-1, int(states.shape[0]))] = graph
+            graph.launch(stream)
+            stream.synchronize()
+        else:
+            # Fallback to eager execution (not captured)
+            pass
+
+        return _run_integration(xp, params, states, wind, duration, self.dt_max, self.max_steps)
 
     def release(self) -> None:
         """Drop the captured graphs and give their memory back.
@@ -710,6 +844,81 @@ def _stability(xp: Any, params: Any, acc: Dict[str, Any]) -> Any:
     trim_factor = 1.0 / (1.0 + xp.abs(coefficients["cm"]))
     return slope_factor * trim_factor
 
+def _run_integration(
+    xp: Any,
+    params: Any,
+    y: Any,
+    wind: Any,
+    duration: float,
+    dt_max: float,
+    max_steps: int,
+) -> Dict[str, Any]:
+    """Run the integration loop for a given number of steps."""
+    xp = xp
+    count = y.shape[0]
+    acc = _new_accumulators(xp, y.shape[0])
+
+    nominal_steps = int(math.ceil(duration / dt_max))
+    steps = max(1, min(max_steps, nominal_steps * 3))
+
+    launch_core = gpu_dynamics._evaluate_state(xp, params, y, wind)
+    _seed_accumulators(xp, acc, launch_core, params)
+
+    for _ in range(steps):
+        active = (~acc["landed"]) & (~acc["crashed"]) & (acc["time"] < duration)
+        core = gpu_dynamics._evaluate_state(xp, params, y, wind)
+        size = gpu_dynamics._step_size(xp, params, y, core, dt_max)
+        size = xp.minimum(size, xp.maximum(duration - acc["time"], 0.0))
+        size = xp.where(active, size, 0.0)
+        y_next = gpu_dynamics._rk4(xp, params, y, size, wind, sample_wind_stages=params.sample_wind_stages)
+        core_next = gpu_dynamics._evaluate_state(xp, params, y_next, wind)
+
+        travelled = xp.sqrt(
+            (y_next[:, 0] - y[:, 0]) ** 2 + (y_next[:, 1] - y[:, 1]) ** 2
+        )
+        acc["distance"] += xp.where(active, travelled, 0.0)
+        acc["time"] += size
+
+        acc["peak_q"][...] = xp.maximum(acc["peak_q"], core_next["dynamic_pressure"])
+        acc["peak_g"][...] = xp.maximum(acc["peak_g"], core_next["g_load"])
+        stress = _stress(xp, core_next, params)
+        worse = active & (stress > acc["peak_stress"])
+        acc["peak_stress"][...] = xp.where(worse, stress, acc["peak_stress"])
+        acc["stall_events"] += xp.where(active & core_next["stalled"], 1.0, 0.0)
+        acc["stall_margin"][...] = xp.where(
+            active,
+            xp.minimum(acc["stall_margin"], core_next["stall_margin"]),
+            acc["stall_margin"],
+        )
+        fast = core_next["speed"] >= gpu_dynamics.SPEED_STAT_FLOOR_MPS
+        candidate = xp.where(fast, xp.abs(core_next["ld_ratio"]), 0.0)
+        better = active & (candidate > acc["max_ld"])
+        acc["max_ld"][...] = xp.where(better, candidate, acc["max_ld"])
+        acc["trim_alpha"][...] = xp.where(better, core_next["alpha"], acc["trim_alpha"])
+        acc["trim_speed"][...] = xp.where(better, core_next["speed"], acc["trim_speed"])
+        acc["trim_altitude"][...] = xp.where(
+            better, core_next["altitude"], acc["trim_altitude"]
+        )
+        acc["trim_cl"][...] = xp.where(better, core_next["cl"], acc["trim_cl"])
+        acc["trim_cd"][...] = xp.where(better, core_next["cd"], acc["trim_cd"])
+        acc["flight_time"][...] = xp.where(active, acc["time"], acc["flight_time"])
+
+        stations = gpu_dynamics._ground_stations(xp, params, y_next)
+        touching = stations["min_alt"] <= 0.0
+        impact_speed = xp.maximum(y_next[:, 5], 0.0)
+        landed_now = active & touching
+        acc["landed"] |= landed_now
+        acc["crashed"] |= active & (impact_speed > gpu_dynamics.CRASH_IMPACT_SPEED_MPS)
+        if xp.any(landed_now | acc["crashed"]):
+            y_next = y_next.copy()
+            y_next[landed_now | acc["crashed"], 10:13] = 0.0
+        y = y_next
+
+    acc["landed"] = acc["landed"] | (acc["time"] >= duration)
+    acc["coverage"] = xp.minimum(acc["time"] / max(duration, 1.0e-9), 1.0)
+    return acc
+
+
 def _make_step(
     xp: Any,
     params: Any,
@@ -731,7 +940,7 @@ def _make_step(
         size = gpu_dynamics._step_size(xp, params, y, core, dt_max)
         size = xp.minimum(size, xp.maximum(duration - acc["time"], 0.0))
         size = xp.where(active, size, 0.0)
-        y_next = gpu_dynamics._rk4(xp, params, y, size, wind)
+        y_next = gpu_dynamics._rk4(xp, params, y, size, wind, sample_wind_stages=params.sample_wind_stages)
         core_next = gpu_dynamics._evaluate_state(xp, params, y_next, wind)
 
         # Every accumulator is updated *in place*.  A CUDA graph replays the

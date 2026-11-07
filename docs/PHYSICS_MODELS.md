@@ -53,8 +53,7 @@
   この式を **Attached 域の傾斜** としてのみ使い、失速後は §3 の別モデル接手する。
 - `cfg.cLalpha_per_rad > 0` のとき Helmbold は **上書き** される（ユーザー明示値＝単一実装原則の
   例外として、API 契約で公開されている）。
-- **パネル法**（`physics/mesh_domain.py`）は Helmbold の 2.2 倍乖離する。これは `no-finish.md` §A-5 /
-  F-8 の **意図的維持** であり、2 つの空力モデルを 1 式に統合しない（統合は単一実装原則を壊す）。
+- `physics/mesh_domain.py::panel_aerodynamics()` は Helmbold の 2.2 倍乖離する面局所荷重近似であり、**オフライン用途**に限る。実飛行・GA経路は `aero_domain` / `aero_kernel` の係数ベースモデルを使う。差異の根拠と範囲は `docs/mesh_panel_aero_integration_report.md` および `no-finish.md` §A-5 / F-8 に記録する。
 
 ### 2.2 検証コマンド
 

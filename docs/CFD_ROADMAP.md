@@ -11,8 +11,7 @@
 通常の飛行・最適化経路は係数ベースの 6DoF 空力モデル（`physics/aero_domain.py` +
 `physics/aero_kernel.py`）を使う。これとは別に、`physics/cfd/solver3d.py` と `grid3d.py` に構造格子上の圧縮性 3D Euler 有限体積ソルバと翼格子生成器がある。これは試作・検証用コードであり、通常飛行経路へ接続された Navier–Stokes CFD ではない。
 
-- `physics/mesh_domain.py` のパネル法は **翼面パネルの*vortex / doublet*  Representations** であり、
-  Navier–Stokes の解は得ない。幾何は折れ面の多角形から作るが、流れは解かない。
+- `physics/mesh_domain.py::panel_aerodynamics()` は、幾何メッシュを面パネルへまとめ、各面に局所経験式を適用して荷重を合算する **オフライン近似** である。source/doublet/vortex 強度を解く境界積分型パネル法ではなく、Navier–Stokes の解も得ない。通常の飛行・GA経路には接続されていない（詳細は `docs/mesh_panel_aero_integration_report.md`）。
 - `docs/SPECIFICATION.md` §6 の Issue #29 / #35 に書いたとおり、この区別は UI 上も明示されている。
 - したがって本ロードマップは「今のモデルを CFD に置き換える」計画ではなく、
   **「別の解法（粘性を含む 3D Navier–Stokes CFD）を 1 つの追加モードとして持てるようにする」** ための要求仕様である。既存の Euler 試作はこの目標の達成とは区別する。
@@ -142,7 +141,7 @@
 
 ## 5. 既存 6DoF モデルとの関係
 
-| 観点 | 6DoF パネル法（現行） | 3D CFD（本書） |
+| 観点 | 係数ベース6DoF（現行） | 3D CFD（本書） |
 |---|---|---|
 | 役割 | **探索用**（GA / 最適化の fitness、100 機一括） | **検証用**（モデルの妥当性検証、剥離・渦の理解） |
 | 計算量 | 1 個体あたり 0.1 s 程度 | 1 個体あたり数時間 |

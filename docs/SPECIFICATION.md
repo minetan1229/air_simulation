@@ -6,7 +6,7 @@
 
 ## 1. 物理・航空工学的理論モデル (Physics & Theoretical Models)
 
-本プロジェクトは、体積メッシュ上で連続の式・ナビエ–ストークス方程式を離散化して解く「体積メッシュ Navier-Stokes CFD ソルバー」ではなく、**AeroSandbox 準拠の 6自由度 (6DoF) 飛行力学方程式、Helmbold/Polhamus 三角翼・低アスペクト比経験空力モデル、Viterna 失速遷移、および静的空力パネル法を組み合わせた高精度・高速シミュレーター**である（Issue #29 明記）。
+本アプリの通常飛行・最適化経路は、体積メッシュ上で Navier–Stokes 方程式を解く CFD ではなく、**6自由度 (6DoF) 飛行力学と係数ベース空力モデルを使う飛行シミュレーター**である（Issue #29）。`physics/mesh_domain.py::panel_aerodynamics()` は別のオフライン局所荷重近似であり、通常飛行・GAの空力評価には使われない。メッシュ取込で得た面積・翼幅・質量・慣性などの形状量は機体設定に反映される。
 
 ### 1.1 空気力学モデル (Aerodynamics)
 - **基礎空気力**:
@@ -167,6 +167,8 @@ uniform として紙シェーダに渡し、翼端で $\mathrm{elastic}^2$ に�
 - `GET /api/v1/mesh/models`: 取込済みモデル一覧
 - `POST /api/v1/mesh/select`: シミュレーション対象モデルの選択
 - `GET /api/v1/mesh/metrics/<model_id>`: 面積・スパン・重心・慣性テンソル・パネル分割データ取得
+
+このAPIは形状・慣性計測値とパネル分割メタデータを管理する。面ごとの局所空力荷重は計算せず、`panel_aerodynamics()` を飛行・GAへ接続しない。面積・翼幅・質量・慣性等は `AircraftConfig` に反映され、飛行時の力は係数ベース `aero_domain` / `aero_kernel` が計算する。詳細は `docs/mesh_panel_aero_integration_report.md` を参照。
 
 ### 3.5 Jobs & Optimization API (`api/routes/jobs.py`)
 - `POST /api/v1/optimizer/run`: 多目的最適化開始（非ブロッキング、即 `job_id` 返却）

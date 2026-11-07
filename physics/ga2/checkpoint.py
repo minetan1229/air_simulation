@@ -27,6 +27,7 @@ the name of the file is the choice of the caller.
 from __future__ import annotations
 
 import contextlib
+import copy
 import gzip
 import json
 import os
@@ -35,6 +36,7 @@ from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from .scaling import ScalingProfile
+from .genome import MAX_FOLD_STEPS
 
 __all__ = [
     "GenerationState",
@@ -199,7 +201,12 @@ def load_checkpoint(path: str) -> GenerationState:
         raise CheckpointError(
             f"the checkpoint '{path}' does not hold a state but a {type(payload).__name__}"
         )
-    return GenerationState.from_dict(payload)
+    state = GenerationState.from_dict(payload)
+    max_steps = int(state.profile.get("max_fold_steps", MAX_FOLD_STEPS))
+    state.islands = [
+        _limit_island_genomes(island, max_steps) for island in state.islands
+    ]
+    return state
 
 
 def migrate_state(state: GenerationState, profile: ScalingProfile) -> GenerationState:
@@ -224,7 +231,8 @@ def migrate_state(state: GenerationState, profile: ScalingProfile) -> Generation
     islands = [dict(island) for island in state.islands]
     sizes = _target_sizes(len(islands), int(target.population_size))
     resized = [
-        _resize_island(island, size) for island, size in zip(islands, sizes)
+        _limit_island_genomes(_resize_island(island, size), int(target.max_fold_steps))
+        for island, size in zip(islands, sizes)
     ]
     statistics = dict(state.statistics or {})
     if old_tier != new_tier:
@@ -370,4 +378,40 @@ def _resize_island(island: Dict[str, Any], target_size: int) -> Dict[str, Any]:
                 index += 1
     if population_key:
         result[population_key] = population
+    return result
+
+
+def _limit_island_genomes(island: Dict[str, Any], max_steps: int) -> Dict[str, Any]:
+    """Apply the fold-program limit and retain removed genes in metadata."""
+    result = dict(island)
+    for candidates in (_POPULATION_KEYS, _ELITE_KEYS):
+        key = _first_key(result, candidates)
+        if key is None:
+            continue
+        individuals = list(result.get(key) or [])
+        limited: List[Any] = []
+        for individual in individuals:
+            if not isinstance(individual, dict):
+                limited.append(individual)
+                continue
+            genome_key = "genome" if isinstance(individual.get("genome"), dict) else None
+            genome = copy.deepcopy(individual[genome_key] if genome_key else individual)
+            genes = genome.get("genes")
+            if not isinstance(genes, list) or len(genes) <= max_steps:
+                limited.append({**individual, "genome": genome} if genome_key else genome)
+                continue
+            meta = dict(genome.get("meta") or {})
+            previous_overflow = list(meta.get("step_limit_overflow_genes") or [])
+            overflow = copy.deepcopy(genes[max_steps:]) + previous_overflow
+            meta["step_limit_overflow_genes"] = overflow
+            meta["original_step_count"] = max(
+                int(meta.get("original_step_count", len(genes) + len(previous_overflow))),
+                len(genes) + len(previous_overflow),
+            )
+            meta["step_count"] = max_steps
+            meta["clamped_to_max_steps"] = True
+            genome["genes"] = genes[:max_steps]
+            genome["meta"] = meta
+            limited.append({**individual, "genome": genome} if genome_key else genome)
+        result[key] = limited
     return result

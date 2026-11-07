@@ -1,7 +1,8 @@
 /*
  * meshpanel.js — glTF / GLB / OBJ / STL import.
  *
- * The server owns the measurement (area, span, CG, inertia, aero panels); this
+ * The server owns geometry/inertia measurements and panel metadata; its local-force
+ * approximation is not wired into flight or GA evaluation. This
  * panel drives the three upload routes (file / drop / URL), renders the same
  * geometry locally with the three.js loaders and exposes the per-metric
  * manual overrides the API supports.

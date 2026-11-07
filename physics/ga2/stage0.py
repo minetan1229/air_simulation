@@ -539,13 +539,11 @@ class GeometryFilter:
     ) -> None:
         """Build the filter.
 
-        ``min_fold_steps`` and ``max_fold_levels`` bound the fold programme:
-        a programme needs at least three creases to be an aeroplane, and the
-        fold tree may not be nested deeper than the engine resolves.  The
-        *number* of creases of a programme is deliberately not bounded from
-        above, because the archetype seeds and their mutants carry eleven to
-        fourteen creases and a filter that threw them away would empty the
-        warm start of the search.
+        ``min_fold_steps`` bounds the minimum usable programme length, and
+        ``max_fold_levels`` bounds fold-tree nesting depth.  The configured
+        maximum programme length is enforced during genome seeding and
+        checkpoint restoration; this geometry filter checks physical shape
+        constraints and does not apply a second step-count cap.
         """
         self.min_wing_area_m2 = max(float(min_wing_area_m2), 0.0)
         self.min_span_m = max(float(min_span_m), 0.0)

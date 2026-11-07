@@ -34,7 +34,7 @@
 | `POST` | `/api/v1/simulation/step` | 6DoF運動方程式の1ステップ状態更新（可変 $\Delta t$ 対応） |
 | `POST` | `/api/v1/simulation/reset` | シミュレーション初期化 |
 | `POST` | `/api/v1/simulation/batch` | 複数パラメータスイープ・並列飛行シミュレーション実行 |
-| `POST` | `/api/v1/mesh/import` | 3Dモデル（STL/OBJ/GLB）アップロードと自動物理量解析 |
+| `POST` | `/api/v1/mesh/import` | 3Dモデル（glTF/GLB/OBJ/STL）取込と形状・慣性の計測 |
 | `GET`  | `/api/v1/mesh/models` | アップロード済みモデル一覧の照会 |
 | `POST` | `/api/v1/mesh/select` | シミュレーションで使用する3Dモデルの選択 |
 | `GET`  | `/api/v1/mesh/metrics/<model_id>` | 指定モデルの詳細物理特性（重心・慣性テンソル等）照会 |
@@ -45,6 +45,8 @@
 | `GET`  | `/api/v1/jobs` | 登録済み全ジョブ一覧とステータス照会 |
 | `POST` | `/api/v1/data/export` | 飛行ログデータの CSV / JSON 形式エクスポート |
 | `POST` | `/api/v1/data/import` | プリセット設定のインポート |
+
+メッシュAPIは形状・慣性計測値とパネル分割メタデータを扱います。メッシュ面局所空力を計算するAPIはなく、`panel_aerodynamics()` は飛行・GA経路に接続されていません。取込メッシュ由来の形状・慣性値は機体設定へ反映され、飛行力は係数ベース空力モデルが計算します。
 
 ---
 

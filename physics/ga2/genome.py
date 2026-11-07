@@ -27,8 +27,8 @@ and nothing else:
 ``symmetry``
     the left / right symmetry constraint of the fold.
 
-A programme holds 3 to 8 genes, so the length of the genome itself is part
-of the search space.  The conversion to and from the fold programme of
+A programme's length is part of the search space and follows the active
+profile's fold-step limits (3 to 8 by default).  The conversion to and from the fold programme of
 :mod:`physics.origami_genome` is lossless: an archetype that is read into a
 hybrid genome and written back folds into the very same solid.
 """
@@ -774,8 +774,8 @@ def archetype_hybrid_genomes(
     initial population, mutation and crossover, every archetype is clamped to
     ``max_steps`` by keeping a valid prefix of its folds (a fold only ever
     references groups created by earlier folds, so a prefix is dependency
-    safe).  The clamp is recorded in ``meta`` so a dropped fold is never
-    silent.
+    safe).  Removed folds are retained in ``meta`` so the clamp is visible
+    and reversible.
     """
     genomes: List[HybridGenome] = []
     for key in ARCHETYPE_KEYS:
@@ -786,6 +786,7 @@ def archetype_hybrid_genomes(
         genome = hybrid_from_origami(source)
         original = len(genome.genes)
         if original > max_steps:
+            overflow = [gene.to_dict() for gene in genome.genes[max_steps:]]
             genome.genes = genome.genes[:max_steps]
             genome.meta = {
                 **genome.meta,
@@ -793,6 +794,7 @@ def archetype_hybrid_genomes(
                 "seeded": True,
                 "clamped_to_max_steps": True,
                 "original_step_count": original,
+                "step_limit_overflow_genes": overflow,
             }
         else:
             genome.meta = {**genome.meta, "archetype": key, "seeded": True}
@@ -854,7 +856,11 @@ def seed_population(
 
     population: List[HybridGenome] = []
     for index in range(archetype_count):
-        base = archetypes[index % len(archetypes)] if archetypes else random_hybrid_genome(rng)
+        base = (
+            archetypes[index % len(archetypes)]
+            if archetypes
+            else random_hybrid_genome(rng, min_steps=min_steps, max_steps=max_steps)
+        )
         genome = HybridGenome(
             genes=list(base.genes),
             key=f"archetype:{base.key}",
@@ -864,7 +870,11 @@ def seed_population(
         )
         population.append(genome)
     for index in range(mutant_count):
-        base = archetypes[index % len(archetypes)] if archetypes else random_hybrid_genome(rng)
+        base = (
+            archetypes[index % len(archetypes)]
+            if archetypes
+            else random_hybrid_genome(rng, min_steps=min_steps, max_steps=max_steps)
+        )
         mutant = mutate_hybrid(base, rng, rate=0.3, max_steps=max_steps, min_steps=min_steps)
         mutant.key = f"mutant:{base.key}"
         mutant.meta = {**mutant.meta, "origin": "mutant", "parent": base.key}

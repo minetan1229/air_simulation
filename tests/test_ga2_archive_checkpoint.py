@@ -161,6 +161,51 @@ def test_the_checkpoint_is_written_atomically(tmp_path: Path) -> None:
     assert restored.best["key"] == "a"
 
 
+def test_checkpoint_loading_and_migration_keep_fold_limits_and_overflow(tmp_path: Path) -> None:
+    profile = ScalingProfile.small_long().with_overrides(
+        population_size=2,
+        islands=1,
+        max_fold_steps=6,
+    )
+    individual = {
+        "key": "legacy-long-programme",
+        "genome": {
+            "key": "legacy-long-programme",
+            "genes": [{"fold_angle_deg": float(index)} for index in range(10)],
+            "meta": {},
+        },
+        "fitness": 0.0,
+    }
+    state = GenerationState(
+        generation=3,
+        profile=profile.to_dict(),
+        islands=[{"index": 0, "population": [individual, individual]}],
+    )
+    path = tmp_path / "generation_000003.json"
+    save_checkpoint(state, str(path))
+
+    restored = load_checkpoint(str(path))
+    loaded = restored.islands[0]["population"][0]["genome"]
+    assert len(loaded["genes"]) == 6
+    assert len(loaded["meta"]["step_limit_overflow_genes"]) == 4
+    assert loaded["meta"]["original_step_count"] == 10
+
+    smaller_profile = profile.with_overrides(max_fold_steps=4)
+    migrated = migrate_state(restored, smaller_profile)
+    migrated_genome = migrated.islands[0]["population"][0]["genome"]
+    assert len(migrated_genome["genes"]) == 4
+    assert len(migrated_genome["meta"]["step_limit_overflow_genes"]) == 6
+    assert migrated_genome["meta"]["original_step_count"] == 10
+    assert [gene["fold_angle_deg"] for gene in migrated_genome["meta"]["step_limit_overflow_genes"]] == [
+        4.0,
+        5.0,
+        6.0,
+        7.0,
+        8.0,
+        9.0,
+    ]
+
+
 def test_a_damaged_checkpoint_is_reported(tmp_path: Path) -> None:
     path = tmp_path / "broken.json"
     path.write_text("{not json", encoding="utf-8")

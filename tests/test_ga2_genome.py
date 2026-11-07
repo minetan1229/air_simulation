@@ -89,6 +89,24 @@ def test_a_random_programme_has_a_valid_length() -> None:
         assert genome.active_step_count >= 1
 
 
+def test_seed_population_applies_a_custom_fold_limit_to_archetypes() -> None:
+    population = seed_population(
+        100,
+        random.Random(31),
+        min_steps=3,
+        max_steps=5,
+    )
+
+    assert all(genome.step_count <= 5 for genome in population)
+    archetypes = [genome for genome in population if genome.key.startswith("archetype:")]
+    assert archetypes
+    assert any(genome.meta.get("step_limit_overflow_genes") for genome in archetypes)
+    for genome in archetypes:
+        assert genome.step_count + len(genome.meta.get("step_limit_overflow_genes", [])) == genome.meta.get(
+            "original_step_count", genome.step_count
+        )
+
+
 def test_a_random_programme_can_be_folded() -> None:
     rng = random.Random(11)
     genome = random_hybrid_genome(rng, min_steps=4, max_steps=5)

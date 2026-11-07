@@ -12,7 +12,7 @@
 
 ## 3. Loop State (現在のループ状態・引き継ぎメモリ)
 - **Current Phase**: Phase 6 [Finalize & Terminate]
-- **Verification Status**: Issue #72 の CFD 現状記述をコード・テストと照合して同期。対象テスト 9 passed / `git diff --check` passed。作業ツリーには本件以外の既存変更あり。次は `priority: medium` の未解決 Issue を一件ずつ扱う。
-- **Branch & Safety**: genetic-project 上で隔離維持。master/main への操作厳禁（AGENTS.md §2 Branch Isolation）。単一コミッター原則。
-- **Next Action**: 次の未解決 `priority: medium` Issue を選び、仮説・合否基準を置いて調査する。
+- **Verification Status**: Issue #95 はメッシュ幾何・慣性の設定反映と、メッシュ面空力が飛行/GAの実行時空力に未接続であることを監査・文書化し、専用テストを含む53件通過後にGitHubで完了。Issue #103 は既存の面スペクトル半径CFL実装を確認し対象テスト9件通過。ただし同一格子でCFL=0.05/0.025/0.0125を各500 step実行したところ、未収束で0.05はNaN発散。時間刻み収束条件を満たさないため未完了・未クローズ。Issue #91 はseed/profile/チェックポイント経路で工程上限を統一し超過分をメタデータ保存、GA2対象32テスト/Ruff/diff-check通過。既定上限8の探索・計算コスト上の根拠は未検証のためGitHubでは未完了・未クローズ。Issue #68/#69 は物理根拠・対象形状に対応する検証データが不足し未解決。
+- **Branch & Safety**: 現在 `fix/issue-92-ga2-stage23-feedback`。作業ツリーに別作業（GA2/係数監査）の変更あり。master/main 操作禁止（AGENTS.md §2）。本タスクでは別作業ファイルを変更しない。
+- **Next Action**: Issue #91 の工程数3〜14の探索性能・計算時間を比較し、既定上限8の影響と妥当性を測定する。根拠が得られなければ未解決として残す。
 
