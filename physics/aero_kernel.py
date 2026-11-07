@@ -449,11 +449,17 @@ def prandtl_glauert(xp: Any, mach: Any) -> Any:
 # 2. Ground effect, parasite drag, wave drag
 # --------------------------------------------------------------------------
 def ground_effect_factor(xp: Any, height_m: Any, span_m: Any, enabled: Any = True) -> Any:
-    """Induced-drag retention ``16 (h/b)^2 / (1 + 16 (h/b)^2)``.
+    """Induced-drag retention factor ``sigma = 16 (h/b)^2 / (1 + 16 (h/b)^2)`` (Wieselsberger 1922).
 
-    The multiplier is ``1.0`` in free air and when the model is disabled, so
-    switching the model off restores the free-air polar instead of deleting
-    the induced drag.
+    The multiplier applies directly to the free-air induced drag coefficient:
+    ``C_Di(h) = sigma * C_Di_free_air = sigma * (C_L^2 / (pi * e * AR))``.
+
+    Boundary and Asymptotic Characteristics:
+    - At high clearance (free air, ``h / b >> 1``): ``sigma -> 1.0`` (no ground-effect reduction).
+    - As ground clearance decreases (``h / b -> 0``): ``sigma`` monotonically decreases towards 0.0.
+    - At ground contact / zero clearance (``h = 0``): ``sigma = 0.0`` cleanly without singularity.
+    - When disabled (``enabled = False``): returns ``1.0`` (retaining full free-air polar).
+    - Non-negative inputs: safe guarding against negative heights (clamped to 0) and small spans.
     """
     enabled = _flag_array(xp, enabled)
     height = xp.maximum(_finite(xp, height_m, 0.0), 0.0)
@@ -1666,6 +1672,16 @@ def _coefficient_core(
     )
 
     # --- ground proximity ---------------------------------------------------
+    # Low-aspect-ratio paper airplane ground proximity modeling:
+    # 1. Induced drag reduction (Wieselsberger sigma factor applied above to C_Di).
+    # 2. Ram-pressure cushion lift increment: delta_CL = cushion_gain * exp(-4 * h/b).
+    #    Near the ground (h/b << 1), ram pressure beneath low-aspect flat/cambered wings
+    #    develops positive lift cushion. When ground_cushion_lift == 0 (default),
+    #    pure classical Wieselsberger behavior is retained without arbitrary offsets.
+    # 3. Ground-effect pitching moment coupling: delta_Cm = -pitch_coupling * CL * exp(-4 * h/b).
+    #    For typical configurations in ground effect, downwash reduction and center-of-pressure
+    #    dynamics introduce a stabilizing nose-down pitch coupling proportional to circulation/CL.
+    #    When ground_pitch_coupling == 0 (default), Cm remains strictly free-air.
     h_b_ratio = _safe_div(xp, xp.maximum(height, 0.0), span, 10.0)
     ground_proximity = xp.where(ground_effect_enabled, xp.exp(-4.0 * h_b_ratio), 0.0)
 
