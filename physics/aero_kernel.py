@@ -2044,12 +2044,12 @@ def coefficient_buildup_audit(
     """
     import numpy as _np
 
-    alphas = []
+    alphas_list = []
     value = -span_deg
     while value <= span_deg + 1e-9:
-        alphas.append(value)
+        alphas_list.append(value)
         value += step_deg
-    alphas = _np.asarray(alphas, dtype=float)
+    alphas = _np.asarray(alphas_list, dtype=float)
     coeffs = evaluate_coefficients(
         xp, p, alpha_deg=alphas, beta_deg=0.0, speed=speed, reynolds=reynolds, mach=mach
     )
