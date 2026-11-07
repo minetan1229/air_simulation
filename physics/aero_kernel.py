@@ -1245,10 +1245,40 @@ def _guard_fold_increment(xp: Any, te_fold: Dict[str, Any], cl_max: Any) -> Dict
 def center_of_pressure_fraction(
     xp: Any, alpha_deg: Any, stall_alpha_deg: Any, cp_shift_gain: Any
 ) -> Any:
-    """Centre-of-pressure position as a fraction of the reference chord.
+    r"""Centre-of-pressure position as a fraction of the reference chord :math:`x_{cp} / c`.
 
-    The thin-airfoil value ``0.25`` moves aft towards ``0.50`` as the flow
-    separates, scaled by ``cp_shift_gain``.
+    Theoretical & Experimental Basis (Issue #109):
+    ----------------------------------------------
+    1. Linear Attached Flow (Thin Airfoil Theory):
+       At low angles of attack (:math:`|\alpha| \ll \alpha_{\mathrm{stall}}`), attached flow
+       around a thin/flat airfoil places the aerodynamic center at approximately 25% of the
+       chord (:math:`x_{ac} / c \approx 0.25`). For symmetric flat plates with zero camber,
+       the pitching moment about the aerodynamic center :math:`C_{m,ac} = 0`, so the center
+       of pressure coincides with the aerodynamic center: :math:`x_{cp} / c = 0.25`.
+
+    2. Fully Separated Bluff Flat-Plate Flow (Kirchhoff-Rayleigh / Hoerner limit):
+       Beyond stall (:math:`|\alpha| \ge \alpha_{\mathrm{stall}}`), leading-edge flow separation
+       causes massive bluff-body detachment. For a stalled flat plate, the pressure distribution
+       becomes symmetric across the chord, shifting the center of pressure to the geometric
+       area centroid :math:`x_{cp} / c = 0.50` (50% chord), as verified experimentally by
+       Hoerner (Fluid-Dynamic Lift, 1975) and low-Re flat plate experiments (e.g. Pelletier &
+       Mueller 2000, Sunada et al. 2002).
+
+    3. Transition & Continuity (:math:`C^1` smoothstep):
+       The transition between attached flow (:math:`0.25`) and separated flow (:math:`0.50`)
+       is governed by a cubic Hermite smoothstep polynomial:
+       .. math::
+           S(u) = 3 u^2 - 2 u^3, \quad u = \mathrm{clamp}(|\alpha| / \alpha_{\mathrm{stall}}, 0, 1)
+
+       - Monotonicity: :math:`S'(u) = 6 u (1 - u) \ge 0` for all :math:`u \in [0, 1]`.
+       - Boundary conditions & :math:`C^1` continuity:
+         :math:`S(0) = 0, \quad S'(0) = 0`, ensuring :math:`\left.\frac{d(x_{cp}/c)}{d\alpha}\right|_{\alpha=0} = 0`.
+         :math:`S(1) = 1, \quad S'(1) = 0`, ensuring :math:`\left.\frac{d(x_{cp}/c)}{d\alpha}\right|_{\alpha=\alpha_{\mathrm{stall}}} = 0`.
+       - Symmetry: :math:`x_{cp}(-\alpha) = x_{cp}(\alpha)`.
+       - Pitch stability coupling:
+         The aft shift produces a stabilizing pitch increment :math:`\Delta C_m = -(x_{cp} - 0.25 c)/c \cdot C_L`,
+         reinforcing static pitch stability margin :math:`\Delta h = (x_{cg} - x_{cp})/c`
+         without introducing speculative empirical offsets.
     """
     alpha = xp.abs(_finite(xp, alpha_deg, 0.0))
     stall_alpha = xp.maximum(xp.abs(_finite(xp, stall_alpha_deg, 14.0)), 1.0)
