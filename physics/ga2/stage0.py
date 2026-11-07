@@ -607,7 +607,10 @@ class GeometryFilter:
                 break
 
         estimate = _model_programme(genes)
-        if estimate.base_folds < 1:
+        # Issue #87: a 0-fold baseline is a valid benchmark. Only require a
+        # base-sheet fold when there is at least one fold; the baseline is
+        # judged by wing area / span / stack instead of step count.
+        if fold_count > 0 and estimate.base_folds < 1:
             reasons.append("no fold acts on the base sheet")
         if estimate.planform_m2 < self.min_wing_area_m2:
             reasons.append("wing area too small")

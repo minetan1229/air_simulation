@@ -27,8 +27,9 @@ and nothing else:
 ``symmetry``
     the left / right symmetry constraint of the fold.
 
-A programme holds 3 to 8 genes, so the length of the genome itself is part
-of the search space.  The conversion to and from the fold programme of
+A programme holds 0 to 15 genes, so the length of the genome itself is part
+of the search space.  Zero genes is the unfolded sheet used as a baseline
+reference; the conversion to and from the fold programme of
 :mod:`physics.origami_genome` is lossless: an archetype that is read into a
 hybrid genome and written back folds into the very same solid.
 """
@@ -57,6 +58,7 @@ __all__ = [
     "hybrid_to_origami",
     "hybrid_from_origami",
     "archetype_hybrid_genomes",
+    "baseline_genome",
     "seed_population",
     "hybrid_signature",
 ]
@@ -64,8 +66,10 @@ __all__ = [
 #: The symmetry modes a fold may carry.
 SYMMETRY_MODES: Tuple[str, ...] = ("symmetric", "left", "right")
 
-#: The shortest programme the search allows.
-MIN_FOLD_STEPS = 3
+#: The shortest programme the search allows. Zero allows the unfolded sheet
+#: as a baseline individual (Issue #87); 0/1/2-fold programmes are then
+#: judged by geometry, not by step count.
+MIN_FOLD_STEPS = 0
 
 #: The longest programme the search allows. Raised to cover the
 #: longest archetype programme (15 folds); the former value 8 silently
@@ -198,7 +202,7 @@ class HybridFoldGene:
 
 @dataclass
 class HybridGenome:
-    """A complete hybrid fold programme (3 to 8 genes)."""
+    """A complete hybrid fold programme (0 to 15 genes; 0 = baseline)."""
 
     genes: List[HybridFoldGene] = field(default_factory=list)
     key: str = "random"
@@ -407,9 +411,9 @@ def random_hybrid_genome(
     actually be folded by a human.
     """
     rng = rng or random.Random()
-    low = max(1, int(min_steps))
+    low = max(0, int(min_steps))
     high = max(low, int(max_steps))
-    total = rng.randint(low, high)
+    total = rng.randint(low, high) if high > low else low
     genes: List[HybridFoldGene] = []
     available = 0
     for index in range(total):
@@ -826,6 +830,24 @@ def hybrid_signature(genome: HybridGenome) -> str:
             ).encode("utf-8")
         )
     return digest.hexdigest()
+
+
+def baseline_genome() -> HybridGenome:
+    """The unfolded sheet as an explicit baseline individual (Issue #87).
+
+    Carries no fold genes.  It is stored, converted and evaluated exactly
+    like any other genome: ``hybrid_to_origami`` yields an empty programme
+    and ``fold_genome`` returns the flat sheet.  Stage 0 then judges it by
+    wing area / span / stack, so a baseline that is not a flyable aeroplane
+    is rejected for a physical reason, not for having zero steps.
+    """
+    return HybridGenome(
+        genes=[],
+        key="baseline",
+        label="unfolded sheet baseline",
+        seed=0,
+        meta={"origin": "baseline", "step_count": 0},
+    )
 
 
 def seed_population(

@@ -172,7 +172,7 @@ class ScalingProfile:
     seed_fraction_archetype: float = 0.02
     seed_fraction_mutant: float = 0.08
     seed_fraction_random: float = 0.90
-    min_fold_steps: int = 3
+    min_fold_steps: int = 0
     max_fold_steps: int = 15
     archive_capacity: int = 20000
 
@@ -416,7 +416,7 @@ class ScalingProfile:
             raise ValueError("'islands' must be at least 1")
         if not (0.0 < self.vram_pool_fraction <= 1.0):
             raise ValueError("'vram_pool_fraction' must be within (0, 1]")
-        if self.min_fold_steps < 1 or self.max_fold_steps < self.min_fold_steps:
+        if self.min_fold_steps < 0 or self.max_fold_steps < self.min_fold_steps:
             raise ValueError("the fold step range is empty")
         total = (
             self.seed_fraction_archetype
