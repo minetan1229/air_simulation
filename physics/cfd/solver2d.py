@@ -169,9 +169,11 @@ class Solver2D:
 
         f_i = self.compute_flux(u_left, u_right, nx_i, ny_i) * len_i
 
-        # Flux enters cell i and leaves cell i-1
-        res += f_i
-        res -= np.roll(f_i, -1, axis=0)
+        # Finite volume with R = sum(F . n_out * A): f_i points +i.
+        # Left cell (i-1) has +i outward -> +f_i; right cell (i) has -i
+        # outward -> -f_i.  Previously reversed (issue #144).
+        res -= f_i
+        res += np.roll(f_i, -1, axis=0)
 
         # 2. Interior j-faces
         u_bottom = u[:, :-1, :]
@@ -182,8 +184,9 @@ class Solver2D:
 
         f_j = self.compute_flux(u_bottom, u_top, nx_j, ny_j) * len_j
 
-        res[:, 1:, :] += f_j
-        res[:, :-1, :] -= f_j
+        # f_j points +j: bottom cell outward + -> +f_j, top cell outward -.
+        res[:, 1:, :] -= f_j
+        res[:, :-1, :] += f_j
 
         # 3. Wall boundary (j=0) - Solid slip wall boundary condition
         # Wall face normal j_nx[:, 0], j_ny[:, 0] points into domain (+j direction)
@@ -206,8 +209,9 @@ class Solver2D:
         u_ghost[:, 3] = rho_w * e_ghost
 
         # Flux across j=0 face from ghost into first cell (normal points into domain)
+        # First cell outward at j=0 is -j, so contribution is -f_wall.
         f_wall = self.compute_flux(u_ghost, u_first, nx_w, ny_w) * len_wall
-        res[:, 0, :] += f_wall
+        res[:, 0, :] -= f_wall
 
         # 4. Farfield boundary (j=nj) - Characteristic Farfield
         nx_far = self.grid.j_nx[:, -1]
@@ -216,9 +220,9 @@ class Solver2D:
 
         u_inner = u[:, -1, :]
         u_outer = np.broadcast_to(self.u_free, u_inner.shape)
-        # Flux leaves domain at outer boundary
+        # Flux leaves domain at outer boundary; j=nj outward is +j.
         f_far = self.compute_flux(u_inner, u_outer, nx_far, ny_far) * len_far
-        res[:, -1, :] -= f_far
+        res[:, -1, :] += f_far
 
         return res
 
