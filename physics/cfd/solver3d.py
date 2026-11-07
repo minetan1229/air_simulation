@@ -350,7 +350,11 @@ class Solver3D:
         return res
 
     def compute_forces(self) -> Tuple[float, float, float]:
-        """Compute aerodynamic coefficients (cl, cd, cm) by surface pressure integration on the wing."""
+        """Compute aerodynamic coefficients (cl, cd, cm) by surface pressure integration on the wing.
+
+        Issue #145: body traction is -p_gauge * area_vector (area vector points
+        into the fluid, outward from the body).
+        """
         _, _, _, _, p_wall, _ = self.get_primitive(self.u[:, 0, :, :])
         p_gauge = p_wall - self.p_inf
 
@@ -362,9 +366,9 @@ class Solver3D:
         p_w = p_gauge[:, :kw]
 
         # Total force on semi-span wing (multiply by 2 for full aircraft)
-        fx = 2.0 * float(np.sum(p_w * ax))
-        fy = 2.0 * float(np.sum(p_w * ay))
-        fz = 2.0 * float(np.sum(p_w * az))
+        fx = 2.0 * float(np.sum(-p_w * ax))
+        fy = 2.0 * float(np.sum(-p_w * ay))
+        fz = 2.0 * float(np.sum(-p_w * az))
 
         q_inf = 0.5 * self.rho_inf * (self.v_inf**2)
         alpha_rad = math.radians(self.config.alpha_deg)
@@ -396,8 +400,8 @@ class Solver3D:
         arm_x = xc_wall - 0.25
         arm_z = zc_wall
 
-        dfx = 2.0 * p_w * ax
-        dfz = 2.0 * p_w * az
+        dfx = 2.0 * -p_w * ax
+        dfz = 2.0 * -p_w * az
         my = float(np.sum(arm_z * dfx - arm_x * dfz))
         cm = float(my / (q_inf * s_ref * c_ref))
 

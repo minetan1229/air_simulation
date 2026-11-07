@@ -223,7 +223,12 @@ class Solver2D:
         return res
 
     def compute_forces(self) -> Tuple[float, float, float]:
-        """Compute aerodynamic coefficients (cl, cd, cm) by integrating surface pressure."""
+        """Compute aerodynamic coefficients (cl, cd, cm) by integrating surface pressure.
+
+        Issue #145: body pressure force is dF_body = -p_gauge * n * dS
+        with n the outward (fluid-side) normal. The grid stores j-face normals
+        pointing into the fluid (+j), so the body traction carries a minus sign.
+        """
         _, _, _, p_wall, _ = self.get_primitive(self.u[:, 0, :])
         p_gauge = p_wall - self.p_inf
 
@@ -231,8 +236,8 @@ class Solver2D:
         ny = self.grid.j_ny[:, 0]
         ds = self.grid.j_len[:, 0]
 
-        fx = float(np.sum(p_gauge * nx * ds))
-        fy = float(np.sum(p_gauge * ny * ds))
+        fx = float(np.sum(-p_gauge * nx * ds))
+        fy = float(np.sum(-p_gauge * ny * ds))
 
         q_inf = 0.5 * self.rho_inf * (self.v_inf**2)
         alpha_rad = math.radians(self.config.alpha_deg)
@@ -248,8 +253,8 @@ class Solver2D:
         arm_x = xc_wall - 0.25
         arm_y = yc_wall
 
-        dfx = p_gauge * nx * ds
-        dfy = p_gauge * ny * ds
+        dfx = -p_gauge * nx * ds
+        dfy = -p_gauge * ny * ds
         cm = float(np.sum(arm_x * dfy - arm_y * dfx) / (q_inf * 1.0))
 
         return cl, cd, cm
