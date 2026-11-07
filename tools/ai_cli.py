@@ -1,8 +1,10 @@
 """Proxy CLI to call current Kilo model: python tools/ai_cli.py --task <name> --prompt-file <file>
 Falls back to local heuristic (git/pytest) when no proxy configured."""
-import sys, subprocess
+import sys
+import subprocess
 def main():
-    import argparse, pathlib
+    import argparse
+    import pathlib
     p = argparse.ArgumentParser()
     p.add_argument("--task", default="")
     p.add_argument("--prompt-file", default="")
