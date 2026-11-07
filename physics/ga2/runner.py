@@ -288,6 +288,47 @@ def select_high_fidelity_candidates(
     return [candidates[i] for i in selected_indices[:limit]]
 
 
+def structural_signature(genome: HybridGenome) -> Tuple[int, int, bool, bool]:
+    """Coarse structural fingerprint for diversity monitoring (Issue #88).
+
+    (enabled folds, symmetric folds, any asymmetric fold, any paired fold).
+    Two genomes with the same signature share their fold count and symmetry
+    class, so counting signatures measures whether the population is
+    collapsing onto one fold programme.
+    """
+    genes = [gene for gene in genome.genes if gene.enabled]
+    symmetric = sum(1 for gene in genes if gene.symmetry == "symmetric")
+    asymmetric = any(gene.symmetry != "symmetric" for gene in genes)
+    paired = any(gene.creates_pair for gene in genes)
+    return (len(genes), symmetric, asymmetric, paired)
+
+
+def diversity_of(records: Sequence[Dict[str, Any]]) -> Dict[str, float]:
+    """Numeric diversity of a population (Issue #88).
+
+    Returns ``unique_signatures``, ``signature_entropy`` (Shannon entropy of
+    the signature distribution, 0 = monoculture) and ``mean_fold_steps``.
+    A monoculture has entropy 0; a spread population has high entropy.
+    """
+    if not records:
+        return {"unique_signatures": 0.0, "signature_entropy": 0.0, "mean_fold_steps": 0.0}
+    signatures: Dict[Tuple[int, int, bool, bool], int] = {}
+    folds: List[int] = []
+    for record in records:
+        payload = record.get("genome") or {}
+        genome = genome_module.HybridGenome.from_dict(payload) if payload else None
+        sig = structural_signature(genome) if genome else (0, 0, False, False)
+        signatures[sig] = signatures.get(sig, 0) + 1
+        folds.append(sig[0])
+    total = len(records)
+    entropy = -sum((c / total) * math.log(c / total) for c in signatures.values())
+    return {
+        "unique_signatures": float(len(signatures)),
+        "signature_entropy": float(entropy),
+        "mean_fold_steps": float(sum(folds) / total),
+    }
+
+
 @dataclass
 class GenerationReport:
     """The summary of one generation."""
@@ -304,6 +345,7 @@ class GenerationReport:
     pareto_size: int
     elapsed_s: float
     stage_seconds: Dict[str, float] = field(default_factory=dict)
+    diversity: Dict[str, float] = field(default_factory=dict)
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -319,6 +361,7 @@ class GenerationReport:
             "pareto_size": int(self.pareto_size),
             "elapsed_s": float(self.elapsed_s),
             "stage_seconds": {key: float(value) for key, value in self.stage_seconds.items()},
+            "diversity": {key: float(value) for key, value in self.diversity.items()},
         }
 
 
@@ -383,6 +426,11 @@ class EvolutionRunner:
         self._stage3: Optional[Any] = None
         self._stage3_module: Optional[Any] = None
         self.history: List[GenerationReport] = []
+        self.last_diversity: Dict[str, float] = {
+            "unique_signatures": 0.0,
+            "signature_entropy": 0.0,
+            "mean_fold_steps": 0.0,
+        }
         if self.out_dir:
             os.makedirs(self.out_dir, exist_ok=True)
             try:
@@ -473,6 +521,7 @@ class EvolutionRunner:
             pareto_size=len(self.pareto),
             elapsed_s=time.perf_counter() - started,
             stage_seconds=timings,
+            diversity=dict(self.last_diversity),
         )
         self.history.append(report)
         self.generation += 1
@@ -556,7 +605,15 @@ class EvolutionRunner:
         return [record for island in self.islands for record in island]
 
     def _reproduce(self) -> None:
-        """Build the next generation from the evaluated individuals."""
+        """Build the next generation from the evaluated individuals.
+
+        Elites (best fitness) are always preserved (Issue #88: diversity
+        never replaces the best).  Beyond elites, ``profile.exploration_fraction``
+        of the island is reserved for exploration: tournament parents are
+        drawn from the whole island and a share of those children are fresh
+        random programmes, so low-fitness but novel structures keep a route
+        into the next generation.
+        """
         elites_per_island = max(
             2, self.profile.population_size // max(1, self.profile.islands) // 10
         )
@@ -568,6 +625,16 @@ class EvolutionRunner:
             elites = ranked[:elites_per_island]
             target = len(population)
             children: List[Dict[str, Any]] = list(elites)
+            # Exploration slots: low-fitness / novel structures survive here.
+            explore_slots = int(round(target * float(self.profile.exploration_fraction)))
+            explored = ranked[elites_per_island:]
+            rng_explore = list(explored)
+            self.rng.shuffle(rng_explore)
+            for record in rng_explore[:explore_slots]:
+                if len(children) >= target:
+                    break
+                children.append(record)
+            random_slots = max(0, explore_slots // 4)
             while len(children) < target:
                 parent_a = self._tournament(ranked)
                 if parent_a is None:
@@ -590,8 +657,22 @@ class EvolutionRunner:
                         max_steps=self.profile.max_fold_steps,
                     )
                 children.append(self._record(child))
-            next_islands.append(children)
+            # Random restart injects: fresh programmes keep the pool open.
+            for _ in range(random_slots):
+                if len(children) >= target:
+                    break
+                children.append(
+                    self._record(
+                        genome_module.random_hybrid_genome(
+                            self.rng,
+                            min_steps=self.profile.min_fold_steps,
+                            max_steps=self.profile.max_fold_steps,
+                        )
+                    )
+                )
+            next_islands.append(children[:target] if len(children) > target else children)
         self.islands = next_islands
+        self.last_diversity = diversity_of(self._all_records())
 
     def _tournament(self, ranked: Sequence[Dict[str, Any]]) -> Optional[HybridGenome]:
         """Pick one parent by tournament selection."""
@@ -676,39 +757,46 @@ class EvolutionRunner:
         if not candidates:
             return []
         cases: List[stage1_module.Stage1Case] = []
+        cases_records: List[Dict[str, Any]] = []
         for record in candidates:
             genome = self._genome_of(record)
             if genome is None:
                 continue
             aircraft = self._screening_aircraft(record)
             state = self._launch_state(aircraft)
+            rec_idx = int(record.get("index", id(record)))
             cases.append(
                 stage1_module.Stage1Case(
-                    index=int(record.get("index", len(cases))),
+                    index=rec_idx,
                     aircraft=aircraft,
                     initial_state=state,
                     duration_s=float(self.profile.stage1_duration_s),
                     label=str(record.get("key", "")),
                 )
             )
+            cases_records.append(record)
         if not cases:
             return []
         results = self.screener.screen(cases, repeats=self.profile.stage1_chunk_repeats)
+        record_by_index = {int(r.get("index", id(r))): r for r in cases_records}
         flown: List[Dict[str, Any]] = []
-        for record, result in zip(candidates, results):
-            record["stage1"] = result.to_dict()
-            record["distance_m"] = result.distance_m
-            record["max_ld_ratio"] = result.max_ld_ratio
-            record["stability"] = result.stability
-            record["peak_stress_index"] = result.peak_stress_index
-            record["cl"] = result.cl
-            record["cd"] = result.cd
-            record["screening_cl"] = result.cl
-            record["screening_cd"] = result.cd
-            record["status"] = result.status
-            record["fitness"] = default_objective(record)
+        for result in results:
+            matched_record = record_by_index.get(int(result.index))
+            if matched_record is None:
+                continue
+            matched_record["stage1"] = result.to_dict()
+            matched_record["distance_m"] = result.distance_m
+            matched_record["max_ld_ratio"] = result.max_ld_ratio
+            matched_record["stability"] = result.stability
+            matched_record["peak_stress_index"] = result.peak_stress_index
+            matched_record["cl"] = result.cl
+            matched_record["cd"] = result.cd
+            matched_record["screening_cl"] = result.cl
+            matched_record["screening_cd"] = result.cd
+            matched_record["status"] = result.status
+            matched_record["fitness"] = default_objective(matched_record)
             if result.status not in ("crashed", "degenerate"):
-                flown.append(record)
+                flown.append(matched_record)
         self._correct_screening(flown)
         return flown
 
@@ -792,6 +880,7 @@ class EvolutionRunner:
 
         aircraft: List[AircraftConfig] = []
         states: List[Any] = []
+        valid_records: List[Dict[str, Any]] = []
         for record in records:
             genome = self._genome_of(record)
             if genome is None:
@@ -802,6 +891,7 @@ class EvolutionRunner:
             frame = self._aircraft_from_geometry(geometry)
             aircraft.append(frame)
             states.append(self._launch_state(frame))
+            valid_records.append(record)
         if not states:
             return
         xp = self.screener.xp
@@ -827,7 +917,7 @@ class EvolutionRunner:
         peak_stress = pull(summary["peak_stress_pa"])
         crashed = pull(summary["crashed"])
         landed = pull(summary["landed"])
-        for index, record in enumerate(records[:count]):
+        for index, record in enumerate(valid_records[:count]):
             record["reference"] = {
                 "distance_m": float(distance[index]),
                 "flight_time_s": float(flight_time[index]),
@@ -1046,10 +1136,13 @@ class EvolutionRunner:
         config.mass_kg = max(mass, 1.0e-9)
         config.sheet_area_m2 = max(area, 1.0e-6)
         config.paper_gsm = self.paper_gsm
-        inertia = mass * span * span / 12.0
-        config.roll_inertia_kgm2 = max(inertia, 1.0e-12)
-        config.pitch_inertia_kgm2 = max(inertia, 1.0e-12)
-        config.yaw_inertia_kgm2 = max(inertia, 1.0e-12)
+        chord = area / max(span, 1.0e-3)
+        ixx = mass * span * span / 12.0
+        iyy = mass * chord * chord / 12.0
+        izz = ixx + iyy
+        config.roll_inertia_kgm2 = max(ixx, 1.0e-12)
+        config.pitch_inertia_kgm2 = max(iyy, 1.0e-12)
+        config.yaw_inertia_kgm2 = max(izz, 1.0e-12)
         return config
 
     def _exact_geometry(self, genome: HybridGenome) -> Optional[Any]:

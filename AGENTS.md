@@ -33,11 +33,17 @@
 
 ## 2. Guardrails（常駐制約）
 - **Strict Rules**: ユーザー明示許可なきファイル削除禁止。事前仮説・合否基準なしの変更/実行禁止。偶然動作での完了禁止。ファイル/ログの全文読込・出力禁止。
+- **Issue 完了・クローズ厳格条件（形式的完了・未解決クローズの厳禁）**:
+  1. *テスト追加のみでの完了禁止*: 物理モデル・数値アルゴリズムの未実装や欠陥に対し、現状挙動をアサートするテストを追加しただけで Issue を完了（Completed）にしてはならない。
+  2. *ドキュメント明記のみでの完了禁止*: 「制約として仕様書・レポートに追記した」「未実装であることを明記した」ことのみを理由に Issue をクローズしてはならない（制約の明記は「現状記録」であり「問題の解決」ではない）。
+  3. *未着手課題への重複集約禁止*: 統合先・重複先とされる Issue が未解決・未着手（Open）の場合、課題を未着手のまま閉じるのではなく、統合先 Issue との親子関係（sub-issue/blocked-by）を明示するか、実質的解決がマージされるまでクローズしてはならない。
+  4. *クローズ合否照合*: Issue 本文に記載された「完了条件」「調査・対応」の全項目が物理的・工学的に満たされ、独立参照解または実測値との比較が成立していること。
 - **Governance**:
   - *Zero-Placeholder*: `TODO`・`...`・空関数等の省略完全禁止。実動コードのみ記述。
   - *Single Committer*: サブエージェント委譲時もリポジトリ変更・コミットは親に一元化（`.agents/skills/subagent-delegation.md`）。
   - *Subagent Cap*: 稼働サブエージェントは最大4（監視1必須・実務3）。上限超過の委譲は拒否する。
   - *Branch Isolation*: `genetic-project` 開発フェーズ（自律進化研究システム構築中）では `master`/`main` へのコミット・マージ・チェリーピック・PR作成を**厳禁**。`tools/branch_guard.py` が保護ブランチ実行を停止し、テストスイート（`conftest.py`）/ `app.py` / `smoke_test.py` に組み込み済み（`PAPER_AIRCRAFT_BRANCH_GUARD=warn|off` で緩和可）。
+  - *Mission Branch Mandatory*: **すべてのミッションは開始前に専用ブランチを作成し、そのブランチ上で取り組むこと**。着手時に `mission/<slug>`（Issue番号がある場合は `mission/<slug>-<issue番号>`）を切り替え、ブランチ作成なしの作業・`master`/`main` への直接コミットを禁止。ミッション完了時のみマージする。
   - *Git & Discord*: ブランチ運用、フェーズ毎通知（`.agents/skills/notify-webhook.md`）。
 - **Critical Traps（詳細・回避策は `.agents/Knowledge.md` 参照）**:
   - *CI Runner / 文字コード*: Actions の run は `defaults: run: shell: bash` 必須。PowerShell の `Get/Set-Content` でのUTF-8破壊禁止（Python/専用ツールで編集）。

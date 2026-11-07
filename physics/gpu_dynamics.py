@@ -70,6 +70,7 @@ __all__ = [
     "quaternion_normalize_batch",
     "launch_state_vector",
     "simulate_batch",
+    "_invert_3x3_batch",
 ]
 
 #: Number of state variables of the rigid body: position, velocity,
@@ -191,6 +192,48 @@ def _contract3(xp: Any, rotation: Any, vector: Any) -> Any:
             rotation[:, 2, 0] * v0 + rotation[:, 2, 1] * v1 + rotation[:, 2, 2] * v2,
         ),
         axis=-1,
+    )
+
+
+def _invert_3x3_batch(xp: Any, matrix: Any) -> Any:
+    """Analytic vectorised inversion of an ``(N, 3, 3)`` matrix batch.
+
+    Written without cuBLAS / NumPy inv to permit CUDA graph capture without
+    device synchronisation or host copies.
+    """
+    a = matrix[:, 0, 0]
+    b = matrix[:, 0, 1]
+    c = matrix[:, 0, 2]
+    d = matrix[:, 1, 0]
+    e = matrix[:, 1, 1]
+    f = matrix[:, 1, 2]
+    g = matrix[:, 2, 0]
+    h = matrix[:, 2, 1]
+    k = matrix[:, 2, 2]
+
+    a_adj = e * k - f * h
+    b_adj = -(d * k - f * g)
+    c_adj = d * h - e * g
+
+    det = a * a_adj + b * b_adj + c * c_adj
+    safe_det = xp.where(xp.abs(det) > 1.0e-15, det, xp.ones_like(det))
+    inv_det = 1.0 / safe_det
+
+    d_adj = -(b * k - c * h)
+    e_adj = a * k - c * g
+    f_adj = -(a * h - b * g)
+
+    g_adj = b * f - c * e
+    h_adj = -(a * f - c * d)
+    k_adj = a * e - b * d
+
+    return xp.stack(
+        (
+            xp.stack((a_adj * inv_det, d_adj * inv_det, g_adj * inv_det), axis=-1),
+            xp.stack((b_adj * inv_det, e_adj * inv_det, h_adj * inv_det), axis=-1),
+            xp.stack((c_adj * inv_det, f_adj * inv_det, k_adj * inv_det), axis=-1),
+        ),
+        axis=1,
     )
 
 
@@ -345,6 +388,7 @@ class FlightParams:
     inertia_matrix: Any = None
     inertia_inv: Any = None
     sample_wind_stages: bool = False
+    apparent_active: Any = None
 
 
 def wind_batch(
@@ -385,36 +429,20 @@ def wind_batch(
     # brought back explicitly.  ``np.asarray`` on a CuPy array raises
     # "Implicit conversion to a NumPy array is not allowed".
     host_positions = positions.get() if hasattr(positions, "get") else np.asarray(positions)
-    if bool(getattr(params.env, "wind_tunnel_enabled", False)):
-        points = np.stack(
-            (
-                np.asarray(host_positions[:, 0], dtype=np.float64),
-                np.asarray(host_positions[:, 1], dtype=np.float64),
-                -np.asarray(host_positions[:, 2], dtype=np.float64),
-            ),
-            axis=-1,
-        )
-        values = velocity_components(points, params.env, float(time_s), params.wind_backend)
-        values = np.asarray(values, dtype=np.float64)
-        wind = xp.asarray(
-            np.stack((values[:, 0], values[:, 1], -values[:, 2]), axis=-1),
-            dtype=xp.float64,
-        )
-    else:
-        points = np.stack(
-            (
-                np.asarray(host_positions[:, 1], dtype=np.float64),
-                np.asarray(host_positions[:, 0], dtype=np.float64),
-                -np.asarray(host_positions[:, 2], dtype=np.float64),
-            ),
-            axis=-1,
-        )
-        values = velocity_components(points, params.env, float(time_s), params.wind_backend)
-        values = np.asarray(values, dtype=np.float64)
-        wind = xp.asarray(
-            np.stack((values[:, 1], values[:, 0], -values[:, 2]), axis=-1),
-            dtype=xp.float64,
-        )
+    points = np.stack(
+        (
+            np.asarray(host_positions[:, 0], dtype=np.float64),
+            np.asarray(host_positions[:, 1], dtype=np.float64),
+            -np.asarray(host_positions[:, 2], dtype=np.float64),
+        ),
+        axis=-1,
+    )
+    values = velocity_components(points, params.env, float(time_s), params.wind_backend)
+    values = np.asarray(values, dtype=np.float64)
+    wind = xp.asarray(
+        np.stack((values[:, 0], values[:, 1], -values[:, 2]), axis=-1),
+        dtype=xp.float64,
+    )
     if out is None:
         return wind
     out[...] = wind
@@ -498,7 +526,7 @@ def build_params(
                 "area", "chord", "span", "aspect", "oswald", "cL0", "cl_alpha",
                 "cl_max", "stall_alpha_deg", "stall_sharpness", "polhamus_kp",
                 "polhamus_kv", "cd0", "re_cd0_exponent", "cm0", "cm_alpha",
-                "cm_q", "cm_roll_rate", "cm_pitch_rate", "cm_yaw_rate",
+                "cm_q", "cm_roll_rate", "cm_yaw_rate",
                 "cl_beta", "cl_roll_rate", "cl_pitch_rate", "cl_yaw_rate",
                 "cn_beta", "cn_roll_rate", "cn_pitch_rate", "cn_yaw_rate",
                 "cy_beta", "aileron_deg", "asymmetry_cl", "rudder_deg",
@@ -522,8 +550,8 @@ def build_params(
         speed = float(env.wind_speed)
         wind = xp.stack(
             (
-                ones * (speed * flow_y),
                 ones * (speed * flow_x),
+                ones * (speed * flow_y),
                 zeros,
             ),
             axis=-1,
@@ -577,6 +605,14 @@ def build_params(
         use_mean_wind_only=use_mean_wind,
         inertia_matrix=inertia_matrix,
         inertia_inv=inertia_inv,
+        apparent_active=xp.asarray([
+            bool(
+                getattr(cfg, "added_mass_enabled", False)
+                or getattr(cfg, "apparent_inertia_enabled", False)
+                or getattr(cfg, "fidelity_mode", "standard") in ("improved_medium", "multifidelity")
+            )
+            for cfg in configs
+        ]),
     )
 
 
@@ -708,8 +744,38 @@ def _evaluate_state(
         coefficients["side_n"],
         coefficients["lift_n"],
     )
-    force_world = body_to_world_batch(xp, rotation, force_body) + params.mass[:, xp.newaxis] * gravity_world
-    acceleration = force_world / params.mass[:, xp.newaxis]
+
+    has_apparent = getattr(params, "apparent_active", None) is not None and bool(params.apparent_active.any())
+    if has_apparent:
+        added = aero_kernel.compute_added_mass(
+            xp, air["density_kgm3"], params.area, params.chord, wingspan_m=params.span
+        )
+        m_add_z = added["added_mass_z_kg"]
+        m_eff_z = params.mass + m_add_z
+        gravity_body = world_to_body_batch(xp, rotation, gravity_world)
+        a_body = (force_body / params.mass[:, xp.newaxis]) + gravity_body
+        a_body_2_app = (force_body[:, 2] + params.mass * gravity_body[:, 2]) / m_eff_z
+        a_body_z = xp.where(params.apparent_active, a_body_2_app, a_body[:, 2])
+        a_body = xp.stack((a_body[:, 0], a_body[:, 1], a_body_z), axis=-1)
+        acceleration = body_to_world_batch(xp, rotation, a_body)
+
+        eff_inertia_mat = xp.copy(params.inertia_matrix)
+        add_xx = xp.where(params.apparent_active, added.get("added_inertia_xx_kgm2", 0.0), 0.0)
+        add_yy = xp.where(params.apparent_active, added.get("added_inertia_yy_kgm2", 0.0), 0.0)
+        add_zz = xp.where(params.apparent_active, added.get("added_inertia_zz_kgm2", 0.0), 0.0)
+        r0 = xp.stack((eff_inertia_mat[:, 0, 0] + add_xx, eff_inertia_mat[:, 0, 1], eff_inertia_mat[:, 0, 2]), axis=-1)
+        r1 = xp.stack((eff_inertia_mat[:, 1, 0], eff_inertia_mat[:, 1, 1] + add_yy, eff_inertia_mat[:, 1, 2]), axis=-1)
+        r2 = xp.stack((eff_inertia_mat[:, 2, 0], eff_inertia_mat[:, 2, 1], eff_inertia_mat[:, 2, 2] + add_zz), axis=-1)
+        eff_inertia_mat = xp.stack((r0, r1, r2), axis=1)
+        eff_inertia_inv = _invert_3x3_batch(xp, eff_inertia_mat)
+
+        cur_mat = eff_inertia_mat
+        cur_inv = eff_inertia_inv
+    else:
+        force_world = body_to_world_batch(xp, rotation, force_body) + params.mass[:, xp.newaxis] * gravity_world
+        acceleration = force_world / params.mass[:, xp.newaxis]
+        cur_mat = params.inertia_matrix
+        cur_inv = params.inertia_inv
 
     beta_rad = _rad(xp, beta)
     moment_body = xp.stack(
@@ -723,11 +789,11 @@ def _evaluate_state(
         xp, params, omega, coefficients["q_dyn"], speed, beta_rad
     )
 
-    if getattr(params, "inertia_matrix", None) is not None:
-        angular_momentum = _contract3(xp, params.inertia_matrix, omega)
+    if cur_mat is not None:
+        angular_momentum = _contract3(xp, cur_mat, omega)
         gyro = _cross(xp, omega, angular_momentum)
         net_moment = moment_body - gyro
-        angular_acceleration = _contract3(xp, params.inertia_inv, net_moment)
+        angular_acceleration = _contract3(xp, cur_inv, net_moment)
     else:
         angular_momentum = params.inertia * omega
         angular_acceleration = (

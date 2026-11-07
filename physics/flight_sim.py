@@ -2489,30 +2489,54 @@ class FlightSimulator:
                 aero_cfg, self.environment, speed, effective_alpha_deg, beta_deg,
                 mach, reynolds, max(altitude, 0.0), omega_strip, air["density_kgm3"], air["kinematic_viscosity_m2s"]
             )
+            # Sample spanwise local wind differential to resolve wind shear & gust gradients
+            # Body station vectors: y_b points out right wing (+y)
+            r_il_b = np.array([0.0, -0.22 * b_span, 0.0], dtype=np.float64)
+            r_ir_b = np.array([0.0, 0.22 * b_span, 0.0], dtype=np.float64)
+            r_ol_b = np.array([0.0, -0.44 * b_span, 0.0], dtype=np.float64)
+            r_or_b = np.array([0.0, 0.44 * b_span, 0.0], dtype=np.float64)
+
+            # World positions of stations
+            pos_il = position + body_to_world(quaternion, r_il_b)
+            pos_ir = position + body_to_world(quaternion, r_ir_b)
+            pos_ol = position + body_to_world(quaternion, r_ol_b)
+            pos_or = position + body_to_world(quaternion, r_or_b)
+
+            # Local wind at stations in world frame and differential relative to CG wind
+            w_il_body = world_to_body(quaternion, wind_vector(pos_il, self.environment, time_s) - wind)
+            w_ir_body = world_to_body(quaternion, wind_vector(pos_ir, self.environment, time_s) - wind)
+            w_ol_body = world_to_body(quaternion, wind_vector(pos_ol, self.environment, time_s) - wind)
+            w_or_body = world_to_body(quaternion, wind_vector(pos_or, self.environment, time_s) - wind)
+
             # Inner stations (+/- 0.22b): left wing y = -0.22b, right wing y = +0.22b
+            # Body velocity relative to air at each station accounts for body rotation (omega x r)
+            # and local differential wind (V_air_rel = V_cg + omega x r - w_local).
             # When p > 0 (roll right, right wing down), alpha_right increases and alpha_left decreases.
             # When r > 0 (yaw right, nose right), airspeed_left increases and airspeed_right decreases.
-            v_il = max(speed + 0.22 * b_span * r_rot, 0.1)
-            a_il = effective_alpha_deg - math.degrees(0.22 * b_span * p_rot / v_safe)
+            # When local wind has updraft on right wing (w_body_z < 0 in z-down body frame),
+            # air-relative downward component w_rel = w_body_motion - w_body_wind increases (+w),
+            # so effective alpha increases on that wing: delta_alpha ~ -w_body_wind_z / v_safe.
+            v_il = max(speed + 0.22 * b_span * r_rot - float(w_il_body[0]), 0.1)
+            a_il = effective_alpha_deg - math.degrees(0.22 * b_span * p_rot / v_safe) - math.degrees(float(w_il_body[2]) / v_safe)
             res_il = aero_forces(
                 aero_cfg, self.environment, v_il, a_il, beta_deg,
                 mach, reynolds, max(altitude, 0.0), omega_strip, air["density_kgm3"], air["kinematic_viscosity_m2s"]
             )
-            v_ir = max(speed - 0.22 * b_span * r_rot, 0.1)
-            a_ir = effective_alpha_deg + math.degrees(0.22 * b_span * p_rot / v_safe)
+            v_ir = max(speed - 0.22 * b_span * r_rot - float(w_ir_body[0]), 0.1)
+            a_ir = effective_alpha_deg + math.degrees(0.22 * b_span * p_rot / v_safe) - math.degrees(float(w_ir_body[2]) / v_safe)
             res_ir = aero_forces(
                 aero_cfg, self.environment, v_ir, a_ir, beta_deg,
                 mach, reynolds, max(altitude, 0.0), omega_strip, air["density_kgm3"], air["kinematic_viscosity_m2s"]
             )
             # Tip stations (+/- 0.44b)
-            v_ol = max(speed + 0.44 * b_span * r_rot, 0.1)
-            a_ol = effective_alpha_deg - math.degrees(0.44 * b_span * p_rot / v_safe)
+            v_ol = max(speed + 0.44 * b_span * r_rot - float(w_ol_body[0]), 0.1)
+            a_ol = effective_alpha_deg - math.degrees(0.44 * b_span * p_rot / v_safe) - math.degrees(float(w_ol_body[2]) / v_safe)
             res_ol = aero_forces(
                 aero_cfg, self.environment, v_ol, a_ol, beta_deg,
                 mach, reynolds, max(altitude, 0.0), omega_strip, air["density_kgm3"], air["kinematic_viscosity_m2s"]
             )
-            v_or = max(speed - 0.44 * b_span * r_rot, 0.1)
-            a_or = effective_alpha_deg + math.degrees(0.44 * b_span * p_rot / v_safe)
+            v_or = max(speed - 0.44 * b_span * r_rot - float(w_or_body[0]), 0.1)
+            a_or = effective_alpha_deg + math.degrees(0.44 * b_span * p_rot / v_safe) - math.degrees(float(w_or_body[2]) / v_safe)
             res_or = aero_forces(
                 aero_cfg, self.environment, v_or, a_or, beta_deg,
                 mach, reynolds, max(altitude, 0.0), omega_strip, air["density_kgm3"], air["kinematic_viscosity_m2s"]
@@ -2632,7 +2656,7 @@ class FlightSimulator:
             q_hat = omega[1] * self._chord / two_v
             r_hat = omega[2] * span / two_v
             base_lp = float(getattr(self.aircraft, "cl_roll_rate", -0.40))
-            base_mq = float(getattr(self.aircraft, "cm_q", -12.0)) + float(getattr(self.aircraft, "cm_pitch_rate", 0.0))
+            base_mq = float(getattr(self.aircraft, "cm_q", -12.0))
             base_nr = float(getattr(self.aircraft, "cn_yaw_rate", -0.30))
 
             cl_p_nl, cm_q_nl, cn_r_nl = aero_kernel.nonlinear_dynamic_damping(
@@ -2659,16 +2683,19 @@ class FlightSimulator:
             or getattr(self.aircraft, "fidelity_mode", "standard") in ("improved_medium", "multifidelity")
         )
         if apparent_active:
+            # Effective mass/inertia only (Issue #131): the former explicit
+            # Coriolis/Munk external forces (compute_apparent_forces) did net
+            # Added yaw inertia follows vertical fin strip model with exact [kg m^2] units:
+            # I_add_zz = (pi / 128) * rho * h_keel * mac^4.
+            # positive body work (F_app.v + M_app.w > 0, ~60% of aero
+            # dissipation) and injected mechanical energy. Keep m_eff/J_eff,
+            # which attenuate acceleration passively; coupling is documented
+            # as a limitation for Issue #136 (GPU parity).
             added = aero_kernel.compute_added_mass(
                 ScalarMath, rho_val, ref_area, self._chord, wingspan_m=span
             )
             m_add_z = float(added["added_mass_z_kg"])
             m_eff_z = self._mass + m_add_z
-            f_app, m_app = aero_kernel.compute_apparent_forces(
-                np, body_relative, omega, m_add_z
-            )
-            force_body = force_body + f_app
-            moment_body = moment_body + m_app
             gravity_body = world_to_body(quaternion, gravity_world)
             a_body = (force_body / self._mass) + gravity_body
             a_body[2] = (force_body[2] + self._mass * gravity_body[2]) / m_eff_z
@@ -3084,6 +3111,17 @@ class FlightSimulator:
             construction, so the cartwheel produced by a wingtip strike
             emerges from the geometry and scales with the impact energy
             instead of being injected as a constant angular rate.
+
+            Friction uses an effective mass along the tangential direction
+            ``t``: ``lever_t = r x t`` and
+            ``m_eff_t = 1/(1/m + lever_t . I^-1 . lever_t)``.  The tangential
+            impulse magnitude is ``j_t = min(mu*|J_n|, m_eff_t*|v_t|)``,
+            which analytically zeroes the contact-point tangential relative
+            speed under Coulomb saturation (``j_t = m_eff_t*|v_t|``) and is
+            otherwise limited by the Coulomb cone.  Using the normal-direction
+            ``m_eff`` for the tangential impulse under/over-brakes off-centre
+            contacts whose geometry makes tangential compliance differ from
+            normal compliance.
             """
             nonlocal velocity, rates
             r_world = body_to_world(state.quaternion, r_body)
@@ -3100,8 +3138,12 @@ class FlightSimulator:
             tangential = v_point - v_normal * normal
             tangential_speed = float(np.linalg.norm(tangential))
             if tangential_speed > 1.0e-9:
-                j_t = min(mu * abs(j_normal), m_eff * tangential_speed)
-                impulse = impulse - j_t * (tangential / tangential_speed)
+                t_dir = tangential / tangential_speed
+                lever_t = np.cross(r_world, t_dir)
+                inv_term_t = 1.0 / mass + float(lever_t @ (inertia_inv @ lever_t))
+                m_eff_t = 1.0 / max(inv_term_t, 1.0e-18)
+                j_t = min(mu * abs(j_normal), m_eff_t * tangential_speed)
+                impulse = impulse - j_t * t_dir
             velocity = velocity + impulse / mass
             rates = rates + inertia_inv @ np.cross(r_world, impulse)
             return abs(j_normal)

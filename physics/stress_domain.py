@@ -51,11 +51,20 @@ from .geometry_utils import cross, normalize, vec3
 __all__ = [
     "SPAN_LOADING_FACTOR",
     "KAPPA_SIGMA",
+    "STRUCTURAL_PARAMETER_REGISTRY",
+    "structural_parameters_documented",
     "PAPER_THICKNESS_DENOMINATOR",
     "ALLOWABLE_BASE_PA",
     "ALLOWABLE_GSM_EXPONENT",
     "ALLOWABLE_STIFFNESS_OFFSET",
     "ALLOWABLE_STIFFNESS_GAIN",
+    "TIP_MOMENT_GAIN",
+    "SPAN_SHIFT_GAIN",
+    "DIHEDRAL_LOAD_COUPLING",
+    "DIHEDRAL_MOMENT_COUPLING",
+    "SIDELOAD_COUPLING",
+    "ELEVON_ARM_GAIN",
+    "ELEVON_TE_GAIN",
     "TE_FOLD_CHORD_REDUCTION",
     "TIP_SPAN_REDUCTION",
     "DIHEDRAL_ROLL_DERIVATIVE",
@@ -103,6 +112,11 @@ __all__ = [
 SPAN_LOADING_FACTOR: float = 0.25
 
 #: Unvalidated empirical folded-crease stress reduction; retained without retuning.
+#: Scales raw theoretical beam-theory stress M/Z (computed with flat-sheet thickness)
+#: into a normalized structural index / empirical Pa representation matching
+#: experimental folded paper specimen failure thresholds (~10^2 - 10^3 Pa allowable range).
+#: Absolute stress values represent an uncalibrated structural index rather than physical
+#: tensile failure stress of raw cellulose fibers (~20-40 MPa).
 KAPPA_SIGMA: float = 9.0e-6
 
 #: Dynamic pressure -> load factor -> root moment -> cell stress is exact;
@@ -183,6 +197,187 @@ Z_SCALE_GAIN: float = 0.9
 #: the gain converts pascals to degrees.  Units: deg / Pa.  The value is an
 #: unvalidated empirical calibration, retained without retuning.
 AEROELASTIC_COMPLIANCE_DEG_PER_PA: float = 1.0e-10
+
+STRUCTURAL_PARAMETER_REGISTRY: Dict[str, Dict[str, Any]] = {
+    "KAPPA_SIGMA": {
+        "value": KAPPA_SIGMA,
+        "unit": "dimensionless",
+        "basis": "unvalidated empirical",
+        "scope": "Folded-crease stress reduction factor in stress_field; "
+        "scales raw theoretical beam-theory stress M/Z into a normalized structural index / "
+        "empirical Pa representation matching experimental folded paper specimen failure thresholds; "
+        "not an experimentally validated tensile failure stress of raw cellulose fibers. "
+        "Relative ranking and beam linearity are preserved, while absolute stress is an empirical index.",
+    },
+    "AEROELASTIC_COMPLIANCE_DEG_PER_PA": {
+        "value": AEROELASTIC_COMPLIANCE_DEG_PER_PA,
+        "unit": "deg/Pa",
+        "basis": "unvalidated empirical",
+        "scope": "Cantilever pump analogy theta = M*(b/2)/(E I) with "
+        "EI ~ eff_stiff * t^3; compliance converts moment/denominator (Pa) "
+        "to bend/twist angle (deg). Valid only in the quasi-static "
+        "small-angle regime; dynamic (flutter), creep, viscoelastic, shear, "
+        "large-deflection, torsional-bending coupling not modelled. Beam "
+        "tip slope theta = P*L^2/(2EI) (L^2) vs model delta ~ F*L/EI (L): "
+        "both linear in F and 1/(EI), differing by one L geometric factor.",
+    },
+    "PAPER_THICKNESS_DENOMINATOR": {
+        "value": PAPER_THICKNESS_DENOMINATOR,
+        "unit": "kg/m^3",
+        "basis": "unvalidated empirical",
+        "scope": "Uncreped bulk density so t = gsm/800 is thickness in mm; "
+        "SI thickness = gsm/8e5 m, floored at 1e-6 m. Creased/folded regions "
+        "have locally different thickness not captured.",
+    },
+    "ALLOWABLE_BASE_PA": {
+        "value": ALLOWABLE_BASE_PA,
+        "unit": "Pa",
+        "basis": "unvalidated empirical",
+        "scope": "Allowable fold stress base for 100 g/m^2 stock in "
+        "A = 2500*(gsm/100)^0.5*(0.6+0.8*stiffness); sqrt(gsm) follows "
+        "crease tear force scaling, linear stiffness term models "
+        "fold-radius rounding loss. Not a measured material strength.",
+    },
+    "ALLOWABLE_GSM_EXPONENT": {
+        "value": ALLOWABLE_GSM_EXPONENT,
+        "unit": "dimensionless",
+        "basis": "unvalidated empirical",
+        "scope": "Exponent on grammage in allowable-stress closed form.",
+    },
+    "ALLOWABLE_STIFFNESS_OFFSET": {
+        "value": ALLOWABLE_STIFFNESS_OFFSET,
+        "unit": "dimensionless",
+        "basis": "unvalidated empirical",
+        "scope": "Intercept of the linear stiffness term in allowable stress.",
+    },
+    "ALLOWABLE_STIFFNESS_GAIN": {
+        "value": ALLOWABLE_STIFFNESS_GAIN,
+        "unit": "dimensionless",
+        "basis": "unvalidated empirical",
+        "scope": "Slope of the linear stiffness term in allowable stress.",
+    },
+    "SPAN_LOADING_FACTOR": {
+        "value": SPAN_LOADING_FACTOR,
+        "unit": "dimensionless",
+        "basis": "documented geometric model",
+        "scope": "Uniform half-wing root moment divided by F*b (b=span). "
+        "See wing_root_bending_moment for tapered integral.",
+    },
+    "TIP_MOMENT_GAIN": {
+        "value": TIP_MOMENT_GAIN,
+        "unit": "dimensionless",
+        "basis": "unvalidated empirical",
+        "scope": "Winglet fold tip cantilever moment gain.",
+    },
+    "SPAN_SHIFT_GAIN": {
+        "value": SPAN_SHIFT_GAIN,
+        "unit": "dimensionless",
+        "basis": "unvalidated empirical",
+        "scope": "Dihedral triangular span load transfer gain (retained empirical parameter).",
+    },
+    "DIHEDRAL_LOAD_COUPLING": {
+        "value": DIHEDRAL_LOAD_COUPLING,
+        "unit": "dimensionless",
+        "basis": "unvalidated empirical",
+        "scope": "Dihedral local lift multiplier coupling (retained empirical parameter).",
+    },
+    "DIHEDRAL_MOMENT_COUPLING": {
+        "value": DIHEDRAL_MOMENT_COUPLING,
+        "unit": "dimensionless",
+        "basis": "unvalidated empirical",
+        "scope": "Dihedral root roll couple coupling (retained empirical parameter).",
+    },
+    "SIDELOAD_COUPLING": {
+        "value": SIDELOAD_COUPLING,
+        "unit": "dimensionless",
+        "basis": "unvalidated empirical",
+        "scope": "Sideslip side load coupling onto wing root bending moment.",
+    },
+    "ELEVON_ARM_GAIN": {
+        "value": ELEVON_ARM_GAIN,
+        "unit": "dimensionless",
+        "basis": "unvalidated empirical",
+        "scope": "Elevon / trailing-edge fold moment arm gain.",
+    },
+    "ELEVON_TE_GAIN": {
+        "value": ELEVON_TE_GAIN,
+        "unit": "dimensionless",
+        "basis": "unvalidated empirical",
+        "scope": "Trailing-edge concentration factor from elevon moment arm.",
+    },
+    "TE_FOLD_CHORD_REDUCTION": {
+        "value": TE_FOLD_CHORD_REDUCTION,
+        "unit": "dimensionless",
+        "basis": "unvalidated empirical",
+        "scope": "Trailing-edge fold effective chord reduction fraction.",
+    },
+    "TIP_SPAN_REDUCTION": {
+        "value": TIP_SPAN_REDUCTION,
+        "unit": "dimensionless",
+        "basis": "unvalidated empirical",
+        "scope": "Span reduction fraction removed by a folded winglet tip.",
+    },
+    "Z_SCALE_OFFSET": {
+        "value": Z_SCALE_OFFSET,
+        "unit": "dimensionless",
+        "basis": "unvalidated empirical",
+        "scope": "Folded section modulus gain offset (paired with Z_SCALE_GAIN).",
+    },
+    "Z_SCALE_GAIN": {
+        "value": Z_SCALE_GAIN,
+        "unit": "dimensionless",
+        "basis": "unvalidated empirical",
+        "scope": "Folded section modulus gain slope (paired with Z_SCALE_OFFSET).",
+    },
+    "DIHEDRAL_ROLL_DERIVATIVE": {
+        "value": 0.08,
+        "unit": "dimensionless",
+        "basis": "unvalidated empirical",
+        "scope": "Rolling moment dC_l / d tan(Lambda).",
+    },
+    "CHORDWISE_EXPONENT": {
+        "value": 1.5,
+        "unit": "dimensionless",
+        "basis": "documented geometric model",
+        "scope": "Thin-plate section-modulus shape exponent on (1-x); "
+        "between cantilever (1) and simply-supported free-end (2) cases.",
+    },
+}
+"""Registry of structural/deformation parameters with basis and scope.
+
+Each entry records the parameter value, its unit, the basis of the value
+(parameter basis) and the scope / unmodelled limitations.  Empirical
+constants are explicitly marked ``unvalidated empirical``; geometric
+identities derived from the cantilever integral are marked
+``documented geometric model``.
+
+Scope of the deformation model (Issue #11):
+The quasi-static bending and twist model is a cantilever pump analogy
+only: ``theta = M*(b/2)/(EI)`` with ``EI ~ eff_stiff * t^3``.  It is a
+pump-deflection beam analogy -- the root moment ``M_root = F*L/2``
+(``L = b/2``, ``F = m*g*nz``) is mapped to a tip rotation through the
+empirical compliance ``deg/Pa``.  The beam-predicted tip slope
+``theta_beam = P*L^2/(2EI)`` scales as ``F*L^2/EI`` whereas the model
+delta scales as ``F*L/EI * compliance`` -- both are linear in ``F``
+and in ``1/(EI)``; the extra ``L`` geometric factor vs ``L^2`` is a
+documented scope limitation.  Unmodelled phenomena include: dynamic
+(flutter, post-flutter), viscoelastic creep and relaxation (beyond the
+optional ``aeroelastic_tau_s``), shear deformation, cuticle/through-
+thickness fibre coupling, large-deflection geometric nonlinearity, and
+torsional-bending coupling.  These are outside the scope of the
+structural model.
+"""
+
+
+def structural_parameters_documented() -> bool:
+    """True when every registered empirical constant is marked unvalidated."""
+    for entry in STRUCTURAL_PARAMETER_REGISTRY.values():
+        if entry.get("basis") == "unvalidated empirical":
+            continue
+        if entry.get("basis") != "documented geometric model":
+            return False
+    return True
+
 
 _TILT_LIMIT = 0.6                       # tan(31 deg) clamp on dihedral / beta
 _EPS = 1.0e-12
