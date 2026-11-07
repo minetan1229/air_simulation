@@ -385,36 +385,20 @@ def wind_batch(
     # brought back explicitly.  ``np.asarray`` on a CuPy array raises
     # "Implicit conversion to a NumPy array is not allowed".
     host_positions = positions.get() if hasattr(positions, "get") else np.asarray(positions)
-    if bool(getattr(params.env, "wind_tunnel_enabled", False)):
-        points = np.stack(
-            (
-                np.asarray(host_positions[:, 0], dtype=np.float64),
-                np.asarray(host_positions[:, 1], dtype=np.float64),
-                -np.asarray(host_positions[:, 2], dtype=np.float64),
-            ),
-            axis=-1,
-        )
-        values = velocity_components(points, params.env, float(time_s), params.wind_backend)
-        values = np.asarray(values, dtype=np.float64)
-        wind = xp.asarray(
-            np.stack((values[:, 0], values[:, 1], -values[:, 2]), axis=-1),
-            dtype=xp.float64,
-        )
-    else:
-        points = np.stack(
-            (
-                np.asarray(host_positions[:, 1], dtype=np.float64),
-                np.asarray(host_positions[:, 0], dtype=np.float64),
-                -np.asarray(host_positions[:, 2], dtype=np.float64),
-            ),
-            axis=-1,
-        )
-        values = velocity_components(points, params.env, float(time_s), params.wind_backend)
-        values = np.asarray(values, dtype=np.float64)
-        wind = xp.asarray(
-            np.stack((values[:, 1], values[:, 0], -values[:, 2]), axis=-1),
-            dtype=xp.float64,
-        )
+    points = np.stack(
+        (
+            np.asarray(host_positions[:, 0], dtype=np.float64),
+            np.asarray(host_positions[:, 1], dtype=np.float64),
+            -np.asarray(host_positions[:, 2], dtype=np.float64),
+        ),
+        axis=-1,
+    )
+    values = velocity_components(points, params.env, float(time_s), params.wind_backend)
+    values = np.asarray(values, dtype=np.float64)
+    wind = xp.asarray(
+        np.stack((values[:, 0], values[:, 1], -values[:, 2]), axis=-1),
+        dtype=xp.float64,
+    )
     if out is None:
         return wind
     out[...] = wind
@@ -522,8 +506,8 @@ def build_params(
         speed = float(env.wind_speed)
         wind = xp.stack(
             (
-                ones * (speed * flow_y),
                 ones * (speed * flow_x),
+                ones * (speed * flow_y),
                 zeros,
             ),
             axis=-1,
