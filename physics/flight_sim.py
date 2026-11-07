@@ -2086,6 +2086,15 @@ class FlightSimulator:
         self._diverged = False
         self._rolled_back = False
         self._bounce_count = 0
+        self._aero_dihedral_lag = 0.0
+        self._aero_twist_lag = 0.0
+        self._unsteady_cl_lag = 0.0
+        self._prev_alpha_deg = 0.0
+        self._alpha_dot_deg_s = 0.0
+        self._lsb_shift_deg = 0.0
+        self._is_stalled_prev = False
+        self._last_dt = 0.01
+        self._last_dynamics_core = None
         self._history.clear()
         self._state_history.clear()
         self._next_record_time = float(self._state.time_s)
@@ -2123,6 +2132,15 @@ class FlightSimulator:
         self._rolled_back = False
         self._bounce_count = 0
         self._step_rejections = 0
+        self._aero_dihedral_lag = 0.0
+        self._aero_twist_lag = 0.0
+        self._unsteady_cl_lag = 0.0
+        self._prev_alpha_deg = 0.0
+        self._alpha_dot_deg_s = 0.0
+        self._lsb_shift_deg = 0.0
+        self._is_stalled_prev = False
+        self._last_dt = 0.01
+        self._last_dynamics_core = None
         self._diagnostics_cache = None
         self._stiffness_cache = None
         if bool(self.settings.collision_enabled):
@@ -2766,6 +2784,31 @@ class FlightSimulator:
         }
 
 
+    def _lag_snapshot(self) -> Dict[str, Any]:
+        """Return a snapshot copy of current internal unsteady and deformation lag states."""
+        return {
+            "_aero_dihedral_lag": float(self._aero_dihedral_lag),
+            "_aero_twist_lag": float(self._aero_twist_lag),
+            "_unsteady_cl_lag": float(self._unsteady_cl_lag),
+            "_prev_alpha_deg": float(self._prev_alpha_deg),
+            "_alpha_dot_deg_s": float(self._alpha_dot_deg_s),
+            "_lsb_shift_deg": float(self._lsb_shift_deg),
+            "_is_stalled_prev": bool(self._is_stalled_prev),
+            "_last_dt": float(self._last_dt),
+        }
+
+    def _lag_restore(self, snapshot: Optional[Dict[str, Any]]) -> None:
+        """Alias for _restore_lag_snapshot."""
+        self._restore_lag_snapshot(snapshot)
+
+    def _restore_lag_snapshot(self, snapshot: Optional[Dict[str, Any]]) -> None:
+        """Restore internal unsteady and deformation lag states from a snapshot."""
+        if not snapshot:
+            return
+        self._apply_lag_states(snapshot)
+        if "_last_dt" in snapshot:
+            self._last_dt = float(snapshot["_last_dt"])
+
     def _apply_lag_states(self, lag_states: Optional[Dict[str, Any]]) -> None:
         """Apply committed unsteady and deformation lag states to the instance."""
         if not lag_states:
@@ -2789,7 +2832,6 @@ class FlightSimulator:
         """Right-hand side of the 13-state ODE (position, velocity, quaternion, rate)."""
         if core is None:
             core = self._compute_dynamics(y, time_s)
-        self._last_dynamics_core = core
         return np.concatenate(
             [
                 core["velocity"],
