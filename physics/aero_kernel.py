@@ -97,6 +97,7 @@ __all__ = [
     "lsb_dynamic_stall_shift",
     "lsb_dynamic_stall_hysteresis",
     "nonlinear_dynamic_damping",
+    "low_reynolds_aerodynamics_audit",
 ]
 
 #: Reference Reynolds number of the ``cd0`` correlation.
@@ -2039,6 +2040,111 @@ def evaluate_coefficients(
             return dict(zip(_COEFFICIENT_KEYS, fused))
     return dict(zip(_COEFFICIENT_KEYS, _coefficient_core(xp, *arguments)))
 
+
+
+
+def low_reynolds_aerodynamics_audit(
+    xp: Any,
+    p: AeroParams,
+    reynolds_range: Tuple[float, float] = (1.0e4, 1.0e5),
+    num_re_points: int = 5,
+    alpha_sweep_deg: Tuple[float, float] = (-5.0, 25.0),
+    num_alpha_points: int = 61,
+) -> Dict[str, Any]:
+    """Quantify low-Re aerodynamic characteristics across the flight envelope (Issue #111).
+
+    Evaluates Reynolds number dependence of:
+    - Lift-curve slope (dCL/dalpha per radian and per deg) in attached flow
+    - Maximum lift coefficient (CLmax)
+    - Stall angle (alpha_stall_deg)
+    - Parasite drag (CD0) scaling and total drag polar sensitivity
+    - Attached flow vs flat-plate stall transition bounds
+    - Envelope diagnostics and model validity
+
+    Paper aircraft flight envelope spans Re in [1e4, 1e5] (U approx 3-15 m/s, c approx 0.05-0.15 m).
+    """
+    import numpy as _np
+
+    re_vals = _np.geomspace(reynolds_range[0], reynolds_range[1], num_re_points)
+    alpha_vals = _np.linspace(alpha_sweep_deg[0], alpha_sweep_deg[1], num_alpha_points)
+
+    re_sweep_data = []
+    for re_val in re_vals:
+        coeffs = evaluate_coefficients(
+            xp,
+            p,
+            alpha_deg=alpha_vals,
+            beta_deg=0.0,
+            speed=8.0,
+            reynolds=float(re_val),
+            mach=0.02,
+        )
+        cl = _np.asarray(coeffs["cl"], dtype=float).reshape(-1)
+        cd = _np.asarray(coeffs["cd"], dtype=float).reshape(-1)
+        stalled = _np.asarray(coeffs["stalled"], dtype=bool).reshape(-1)
+        stall_margin = _np.asarray(coeffs["stall_margin"], dtype=float).reshape(-1)
+
+        # Attached linear region around alpha in [-2, 6] deg for slope estimation
+        att_mask = (alpha_vals >= -2.0) & (alpha_vals <= 6.0)
+        if _np.sum(att_mask) >= 2:
+            poly = _np.polyfit(_np.radians(alpha_vals[att_mask]), cl[att_mask], deg=1)
+            cl_alpha_per_rad = float(poly[0])
+            cl_alpha_per_deg = cl_alpha_per_rad * (_np.pi / 180.0)
+        else:
+            cl_alpha_per_rad = float(p.cl_alpha)
+            cl_alpha_per_deg = cl_alpha_per_rad * (_np.pi / 180.0)
+
+        cl_max_observed = float(_np.max(cl))
+        idx_max = int(_np.argmax(cl))
+        alpha_at_cl_max = float(alpha_vals[idx_max])
+
+        # Parasite drag cd0 at alpha=0
+        idx_zero = int(_np.argmin(_np.abs(alpha_vals)))
+        cd0_val = float(cd[idx_zero])
+
+        re_sweep_data.append({
+            "reynolds": float(re_val),
+            "cl_alpha_per_rad": cl_alpha_per_rad,
+            "cl_alpha_per_deg": cl_alpha_per_deg,
+            "cl_max": cl_max_observed,
+            "alpha_at_cl_max_deg": alpha_at_cl_max,
+            "cd0": cd0_val,
+            "nominal_stall_alpha_deg": float(p.stall_alpha_deg),
+            "stalled_fraction": float(_np.mean(stalled)),
+        })
+
+    # Evaluate constancy / variation across Re
+    slopes = [d["cl_alpha_per_rad"] for d in re_sweep_data]
+    cl_maxs = [d["cl_max"] for d in re_sweep_data]
+    cd0s = [d["cd0"] for d in re_sweep_data]
+
+    slope_variation = float(_np.ptp(slopes))
+    cl_max_variation = float(_np.ptp(cl_maxs))
+    cd0_variation = float(_np.ptp(cd0s))
+
+    # Envelope check
+    val_low = evaluate_model_validity(xp, 0.02, reynolds_range[0])
+    val_high = evaluate_model_validity(xp, 0.02, reynolds_range[1])
+    envelope_valid = bool(_np.asarray(val_low["valid"]).reshape(-1)[0] and _np.asarray(val_high["valid"]).reshape(-1)[0])
+
+    return {
+        "re_sweep_data": re_sweep_data,
+        "slope_variation": slope_variation,
+        "cl_max_variation": cl_max_variation,
+        "cd0_variation": cd0_variation,
+        "envelope_valid": envelope_valid,
+        "envelope_re_min": float(MODEL_REYNOLDS_MIN),
+        "envelope_re_max": float(MODEL_REYNOLDS_MAX),
+        "helmbold_attached_cl_alpha": float(p.cl_alpha),
+        "configured_cl_max": float(p.cl_max),
+        "configured_stall_alpha_deg": float(p.stall_alpha_deg),
+        "notes": (
+            "In the calibrated baseline model, potential lift slope (Helmbold) and static stall "
+            "ceiling (cl_max, stall_alpha_deg) are invariant with steady Re, while parasite drag cd0 "
+            "scales via re_cd0_exponent. Unsteady LSB dynamics (lsb_dynamic_stall_shift/hysteresis) "
+            "provide rate-dependent pitch delays scaling with Re^-0.5."
+        ),
+    }
 
 def coefficient_buildup_audit(
     xp: Any,
