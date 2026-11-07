@@ -857,6 +857,11 @@ class EvolutionRunner:
             matched["stage2"] = report.to_dict()
             if report.feasible:
                 survivors.append(matched)
+            else:
+                matched["fitness"] = 0.0
+                matched["peak_stress_index"] = max(
+                    float(matched.get("peak_stress_index", 1.0)), 2.0
+                )
         self._reference_refly(survivors)
         return survivors
 
@@ -980,6 +985,11 @@ class EvolutionRunner:
             matched["stage3"] = result.to_dict()
             if result.lift_to_drag > 0.0:
                 matched["lift_to_drag"] = float(result.lift_to_drag)
+                matched["max_ld_ratio"] = float(result.lift_to_drag)
+                matched["cl"] = float(result.cl)
+                matched["cd"] = float(result.cd)
+                matched["cm"] = float(result.cm)
+                matched["fitness"] = default_objective(matched)
                 resolved.append(matched)
         return resolved
 
@@ -1103,7 +1113,7 @@ class EvolutionRunner:
 
     def _genome_of(self, record: Dict[str, Any]) -> Optional[HybridGenome]:
         payload = record.get("genome")
-        if not payload:
+        if payload is None:
             return None
         return genome_module.HybridGenome.from_dict(payload)
 
