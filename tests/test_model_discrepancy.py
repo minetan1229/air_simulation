@@ -1,33 +1,51 @@
-"""Issue #133: panel vs Helmbold downstream impact quantification.
+"""Pin panel-vs-Helmbold discrepancy quantification (#133)."""
 
-Panel local slope is 2*sin(alpha) (mesh_domain), Helmbold is ~3.27/rad for
-AR=4. Same shape/Re/alpha comparison + naming guard so results are not
-presented as one fidelity. No model change (discrepancy is intentional per
-PHYSICS_MODELS.md §2.1).
-"""
 from __future__ import annotations
 
 import math
 
-from physics.aero_kernel import helmbold_cl_alpha
+import pytest
+
+from physics.model_discrepancy import (
+    discrepancy_report,
+    flight_impact_summary,
+    helmbold_slope_per_rad,
+    panel_slope_per_rad,
+)
 
 
-def _panel_cl(alpha_deg: float) -> float:
-    return 2.0 * math.sin(math.radians(alpha_deg))
+def test_panel_slope_is_2pi():
+    assert panel_slope_per_rad() == pytest.approx(2.0 * math.pi)
 
 
-def _helmbold_cl(alpha_deg: float, ar: float = 4.0, taper: float = 0.7) -> float:
-    return helmbold_cl_alpha(ar, taper) * math.radians(alpha_deg)
+def test_helmbold_default_slope_value():
+    sl = helmbold_slope_per_rad(2.666666666666667, 0.7)
+    assert sl == pytest.approx(2.823, rel=0.01)
 
 
-def test_lift_slope_ratio_quantified() -> None:
-    ratio = helmbold_cl_alpha(4.0, 0.7) / 2.0
-    assert 1.4 < ratio < 1.8
-    # At 10 deg the absolute CL gap is material for trim/flight metrics.
-    assert _helmbold_cl(10.0) > 1.5 * _panel_cl(10.0)
+def test_ratio_is_documented_2p2():
+    rep = discrepancy_report()
+    assert rep.ratio == pytest.approx(2.22, rel=0.02)
+    assert rep.relative_error == pytest.approx(1.22, rel=0.02)
 
 
-def test_models_are_named_distinctly() -> None:
-    # Guard: downstream consumers must not compare raw CL without model name.
-    assert "panel" != "helmbold"
-    assert math.isfinite(_helmbold_cl(10.0))
+def test_trim_alpha_scales_inversely_with_slope():
+    rep = discrepancy_report(reference_cl=0.5)
+    assert rep.trim_alpha_deg_panel == pytest.approx(
+        math.degrees(0.5 / rep.panel_slope_per_rad), rel=1e-9
+    )
+    assert rep.trim_alpha_deg_helmbold == pytest.approx(
+        math.degrees(0.5 / rep.helmbold_slope_per_rad), rel=1e-9
+    )
+    assert rep.trim_alpha_deg_helmbold > rep.trim_alpha_deg_panel
+
+
+def test_flight_impact_summary_consistency():
+    rep = discrepancy_report()
+    out = flight_impact_summary(rep)
+    assert out["lift_ratio_at_same_alpha"] == pytest.approx(rep.ratio)
+    assert out["trim_alpha_ratio_panel_over_helmbold"] == pytest.approx(
+        1.0 / rep.ratio
+    )
+    assert out["rank_inversion_risk"] == pytest.approx(rep.ratio - 1.0)
+    assert out["rank_inversion_risk"] > 1.0  # not interchangeable
