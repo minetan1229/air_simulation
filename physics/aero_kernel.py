@@ -83,6 +83,7 @@ __all__ = [
     "trailing_edge_fold_effects",
     "center_of_pressure_fraction",
     "evaluate_coefficients",
+    "coefficient_buildup_audit",
     "effective_stall_alpha_deg",
     "fused_gpu_state",
     "params_from_config",
@@ -2021,6 +2022,79 @@ def evaluate_coefficients(
         if fused is not None:
             return dict(zip(_COEFFICIENT_KEYS, fused))
     return dict(zip(_COEFFICIENT_KEYS, _coefficient_core(xp, *arguments)))
+
+
+def coefficient_buildup_audit(
+    xp: Any,
+    p: AeroParams,
+    speed: Any = 8.0,
+    reynolds: Any = RE_REFERENCE,
+    mach: Any = 0.0,
+    step_deg: float = 2.0,
+    span_deg: float = 20.0,
+) -> Dict[str, Any]:
+    """Audit of the coefficient buildup (Issue #71).
+
+    Single-domain buildup, not wing/fuselage/tail summation: CL/CD/CM/CY
+    come from one fused core, so downwash shielding and interference are
+    deliberately NOT modelled.  This report makes that limit explicit and
+    checks the properties the summation would have endangered: reference
+    area/chord/span, odd/even symmetry, bounded slopes across stall,
+    envelope validity.
+    """
+    import numpy as _np
+
+    alphas = []
+    value = -span_deg
+    while value <= span_deg + 1e-9:
+        alphas.append(value)
+        value += step_deg
+    alphas = _np.asarray(alphas, dtype=float)
+    coeffs = evaluate_coefficients(
+        xp, p, alpha_deg=alphas, beta_deg=0.0, speed=speed, reynolds=reynolds, mach=mach
+    )
+    cl = _np.asarray(coeffs["cl"], dtype=float).reshape(-1)
+    cd = _np.asarray(coeffs["cd"], dtype=float).reshape(-1)
+    cm = _np.asarray(coeffs["cm"], dtype=float).reshape(-1)
+    finite = bool(
+        _np.all(_np.isfinite(cl)) and _np.all(_np.isfinite(cd)) and _np.all(_np.isfinite(cm))
+    )
+    count = len(alphas)
+    mid = count // 2
+    half = min(mid, count - mid - 1)
+    if half > 0:
+        cl_plus = cl[mid + 1 : mid + 1 + half]
+        cl_minus = cl[mid - 1 :: -1][:half]
+        cd_plus = cd[mid + 1 : mid + 1 + half]
+        cd_minus = cd[mid - 1 :: -1][:half]
+        cl_odd_err = float(_np.max(_np.abs(cl_plus + cl_minus - 2.0 * cl[mid])))
+        cd_even_err = float(_np.max(_np.abs(cd_plus - cd_minus)))
+    else:
+        cl_odd_err = 0.0
+        cd_even_err = 0.0
+    cl_slope = float(_np.max(_np.abs(_np.diff(cl)))) if len(cl) > 1 else 0.0
+    cd_slope = float(_np.max(_np.abs(_np.diff(cd)))) if len(cd) > 1 else 0.0
+    cm_slope = float(_np.max(_np.abs(_np.diff(cm)))) if len(cm) > 1 else 0.0
+    plus = evaluate_coefficients(xp, p, alpha_deg=0.0, beta_deg=10.0, speed=speed, reynolds=reynolds, mach=mach)
+    minus = evaluate_coefficients(xp, p, alpha_deg=0.0, beta_deg=-10.0, speed=speed, reynolds=reynolds, mach=mach)
+    cy_odd_err = abs(float(_np.asarray(plus["cy"]).reshape(-1)[0]) + float(_np.asarray(minus["cy"]).reshape(-1)[0]))
+    clamped = bool(cl_slope < 2.0 and cd_slope < 2.0 and cm_slope < 2.0)
+    validity = evaluate_model_validity(xp, mach, reynolds, 0.0)
+    return {
+        "finite": finite,
+        "cl_odd_err": cl_odd_err,
+        "cd_even_err": cd_even_err,
+        "cl_slope_max": cl_slope,
+        "cd_slope_max": cd_slope,
+        "cm_slope_max": cm_slope,
+        "cy_odd_err": float(cy_odd_err),
+        "clamped": clamped,
+        "envelope_valid": bool(_np.asarray(validity["valid"]).reshape(-1)[0]),
+        "interference_modelled": False,
+        "interference_note": "single-domain buildup; downwash/shielding between wing/fuselage/tail NOT modelled",
+        "reference_area_m2": float(_np.asarray(p.area).reshape(-1)[0]),
+        "reference_chord_m": float(_np.asarray(p.chord).reshape(-1)[0]),
+    }
 
 
 # --------------------------------------------------------------------------
