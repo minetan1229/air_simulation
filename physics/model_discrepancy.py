@@ -83,15 +83,22 @@ def discrepancy_report(
 def flight_impact_summary(report: ModelDiscrepancyReport) -> dict[str, float]:
     """First-order downstream impact estimates (linear, small-alpha).
 
-    Trim alpha scales as 1/slope, lift at fixed alpha scales as slope,
-    induced drag scales as C_L^2/(pi AR e) — downstream metrics shift
-    by the slope ratio to leading order.
+    At the same alpha the lift ratio equals the slope ratio.  At the
+    same trim C_L (level flight) the required C_L is slope-independent,
+    so the induced-drag ratio at same C_L is 1.0 and the trim-alpha
+    ratio is 1/ratio.  The flight-distance ratio is regime-dependent:
+    parasite-dominated ~ ratio and induced-dominated ~ 1/ratio.  We
+    therefore report the trim-C_L regime (1.0) as the primary value and
+    the induced-dominated bound explicitly.
     """
     ratio = report.ratio
     return {
         "lift_ratio_at_same_alpha": ratio,
         "trim_alpha_ratio_panel_over_helmbold": 1.0 / ratio,
         "induced_drag_ratio_at_same_cl": 1.0,
-        "flight_distance_ratio_to_first_order": 1.0 / ratio,
+        # Trim regime: same C_L -> same induced drag -> 1.0 (not 1/ratio).
+        "flight_distance_ratio_at_same_trim_cl": 1.0,
+        # Induced-dominated bound (fixed-alpha, drag = k C_L^2):
+        "flight_distance_ratio_induced_bound": 1.0 / ratio,
         "rank_inversion_risk": ratio - 1.0,  # 0 would mean interchangeable
     }

@@ -47,5 +47,30 @@ def test_flight_impact_summary_consistency():
     assert out["trim_alpha_ratio_panel_over_helmbold"] == pytest.approx(
         1.0 / rep.ratio
     )
+    assert out["induced_drag_ratio_at_same_cl"] == pytest.approx(1.0)
+    # Trim regime: same C_L -> same induced drag -> distance ratio 1.0.
+    assert out["flight_distance_ratio_at_same_trim_cl"] == pytest.approx(1.0)
+    # Induced-dominated bound is the other regime.
+    assert out["flight_distance_ratio_induced_bound"] == pytest.approx(
+        1.0 / rep.ratio
+    )
     assert out["rank_inversion_risk"] == pytest.approx(rep.ratio - 1.0)
     assert out["rank_inversion_risk"] > 1.0  # not interchangeable
+
+
+def test_helmbold_wrapper_delegates_to_canonical():
+    """Wrapper must equal the canonical aero_domain implementation (not a copy)."""
+    from physics.aero_domain import helmbold_cl_alpha
+
+    for ar, lam in [(2.67, 0.7), (4.0, 1.0), (1.0, 0.0), (3.5, 0.5)]:
+        assert helmbold_slope_per_rad(ar, lam) == pytest.approx(
+            helmbold_cl_alpha(ar, lam), rel=1e-12
+        )
+
+
+def test_guidance_tracks_aspect_ratio():
+    rep_default = discrepancy_report()
+    rep_wide = discrepancy_report(aspect_ratio=4.0, taper_ratio=1.0)
+    assert "4.00" in rep_wide.guidance
+    assert f"{rep_wide.ratio:.2f}" in rep_wide.guidance
+    assert f"{rep_default.ratio:.2f}" in rep_default.guidance
