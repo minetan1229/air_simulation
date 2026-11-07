@@ -1126,10 +1126,13 @@ class EvolutionRunner:
         config.mass_kg = max(mass, 1.0e-9)
         config.sheet_area_m2 = max(area, 1.0e-6)
         config.paper_gsm = self.paper_gsm
-        inertia = mass * span * span / 12.0
-        config.roll_inertia_kgm2 = max(inertia, 1.0e-12)
-        config.pitch_inertia_kgm2 = max(inertia, 1.0e-12)
-        config.yaw_inertia_kgm2 = max(inertia, 1.0e-12)
+        chord = area / max(span, 1.0e-3)
+        ixx = mass * span * span / 12.0
+        iyy = mass * chord * chord / 12.0
+        izz = ixx + iyy
+        config.roll_inertia_kgm2 = max(ixx, 1.0e-12)
+        config.pitch_inertia_kgm2 = max(iyy, 1.0e-12)
+        config.yaw_inertia_kgm2 = max(izz, 1.0e-12)
         return config
 
     def _exact_geometry(self, genome: HybridGenome) -> Optional[Any]:
