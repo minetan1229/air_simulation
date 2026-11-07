@@ -81,7 +81,7 @@ class TestCantileverBeamTheoryLinearity:
         # Use odd spanwise resolution (25) so centre column is exactly the root (y_signed=0)
         field = sd.stress_field(base_config, dynamic_pressure_pa=q, load_factor=nz, spanwise=25, chordwise=17)
         raw_moment = field["wing_root_moment_nm"]
-        
+
         # Calculate flat-sheet Z at root
         t = base_config.paper_gsm / (sd.PAPER_THICKNESS_DENOMINATOR * 1000.0)
         c_root = sd.root_chord_batch(
@@ -90,14 +90,14 @@ class TestCantileverBeamTheoryLinearity:
         stiffness = sd.effective_paper_stiffness(base_config)
         z_gain = sd.Z_SCALE_OFFSET + sd.Z_SCALE_GAIN * stiffness
         z_raw = c_root * (t**2) * z_gain / 6.0
-        
+
         # Theoretical raw Euler-Bernoulli beam stress (order ~10^7 Pa = tens of MPa)
         sigma_raw = raw_moment / z_raw
         assert sigma_raw > 1.0e6  # Raw flat-sheet beam stress is on the order of 10-100 MPa
-        
+
         # Empirical scaled stress reported by stress_domain
         expected_scaled_stress = sd.KAPPA_SIGMA * sigma_raw
-        
+
         # peak_root_stress_pa should match KAPPA_SIGMA * M / Z
         peak_stress = sd.peak_root_stress_pa(
             np,
@@ -123,7 +123,7 @@ class TestCantileverBeamTheoryLinearity:
         for nz in loads:
             field = sd.stress_field(base_config, dynamic_pressure_pa=20.0, load_factor=nz)
             stresses.append(field["max_stress_pa"])
-        
+
         # Check linearity: stress / nz == constant
         ratios = [s / nz for s, nz in zip(stresses, loads)]
         for r in ratios[1:]:
@@ -156,16 +156,16 @@ class TestStressScaleAndFailureThresholdMapping:
         field = sd.stress_field(cfg, dynamic_pressure_pa=25.0, load_factor=1.0)
         max_stress = field["max_stress_pa"]
         allowable = field["allowable_stress_pa"]
-        
+
         # Absolute scaled stress is in the 100 - 3000 Pa range
         assert 50.0 <= max_stress <= 5000.0
         assert 500.0 <= allowable <= 5000.0
-        
+
         # Contrast with raw physical tensile strength of cellulose paper (20 to 40 MPa)
         cellulose_tensile_min_pa = 20.0e6
         cellulose_tensile_max_pa = 40.0e6
         assert max_stress < 0.001 * cellulose_tensile_min_pa
-        
+
         # Ratio of raw unscaled beam stress to cellulose tensile strength is order unity
         raw_beam_stress = max_stress / sd.KAPPA_SIGMA
         assert 0.1 * cellulose_tensile_min_pa <= raw_beam_stress <= 10.0 * cellulose_tensile_max_pa
@@ -204,10 +204,10 @@ class TestMonotonicityAndIndividualRankingInvariance:
             sd.stress_field(cfg, dynamic_pressure_pa=25.0, load_factor=1.5)["max_stress_pa"]
             for cfg in population
         ]
-        
+
         # Ranking of population under nominal KAPPA_SIGMA
         ranking_nominal = np.argsort(stresses_nominal)
-        
+
         # Simulate different arbitrary scaling factors on KAPPA_SIGMA
         for scale in [0.1, 0.5, 2.0, 10.0]:
             stresses_scaled = [s * scale for s in stresses_nominal]
@@ -235,7 +235,7 @@ class TestMonotonicityAndIndividualRankingInvariance:
             paper_stiffness=0.4,
         )
         allowable = sd.paper_allowable_stress(cfg.paper_gsm, cfg.paper_stiffness)
-        
+
         # Find nz values corresponding to index < 0.6, 0.6 <= index < 1.0, and index >= 1.0
         # First sample at nz = 0.5
         field_low = sd.stress_field(cfg, dynamic_pressure_pa=10.0, load_factor=0.5)
@@ -243,17 +243,17 @@ class TestMonotonicityAndIndividualRankingInvariance:
         base_stress = field_low["max_stress_pa"] / 0.5
         nz_high_load = (0.7 * allowable) / base_stress
         nz_failed = (1.2 * allowable) / base_stress
-        
+
         field_ok = sd.stress_field(cfg, dynamic_pressure_pa=10.0, load_factor=0.3)
         field_hl = sd.stress_field(cfg, dynamic_pressure_pa=10.0, load_factor=nz_high_load)
         field_fl = sd.stress_field(cfg, dynamic_pressure_pa=10.0, load_factor=nz_failed)
-        
+
         assert field_ok["status"] == sd.STATUS_OK
         assert field_ok["failure_index"] < sd.STATUS_HIGH_LOAD_THRESHOLD
-        
+
         assert field_hl["status"] == sd.STATUS_HIGH_LOAD
         assert sd.STATUS_HIGH_LOAD_THRESHOLD <= field_hl["failure_index"] < sd.STATUS_FAILED_THRESHOLD
-        
+
         assert field_fl["status"] == sd.STATUS_FAILED
         assert field_fl["failure_index"] >= sd.STATUS_FAILED_THRESHOLD
 
@@ -272,7 +272,7 @@ class TestOptimizerObjectiveCoupling:
                 weights={"min_max_stress": 1.0},
             )
             scores.append(score)
-        
+
         # Because direction is -1 (minimize stress), higher stress index gives lower score
         for i in range(len(scores) - 1):
             assert scores[i + 1] < scores[i]
