@@ -671,6 +671,7 @@ def compute_added_mass(
         m_added_z = (pi / 4) * rho * S * mac
         I_added_yy = (pi / 128) * rho * S * mac^3
         I_added_xx = (pi / 48) * rho * b^3 * mac^2
+        I_added_zz = (pi / 128) * rho * h_keel * mac^4  # [kg m^2]
     """
     rho = xp.maximum(_finite(xp, density_kgm3, 1.225), 0.0)
     s = xp.maximum(_finite(xp, wing_area_m2, 0.02), 0.0)

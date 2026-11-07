@@ -176,7 +176,7 @@ def meta_physics_references():
             "aerosandbox_reference": "aerosandbox.aerodynamics.buildup (apparent mass / added inertia extensions)",
             "domain": "aerodynamics",
             "model": "Blevins-Newman Thin Planar Wing Added Mass and Inertia Tensor",
-            "equation": "m_add_z = (pi/4)*rho*S*c, I_add_yy = (pi/128)*rho*S*c^3, I_add_xx = (pi/48)*rho*b^3*c^2",
+            "equation": "m_add_z = (pi/4)*rho*S*c, I_add_yy = (pi/128)*rho*S*c^3, I_add_xx = (pi/48)*rho*b^3*c^2, I_add_zz = (pi/128)*rho*h_keel*c^4",
             "authors": "Blevins, R. D. / Newman, J. N.",
             "year": 1979,
             "title": "Formulas for Natural Frequency and Mode Shape / Marine Hydrodynamics",

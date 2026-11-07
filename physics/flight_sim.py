@@ -2685,6 +2685,8 @@ class FlightSimulator:
         if apparent_active:
             # Effective mass/inertia only (Issue #131): the former explicit
             # Coriolis/Munk external forces (compute_apparent_forces) did net
+            # Added yaw inertia follows vertical fin strip model with exact [kg m^2] units:
+            # I_add_zz = (pi / 128) * rho * h_keel * mac^4.
             # positive body work (F_app.v + M_app.w > 0, ~60% of aero
             # dissipation) and injected mechanical energy. Keep m_eff/J_eff,
             # which attenuate acceleration passively; coupling is documented
