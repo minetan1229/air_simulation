@@ -928,17 +928,59 @@ def fold_genome(
 
     tensor = [[0.0, 0.0, 0.0], [0.0, 0.0, 0.0], [0.0, 0.0, 0.0]]
     for face in faces:
-        weight = areal_density * face.area_m2
-        dx = face.centroid3d[0] - cx
-        dy = face.centroid3d[1] - cy
-        dz = face.centroid3d[2] - cz
-        r2 = dx * dx + dy * dy + dz * dz
-        tensor[0][0] += weight * (r2 - dx * dx)
-        tensor[1][1] += weight * (r2 - dy * dy)
-        tensor[2][2] += weight * (r2 - dz * dz)
-        tensor[0][1] -= weight * dx * dy
-        tensor[0][2] -= weight * dx * dz
-        tensor[1][2] -= weight * dy * dz
+        poly = face.poly3d
+        n_pts = len(poly)
+        if n_pts < 3:
+            continue
+        p0 = poly[0]
+        for k in range(1, n_pts - 1):
+            p1 = poly[k]
+            p2 = poly[k + 1]
+            v10 = (p1[0] - p0[0], p1[1] - p0[1], p1[2] - p0[2])
+            v20 = (p2[0] - p0[0], p2[1] - p0[1], p2[2] - p0[2])
+            cross_x = v10[1] * v20[2] - v10[2] * v20[1]
+            cross_y = v10[2] * v20[0] - v10[0] * v20[2]
+            cross_z = v10[0] * v20[1] - v10[1] * v20[0]
+            tri_area = 0.5 * math.sqrt(cross_x * cross_x + cross_y * cross_y + cross_z * cross_z)
+            if tri_area <= 1.0e-12:
+                continue
+            tri_mass = areal_density * tri_area
+            tc_x = (p0[0] + p1[0] + p2[0]) / 3.0
+            tc_y = (p0[1] + p1[1] + p2[1]) / 3.0
+            tc_z = (p0[2] + p1[2] + p2[2]) / 3.0
+
+            pts = (p0, p1, p2)
+            dp = [
+                (pts[0][0] - tc_x, pts[0][1] - tc_y, pts[0][2] - tc_z),
+                (pts[1][0] - tc_x, pts[1][1] - tc_y, pts[1][2] - tc_z),
+                (pts[2][0] - tc_x, pts[2][1] - tc_y, pts[2][2] - tc_z),
+            ]
+            m_xx = (tri_mass / 12.0) * sum(d[0] * d[0] for d in dp)
+            m_yy = (tri_mass / 12.0) * sum(d[1] * d[1] for d in dp)
+            m_zz = (tri_mass / 12.0) * sum(d[2] * d[2] for d in dp)
+            m_xy = (tri_mass / 12.0) * sum(d[0] * d[1] for d in dp)
+            m_xz = (tri_mass / 12.0) * sum(d[0] * d[2] for d in dp)
+            m_yz = (tri_mass / 12.0) * sum(d[1] * d[2] for d in dp)
+
+            tr_m = m_xx + m_yy + m_zz
+            i_loc_xx = tr_m - m_xx
+            i_loc_yy = tr_m - m_yy
+            i_loc_zz = tr_m - m_zz
+            i_loc_xy = -m_xy
+            i_loc_xz = -m_xz
+            i_loc_yz = -m_yz
+
+            dx = tc_x - cx
+            dy = tc_y - cy
+            dz = tc_z - cz
+            r2 = dx * dx + dy * dy + dz * dz
+
+            tensor[0][0] += i_loc_xx + tri_mass * (r2 - dx * dx)
+            tensor[1][1] += i_loc_yy + tri_mass * (r2 - dy * dy)
+            tensor[2][2] += i_loc_zz + tri_mass * (r2 - dz * dz)
+            tensor[0][1] += i_loc_xy - tri_mass * (dx * dy)
+            tensor[0][2] += i_loc_xz - tri_mass * (dx * dz)
+            tensor[1][2] += i_loc_yz - tri_mass * (dy * dz)
     tensor[1][0] = tensor[0][1]
     tensor[2][0] = tensor[0][2]
     tensor[2][1] = tensor[1][2]
