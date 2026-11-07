@@ -42,11 +42,17 @@ from physics.origami_genome import (  # noqa: E402
 
 def test_the_three_archetypes_are_available() -> None:
     genomes = archetype_hybrid_genomes()
-    assert [genome.key for genome in genomes] == [
-        "classic_dart",
-        "nakamura_lock",
-        "sky_king",
-    ]
+    keys = [genome.key for genome in genomes]
+    # Issue #89: the three known-good designs plus the new mutable
+    # lineages (baseline, few-fold, wide wing, asymmetric, glider).
+    assert keys[:3] == ["classic_dart", "nakamura_lock", "sky_king"]
+    assert set(keys[3:]) == {
+        "baseline_flat",
+        "few_fold",
+        "wide_wing",
+        "asymmetric",
+        "glider",
+    }
 
 
 @pytest.mark.parametrize("key", ["classic_dart", "nakamura_lock", "sky_king"])

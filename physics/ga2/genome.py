@@ -58,17 +58,18 @@ __all__ = [
     "hybrid_to_origami",
     "hybrid_from_origami",
     "archetype_hybrid_genomes",
-    "baseline_genome",
     "seed_population",
     "hybrid_signature",
+    "LINEAGE_KEYS",
+    "baseline_genome",
+    "lineage_of",
 ]
 
 #: The symmetry modes a fold may carry.
 SYMMETRY_MODES: Tuple[str, ...] = ("symmetric", "left", "right")
 
-#: The shortest programme the search allows. Zero allows the unfolded sheet
-#: as a baseline individual (Issue #87); 0/1/2-fold programmes are then
-#: judged by geometry, not by step count.
+#: The shortest programme the search allows. Zero = unfolded baseline
+#: (Issues #87/#89); 0/1/2-fold programmes are judged by geometry.
 MIN_FOLD_STEPS = 0
 
 #: The longest programme the search allows. Raised to cover the
@@ -77,7 +78,19 @@ MIN_FOLD_STEPS = 0
 MAX_FOLD_STEPS = 15
 
 #: The archetypes that seed the initial population.
-ARCHETYPE_KEYS: Tuple[str, ...] = ("classic_dart", "nakamura_lock", "sky_king")
+ARCHETYPE_KEYS: Tuple[str, ...] = (
+    "classic_dart",
+    "nakamura_lock",
+    "sky_king",
+    "baseline_flat",
+    "few_fold",
+    "wide_wing",
+    "asymmetric",
+    "glider",
+)
+
+#: The lineage families a seed belongs to. ``free`` is open exploration.
+LINEAGE_KEYS: Tuple[str, ...] = ARCHETYPE_KEYS + ("free",)
 
 #: The shortest crease a gene may describe, as a fraction of the distance
 #: from its start point to the edge of the sheet.
@@ -769,9 +782,11 @@ def archetype_hybrid_genomes(
 ) -> List[HybridGenome]:
     """The known good indoor designs of the specification.
 
-    The classic dart, the Nakamura lock (the "heso" glider) and the Sky King
-    competition glider are the three designs a human would try first; they
-    are the warm start of the search.
+    The classic dart, the Nakamura lock ("heso" glider) and the Sky King
+    glider are the known-good designs.  The remaining families are mutable
+    starting programmes (Issue #89): baseline, few-fold, wide-wing,
+    asymmetric and glider.  Free random programmes keep the open lineage
+    (``free``) in parallel.
 
     These hand designs naturally use 11 to 14 creases, which exceeds
     :data:`MAX_FOLD_STEPS`.  To keep the step-count rule consistent across the
@@ -783,6 +798,33 @@ def archetype_hybrid_genomes(
     """
     genomes: List[HybridGenome] = []
     for key in ARCHETYPE_KEYS:
+        if key == "baseline_flat":
+            genome = HybridGenome(genes=[], key=key, label=f"archetype {key}", seed=0, meta={"archetype": key, "lineage": key, "seeded": True, "step_count": 0})
+            genomes.append(genome)
+            continue
+        if key == "few_fold":
+            base = random_hybrid_genome(random.Random(41), min_steps=min(2, max_steps), max_steps=min(max_steps, 2))
+            if base.step_count > max_steps:
+                base.genes = base.genes[:max_steps]
+                base.meta = {**base.meta, "clamped_to_max_steps": True, "original_step_count": 2}
+            base.key, base.label = key, f"archetype {key}"
+            base.meta = {**base.meta, "archetype": key, "lineage": key, "seeded": True}
+            genomes.append(base)
+            continue
+        if key in ("wide_wing", "asymmetric", "glider"):
+            family = {"wide_wing": "families", "asymmetric": "free", "glider": "families"}[key]
+            low, high = min(5, max_steps), min(7, max_steps)
+            forced = random_hybrid_genome(
+                random.Random({"wide_wing": 42, "asymmetric": 43, "glider": 44}[key]),
+                min_steps=low, max_steps=high, strategy=family,
+            )
+            if forced.step_count > max_steps:
+                forced.genes = forced.genes[:max_steps]
+                forced.meta = {**forced.meta, "clamped_to_max_steps": True, "original_step_count": 5}
+            forced.key, forced.label = key, f"archetype {key}"
+            forced.meta = {**forced.meta, "archetype": key, "lineage": key, "seeded": True}
+            genomes.append(forced)
+            continue
         try:
             source = origami_genome.genome_from_archetype(key)
         except Exception:  # pragma: no cover - depends on the engine
@@ -794,12 +836,13 @@ def archetype_hybrid_genomes(
             genome.meta = {
                 **genome.meta,
                 "archetype": key,
+                "lineage": key,
                 "seeded": True,
                 "clamped_to_max_steps": True,
                 "original_step_count": original,
             }
         else:
-            genome.meta = {**genome.meta, "archetype": key, "seeded": True}
+            genome.meta = {**genome.meta, "archetype": key, "lineage": key, "seeded": True}
         genome.key = key
         genome.label = f"archetype {key}"
         genomes.append(genome)
@@ -833,7 +876,7 @@ def hybrid_signature(genome: HybridGenome) -> str:
 
 
 def baseline_genome() -> HybridGenome:
-    """The unfolded sheet as an explicit baseline individual (Issue #87).
+    """The unfolded sheet as an explicit baseline individual.
 
     Carries no fold genes.  It is stored, converted and evaluated exactly
     like any other genome: ``hybrid_to_origami`` yields an empty programme
@@ -841,13 +884,23 @@ def baseline_genome() -> HybridGenome:
     wing area / span / stack, so a baseline that is not a flyable aeroplane
     is rejected for a physical reason, not for having zero steps.
     """
-    return HybridGenome(
-        genes=[],
-        key="baseline",
-        label="unfolded sheet baseline",
-        seed=0,
-        meta={"origin": "baseline", "step_count": 0},
-    )
+    return HybridGenome(genes=[], key="baseline", label="unfolded sheet baseline", seed=0, meta={"origin": "baseline", "archetype": "baseline_flat", "lineage": "baseline_flat", "step_count": 0})
+
+
+def lineage_of(genome: HybridGenome) -> str:
+    """The lineage family a seed belongs to (Issue #89)."""
+    meta = genome.meta or {}
+    for name in ("lineage", "archetype", "parent"):
+        value = str(meta.get(name, "") or "")
+        if value in LINEAGE_KEYS:
+            return value
+    key = str(genome.key or "")
+    for candidate in ARCHETYPE_KEYS:
+        if candidate in key:
+            return candidate
+    if key == "baseline":
+        return "baseline_flat"
+    return "free"
 
 
 def seed_population(
@@ -861,11 +914,9 @@ def seed_population(
 ) -> List[HybridGenome]:
     """Build the warm start population of a generation.
 
-    Two percent of the individuals are the known good designs, eight percent
-    are mutations of them and the remaining ninety percent are random
-    programmes.  The random programmes are *not* filtered here: the geometry
-    filter of stage 0 does that, and it is the only place where the filter
-    is allowed to spend time.
+    Two percent are the known-good designs (cycled over ARCHETYPE_KEYS),
+    eight percent are mutations of them and the remaining ninety percent
+    are random programmes in the free lineage.
     """
     rng = rng or random.Random()
     total = max(1, int(size))
@@ -882,22 +933,22 @@ def seed_population(
             key=f"archetype:{base.key}",
             label=f"archetype {base.key}",
             seed=rng.randrange(1 << 30),
-            meta={**base.meta, "origin": "archetype"},
+            meta={**base.meta, "origin": "archetype", "lineage": base.meta.get("lineage", base.key)},
         )
         population.append(genome)
     for index in range(mutant_count):
         base = archetypes[index % len(archetypes)] if archetypes else random_hybrid_genome(rng)
         mutant = mutate_hybrid(base, rng, rate=0.3, max_steps=max_steps, min_steps=min_steps)
         mutant.key = f"mutant:{base.key}"
-        mutant.meta = {**mutant.meta, "origin": "mutant", "parent": base.key}
+        mutant.meta = {**mutant.meta, "origin": "mutant", "parent": base.key, "lineage": base.meta.get("lineage", base.key)}
         population.append(mutant)
     for _ in range(random_count):
-        population.append(
-            random_hybrid_genome(
-                rng,
-                min_steps=min_steps,
-                max_steps=max_steps,
-                strategy=strategy,
-            )
+        genome = random_hybrid_genome(
+            rng,
+            min_steps=min_steps,
+            max_steps=max_steps,
+            strategy=strategy,
         )
+        genome.meta = {**genome.meta, "lineage": "free"}
+        population.append(genome)
     return population
