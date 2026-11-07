@@ -3085,6 +3085,17 @@ class FlightSimulator:
             construction, so the cartwheel produced by a wingtip strike
             emerges from the geometry and scales with the impact energy
             instead of being injected as a constant angular rate.
+
+            Friction uses an effective mass along the tangential direction
+            ``t``: ``lever_t = r x t`` and
+            ``m_eff_t = 1/(1/m + lever_t . I^-1 . lever_t)``.  The tangential
+            impulse magnitude is ``j_t = min(mu*|J_n|, m_eff_t*|v_t|)``,
+            which analytically zeroes the contact-point tangential relative
+            speed under Coulomb saturation (``j_t = m_eff_t*|v_t|``) and is
+            otherwise limited by the Coulomb cone.  Using the normal-direction
+            ``m_eff`` for the tangential impulse under/over-brakes off-centre
+            contacts whose geometry makes tangential compliance differ from
+            normal compliance.
             """
             nonlocal velocity, rates
             r_world = body_to_world(state.quaternion, r_body)
@@ -3101,8 +3112,12 @@ class FlightSimulator:
             tangential = v_point - v_normal * normal
             tangential_speed = float(np.linalg.norm(tangential))
             if tangential_speed > 1.0e-9:
-                j_t = min(mu * abs(j_normal), m_eff * tangential_speed)
-                impulse = impulse - j_t * (tangential / tangential_speed)
+                t_dir = tangential / tangential_speed
+                lever_t = np.cross(r_world, t_dir)
+                inv_term_t = 1.0 / mass + float(lever_t @ (inertia_inv @ lever_t))
+                m_eff_t = 1.0 / max(inv_term_t, 1.0e-18)
+                j_t = min(mu * abs(j_normal), m_eff_t * tangential_speed)
+                impulse = impulse - j_t * t_dir
             velocity = velocity + impulse / mass
             rates = rates + inertia_inv @ np.cross(r_world, impulse)
             return abs(j_normal)
