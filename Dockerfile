@@ -24,10 +24,15 @@ COPY --from=builder /root/.local /home/appuser/.local
 # Copy application source code
 COPY --chown=appuser:appuser . /app
 
+# Ensure appuser's Python finds the copied user-site packages.
+# USER_BASE matches the builder's pip --user target (/root/.local) which is
+# copied above; USER_SITE is derived by site.py from USER_BASE + version.
 ENV PATH=/home/appuser/.local/bin:$PATH \
     PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
-    ENV=production
+    ENV=production \
+    HOME=/app \
+    PYTHONUSERBASE=/home/appuser/.local
 
 USER appuser
 
