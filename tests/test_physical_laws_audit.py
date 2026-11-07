@@ -303,6 +303,7 @@ def test_vacuum_ballistic_flight_matches_exact_parabola(launch_angle_deg):
         post_stall_slope=0.0,
         stall_alpha_deg=89.0,
         elevon_deg=0.0,
+        fold_trailing_deg=0.0,
         cy_beta=0.0,
         cl_beta=0.0,
         cn_beta=0.0,
