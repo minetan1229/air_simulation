@@ -389,6 +389,7 @@ class FlightParams:
     inertia_inv: Any = None
     sample_wind_stages: bool = False
     apparent_active: Any = None
+    has_apparent: bool = False
 
 
 def wind_batch(
@@ -613,6 +614,14 @@ def build_params(
             )
             for cfg in configs
         ]),
+        has_apparent=any(
+            bool(
+                getattr(cfg, "added_mass_enabled", False)
+                or getattr(cfg, "apparent_inertia_enabled", False)
+                or getattr(cfg, "fidelity_mode", "standard") in ("improved_medium", "multifidelity")
+            )
+            for cfg in configs
+        ),
     )
 
 
@@ -745,7 +754,7 @@ def _evaluate_state(
         coefficients["lift_n"],
     )
 
-    has_apparent = getattr(params, "apparent_active", None) is not None and bool(params.apparent_active.any())
+    has_apparent = bool(getattr(params, "has_apparent", False))
     if has_apparent:
         added = aero_kernel.compute_added_mass(
             xp, air["density_kgm3"], params.area, params.chord, wingspan_m=params.span

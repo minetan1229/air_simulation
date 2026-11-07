@@ -419,7 +419,7 @@ class BatchScreener:
         steps = max(1, min(self.max_steps, nominal_steps * 3))
 
         launch_core = gpu_dynamics._evaluate_state(xp, params, y, wind)
-        _seed_accumulators(xp, acc, launch_core, params)
+        _seed_accumulators(xp, acc, launch_core, params, y)
 
         step = _make_step(xp, params, y, wind, acc, duration, self.dt_max)
         graph = self._capture(count, steps, step)
@@ -617,11 +617,12 @@ def _new_accumulators(xp: Any, count: int) -> Dict[str, Any]:
         "stability": xp.zeros(count, dtype=xp.float64),
         "landed": xp.zeros(count, dtype=bool),
         "crashed": xp.zeros(count, dtype=bool),
+        "min_alt_prev": xp.zeros(count, dtype=xp.float64),
     }
 
 
 def _seed_accumulators(
-    xp: Any, acc: Dict[str, Any], core: Dict[str, Any], params: Any
+    xp: Any, acc: Dict[str, Any], core: Dict[str, Any], params: Any, y: Any
 ) -> None:
     """Seed the summary with the launch state."""
     acc["allowable"] = params.allowable_pa
@@ -638,6 +639,7 @@ def _seed_accumulators(
     acc["trim_altitude"][...] = xp.where(better, core["altitude"], acc["trim_altitude"])
     acc["trim_cl"][...] = xp.where(better, core["cl"], acc["trim_cl"])
     acc["trim_cd"][...] = xp.where(better, core["cd"], acc["trim_cd"])
+    acc["min_alt_prev"][...] = gpu_dynamics._ground_stations(xp, params, y)["min_alt"]
 
 
 def _stress(xp: Any, core: Dict[str, Any], params: Any) -> Any:
@@ -776,8 +778,33 @@ def _make_step(
         acc["flight_time"][...] = xp.where(active, acc["time"], acc["flight_time"])
 
         stations = gpu_dynamics._ground_stations(xp, params, y_next)
-        touching = stations["min_alt"] <= 0.0
-        impact_speed = xp.maximum(y_next[:, 5], 0.0)
+        min_alt_next = stations["min_alt"]
+        touching = min_alt_next <= 0.0
+
+        # Continuous Collision Detection (CCD, Issue #80):
+        # Detect ground crossing within the step interval [y, y_next] and interpolate contact
+        min_alt_prev = acc["min_alt_prev"]
+        crossing = touching & (min_alt_prev > 0.0)
+        span_alt = min_alt_prev - min_alt_next
+        safe_span = xp.where(span_alt > 1.0e-12, span_alt, xp.ones_like(span_alt))
+        tau = xp.where(
+            crossing,
+            xp.clip(min_alt_prev / safe_span, 0.0, 1.0),
+            xp.where(touching, 0.0, 1.0),
+        )
+
+        # Interpolate contact state and flight time
+        dt_impact = tau * size
+        impact_time = acc["time"] + dt_impact
+        acc["flight_time"][...] = xp.where(
+            active & touching,
+            impact_time,
+            acc["flight_time"],
+        )
+
+        # Contact vertical speed
+        vz_contact = (1.0 - tau) * y[:, 5] + tau * y_next[:, 5]
+        impact_speed = xp.maximum(vz_contact, 0.0)
         impact_g = 1.0 + impact_speed * impact_speed / (
             2.0 * params.gravity * _IMPACT_DISTANCE_M
         )
@@ -800,8 +827,11 @@ def _make_step(
             (impact_index >= 1.0)
             | (impact_speed > gpu_dynamics.CRASH_IMPACT_SPEED_MPS)
         )
-        acc["landed"] |= touching & ~failed
-        acc["crashed"] |= failed
+        acc["landed"] |= active & touching & ~failed
+        acc["crashed"] |= active & failed
+
+        # Update min_alt_prev for next step
+        acc["min_alt_prev"][...] = min_alt_next
         y[...] = xp.where(active[:, xp.newaxis], y_next, y)
 
     return step
