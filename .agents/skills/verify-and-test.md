@@ -5,11 +5,11 @@
 ## Procedure (最小手順)
 ### 1. 段階的ローカル検証（順次全件パス確認）
 ```bash
-python -m compileall physics api tools app.py smoke_test.py
+python -m compileall physics api tools app.py scripts/smoke_test.py
 ruff check .
-mypy physics api app.py smoke_test.py
+mypy physics api app.py scripts/smoke_test.py
 python -m pytest tests -q
-python smoke_test.py
+python scripts/smoke_test.py
 ```
 ### 2. Git & CI 運用
 - ブランチ: `git checkout -b <type>/<desc>` (`feat/`, `fix/`, `docs/`, `test/`等)

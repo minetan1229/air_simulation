@@ -43,7 +43,7 @@
   - *Zero-Placeholder*: `TODO`・`...`・空関数等の省略完全禁止。実動コードのみ記述。
   - *Single Committer*: サブエージェント委譲時もリポジトリ変更・コミットは親に一元化（`.agents/skills/subagent-delegation.md`）。
   - *Subagent Cap*: 稼働サブエージェントは最大4（監視1必須・実務3）。上限超過の委譲は拒否する。
-  - *Branch Isolation*: `genetic-project` 開発フェーズ（自律進化研究システム構築中）では `master`/`main` へのコミット・マージ・チェリーピック・PR作成を**厳禁**。`tools/branch_guard.py` が保護ブランチ実行を停止し、テストスイート（`conftest.py`）/ `app.py` / `smoke_test.py` に組み込み済み（`PAPER_AIRCRAFT_BRANCH_GUARD=warn|off` で緩和可）。
+  - *Branch Isolation*: `genetic-project` 開発フェーズ（自律進化研究システム構築中）では `master`/`main` へのコミット・マージ・チェリーピック・PR作成を**厳禁**。`tools/branch_guard.py` が保護ブランチ実行を停止し、テストスイート（`conftest.py`）/ `app.py` / `scripts/smoke_test.py` に組み込み済み（`PAPER_AIRCRAFT_BRANCH_GUARD=warn|off` で緩和可）。
   - *Mission Branch Mandatory*: **すべてのミッションは開始前に専用ブランチを作成し、そのブランチ上で取り組むこと**。着手時に `mission/<slug>`（Issue番号がある場合は `mission/<slug>-<issue番号>`）を切り替え、ブランチ作成なしの作業・`master`/`main` への直接コミットを禁止。ミッション完了時のみマージする。
   - *Git & Discord*: ブランチ運用、フェーズ毎通知（`.agents/skills/notify-webhook.md`）。
 - **Critical Traps（詳細・回避策は `.agents/Knowledge.md` 参照）**:
@@ -73,8 +73,8 @@
 ## 4. コマンド早見（常駐）
 | 目的 | コマンド / 手順正本 |
 |---|---|
-| 構文 / 静的解析・型 | `python -m compileall physics api tools app.py smoke_test.py` / `ruff check .` / `mypy physics api app.py smoke_test.py` |
-| 単体・監査 / E2E | `python -m pytest tests -q` / `python smoke_test.py`（詳細: `.agents/skills/verify-and-test.md`） |
+| 構文 / 静的解析・型 | `python -m compileall physics api tools app.py scripts/smoke_test.py` / `ruff check .` / `mypy physics api app.py scripts/smoke_test.py` |
+| 単体・監査 / E2E | `python -m pytest tests -q` / `python scripts/smoke_test.py`（詳細: `.agents/skills/verify-and-test.md`） |
 | Discord通知 | `python tools/notify_discord.py <status> "<title>" "<summary>"`（詳細: `.agents/skills/notify-webhook.md`） |
 | Discordブリッジ / クォータ / 監視 | `python tools/discord_bridge.py` / 応答チャンネル `!quota` `!monitor` `!backend` `!model`（正本: `.agents/skills/discord-bridge-routing.md`） |
 | MCP確認 / 呼出 | `python tools/verify_mcp_servers.py` / `python tools/mcp_call.py <server> <tool> --arg k=v` |

@@ -17,7 +17,7 @@ AIエージェントは作業着手前に必ず本ファイルを参照し、プ
 - `api/`: シミュレーション実行・データ送出を行うバックエンドAPI
 - `tools/`: 運用保守、ブランチ監視、プロセス衛生管理、Discord連携スクリプト群
 - `app.py`: アプリケーション起動エントリポイント
-- `smoke_test.py`: 統合スモークテスト実行スクリプト
+- `scripts/smoke_test.py`: 統合スモークテスト実行スクリプト
 - `docs/SPECIFICATION.md`: 詳細物理モデル・API仕様書（設計の正本）
 
 ## 3. プロジェクト固有のガードレール & 地雷
@@ -32,6 +32,6 @@ AIエージェントは作業着手前に必ず本ファイルを参照し、プ
   - GA既定値は `physics/ga_config.py` へ集約。
 
 ## 4. 検証・実行コマンド早見
-- **構文・静的型チェック**: `python -m compileall physics api tools app.py smoke_test.py` / `ruff check .` / `mypy physics api app.py smoke_test.py`
-- **単体・統合テスト**: `python -m pytest tests -q` / `python smoke_test.py`
+- **構文・静的型チェック**: `python -m compileall physics api tools app.py scripts/smoke_test.py` / `ruff check .` / `mypy physics api app.py scripts/smoke_test.py`
+- **単体・統合テスト**: `python -m pytest tests -q` / `python scripts/smoke_test.py`
 - **プロセス管理**: `python tools/process_hygiene.py --list` / `--apply`

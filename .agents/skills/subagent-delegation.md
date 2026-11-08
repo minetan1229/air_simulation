@@ -19,7 +19,7 @@
 4. **担当ファイル境界（排他）**:
    | # | エージェント名 | 担当ファイル | 責務 |
    |---|---|---|---|
-   | 0 | `Manager` | `physics/config_schema.py`, `physics/geometry_utils.py`, `app.py`, `smoke_test.py`, `AGENTS.md` | 契約定義・API統合・E2E・Git統括 |
+   | 0 | `Manager` | `physics/config_schema.py`, `physics/geometry_utils.py`, `app.py`, `scripts/smoke_test.py`, `AGENTS.md` | 契約定義・API統合・E2E・Git統括 |
    | 1 | `aero-physics` | `physics/aero_domain.py`, `tests/test_aero.py` | 翼型・失速・Drag Polar・受動空力弾性 |
    | 2 | `atmosphere-fluid` | `physics/atmosphere_domain.py`, `physics/wind_domain.py`, `tests/test_atmo_wind.py` | ISA・3D Simplex風場・NED/風座標変換 |
    | 3 | `structural-stress` | `physics/stress_domain.py`, `tests/test_stress.py` | 動圧・G・曲げモーメント・応力ヒートマップ |
