@@ -51,6 +51,12 @@ from .geometry_utils import cross, normalize, vec3
 __all__ = [
     "SPAN_LOADING_FACTOR",
     "KAPPA_SIGMA",
+    "KAPPA_SIGMA_REFERENCE_GSM",
+    "KAPPA_SIGMA_GSM_EXPONENT",
+    "KAPPA_SIGMA_FOLDED_DEPTH_M",
+    "KAPPA_SIGMA_GSM_PRIOR",
+    "kappa_sigma_derivation",
+    "kappa_sigma_raw_beam_stress_pa",
     "STRUCTURAL_PARAMETER_REGISTRY",
     "structural_parameters_documented",
     "PAPER_THICKNESS_DENOMINATOR",
@@ -111,13 +117,62 @@ __all__ = [
 #: Uniform half-wing root moment divided by total normal load times semispan.
 SPAN_LOADING_FACTOR: float = 0.25
 
-#: Unvalidated empirical folded-crease stress reduction; retained without retuning.
-#: Scales raw theoretical beam-theory stress M/Z (computed with flat-sheet thickness)
-#: into a normalized structural index / empirical Pa representation matching
-#: experimental folded paper specimen failure thresholds (~10^2 - 10^3 Pa allowable range).
-#: Absolute stress values represent an uncalibrated structural index rather than physical
-#: tensile failure stress of raw cellulose fibers (~20-40 MPa).
+#: Dimensionless empirical scale factor from flat-sheet beam theory to the
+#: reported folded-crease structural index (Pa representation).
+#:
+#: Scale derivation (Euler-Bernoulli, flat sheet):
+#:   sigma_beam = M / Z_flat,  Z_flat = b * t^2 / 6,
+#:   t = gsm / 800 mm = gsm / 8e5 m  =>  Z_flat ~ gsm^2.
+#: For 80 g/m2: t = 0.10 mm; 100 g/m2: t = 0.125 mm.
+#: Raw beam stress for typical paper planes (m ~ 5 g, b ~ 0.3 m, nz ~ 1)
+#: is ~10^1-10^2 MPa, consistent with brief's "tens of MPa" expectation and
+#: the same order as cellulose-fibre tensile strength (20-40 MPa).
+#:
+#: Physical-quantity correction (charge 1/2):
+#: The beam model uses flat-sheet thickness t, NOT the folded keel/box
+#: section depth h ~ 10-30 mm (ROOT_SECTION_HEIGHT_FRACTION = 0.40 * MAC).
+#: A folded section modulus Z_fold ~ b * h^2 / 6 would be
+#: (h/t)^2 ~ (0.02 / 0.000125)^2 ~ 2.5e4 times larger.
+#: KAPPA_SIGMA = 9.0e-6 (1/1.11e5) thus folds BOTH the (h/t)^2 gap and
+#: the crease inefficiency/shear-lag into one lumped dimensionless factor.
+#: It is NOT a material constant and must not be read as
+#: "stress = 9e-6 * stress" physically.  The remaining factor ~4.4 is the
+#: empirical residual after the geometric (h/t)^2 correction.
+#:
+#: Absolute scale mapping:
+#:   KAPPA_SIGMA * M / Z_flat  ->  reported sigma ~ 10^2-10^3 Pa,
+#: matching folded-paper specimen failure thresholds and the companion
+#: allowable A0 = 2500 Pa (docs/SPECIFICATION.md 1.3/5.2), NOT the
+#: 20-40 MPa tensile strength of raw cellulose (see docs/SPECIFICATION.md 5.2,
+#: no-finish.md A-1, PHYSICS_PAPER_CONFORMANCE_AUDIT.md H-11).
+#: Retained without retuning per AGENTS.md Sec.2 (Zero-Placeholder / no
+#: source-less constants).  Sensitivity: d(ln sigma)/d(ln KAPPA)=1, same as
+#: normalising by E (Young's modulus): stiffness enters via
+#: Z_SCALE_OFFSET + Z_SCALE_GAIN * effective_paper_stiffness.  Changing
+#: KAPPA shifts all absolute stresses and failure indices by the same factor;
+#: relative ranking, beam linearity sigma ~ nz, and sigma ~ gsm^-2 are
+#: invariant (see tests/test_kappa_sigma_stress_audit.py).
+#: Limits: valid only as a relative ranking index for folded crease
+#: sections under quasi-static bending; NOT for shear, torsion, buckling,
+#: dynamic/impulsive, creep, or raw-fibre failure prediction.
 KAPPA_SIGMA: float = 9.0e-6
+
+#: Reference grammage at which KAPPA_SIGMA was calibrated (g/m^2).
+KAPPA_SIGMA_REFERENCE_GSM: float = 80.0
+
+#: GSM exponent of the raw beam stress via sheet thickness t = gsm/800 mm
+#: (SI: gsm/8e5 m): Z ~ t^2 ~ gsm^2, hence sigma_beam ~ gsm^-2 at fixed
+#: moment.  Exposed for sensitivity audit (charge 2).
+KAPPA_SIGMA_GSM_EXPONENT: float = -2.0
+
+#: Representative folded keel/box depth used only for the scale-derivation
+#: check (ROOT_SECTION_HEIGHT_FRACTION = 0.40 * MAC ~ 10-30 mm).  Not used
+#: in the production stress path; see kappa_sigma_derivation().
+KAPPA_SIGMA_FOLDED_DEPTH_M: float = 0.02
+
+#: Prior scale of folded-paper allowable stress (Pa) at 80 g/m^2 against
+#: which the KAPPA_SIGMA mapping is checked (order 1e3 Pa, not MPa).
+KAPPA_SIGMA_GSM_PRIOR: float = 2500.0
 
 #: Dynamic pressure -> load factor -> root moment -> cell stress is exact;
 #: this constant maps peak stress onto the heat-map saturation point.  Ten
@@ -396,6 +451,42 @@ def _finite_or(value: Any, default: float) -> float:
     if not math.isfinite(out):
         return float(default)
     return out
+
+
+def kappa_sigma_derivation(
+    gsm: float = KAPPA_SIGMA_REFERENCE_GSM,
+    folded_depth_m: float = KAPPA_SIGMA_FOLDED_DEPTH_M,
+) -> Dict[str, float]:
+    """Return the closed-form scale derivation for KAPPA_SIGMA.
+
+    Keys mirror the audit in tests/test_kappa_sigma_stress_audit.py:
+    sheet thickness ``t = gsm/800`` mm in metres, the geometric ratio
+    ``(h/t)^2`` between a folded section modulus ``b h^2/6`` and the
+    flat-sheet ``b t^2/6``, and the residual lumped factor
+    ``KAPPA_SIGMA * (h/t)^2`` (dimensionless, order unity).
+    """
+    g = max(float(gsm), 1.0e-6)
+    t_m = (g * 1.0e-3) / PAPER_THICKNESS_DENOMINATOR
+    h = max(float(folded_depth_m), 1.0e-6)
+    geom = (h / t_m) ** 2
+    return {
+        "t_m": t_m,
+        "t_mm": t_m * 1000.0,
+        "geom_h_over_t_sq": geom,
+        "residual": KAPPA_SIGMA * geom,
+        "kappa_sigma": KAPPA_SIGMA,
+        "gsm_exponent": KAPPA_SIGMA_GSM_EXPONENT,
+        "gsm_prior_pa": KAPPA_SIGMA_GSM_PRIOR,
+    }
+
+
+def kappa_sigma_raw_beam_stress_pa(moment_nm: float, modulus_m3: float) -> float:
+    """Raw (unscaled) Euler-Bernoulli beam stress ``M / Z`` in Pa.
+
+    Used by tests to confirm the raw stress is O(10^7) Pa (tens of MPa)
+    before KAPPA_SIGMA maps it to the 10^2-10^3 Pa index.
+    """
+    return _finite_or(float(moment_nm), 0.0) / max(_finite_or(float(modulus_m3), 0.0), 1.0e-30)
 
 
 def _sheet_thickness(paper_gsm: float) -> float:
