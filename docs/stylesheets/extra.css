@@ -1,0 +1,114 @@
+:root {
+  --md-primary-fg-color: #1a73e8;
+  --md-primary-fg-color--light: #4f8ff0;
+  --md-primary-fg-color--dark: #1458c4;
+  --md-primary-bg-color: #ffffff;
+  --md-primary-bg-color--light: #f8f9fa;
+  --md-accent-fg-color: #0d9488;
+  --md-code-hl-color: rgba(26, 115, 232, 0.08);
+  --md-typeset-a-color: #1a73e8;
+  --md-typeset-img: 100%;
+}
+
+.md-typeset h1 {
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+.md-typeset h2 {
+  font-weight: 600;
+  margin-top: 2em;
+}
+
+.hero {
+  border-radius: 16px;
+  padding: 2.2rem 1.6rem;
+  margin: 1.5rem 0;
+  background: linear-gradient(135deg, #0b2a5b 0%, #1a73e8 55%, #0d9488 100%);
+  color: #ffffff;
+  text-align: center;
+}
+
+.hero h1 {
+  color: #ffffff;
+  margin: 0 0 0.4rem;
+  font-size: 2.2rem;
+}
+
+.hero p {
+  margin: 0.3rem auto;
+  max-width: 44rem;
+  opacity: 0.92;
+}
+
+.hero .badges {
+  margin-top: 0.8rem;
+}
+
+.grid.cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 0.9rem;
+  margin: 1rem 0;
+}
+
+.grid.cards > * {
+  border: 1px solid var(--md-default-fg-color--lightest);
+  border-radius: 0.75rem;
+  padding: 1rem 1rem 0.9rem;
+  background: var(--md-default-bg-color);
+  transition: transform 0.12s ease, box-shadow 0.12s ease;
+}
+
+.grid.cards > *:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.08);
+}
+
+.screenshots {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.9rem;
+  margin: 1rem 0;
+}
+
+.screenshots figure {
+  margin: 0;
+  border: 1px solid var(--md-default-fg-color--lightest);
+  border-radius: 0.75rem;
+  overflow: hidden;
+}
+
+.screenshots img {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.screenshots figcaption {
+  padding: 0.45rem 0.6rem;
+  font-size: 0.85rem;
+  color: var(--md-default-fg-color--light);
+  background: var(--md-default-bg-color--light);
+}
+
+@media (max-width: 720px) {
+  .screenshots {
+    grid-template-columns: 1fr;
+  }
+  .hero h1 {
+    font-size: 1.7rem;
+  }
+}
+
+.md-typeset table {
+  font-size: 0.92rem;
+}
+
+.md-typeset .admonition {
+  border-radius: 0.6rem;
+}
+
+.md-typeset code {
+  font-size: 0.88em;
+}

@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+
+{% block content %}
+  {% if page and page.is_homepage %}
+    <div class="hero">
+      <h1>✈️ {{ config.site_name }}</h1>
+      <p><strong>6DoF RK4 飛行力学 × WebGL 3D × GPU 並列最適化</strong></p>
+      <p>学術根拠を持つ紙飛行機シミュレーション基盤。ブラウザでリアルタイム 3D 飛行軌跡・姿勢・気流を可視化します。</p>
+      <div class="badges">
+        <a href="https://github.com/minetan1229/air_simulation/actions/workflows/ci.yml"><img src="https://github.com/minetan1229/air_simulation/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+        <a href="https://github.com/minetan1229/air_simulation/actions/workflows/codeql.yml"><img src="https://github.com/minetan1229/air_simulation/actions/workflows/codeql.yml/badge.svg" alt="CodeQL"></a>
+        <a href="https://www.python.org/downloads/"><img src="https://img.shields.io/badge/python-3.10+-blue.svg" alt="Python 3.10+"></a>
+      </div>
+    </div>
+  {% endif %}
+  {{ super() }}
+{% endblock %}

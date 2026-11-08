@@ -10,7 +10,11 @@ docs_dir: docs
 
 theme:
   name: material
+  custom_dir: docs/overrides
   language: ja
+  font:
+    text: Noto Sans JP
+    code: JetBrains Mono
   palette:
     - media: "(prefers-color-scheme)"
       scheme: default
@@ -19,6 +23,7 @@ theme:
         name: ライト/ダーク
     - media: "(prefers-color-scheme: dark)"
       scheme: slate
+      primary: light blue
       toggle:
         icon: material/brightness-4
         name: ダーク/ライト
@@ -28,16 +33,22 @@ theme:
     - navigation.tabs
     - navigation.tabs.sticky
     - navigation.sections
+    - navigation.index
+    - navigation.expand
     - navigation.top
     - search.suggest
     - search.highlight
     - content.code.copy
+    - content.code.annotate
     - content.action.view
+    - content.action.edit
   icon:
     repo: fontawesome/brands/github
 
 markdown_extensions:
   - pymdownx.extra
+  - pymdownx.arithmatex:
+      generic: true
   - pymdownx.superfences:
       custom_fences:
         - name: mermaid
@@ -49,18 +60,30 @@ markdown_extensions:
   - pymdownx.mark
   - pymdownx.caret
   - pymdownx.tilde
-  - pymdownx.magicbonnet
+  - pymdownx.snippets
   - toc:
       permalink: true
   - attr_list
 
+extra_css:
+  - stylesheets/extra.css
+
+extra_javascript:
+  - javascripts/extra.js
+
 extra:
   generator: false
+  alternate:
+    - name: 日本語
+      link: /air_simulation/
+      lang: ja
+    - name: English
+      link: /air_simulation/en/
+      lang: en
 
 plugins:
   - search:
       lang: ja
-      min_search_length: 2
   - mkdocstrings:
       default_handler: python
       handlers:
@@ -79,9 +102,10 @@ nav:
       - 物理モデル正本: PHYSICS_MODELS.md
       - 検証と妥当性確認 (V&V): VALIDATION.md
       - アーキテクチャ: architecture.md
+      - 物理ロードマップ: PHYSICS_ROADMAP.md
   - API リファレンス:
       - REST API 仕様: api.md
-      - OpenAPI (Swagger UI): ../README.md
+      - OpenAPI (Swagger UI): https://github.com/minetan1229/air_simulation#api-リファレンス
   - 開発・運用:
       - 開発ガイド: development.md
       - GA V2 アーキテクチャ: GA_V2_ARCHITECTURE.md

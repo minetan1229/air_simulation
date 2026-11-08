@@ -15,7 +15,7 @@ Flask REST API + Three.js WebGL visualises real-time 3D flight paths, attitude, 
 [![CodeQL](https://github.com/minetan1229/air_simulation/actions/workflows/codeql.yml/badge.svg)](https://github.com/minetan1229/air_simulation/actions/workflows/codeql.yml)
 [![License](https://img.shields.io/badge/license-Proprietary-red.svg)](./LICENSE)
 
-[Documentation](https://minetan1229.github.io/air_simulation/) ·
+[Documentation (local)](./docs/README.md) ·
 [API Reference](./docs/api.md) ·
 [Physics Models](./docs/PHYSICS_MODELS.md) ·
 [Contributing](./CONTRIBUTING.md) ·
@@ -196,7 +196,7 @@ flowchart TD
 
 ## 📚 Detailed Documentation
 
-Web site: <https://minetan1229.github.io/air_simulation/> (auto-published to GitHub Pages from `mkdocs.yml`)
+> The web site is **not yet published** (GitHub Pages is not enabled). See [`.github/workflows/docs.yml`](./.github/workflows/docs.yml) and run locally with `pip install mkdocs-material && mkdocs serve`.
 
 | Category | Documents |
 | :--- | :--- |
