@@ -22,9 +22,10 @@
 - **誘導抗力と地面効果 (Ground Effect, Wieselsberger)**:
   高度 $h$、翼幅 $b$、オズワルド効率係数 $e$ に基づく誘導抗力低減:
   $$C_{Di}(h) = \frac{C_L^2}{\pi e AR} \cdot \left[ \frac{16(h/b)^2}{1 + 16(h/b)^2} \right]$$
-- **用紙特性と受動的空力弾性モーフィング (Passive Aeroelastic Morphing)**:
-  坪量 ($g/m^2$) と剛性に基づく、動圧 $q = \frac{1}{2}\rho v^2$ 依存の非線形後縁トリム変形モデル。高動圧投擲域（$q \gg q_{ref}$）での頭上げ急激ループ（Looping）を抑制し、頂点・滑空域（$q \to 0$）で本来のトリム角へ自動復元する:
+- **用紙特性と準定常空力弾性モーフィング (Quasi-Steady Aeroelastic Morphing)**:
+  動圧 $q = \frac{1}{2}\rho v^2$ 依存の後縁トリム変形モデル。高動圧投擲域（$q \gg q_{ref}$）での頭上げ急激ループ（Looping）を抑制し、頂点・滑空域（$q \to 0$）で本来のトリム角へ自動復元する:
   $$\delta_{eff}(q) = \delta_{trim} \cdot \left[ \frac{1}{1 + (q / q_{aeroelastic})^{n_{morph}}} \right]$$
+  本モデルは弾性状態を持たない代数的準定常近似であり、受動性は証明しない（`aeroelastic_compliance>0` のオプトイン、既定 OFF）。
 - **極低速頂点遷移力学 (Apex Low-Speed Pushover Dynamics)**:
   急上昇の頂点（$V < 2.0\,\text{m/s}$）において、動圧低下によるモーメント特異点を防ぎ、風圧中心 $x_{cp}$ の後退と質量中心偏心による機首下げモーメントを生成。重力と微小相対風による自然なプッシュオーバー（滑空姿勢への遷移）を実現する。
 - **全幅後縁折れの空力増分 (Trailing-Edge Fold Effects)**:
