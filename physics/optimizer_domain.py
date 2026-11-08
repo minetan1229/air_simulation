@@ -158,7 +158,19 @@ OBJECTIVE_SCALES: Dict[str, float] = {
 INFEASIBLE_SCORE: float = -1.0e12
 
 #: Flight statuses that describe a *failed evaluation* rather than a flight.
-INFEASIBLE_STATUSES: Tuple[str, ...] = ("error", "failed")
+#: ``diverged`` (numerical failure) and surrogate non-flights (``stalled`` /
+#: ``time-limit`` / ``no-launch``) historically slipped through as feasible
+#: 0 m flights.  They must never become incumbent / Pareto members (AGENTS.md
+#: §2: no relabelling).  ``timeout`` is *not* infeasible: it means the flight
+#: ran the full budget without landing, i.e. a long legitimate flight.
+INFEASIBLE_STATUSES: Tuple[str, ...] = (
+    "error",
+    "failed",
+    "diverged",
+    "stalled",
+    "time-limit",
+    "no-launch",
+)
 
 #: Maximum number of final candidates that are re-verified in the reference
 #: 6-DoF path.  The re-verification costs one full 6-DoF flight per

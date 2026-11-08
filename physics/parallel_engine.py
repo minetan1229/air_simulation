@@ -44,6 +44,7 @@ import os
 import pickle
 import atexit
 import logging
+import threading
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, Union, cast
 
@@ -316,11 +317,13 @@ def backend_name(processes: int = 0) -> str:
     """
     if get_worker_count(processes) == 1:
         return "serial"
-    return _BACKEND_OVERRIDE or "multiprocessing"
+    return getattr(_backend_state, "override", None) or "multiprocessing"
 
 
 #: Set by :func:`map_evaluate` when (and only when) it had to fall back to
 #: threads because the callable was not picklable.  ``None`` otherwise.
+#: Thread-local so concurrent ``map_evaluate`` callers do not race.
+_backend_state = threading.local()
 _BACKEND_OVERRIDE: Optional[str] = None
 
 
@@ -419,27 +422,24 @@ def map_evaluate(
     The output order always matches the input order, whatever backend runs.
     ``processes == 1`` is a plain serial loop (no pool object is built).
     """
-    global _BACKEND_OVERRIDE
-
+    _backend_state.override = None
     materialised: List[Any] = list(items)
     if not materialised:
-        _BACKEND_OVERRIDE = None
         return []
 
     workers = get_worker_count(processes)
     if workers == 1:
-        _BACKEND_OVERRIDE = None
         return [func(item) for item in materialised]
 
     if not _is_picklable(func):
-        _BACKEND_OVERRIDE = "threading"
+        _backend_state.override = "threading"
         try:
             with ThreadPoolExecutor(max_workers=workers) as pool:
                 return list(pool.map(func, materialised))
         finally:
-            _BACKEND_OVERRIDE = None
+            _backend_state.override = None
 
-    _BACKEND_OVERRIDE = None
+    _backend_state.override = None
     plan = _chunk_plan(len(materialised), workers, chunk_size)
     tasks = [(func, [materialised[index] for index in chunk]) for chunk in plan]
     ordered: List[Any] = []
@@ -685,7 +685,10 @@ def evaluate_flight_surrogate(
     elif stall_margin <= 0.0:
         status = "stalled"
     elif time_to_ground > horizon + 1.0e-9:
-        status = "time-limit"
+        # Remaining airborne beyond the budget: a constructively long flight,
+        # not a non-flight.  Report ``timeout`` (=6-DoF vocabulary) and let
+        # ``is_infeasible_flight`` treat it as feasible (it is not failed).
+        status = "timeout"
     else:
         status = "landed"
 
