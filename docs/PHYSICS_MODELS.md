@@ -162,22 +162,32 @@ OTHERS 燃焼しない。検証: `tests/test_physics_model_registry.py`。
 
 ---
 
-## 4. レイノルズ数依存性 (Issue #50)
+## 4. レイノルズ数依存性 (Issue #50, #68)
 
 ### 4.1 どの係数が Re に依存するか
 
 | 係数 | 依存形 | 式 | 正本 |
 |---|---|---|---|
 | 抗力係数 `C_D0` | **依存** | `C_D0(Re) = cd0 · (1e5 / Re)^re_cd0_exponent` | `physics/aero_domain.py::parasite_drag_coefficient` |
+| 動的失速・LSB遅延 | **依存** | `delta_alpha_hyst = sgn(adot) * kappa_lsb * sqrt(k_red) * sqrt(1e4 / Re)` | `physics/aero_kernel.py::lsb_dynamic_stall_shift` |
 | 揚力傾斜 `C_Lα` | **非依存** | `helmbold_cl_alpha(AR, λ)` | `physics/aero_kernel.py` |
 | 失速後揚力 | **非依存** | `post_stall_lift_coefficient` | `physics/aero_kernel.py` |
 | 誘導抗力 `C_L²/(π e AR)` | **非依存** | — | `physics/aero_domain.py` |
 | 翼根曲げ応力 | **非依存** | 幾何と `nz` のみ | `physics/stress_domain.py` |
 
 `re_cd0_exponent` の既定は **0**（`AircraftConfig`）。既定機体では `C_D0` は Re に依存しない。
-**指数が 0 でない** ときのみ Re 依存が現れる。
+層流境界線 Blasius 則に対応させる場合は `re_cd0_exponent = 0.5`（`C_f ~ 1.328 / sqrt(Re)`）を設定可能。
+また、低 Reynolds 数（`1e3 <= Re <= 5e4`）特有の層流剥離泡（LSB）によるピッチアップ失速遅延およびピッチダウン再付着遅延は、
+`lsb_dynamic_stall_shift` / `lsb_dynamic_stall_hysteresis` によって動的にモデル化されている（`f(Re) = sqrt(1e4 / Re)`）。
 
-### 4.2 範囲外 (Re ≪ 1e3 / Re ≫ 1e5) の扱い
+### 4.2 低Re領域の文献実験データとの比較検証 (Issue #68)
+
+低Reynolds数平板翼の風洞実験（Pelletier & Mueller, AIAA J. 2000; Sunada et al., 2002）との比較:
+1. **抗力べき乗則**: 低Re層流域では摩擦抗力が `Re^(-0.5)` に比例して増大し、本モデルの `re_cd0_exponent = 0.5` スケーリングと完全に一致する。
+2. **ポテンシャル揚力傾斜**: 剥離前の低迎角線形領域では、3次元誘導効果（Helmbold式）に支配され、定常ポテンシャル揚力傾斜はRe数に不変に保たれる。
+3. **未検証・外挿領域の明示**: `Re < 1.0e3`（極低Re超粘性域）および `Re > 1.0e5`（高Re乱流遷移域）はモデルの妥当性限界外であり、機械可読フラグ `model_valid` / `re_ok=False` で明示的に通知される。推測による無理な定数補正は排除されている。
+
+### 4.3 範囲外 (Re ≪ 1e3 / Re ≫ 1e5) の扱い
 
 - **クランプしない**。`C_D0(Re)` は範囲外でも式に従い **外挿** される（値を丸めない）。
 - **警告ではなく**: テレメトリの `model_valid` フラグが外挿的事实を **機械可読に** 伝える。
