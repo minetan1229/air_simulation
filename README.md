@@ -20,6 +20,42 @@
 
 ---
 
+## システム構造図 (Architecture Overview)
+
+```mermaid
+flowchart TD
+    subgraph Frontend["フロントエンド (Browser / WebGL)"]
+        UI["UI Controls & Dashboard<br/>(Tailwind CSS / Chart.js)"]
+        Three["3D Visualizer<br/>(Three.js / WebGL)"]
+        UI <--> Three
+    end
+
+    subgraph Backend["バックエンド (Flask Application)"]
+        App["App Entry (app.py)"]
+        API["REST & Streaming API (api/)<br/>- /api/simulate (6DoF)<br/>- /api/optimize (GA)<br/>- /api/wind_tunnel"]
+        App --> API
+    end
+
+    subgraph CoreEngine["物理・シミュレーション基盤 (physics/)"]
+        direction TB
+        FDM["6DoF 飛行力学演算<br/>(Quaternion & RK4)"]
+        Aero["空力モデル群<br/>(揚抗力・地面効果・低Re補正)"]
+        Env["環境モデル群<br/>(標準大気・3D風場・乱気流)"]
+        GPU["バッチ並列計算エンジン<br/>(CuPy GPU / NumPy CPU)"]
+        GA["遺伝的アルゴリズム (GA)<br/>(機体形状・パラメータ最適化)"]
+
+        FDM --- Aero
+        FDM --- Env
+        GPU --- GA
+        FDM -. アンサンブル拡張 .-> GPU
+    end
+
+    UI <-- "REST / SSE / JSON" --> API
+    API --> FDM
+    API --> GA
+    API --> GPU
+```
+
 ## 画面イメージ
 
 | メインコンソール | 3D 飛行軌道・姿勢追跡 |
