@@ -47,6 +47,7 @@ __all__ = [
     "EvolutionRunner",
     "OBJECTIVES",
     "default_objective",
+    "select_high_fidelity_candidates",
 ]
 
 #: The objectives the Pareto front of the search is built on.
@@ -94,6 +95,240 @@ def default_objective(records: Dict[str, float]) -> float:
     return distance * (0.25 + 0.75 * quality) * (1.0 + 0.05 * min(ld_ratio, 20.0))
 
 
+def _dominates_candidate(
+    a: Sequence[float],
+    b: Sequence[float],
+    directions: Sequence[int],
+) -> bool:
+    """True when candidate a dominates candidate b."""
+    strictly_better = False
+    for val_a, val_b, d in zip(a, b, directions):
+        diff = d * (val_a - val_b)
+        if diff < 0.0:
+            return False
+        if diff > 0.0:
+            strictly_better = True
+    return strictly_better
+
+
+def _crowding_distances(
+    front: Sequence[int],
+    vectors: Sequence[Sequence[float]],
+) -> Dict[int, float]:
+    """Calculate NSGA-II crowding distances for members of a Pareto front."""
+    if not front:
+        return {}
+    if len(front) <= 2:
+        return {idx: float("inf") for idx in front}
+
+    distances: Dict[int, float] = {idx: 0.0 for idx in front}
+    num_objectives = len(vectors[0])
+
+    for m in range(num_objectives):
+        sorted_front = sorted(front, key=lambda idx: vectors[idx][m])
+        distances[sorted_front[0]] = float("inf")
+        distances[sorted_front[-1]] = float("inf")
+        obj_min = vectors[sorted_front[0]][m]
+        obj_max = vectors[sorted_front[-1]][m]
+        span = obj_max - obj_min
+        if span <= 1e-12:
+            continue
+        for i in range(1, len(sorted_front) - 1):
+            prev_val = vectors[sorted_front[i - 1]][m]
+            next_val = vectors[sorted_front[i + 1]][m]
+            if math.isinf(distances[sorted_front[i]]):
+                continue
+            distances[sorted_front[i]] += (next_val - prev_val) / span
+
+    return distances
+
+
+def select_high_fidelity_candidates(
+    candidates: Sequence[Dict[str, Any]],
+    limit: int,
+    primary_ratio: float = 0.5,
+) -> List[Dict[str, Any]]:
+    """Select candidate individuals for high-fidelity evaluation.
+
+    Instead of relying purely on a single scalar ranking (such as distance_m),
+    this selection balances exploitation and exploration:
+    1. The primary quota (e.g. 50%) is selected by overall scalar fitness
+       and distance (primary performance objective).
+    2. The remaining quota (e.g. 50%) is selected from non-dominated Pareto
+       fronts (NSGA-II fast non-dominated sort with crowding distance) considering
+       multiple objectives (distance_m, max_ld_ratio, stability, and stress headroom:
+       1.0 - peak_stress_index) and structural/behavioural diversity.
+    """
+    if not candidates or limit <= 0:
+        return []
+    if len(candidates) <= limit:
+        return list(candidates)
+
+    # 1. Primary selection: Sort candidates by primary fitness (with distance_m tie-breaker)
+    primary_quota = max(1, min(limit, int(math.ceil(limit * primary_ratio)))) if limit > 1 else 1
+    sorted_by_primary = sorted(
+        enumerate(candidates),
+        key=lambda item: (
+            float(item[1].get("fitness", 0.0)),
+            float(item[1].get("distance_m", 0.0)),
+        ),
+        reverse=True,
+    )
+
+    selected_indices: List[int] = []
+    selected_set = set()
+
+    for orig_idx, _ in sorted_by_primary[:primary_quota]:
+        selected_indices.append(orig_idx)
+        selected_set.add(orig_idx)
+
+    remaining_needed = limit - len(selected_indices)
+    if remaining_needed <= 0:
+        return [candidates[i] for i in selected_indices]
+
+    # 2. Multi-objective & Diversity selection for the remaining slots
+    # Objectives:
+    # - distance_m (maximise, dir=+1)
+    # - max_ld_ratio (maximise, dir=+1)
+    # - stability (maximise, dir=+1)
+    # - stress_headroom: 1.0 - peak_stress_index (maximise, dir=+1)
+    obj_directions = (1, 1, 1, 1)
+    vectors: List[Tuple[float, float, float, float]] = []
+    for c in candidates:
+        dist = float(c.get("distance_m", 0.0))
+        ld = float(c.get("max_ld_ratio", 0.0))
+        stab = float(c.get("stability", 0.0))
+        stress = float(c.get("peak_stress_index", 1.0))
+        stress_headroom = max(0.0, 1.0 - stress)
+        vectors.append((dist, ld, stab, stress_headroom))
+
+    # Fast non-dominated sorting over unselected candidates
+    unselected = [i for i in range(len(candidates)) if i not in selected_set]
+    fronts: List[List[int]] = []
+    domination_counts = {i: 0 for i in unselected}
+    dominated_sets: Dict[int, List[int]] = {i: [] for i in unselected}
+
+    for i in range(len(unselected)):
+        idx_i = unselected[i]
+        vec_i = vectors[idx_i]
+        for j in range(i + 1, len(unselected)):
+            idx_j = unselected[j]
+            vec_j = vectors[idx_j]
+            if _dominates_candidate(vec_i, vec_j, obj_directions):
+                dominated_sets[idx_i].append(idx_j)
+                domination_counts[idx_j] += 1
+            elif _dominates_candidate(vec_j, vec_i, obj_directions):
+                dominated_sets[idx_j].append(idx_i)
+                domination_counts[idx_i] += 1
+
+    current_front = [i for i in unselected if domination_counts[i] == 0]
+    while current_front:
+        fronts.append(current_front)
+        next_front: List[int] = []
+        for i in current_front:
+            for j in dominated_sets[i]:
+                domination_counts[j] -= 1
+                if domination_counts[j] == 0:
+                    next_front.append(j)
+        current_front = next_front
+
+    # Select candidates from fronts, ordering by diversity and crowding distance
+    # To prevent clustering in one corner of the Pareto front, prioritize individuals
+    # that maximize distance to already selected candidates in normalized objective space.
+    mins = [min(v[m] for v in vectors) for m in range(len(obj_directions))]
+    maxs = [max(v[m] for v in vectors) for m in range(len(obj_directions))]
+    spans = [maxs[m] - mins[m] if (maxs[m] - mins[m]) > 1e-12 else 1.0 for m in range(len(obj_directions))]
+
+    for front in fronts:
+        if len(selected_indices) >= limit:
+            break
+        crowding = _crowding_distances(front, vectors)
+
+        # Greedily select the most diverse candidate from the current front
+        remaining_front = list(front)
+        while remaining_front and len(selected_indices) < limit:
+            best_idx = None
+            best_score: Tuple[float, float, float] = (-1.0, -1.0, -1.0)
+            for idx in remaining_front:
+                # Minimum Euclidean distance to already selected set in normalized objective space
+                vec_norm = [(vectors[idx][m] - mins[m]) / spans[m] for m in range(len(obj_directions))]
+                min_dist_to_selected = min(
+                    math.sqrt(sum(((vectors[s][m] - mins[m]) / spans[m] - vec_norm[m]) ** 2 for m in range(len(obj_directions))))
+                    for s in selected_indices
+                ) if selected_indices else 1.0
+
+                cr = crowding.get(idx, 0.0)
+                cr_val = 1e6 if math.isinf(cr) else cr
+                fit = float(candidates[idx].get("fitness", 0.0))
+                score = (min_dist_to_selected, cr_val, fit)
+                if best_idx is None or score > best_score:
+                    best_score = score
+                    best_idx = idx
+
+            if best_idx is not None:
+                selected_indices.append(best_idx)
+                selected_set.add(best_idx)
+                remaining_front.remove(best_idx)
+
+    # If still needed (fallback), fill from remaining unselected sorted by fitness
+    if len(selected_indices) < limit:
+        remaining = [i for i in range(len(candidates)) if i not in selected_set]
+        remaining.sort(
+            key=lambda i: (
+                float(candidates[i].get("fitness", 0.0)),
+                float(candidates[i].get("distance_m", 0.0)),
+            ),
+            reverse=True,
+        )
+        for idx in remaining:
+            selected_indices.append(idx)
+            if len(selected_indices) >= limit:
+                break
+
+    return [candidates[i] for i in selected_indices[:limit]]
+
+
+def structural_signature(genome: HybridGenome) -> Tuple[int, int, bool, bool]:
+    """Coarse structural fingerprint for diversity monitoring (Issue #88).
+
+    (enabled folds, symmetric folds, any asymmetric fold, any paired fold).
+    Two genomes with the same signature share their fold count and symmetry
+    class, so counting signatures measures whether the population is
+    collapsing onto one fold programme.
+    """
+    genes = [gene for gene in genome.genes if gene.enabled]
+    symmetric = sum(1 for gene in genes if gene.symmetry == "symmetric")
+    asymmetric = any(gene.symmetry != "symmetric" for gene in genes)
+    paired = any(gene.creates_pair for gene in genes)
+    return (len(genes), symmetric, asymmetric, paired)
+
+
+def diversity_of(records: Sequence[Dict[str, Any]]) -> Dict[str, float]:
+    """Numeric diversity of a population (Issue #88).
+
+    Returns ``unique_signatures``, ``signature_entropy`` (Shannon entropy of
+    the signature distribution, 0 = monoculture) and ``mean_fold_steps``.
+    A monoculture has entropy 0; a spread population has high entropy.
+    """
+    if not records:
+        return {"unique_signatures": 0.0, "signature_entropy": 0.0, "mean_fold_steps": 0.0}
+    signatures: Dict[Tuple[int, int, bool, bool], int] = {}
+    folds: List[int] = []
+    for record in records:
+        payload = record.get("genome") or {}
+        genome = genome_module.HybridGenome.from_dict(payload) if payload else None
+        sig = structural_signature(genome) if genome else (0, 0, False, False)
+        signatures[sig] = signatures.get(sig, 0) + 1
+        folds.append(sig[0])
+    total = len(records)
+    entropy = -sum((c / total) * math.log(c / total) for c in signatures.values())
+    return {
+        "unique_signatures": float(len(signatures)),
+        "signature_entropy": float(entropy),
+        "mean_fold_steps": float(sum(folds) / total),
+    }
+
+
 @dataclass
 class GenerationReport:
     """The summary of one generation."""
@@ -110,6 +345,7 @@ class GenerationReport:
     pareto_size: int
     elapsed_s: float
     stage_seconds: Dict[str, float] = field(default_factory=dict)
+    diversity: Dict[str, float] = field(default_factory=dict)
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -125,6 +361,7 @@ class GenerationReport:
             "pareto_size": int(self.pareto_size),
             "elapsed_s": float(self.elapsed_s),
             "stage_seconds": {key: float(value) for key, value in self.stage_seconds.items()},
+            "diversity": {key: float(value) for key, value in self.diversity.items()},
         }
 
 
@@ -189,6 +426,11 @@ class EvolutionRunner:
         self._stage3: Optional[Any] = None
         self._stage3_module: Optional[Any] = None
         self.history: List[GenerationReport] = []
+        self.last_diversity: Dict[str, float] = {
+            "unique_signatures": 0.0,
+            "signature_entropy": 0.0,
+            "mean_fold_steps": 0.0,
+        }
         if self.out_dir:
             os.makedirs(self.out_dir, exist_ok=True)
             try:
@@ -279,6 +521,7 @@ class EvolutionRunner:
             pareto_size=len(self.pareto),
             elapsed_s=time.perf_counter() - started,
             stage_seconds=timings,
+            diversity=dict(self.last_diversity),
         )
         self.history.append(report)
         self.generation += 1
@@ -362,7 +605,15 @@ class EvolutionRunner:
         return [record for island in self.islands for record in island]
 
     def _reproduce(self) -> None:
-        """Build the next generation from the evaluated individuals."""
+        """Build the next generation from the evaluated individuals.
+
+        Elites (best fitness) are always preserved (Issue #88: diversity
+        never replaces the best).  Beyond elites, ``profile.exploration_fraction``
+        of the island is reserved for exploration: tournament parents are
+        drawn from the whole island and a share of those children are fresh
+        random programmes, so low-fitness but novel structures keep a route
+        into the next generation.
+        """
         elites_per_island = max(
             2, self.profile.population_size // max(1, self.profile.islands) // 10
         )
@@ -374,6 +625,16 @@ class EvolutionRunner:
             elites = ranked[:elites_per_island]
             target = len(population)
             children: List[Dict[str, Any]] = list(elites)
+            # Exploration slots: low-fitness / novel structures survive here.
+            explore_slots = int(round(target * float(self.profile.exploration_fraction)))
+            explored = ranked[elites_per_island:]
+            rng_explore = list(explored)
+            self.rng.shuffle(rng_explore)
+            for record in rng_explore[:explore_slots]:
+                if len(children) >= target:
+                    break
+                children.append(record)
+            random_slots = max(0, explore_slots // 4)
             while len(children) < target:
                 parent_a = self._tournament(ranked)
                 if parent_a is None:
@@ -396,8 +657,22 @@ class EvolutionRunner:
                         max_steps=self.profile.max_fold_steps,
                     )
                 children.append(self._record(child))
-            next_islands.append(children)
+            # Random restart injects: fresh programmes keep the pool open.
+            for _ in range(random_slots):
+                if len(children) >= target:
+                    break
+                children.append(
+                    self._record(
+                        genome_module.random_hybrid_genome(
+                            self.rng,
+                            min_steps=self.profile.min_fold_steps,
+                            max_steps=self.profile.max_fold_steps,
+                        )
+                    )
+                )
+            next_islands.append(children[:target] if len(children) > target else children)
         self.islands = next_islands
+        self.last_diversity = diversity_of(self._all_records())
 
     def _tournament(self, ranked: Sequence[Dict[str, Any]]) -> Optional[HybridGenome]:
         """Pick one parent by tournament selection."""
@@ -482,39 +757,46 @@ class EvolutionRunner:
         if not candidates:
             return []
         cases: List[stage1_module.Stage1Case] = []
+        cases_records: List[Dict[str, Any]] = []
         for record in candidates:
             genome = self._genome_of(record)
             if genome is None:
                 continue
             aircraft = self._screening_aircraft(record)
             state = self._launch_state(aircraft)
+            rec_idx = int(record.get("index", id(record)))
             cases.append(
                 stage1_module.Stage1Case(
-                    index=int(record.get("index", len(cases))),
+                    index=rec_idx,
                     aircraft=aircraft,
                     initial_state=state,
                     duration_s=float(self.profile.stage1_duration_s),
                     label=str(record.get("key", "")),
                 )
             )
+            cases_records.append(record)
         if not cases:
             return []
         results = self.screener.screen(cases, repeats=self.profile.stage1_chunk_repeats)
+        record_by_index = {int(r.get("index", id(r))): r for r in cases_records}
         flown: List[Dict[str, Any]] = []
-        for record, result in zip(candidates, results):
-            record["stage1"] = result.to_dict()
-            record["distance_m"] = result.distance_m
-            record["max_ld_ratio"] = result.max_ld_ratio
-            record["stability"] = result.stability
-            record["peak_stress_index"] = result.peak_stress_index
-            record["cl"] = result.cl
-            record["cd"] = result.cd
-            record["screening_cl"] = result.cl
-            record["screening_cd"] = result.cd
-            record["status"] = result.status
-            record["fitness"] = default_objective(record)
+        for result in results:
+            matched_record = record_by_index.get(int(result.index))
+            if matched_record is None:
+                continue
+            matched_record["stage1"] = result.to_dict()
+            matched_record["distance_m"] = result.distance_m
+            matched_record["max_ld_ratio"] = result.max_ld_ratio
+            matched_record["stability"] = result.stability
+            matched_record["peak_stress_index"] = result.peak_stress_index
+            matched_record["cl"] = result.cl
+            matched_record["cd"] = result.cd
+            matched_record["screening_cl"] = result.cl
+            matched_record["screening_cd"] = result.cd
+            matched_record["status"] = result.status
+            matched_record["fitness"] = default_objective(matched_record)
             if result.status not in ("crashed", "degenerate"):
-                flown.append(record)
+                flown.append(matched_record)
         self._correct_screening(flown)
         return flown
 
@@ -523,8 +805,7 @@ class EvolutionRunner:
         if not candidates:
             return []
         limit = self.profile.stage2_passthrough
-        ordered = sorted(candidates, key=lambda item: float(item.get("distance_m", 0.0)), reverse=True)
-        selected = ordered[:limit]
+        selected = select_high_fidelity_candidates(candidates, limit)
         if self._stage2 is None:
             stage2_module = self._optional_module("stage2")
             if stage2_module is None:
@@ -532,6 +813,7 @@ class EvolutionRunner:
             self._stage2_module = stage2_module
             self._stage2 = stage2_module.StaticFsiScreener(paper_gsm=self.paper_gsm)
         cases: List[Any] = []
+        cases_records: List[Dict[str, Any]] = []
         stage2_api: Any = self._stage2_module
         for record in selected:
             genome = self._genome_of(record)
@@ -549,9 +831,10 @@ class EvolutionRunner:
                 "chord_m": float(geometry.chord_m),
                 "aspect_ratio": float(geometry.span_m) ** 2 / max(float(geometry.wing_area_m2), 1.0e-9),
             }
+            rec_idx = int(record.get("index", id(record)))
             cases.append(
                 stage2_api.Stage2Case(
-                    index=int(record.get("index", len(cases))),
+                    index=rec_idx,
                     aircraft=aircraft,
                     dynamic_pressure_pa=self._dynamic_pressure(record),
                     load_factor=float(record.get("peak_load_factor", 1.0)),
@@ -561,14 +844,24 @@ class EvolutionRunner:
                     thickness_m=max(self.paper_gsm * 1.0e-3 / 800.0, 1.0e-6),
                 )
             )
+            cases_records.append(record)
         if not cases:
             return []
         reports = self._stage2.screen(cases)
+        record_by_index = {int(r.get("index", id(r))): r for r in cases_records}
         survivors: List[Dict[str, Any]] = []
-        for record, report in zip(selected, reports):
-            record["stage2"] = report.to_dict()
+        for report in reports:
+            matched = record_by_index.get(int(report.index))
+            if matched is None:
+                continue
+            matched["stage2"] = report.to_dict()
             if report.feasible:
-                survivors.append(record)
+                survivors.append(matched)
+            else:
+                matched["fitness"] = 0.0
+                matched["peak_stress_index"] = max(
+                    float(matched.get("peak_stress_index", 1.0)), 2.0
+                )
         self._reference_refly(survivors)
         return survivors
 
@@ -587,6 +880,7 @@ class EvolutionRunner:
 
         aircraft: List[AircraftConfig] = []
         states: List[Any] = []
+        valid_records: List[Dict[str, Any]] = []
         for record in records:
             genome = self._genome_of(record)
             if genome is None:
@@ -597,6 +891,7 @@ class EvolutionRunner:
             frame = self._aircraft_from_geometry(geometry)
             aircraft.append(frame)
             states.append(self._launch_state(frame))
+            valid_records.append(record)
         if not states:
             return
         xp = self.screener.xp
@@ -622,7 +917,7 @@ class EvolutionRunner:
         peak_stress = pull(summary["peak_stress_pa"])
         crashed = pull(summary["crashed"])
         landed = pull(summary["landed"])
-        for index, record in enumerate(records[:count]):
+        for index, record in enumerate(valid_records[:count]):
             record["reference"] = {
                 "distance_m": float(distance[index]),
                 "flight_time_s": float(flight_time[index]),
@@ -643,8 +938,7 @@ class EvolutionRunner:
         if not candidates or not self.stage3_enabled:
             return list(candidates)
         limit = self.profile.stage3_passthrough
-        ordered = sorted(candidates, key=lambda item: float(item.get("distance_m", 0.0)), reverse=True)
-        selected = ordered[:limit]
+        selected = select_high_fidelity_candidates(candidates, limit)
         try:
             stage3_module = self._optional_module("stage3")
         except Exception:
@@ -653,6 +947,7 @@ class EvolutionRunner:
             return list(candidates)
         self._stage3_module = stage3_module
         requests: List[Any] = []
+        requests_records: List[Dict[str, Any]] = []
         for record in selected:
             genome = self._genome_of(record)
             if genome is None:
@@ -661,9 +956,10 @@ class EvolutionRunner:
             if geometry is None:
                 continue
             aircraft = self._aircraft_from_geometry(geometry)
+            rec_idx = int(record.get("index", id(record)))
             requests.append(
                 stage3_module.Stage3Request(
-                    index=int(record.get("index", len(requests))),
+                    index=rec_idx,
                     genome=genome.to_dict(),
                     aircraft=dict(vars(aircraft)),
                     launch={
@@ -676,15 +972,25 @@ class EvolutionRunner:
                     glide_steps=int(self.profile.stage3_glide_steps),
                 )
             )
+            requests_records.append(record)
         if not requests:
             return list(candidates)
         results = stage3_module.run_stage3_parallel(requests, self.profile)
+        record_by_index = {int(r.get("index", id(r))): r for r in requests_records}
         resolved: List[Dict[str, Any]] = []
-        for record, result in zip(selected, results):
-            record["stage3"] = result.to_dict()
+        for result in results:
+            matched = record_by_index.get(int(result.index))
+            if matched is None:
+                continue
+            matched["stage3"] = result.to_dict()
             if result.lift_to_drag > 0.0:
-                record["lift_to_drag"] = float(result.lift_to_drag)
-                resolved.append(record)
+                matched["lift_to_drag"] = float(result.lift_to_drag)
+                matched["max_ld_ratio"] = float(result.lift_to_drag)
+                matched["cl"] = float(result.cl)
+                matched["cd"] = float(result.cd)
+                matched["cm"] = float(result.cm)
+                matched["fitness"] = default_objective(matched)
+                resolved.append(matched)
         return resolved
 
     # ------------------------------------------------------------------
@@ -807,7 +1113,7 @@ class EvolutionRunner:
 
     def _genome_of(self, record: Dict[str, Any]) -> Optional[HybridGenome]:
         payload = record.get("genome")
-        if not payload:
+        if payload is None:
             return None
         return genome_module.HybridGenome.from_dict(payload)
 
@@ -830,10 +1136,13 @@ class EvolutionRunner:
         config.mass_kg = max(mass, 1.0e-9)
         config.sheet_area_m2 = max(area, 1.0e-6)
         config.paper_gsm = self.paper_gsm
-        inertia = mass * span * span / 12.0
-        config.roll_inertia_kgm2 = max(inertia, 1.0e-12)
-        config.pitch_inertia_kgm2 = max(inertia, 1.0e-12)
-        config.yaw_inertia_kgm2 = max(inertia, 1.0e-12)
+        chord = area / max(span, 1.0e-3)
+        ixx = mass * span * span / 12.0
+        iyy = mass * chord * chord / 12.0
+        izz = ixx + iyy
+        config.roll_inertia_kgm2 = max(ixx, 1.0e-12)
+        config.pitch_inertia_kgm2 = max(iyy, 1.0e-12)
+        config.yaw_inertia_kgm2 = max(izz, 1.0e-12)
         return config
 
     def _exact_geometry(self, genome: HybridGenome) -> Optional[Any]:

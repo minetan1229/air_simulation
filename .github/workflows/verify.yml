@@ -78,4 +78,4 @@ jobs:
         if: success()
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: python tools/close_resolved_issue.py
+        run: python tools/close_resolved_issue.py --yes

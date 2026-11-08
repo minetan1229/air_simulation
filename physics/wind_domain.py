@@ -50,6 +50,27 @@ coordinates (``i -> A i + B (mod 289)`` with ``gcd(A, 289) = 1``), a bijection
 of the lattice, which preserves the gradient statistics while producing a
 completely different field for every ``turbulence_seed``.
 
+Turbulence Scope & Spectral Characteristics (Simplex Surrogate vs Analytic Dryden Filter)
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+The 3D simplex turbulence field serves as a procedural spatial turbulence
+surrogate rather than an exact 1D linear-filter Dryden or von Karman temporal process:
+
+* **Divergence**: Being constructed from 3 decorrelated scalar noise fields
+  `(u', v', w')`, the field is not strictly divergence-free (`div u != 0`).
+  This is a standard property of procedural spatial noise turbulence surrogates
+  (unlike vector streamfunction or Biot-Savart methods), chosen for O(1) point evaluation
+  and GPU massive parallelism.
+* **Power Spectral Density (PSD)**: Analytic Dryden / von Karman spectra display an
+  asymptotic power-law inertial roll-off (`f^-2` for Dryden, `f^(-5/3)` for von Karman).
+  In contrast, simplex noise produces smooth (C1/C2 continuous) fluctuations with a
+  band-pass characteristic: flat/rising at very low spatial frequencies, peak power at
+  eddy scales around `lambda ~ lambda_base * turbulence_scale`, and steep roll-off at high wavenumbers.
+* **Statistical Moments**: Fluctuations are zero-mean (`E[u'] ~ 0`), with variances scaled by
+  `turbulence_amplitude(env)` and horizontal-to-vertical anisotropy ratio
+  `sigma_w / sigma_u = 1 / sqrt(2) ~ 0.707` matching neutral atmospheric boundary layer behavior.
+* **Reproducibility**: For a fixed `turbulence_seed`, evaluation is 100% deterministic,
+  purely functional, and bit-for-bit reproducible across calls.
+
 GPU backend with honest fallback
 --------------------------------
 :func:`active_backend` probes for ``cupy`` then ``torch.cuda``.

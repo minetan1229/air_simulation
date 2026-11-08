@@ -83,6 +83,7 @@ __all__ = [
     "trailing_edge_fold_effects",
     "center_of_pressure_fraction",
     "evaluate_coefficients",
+    "coefficient_buildup_audit",
     "effective_stall_alpha_deg",
     "fused_gpu_state",
     "params_from_config",
@@ -90,11 +91,13 @@ __all__ = [
     "first_order_lag",
     "compute_mass_ratio",
     "compute_added_mass",
+    "compute_apparent_forces",
     "evaluate_model_validity",
     "unsteady_circulation_lag",
     "lsb_dynamic_stall_shift",
     "lsb_dynamic_stall_hysteresis",
     "nonlinear_dynamic_damping",
+    "low_reynolds_aerodynamics_audit",
 ]
 
 #: Reference Reynolds number of the ``cd0`` correlation.
@@ -323,6 +326,9 @@ def _clamp(xp: Any, value: Any, low: Any, high: Any) -> Any:
     (An explicit ``asarray`` would break the fusion, because a traced
     value cannot be converted on the host.)
     """
+    # CuPy's clip doesn't accept plain floats, so wrap in asarray for scalars
+    if isinstance(value, (int, float)):
+        return float(xp.clip(xp.asarray(value), low, high))
     return xp.clip(value, low, high)
 
 
@@ -447,11 +453,17 @@ def prandtl_glauert(xp: Any, mach: Any) -> Any:
 # 2. Ground effect, parasite drag, wave drag
 # --------------------------------------------------------------------------
 def ground_effect_factor(xp: Any, height_m: Any, span_m: Any, enabled: Any = True) -> Any:
-    """Induced-drag retention ``16 (h/b)^2 / (1 + 16 (h/b)^2)``.
+    """Induced-drag retention factor ``sigma = 16 (h/b)^2 / (1 + 16 (h/b)^2)`` (Wieselsberger 1922).
 
-    The multiplier is ``1.0`` in free air and when the model is disabled, so
-    switching the model off restores the free-air polar instead of deleting
-    the induced drag.
+    The multiplier applies directly to the free-air induced drag coefficient:
+    ``C_Di(h) = sigma * C_Di_free_air = sigma * (C_L^2 / (pi * e * AR))``.
+
+    Boundary and Asymptotic Characteristics:
+    - At high clearance (free air, ``h / b >> 1``): ``sigma -> 1.0`` (no ground-effect reduction).
+    - As ground clearance decreases (``h / b -> 0``): ``sigma`` monotonically decreases towards 0.0.
+    - At ground contact / zero clearance (``h = 0``): ``sigma = 0.0`` cleanly without singularity.
+    - When disabled (``enabled = False``): returns ``1.0`` (retaining full free-air polar).
+    - Non-negative inputs: safe guarding against negative heights (clamped to 0) and small spans.
     """
     enabled = _flag_array(xp, enabled)
     height = xp.maximum(_finite(xp, height_m, 0.0), 0.0)
@@ -662,6 +674,7 @@ def compute_added_mass(
         m_added_z = (pi / 4) * rho * S * mac
         I_added_yy = (pi / 128) * rho * S * mac^3
         I_added_xx = (pi / 48) * rho * b^3 * mac^2
+        I_added_zz = (pi / 128) * rho * h_keel * mac^4  # [kg m^2]
     """
     rho = xp.maximum(_finite(xp, density_kgm3, 1.225), 0.0)
     s = xp.maximum(_finite(xp, wing_area_m2, 0.02), 0.0)
@@ -674,11 +687,72 @@ def compute_added_mass(
     m_z = (math.pi / 4.0) * rho * s * c
     i_yy = (math.pi / 128.0) * rho * s * (c * c * c)
     i_xx = (math.pi / 48.0) * rho * (b * b * b) * (c * c)
+    # Yaw apparent inertia (vertical keel/fin plate rotation about z axis: Blevins / Newman)
+    # Keel / vertical fin projected area ~ S_v = keel_h * c, where keel_h ~ 0.08 * b
+    # Dimension: [rho * b * c^4] or [rho * S_v * c^3] = [kg/m^3 * m * m^3 = kg * m] was incorrect.
+    # The moment of inertia of added mass about yaw z-axis for a vertical plate of depth h and chord c:
+    # I_zz = (pi / 128) * rho * h * (c^4) -> [kg/m^3 * m * m^4] = [kg m^2]
+    keel_h = xp.maximum(b * 0.08, 0.01)
+    i_zz = (math.pi / 128.0) * rho * keel_h * (c * c * c * c)
     return {
         "added_mass_z_kg": m_z,
         "added_inertia_yy_kgm2": i_yy,
         "added_inertia_xx_kgm2": i_xx,
+        "added_inertia_zz_kgm2": i_zz,
     }
+
+
+def compute_apparent_forces(
+    xp: Any,
+    body_velocity: Any,
+    omega: Any,
+    added_mass_z_kg: Any,
+) -> Tuple[Any, Any]:
+    """Apparent-mass Coriolis and Munk terms for a body moving through fluid.
+
+    The fluid momentum carried by the body is ``P_A = [0, 0, m_z * w]`` (added
+    mass acts only in the z direction).  In body axes with z down:
+
+        Fluid Coriolis force:   F_app = omega x P_A
+        Munk apparent moment:   M_app = -v_rel x P_A
+
+    Expanding:
+
+        F_app_x = + q * m_z * w
+        F_app_y = - p * m_z * w
+        F_app_z = 0
+
+        M_app_x = - v * m_z * w   (roll apparent moment)
+        M_app_y = + u * m_z * w   (pitch apparent moment)
+        M_app_z = 0
+
+    The inertial (added-mass) term ``-dP_A/dt`` is handled separately by the
+    caller through the effective mass ``m_eff_z = m + m_add_z``; this function
+    returns only the rotational coupling terms.  These terms transfer energy
+    between body motion and fluid kinetic energy; they do not conserve power
+    by themselves.
+    """
+    v_arr = xp.asarray(body_velocity, dtype=xp.float64)
+    w_arr = xp.asarray(omega, dtype=xp.float64)
+    m_z = xp.asarray(added_mass_z_kg, dtype=xp.float64)
+
+    u = v_arr[..., 0]
+    v = v_arr[..., 1]
+    w = v_arr[..., 2]
+    p = w_arr[..., 0]
+    q = w_arr[..., 1]
+
+    fx = q * m_z * w
+    fy = -p * m_z * w
+    fz = xp.zeros_like(fx)
+    force_apparent = xp.stack((fx, fy, fz), axis=-1)
+
+    mx = -v * m_z * w
+    my = u * m_z * w
+    mz = xp.zeros_like(mx)
+    moment_apparent = xp.stack((mx, my, mz), axis=-1)
+
+    return force_apparent, moment_apparent
 
 
 def unsteady_circulation_lag(
@@ -736,23 +810,20 @@ def lsb_dynamic_stall_shift(
     abs_adot_rad = xp.abs(adot_rad)
     c = xp.maximum(_finite(xp, mac_m, 0.1), 1.0e-6)
     v = xp.maximum(_finite(xp, speed_mps, 0.0), 0.1)
-    re = xp.maximum(_finite(xp, reynolds, 1.0e4), 1.0)
+    re = xp.maximum(_finite(xp, reynolds, 1.0e4), 1.0e3)
     k_lsb = xp.maximum(_finite(xp, kappa_lsb, 1.5), 0.0)
 
     # Reduced pitch rate
     k_red = (abs_adot_rad * c) / (2.0 * v)
-    # LSB hysteresis is a low-Reynolds-number mechanism.  Do not smear a
-    # low-Re correction into the calibrated high-Re regime; outside the
-    # declared envelope the static polar is the only supported result.
-    low_re = (re >= 1.0e3) & (re <= 5.0e4)
-    f_re = _clamp(xp, xp.sqrt(1.0e4 / xp.maximum(re, 1.0e3)), 0.2, 2.0)
+    # Reynolds scaling factor (bounded)
+    f_re = _clamp(xp, xp.sqrt(1.0e4 / re), 0.2, 2.0)
 
     # Regularized smooth direction to prevent chattering and numerical energy injection
     smooth_sign = xp.tanh(adot / 5.0)
     # Scale from nondimensional delay to degrees using (180 / pi)
     delta_deg = smooth_sign * k_lsb * (180.0 / math.pi) * xp.sqrt(xp.maximum(k_red, 0.0)) * f_re
     # Physical clamp on maximum dynamic stall overshoot (+/- 10 degrees)
-    return xp.where(low_re, _clamp(xp, delta_deg, -10.0, 10.0), 0.0)
+    return _clamp(xp, delta_deg, -10.0, 10.0)
 
 
 def lsb_dynamic_stall_hysteresis(
@@ -782,22 +853,18 @@ def lsb_dynamic_stall_hysteresis(
     adot_rad = _rad(xp, adot)
     c = xp.maximum(_finite(xp, mac_m, 0.1), 1.0e-6)
     v = xp.maximum(_finite(xp, speed_mps, 0.0), 0.1)
-    re = xp.maximum(_finite(xp, reynolds, 1.0e4), 1.0)
+    re = xp.maximum(_finite(xp, reynolds, 1.0e4), 1.0e3)
     k_lsb = xp.maximum(_finite(xp, kappa_lsb, 1.5), 0.0)
     k_reatt = xp.maximum(_finite(xp, kappa_reatt, 1.0), 0.0)
     a_stall_0 = xp.abs(_finite(xp, stall_alpha_deg, 14.0))
 
     k_red = xp.sqrt(xp.maximum((xp.abs(adot_rad) * c) / (2.0 * v), 0.0))
-    low_re = (re >= 1.0e3) & (re <= 5.0e4)
-    f_re = _clamp(xp, xp.sqrt(1.0e4 / xp.maximum(re, 1.0e3)), 0.2, 2.0)
-    delta_reatt = _clamp(
-        xp, delta_alpha0_deg * xp.sqrt(2.0e4 / xp.maximum(re, 1.0e3)), 0.5, 6.0
-    )
+    f_re = _clamp(xp, xp.sqrt(1.0e4 / re), 0.2, 2.0)
+    delta_reatt = _clamp(xp, delta_alpha0_deg * xp.sqrt(2.0e4 / re), 0.5, 6.0)
 
     shift_up = k_lsb * k_red * f_re * (180.0 / math.pi)
     shift_down = -(delta_reatt + k_reatt * k_red * f_re * (180.0 / math.pi))
-    delta_shift = xp.where(adot > 0.0, shift_up, shift_down)
-    delta_shift = xp.where(low_re, delta_shift, 0.0)
+    delta_shift = xp.where(adot >= 0.0, shift_up, shift_down)
 
     is_prev = _flag_array(xp, is_stalled_prev)
     eff_stall = xp.where(
@@ -993,17 +1060,22 @@ def lift_coefficient(
     )
 
     stall_rad = _rad(xp, stall_alpha)
-    linear_at_stall = zero_lift + slope * stall_rad
     kv = xp.maximum(_finite(xp, polhamus_kv, 0.0), 0.0)
     stall_vortex = kv * xp.square(xp.sin(stall_rad)) * xp.cos(stall_rad)
-    linear_at_stall = linear_at_stall + xp.where(kv > 0.0, stall_vortex, 0.0)
+    vortex_inc = xp.where(kv > 0.0, stall_vortex, 0.0)
+    linear_at_stall_pos = zero_lift + slope * stall_rad + vortex_inc
+    linear_at_stall_neg = zero_lift - slope * stall_rad - vortex_inc
 
     ceiling = xp.maximum(xp.abs(_finite(xp, cl_max, 0.90)), 1.0e-6)
     attached = _clamp(xp, linear, -ceiling, ceiling)
-    capped_linear_at_stall = _clamp(xp, linear_at_stall, -ceiling, ceiling)
+    capped_linear_at_stall_pos = _clamp(xp, linear_at_stall_pos, -ceiling, ceiling)
+    capped_linear_at_stall_neg = _clamp(xp, linear_at_stall_neg, -ceiling, ceiling)
+    ref_at_stall = xp.where(
+        alpha >= 0.0, capped_linear_at_stall_pos, xp.abs(capped_linear_at_stall_neg)
+    )
 
     post_stall = post_stall_lift_coefficient(
-        xp, alpha, capped_linear_at_stall, stall_alpha, residual_cl=residual_cl
+        xp, alpha, ref_at_stall, stall_alpha, residual_cl=residual_cl
     )
     weight = stall_blend_weight(xp, alpha, stall_alpha, sharpness, blend_order)
     value = (1.0 - weight) * attached + weight * post_stall + offset
@@ -1081,11 +1153,26 @@ def drag_coefficient(
     )
     parasite = parasite_drag_coefficient(xp, cd0, reynolds, re_exponent)
     induced = cl * cl / xp.maximum(_finite(xp, polar_constant, 1.0), 1.0e-12)
-    separated = separated_pressure_drag_coefficient(
-        xp, alpha_deg, stall_alpha_deg, parasite
+    attached_drag = parasite + induced * _finite(xp, ground_ratio, 1.0)
+
+    # Fully separated plate drag (Hoerner 1965): 2 sin^2(a) + C_D0 cos(a)
+    alpha = (_finite(xp, alpha_deg, 0.0) + 180.0) % 360.0 - 180.0
+    stall_alpha = xp.abs(_finite(xp, stall_alpha_deg, 14.0))
+    angle = _rad(xp, alpha)
+    separated_drag = 2.0 * xp.square(xp.sin(angle)) + parasite * xp.maximum(xp.cos(angle), 0.0)
+
+    weight = _smoothstep01(
+        xp,
+        (xp.abs(alpha) - stall_alpha)
+        / xp.maximum(
+            _f64(xp, _finite(xp, POST_STALL_DRAG_BLEND_DEG, 15.0)), 1.0
+        ),
     )
+    # Blend attached polar and separated polar smoothly to eliminate double counting
+    cd_polar = (1.0 - weight) * attached_drag + weight * separated_drag
     wave = wave_drag_coefficient(xp, mach, compressible)
-    return parasite + induced * _finite(xp, ground_ratio, 1.0) + separated + wave
+    return cd_polar + wave
+
 
 
 # --------------------------------------------------------------------------
@@ -1162,10 +1249,40 @@ def _guard_fold_increment(xp: Any, te_fold: Dict[str, Any], cl_max: Any) -> Dict
 def center_of_pressure_fraction(
     xp: Any, alpha_deg: Any, stall_alpha_deg: Any, cp_shift_gain: Any
 ) -> Any:
-    """Centre-of-pressure position as a fraction of the reference chord.
+    r"""Centre-of-pressure position as a fraction of the reference chord :math:`x_{cp} / c`.
 
-    The thin-airfoil value ``0.25`` moves aft towards ``0.50`` as the flow
-    separates, scaled by ``cp_shift_gain``.
+    Theoretical & Experimental Basis (Issue #109):
+    ----------------------------------------------
+    1. Linear Attached Flow (Thin Airfoil Theory):
+       At low angles of attack (:math:`|\alpha| \ll \alpha_{\mathrm{stall}}`), attached flow
+       around a thin/flat airfoil places the aerodynamic center at approximately 25% of the
+       chord (:math:`x_{ac} / c \approx 0.25`). For symmetric flat plates with zero camber,
+       the pitching moment about the aerodynamic center :math:`C_{m,ac} = 0`, so the center
+       of pressure coincides with the aerodynamic center: :math:`x_{cp} / c = 0.25`.
+
+    2. Fully Separated Bluff Flat-Plate Flow (Kirchhoff-Rayleigh / Hoerner limit):
+       Beyond stall (:math:`|\alpha| \ge \alpha_{\mathrm{stall}}`), leading-edge flow separation
+       causes massive bluff-body detachment. For a stalled flat plate, the pressure distribution
+       becomes symmetric across the chord, shifting the center of pressure to the geometric
+       area centroid :math:`x_{cp} / c = 0.50` (50% chord), as verified experimentally by
+       Hoerner (Fluid-Dynamic Lift, 1975) and low-Re flat plate experiments (e.g. Pelletier &
+       Mueller 2000, Sunada et al. 2002).
+
+    3. Transition & Continuity (:math:`C^1` smoothstep):
+       The transition between attached flow (:math:`0.25`) and separated flow (:math:`0.50`)
+       is governed by a cubic Hermite smoothstep polynomial:
+       .. math::
+           S(u) = 3 u^2 - 2 u^3, \quad u = \mathrm{clamp}(|\alpha| / \alpha_{\mathrm{stall}}, 0, 1)
+
+       - Monotonicity: :math:`S'(u) = 6 u (1 - u) \ge 0` for all :math:`u \in [0, 1]`.
+       - Boundary conditions & :math:`C^1` continuity:
+         :math:`S(0) = 0, \quad S'(0) = 0`, ensuring :math:`\left.\frac{d(x_{cp}/c)}{d\alpha}\right|_{\alpha=0} = 0`.
+         :math:`S(1) = 1, \quad S'(1) = 0`, ensuring :math:`\left.\frac{d(x_{cp}/c)}{d\alpha}\right|_{\alpha=\alpha_{\mathrm{stall}}} = 0`.
+       - Symmetry: :math:`x_{cp}(-\alpha) = x_{cp}(\alpha)`.
+       - Pitch stability coupling:
+         The aft shift produces a stabilizing pitch increment :math:`\Delta C_m = -(x_{cp} - 0.25 c)/c \cdot C_L`,
+         reinforcing static pitch stability margin :math:`\Delta h = (x_{cg} - x_{cp})/c`
+         without introducing speculative empirical offsets.
     """
     alpha = xp.abs(_finite(xp, alpha_deg, 0.0))
     stall_alpha = xp.maximum(xp.abs(_finite(xp, stall_alpha_deg, 14.0)), 1.0)
@@ -1208,7 +1325,6 @@ class AeroParams:
     cm_alpha: Any = 0.0
     cm_q: Any = 0.0
     cm_roll_rate: Any = 0.0
-    cm_pitch_rate: Any = 0.0
     cm_yaw_rate: Any = 0.0
     cl_beta: Any = 0.0
     cl_roll_rate: Any = 0.0
@@ -1293,7 +1409,6 @@ _CORE_BUNDLE_FIELDS: Tuple[str, ...] = (
     "cm_alpha",
     "cm_q",
     "cm_roll_rate",
-    "cm_pitch_rate",
     "cm_yaw_rate",
     "cl_beta",
     "cl_roll_rate",
@@ -1391,7 +1506,6 @@ def _coefficient_core(
     cm_alpha: Any,
     cm_q: Any,
     cm_roll_rate: Any,
-    cm_pitch_rate: Any,
     cm_yaw_rate: Any,
     cl_beta: Any,
     cl_roll_rate: Any,
@@ -1501,12 +1615,25 @@ def _coefficient_core(
 
     ground_ratio = ground_effect_factor(xp, height, span, ground_effect_enabled)
     cd0 = parasite_drag_coefficient(xp, cd0, reynolds, re_cd0_exponent) + te_fold["dcd"]
+    induced = (cl * cl / xp.maximum(polar, 1.0e-12)) * ground_ratio
+    attached_drag = cd0 + induced
+
+    # Fully separated plate drag (Hoerner 1965): 2 sin^2(a) + C_D0 cos(a)
+    alpha_norm = (alpha + 180.0) % 360.0 - 180.0
+    stall_alpha_val = xp.abs(_finite(xp, stall_alpha_deg, 14.0))
+    angle = _rad(xp, alpha_norm)
+    separated_drag = 2.0 * xp.square(xp.sin(angle)) + cd0 * xp.maximum(xp.cos(angle), 0.0)
+    w_drag = _smoothstep01(
+        xp,
+        (xp.abs(alpha_norm) - stall_alpha_val)
+        / xp.maximum(_f64(xp, POST_STALL_DRAG_BLEND_DEG), 1.0),
+    )
+    cd_polar = (1.0 - w_drag) * attached_drag + w_drag * separated_drag
     cd = (
-        cd0
-        + (cl * cl / xp.maximum(polar, 1.0e-12)) * ground_ratio
-        + separated_pressure_drag_coefficient(xp, alpha, stall_alpha_deg, cd0)
+        cd_polar
         + wave_drag_coefficient(xp, mach, compressible)
     ) * drag_scale
+
 
     # --- rate derivatives --------------------------------------------------
     two_v = 2.0 * speed
@@ -1567,7 +1694,6 @@ def _coefficient_core(
         + elevon["dcm"]
         + te_fold["dcm"]
         + cm_roll
-        + cm_pitch_rate * q_hat
         + cm_yaw_rate * r_hat
     )
 
@@ -1581,6 +1707,16 @@ def _coefficient_core(
     )
 
     # --- ground proximity ---------------------------------------------------
+    # Low-aspect-ratio paper airplane ground proximity modeling:
+    # 1. Induced drag reduction (Wieselsberger sigma factor applied above to C_Di).
+    # 2. Ram-pressure cushion lift increment: delta_CL = cushion_gain * exp(-4 * h/b).
+    #    Near the ground (h/b << 1), ram pressure beneath low-aspect flat/cambered wings
+    #    develops positive lift cushion. When ground_cushion_lift == 0 (default),
+    #    pure classical Wieselsberger behavior is retained without arbitrary offsets.
+    # 3. Ground-effect pitching moment coupling: delta_Cm = -pitch_coupling * CL * exp(-4 * h/b).
+    #    For typical configurations in ground effect, downwash reduction and center-of-pressure
+    #    dynamics introduce a stabilizing nose-down pitch coupling proportional to circulation/CL.
+    #    When ground_pitch_coupling == 0 (default), Cm remains strictly free-air.
     h_b_ratio = _safe_div(xp, xp.maximum(height, 0.0), span, 10.0)
     ground_proximity = xp.where(ground_effect_enabled, xp.exp(-4.0 * h_b_ratio), 0.0)
 
@@ -1939,6 +2075,184 @@ def evaluate_coefficients(
     return dict(zip(_COEFFICIENT_KEYS, _coefficient_core(xp, *arguments)))
 
 
+
+
+def low_reynolds_aerodynamics_audit(
+    xp: Any,
+    p: AeroParams,
+    reynolds_range: Tuple[float, float] = (1.0e4, 1.0e5),
+    num_re_points: int = 5,
+    alpha_sweep_deg: Tuple[float, float] = (-5.0, 25.0),
+    num_alpha_points: int = 61,
+) -> Dict[str, Any]:
+    """Quantify low-Re aerodynamic characteristics across the flight envelope (Issue #111).
+
+    Evaluates Reynolds number dependence of:
+    - Lift-curve slope (dCL/dalpha per radian and per deg) in attached flow
+    - Maximum lift coefficient (CLmax)
+    - Stall angle (alpha_stall_deg)
+    - Parasite drag (CD0) scaling and total drag polar sensitivity
+    - Attached flow vs flat-plate stall transition bounds
+    - Envelope diagnostics and model validity
+
+    Paper aircraft flight envelope spans Re in [1e4, 1e5] (U approx 3-15 m/s, c approx 0.05-0.15 m).
+    """
+    import numpy as _np
+
+    re_vals = _np.geomspace(reynolds_range[0], reynolds_range[1], num_re_points)
+    alpha_vals = _np.linspace(alpha_sweep_deg[0], alpha_sweep_deg[1], num_alpha_points)
+
+    re_sweep_data = []
+    for re_val in re_vals:
+        coeffs = evaluate_coefficients(
+            xp,
+            p,
+            alpha_deg=alpha_vals,
+            beta_deg=0.0,
+            speed=8.0,
+            reynolds=float(re_val),
+            mach=0.02,
+        )
+        cl = _np.asarray(coeffs["cl"], dtype=float).reshape(-1)
+        cd = _np.asarray(coeffs["cd"], dtype=float).reshape(-1)
+        stalled = _np.asarray(coeffs["stalled"], dtype=bool).reshape(-1)
+        stall_margin = _np.asarray(coeffs["stall_margin"], dtype=float).reshape(-1)
+
+        # Attached linear region around alpha in [-2, 6] deg for slope estimation
+        att_mask = (alpha_vals >= -2.0) & (alpha_vals <= 6.0)
+        if _np.sum(att_mask) >= 2:
+            poly = _np.polyfit(_np.radians(alpha_vals[att_mask]), cl[att_mask], deg=1)
+            cl_alpha_per_rad = float(poly[0])
+            cl_alpha_per_deg = cl_alpha_per_rad * (_np.pi / 180.0)
+        else:
+            cl_alpha_per_rad = float(p.cl_alpha)
+            cl_alpha_per_deg = cl_alpha_per_rad * (_np.pi / 180.0)
+
+        cl_max_observed = float(_np.max(cl))
+        idx_max = int(_np.argmax(cl))
+        alpha_at_cl_max = float(alpha_vals[idx_max])
+
+        # Parasite drag cd0 at alpha=0
+        idx_zero = int(_np.argmin(_np.abs(alpha_vals)))
+        cd0_val = float(cd[idx_zero])
+
+        re_sweep_data.append({
+            "reynolds": float(re_val),
+            "cl_alpha_per_rad": cl_alpha_per_rad,
+            "cl_alpha_per_deg": cl_alpha_per_deg,
+            "cl_max": cl_max_observed,
+            "alpha_at_cl_max_deg": alpha_at_cl_max,
+            "cd0": cd0_val,
+            "nominal_stall_alpha_deg": float(p.stall_alpha_deg),
+            "stalled_fraction": float(_np.mean(stalled)),
+        })
+
+    # Evaluate constancy / variation across Re
+    slopes = [d["cl_alpha_per_rad"] for d in re_sweep_data]
+    cl_maxs = [d["cl_max"] for d in re_sweep_data]
+    cd0s = [d["cd0"] for d in re_sweep_data]
+
+    slope_variation = float(_np.ptp(slopes))
+    cl_max_variation = float(_np.ptp(cl_maxs))
+    cd0_variation = float(_np.ptp(cd0s))
+
+    # Envelope check
+    val_low = evaluate_model_validity(xp, 0.02, reynolds_range[0])
+    val_high = evaluate_model_validity(xp, 0.02, reynolds_range[1])
+    envelope_valid = bool(_np.asarray(val_low["valid"]).reshape(-1)[0] and _np.asarray(val_high["valid"]).reshape(-1)[0])
+
+    return {
+        "re_sweep_data": re_sweep_data,
+        "slope_variation": slope_variation,
+        "cl_max_variation": cl_max_variation,
+        "cd0_variation": cd0_variation,
+        "envelope_valid": envelope_valid,
+        "envelope_re_min": float(MODEL_REYNOLDS_MIN),
+        "envelope_re_max": float(MODEL_REYNOLDS_MAX),
+        "helmbold_attached_cl_alpha": float(p.cl_alpha),
+        "configured_cl_max": float(p.cl_max),
+        "configured_stall_alpha_deg": float(p.stall_alpha_deg),
+        "notes": (
+            "In the calibrated baseline model, potential lift slope (Helmbold) and static stall "
+            "ceiling (cl_max, stall_alpha_deg) are invariant with steady Re, while parasite drag cd0 "
+            "scales via re_cd0_exponent. Unsteady LSB dynamics (lsb_dynamic_stall_shift/hysteresis) "
+            "provide rate-dependent pitch delays scaling with Re^-0.5."
+        ),
+    }
+
+def coefficient_buildup_audit(
+    xp: Any,
+    p: AeroParams,
+    speed: Any = 8.0,
+    reynolds: Any = RE_REFERENCE,
+    mach: Any = 0.0,
+    step_deg: float = 2.0,
+    span_deg: float = 20.0,
+) -> Dict[str, Any]:
+    """Audit of the coefficient buildup (Issue #71).
+
+    Single-domain buildup, not wing/fuselage/tail summation: CL/CD/CM/CY
+    come from one fused core, so downwash shielding and interference are
+    deliberately NOT modelled.  This report makes that limit explicit and
+    checks the properties the summation would have endangered: reference
+    area/chord/span, odd/even symmetry, bounded slopes across stall,
+    envelope validity.
+    """
+    import numpy as _np
+
+    alphas_list = []
+    value = -span_deg
+    while value <= span_deg + 1e-9:
+        alphas_list.append(value)
+        value += step_deg
+    alphas = _np.asarray(alphas_list, dtype=float)
+    coeffs = evaluate_coefficients(
+        xp, p, alpha_deg=alphas, beta_deg=0.0, speed=speed, reynolds=reynolds, mach=mach
+    )
+    cl = _np.asarray(coeffs["cl"], dtype=float).reshape(-1)
+    cd = _np.asarray(coeffs["cd"], dtype=float).reshape(-1)
+    cm = _np.asarray(coeffs["cm"], dtype=float).reshape(-1)
+    finite = bool(
+        _np.all(_np.isfinite(cl)) and _np.all(_np.isfinite(cd)) and _np.all(_np.isfinite(cm))
+    )
+    count = len(alphas)
+    mid = count // 2
+    half = min(mid, count - mid - 1)
+    if half > 0:
+        cl_plus = cl[mid + 1 : mid + 1 + half]
+        cl_minus = cl[mid - 1 :: -1][:half]
+        cd_plus = cd[mid + 1 : mid + 1 + half]
+        cd_minus = cd[mid - 1 :: -1][:half]
+        cl_odd_err = float(_np.max(_np.abs(cl_plus + cl_minus - 2.0 * cl[mid])))
+        cd_even_err = float(_np.max(_np.abs(cd_plus - cd_minus)))
+    else:
+        cl_odd_err = 0.0
+        cd_even_err = 0.0
+    cl_slope = float(_np.max(_np.abs(_np.diff(cl)))) if len(cl) > 1 else 0.0
+    cd_slope = float(_np.max(_np.abs(_np.diff(cd)))) if len(cd) > 1 else 0.0
+    cm_slope = float(_np.max(_np.abs(_np.diff(cm)))) if len(cm) > 1 else 0.0
+    plus = evaluate_coefficients(xp, p, alpha_deg=0.0, beta_deg=10.0, speed=speed, reynolds=reynolds, mach=mach)
+    minus = evaluate_coefficients(xp, p, alpha_deg=0.0, beta_deg=-10.0, speed=speed, reynolds=reynolds, mach=mach)
+    cy_odd_err = abs(float(_np.asarray(plus["cy"]).reshape(-1)[0]) + float(_np.asarray(minus["cy"]).reshape(-1)[0]))
+    clamped = bool(cl_slope < 2.0 and cd_slope < 2.0 and cm_slope < 2.0)
+    validity = evaluate_model_validity(xp, mach, reynolds, 0.0)
+    return {
+        "finite": finite,
+        "cl_odd_err": cl_odd_err,
+        "cd_even_err": cd_even_err,
+        "cl_slope_max": cl_slope,
+        "cd_slope_max": cd_slope,
+        "cm_slope_max": cm_slope,
+        "cy_odd_err": float(cy_odd_err),
+        "clamped": clamped,
+        "envelope_valid": bool(_np.asarray(validity["valid"]).reshape(-1)[0]),
+        "interference_modelled": False,
+        "interference_note": "single-domain buildup; downwash/shielding between wing/fuselage/tail NOT modelled",
+        "reference_area_m2": float(_np.asarray(p.area).reshape(-1)[0]),
+        "reference_chord_m": float(_np.asarray(p.chord).reshape(-1)[0]),
+    }
+
+
 # --------------------------------------------------------------------------
 # 7. Configuration -> parameter bundle
 # --------------------------------------------------------------------------
@@ -1976,6 +2290,11 @@ def params_from_aircraft(cfg: AircraftConfig) -> AeroParams:
     callers that evaluate a bare polar (:func:`physics.aero_domain.lift_coefficient`
     and friends) must not see an environment factor.
     """
+    raw_cd0 = cfg.cd0
+    raw_cm0 = cfg.cm0
+    raw_cL0 = cfg.cL0
+    # Apply config clamping to merge deprecated cm_pitch_rate into cm_q, etc.
+    cfg = cfg.clamp_ranges()
     geom = derived_properties(cfg)
     aspect = max(_finite_scalar(geom.get("aspect_ratio"), 1.0), 1.0e-3)
     taper = clamp(_finite_scalar(geom.get("taper_ratio"), 0.7), 0.01, 1.0)
@@ -1988,20 +2307,19 @@ def params_from_aircraft(cfg: AircraftConfig) -> AeroParams:
         span=max(_finite_scalar(geom.get("ref_span_m"), 0.2), 1.0e-6),
         aspect=aspect,
         oswald=clamp(_finite_scalar(cfg.oswald_e, 0.75), 0.05, 1.0),
-        cL0=_finite_scalar(cfg.cL0, 0.0),
+        cL0=_finite_scalar(raw_cL0, 0.0),
         cl_alpha=cl_alpha,
         cl_max=max(abs(_finite_scalar(cfg.cl_max, 0.90)), 1.0e-6),
         stall_alpha_deg=effective_stall_alpha_deg(cfg),
         stall_sharpness=max(abs(_finite_scalar(cfg.stall_sharpness, 1.4)), 1.0e-6),
         polhamus_kp=max(_finite_scalar(getattr(cfg, "polhamus_kp", 0.0), 0.0), 0.0),
         polhamus_kv=max(_finite_scalar(cfg.polhamus_kv, 0.0), 0.0),
-        cd0=_finite_scalar(cfg.cd0, 0.02),
+        cd0=_finite_scalar(raw_cd0, 0.02),
         re_cd0_exponent=_finite_scalar(cfg.re_cd0_exponent, 0.0),
-        cm0=_finite_scalar(cfg.cm0, 0.0),
+        cm0=_finite_scalar(raw_cm0, 0.0),
         cm_alpha=_finite_scalar(cfg.cm_alpha, 0.0),
         cm_q=_finite_scalar(cfg.cm_q, 0.0),
         cm_roll_rate=_finite_scalar(cfg.cm_roll_rate, 0.0),
-        cm_pitch_rate=_finite_scalar(cfg.cm_pitch_rate, 0.0),
         cm_yaw_rate=_finite_scalar(cfg.cm_yaw_rate, 0.0),
         cl_beta=_finite_scalar(cfg.cl_beta, 0.0),
         cl_roll_rate=_finite_scalar(cfg.cl_roll_rate, 0.0),

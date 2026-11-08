@@ -14,7 +14,7 @@ python smoke_test.py
 ### 2. Git & CI 運用
 - ブランチ: `git checkout -b <type>/<desc>` (`feat/`, `fix/`, `docs/`, `test/`等)
 - マージ&プッシュ: ローカル全通過後、実動コードのみ master マージ → `git push`
-- CI/Issue確認: `python tools/check_runs.py` でCI完了確認 → `python tools/check_issues.py` & `python tools/close_resolved_issue.py` でIssueクローズ。
+- CI/Issue確認: python tools/check_runs.py でCI完了確認 → AGENTS.md §2のIssueクローズ厳格条件を満たす場合のみIssueクローズ（テスト追加のみ、ドキュメント明記のみ、未着手Issueへの集約によるクローズは厳禁）。
 
 ## Verification Criteria (事前合否基準)
 - 成功: 構文エラーなし、Ruff/Mypy指摘0件、pytest全パス、smoke_test正常終了(Exit 0)。

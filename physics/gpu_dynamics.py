@@ -70,6 +70,7 @@ __all__ = [
     "quaternion_normalize_batch",
     "launch_state_vector",
     "simulate_batch",
+    "_invert_3x3_batch",
 ]
 
 #: Number of state variables of the rigid body: position, velocity,
@@ -191,6 +192,48 @@ def _contract3(xp: Any, rotation: Any, vector: Any) -> Any:
             rotation[:, 2, 0] * v0 + rotation[:, 2, 1] * v1 + rotation[:, 2, 2] * v2,
         ),
         axis=-1,
+    )
+
+
+def _invert_3x3_batch(xp: Any, matrix: Any) -> Any:
+    """Analytic vectorised inversion of an ``(N, 3, 3)`` matrix batch.
+
+    Written without cuBLAS / NumPy inv to permit CUDA graph capture without
+    device synchronisation or host copies.
+    """
+    a = matrix[:, 0, 0]
+    b = matrix[:, 0, 1]
+    c = matrix[:, 0, 2]
+    d = matrix[:, 1, 0]
+    e = matrix[:, 1, 1]
+    f = matrix[:, 1, 2]
+    g = matrix[:, 2, 0]
+    h = matrix[:, 2, 1]
+    k = matrix[:, 2, 2]
+
+    a_adj = e * k - f * h
+    b_adj = -(d * k - f * g)
+    c_adj = d * h - e * g
+
+    det = a * a_adj + b * b_adj + c * c_adj
+    safe_det = xp.where(xp.abs(det) > 1.0e-15, det, xp.ones_like(det))
+    inv_det = 1.0 / safe_det
+
+    d_adj = -(b * k - c * h)
+    e_adj = a * k - c * g
+    f_adj = -(a * h - b * g)
+
+    g_adj = b * f - c * e
+    h_adj = -(a * f - c * d)
+    k_adj = a * e - b * d
+
+    return xp.stack(
+        (
+            xp.stack((a_adj * inv_det, d_adj * inv_det, g_adj * inv_det), axis=-1),
+            xp.stack((b_adj * inv_det, e_adj * inv_det, h_adj * inv_det), axis=-1),
+            xp.stack((c_adj * inv_det, f_adj * inv_det, k_adj * inv_det), axis=-1),
+        ),
+        axis=1,
     )
 
 
@@ -345,6 +388,8 @@ class FlightParams:
     inertia_matrix: Any = None
     inertia_inv: Any = None
     sample_wind_stages: bool = False
+    apparent_active: Any = None
+    has_apparent: bool = False
 
 
 def wind_batch(
@@ -482,7 +527,7 @@ def build_params(
                 "area", "chord", "span", "aspect", "oswald", "cL0", "cl_alpha",
                 "cl_max", "stall_alpha_deg", "stall_sharpness", "polhamus_kp",
                 "polhamus_kv", "cd0", "re_cd0_exponent", "cm0", "cm_alpha",
-                "cm_q", "cm_roll_rate", "cm_pitch_rate", "cm_yaw_rate",
+                "cm_q", "cm_roll_rate", "cm_yaw_rate",
                 "cl_beta", "cl_roll_rate", "cl_pitch_rate", "cl_yaw_rate",
                 "cn_beta", "cn_roll_rate", "cn_pitch_rate", "cn_yaw_rate",
                 "cy_beta", "aileron_deg", "asymmetry_cl", "rudder_deg",
@@ -561,6 +606,22 @@ def build_params(
         use_mean_wind_only=use_mean_wind,
         inertia_matrix=inertia_matrix,
         inertia_inv=inertia_inv,
+        apparent_active=xp.asarray([
+            bool(
+                getattr(cfg, "added_mass_enabled", False)
+                or getattr(cfg, "apparent_inertia_enabled", False)
+                or getattr(cfg, "fidelity_mode", "standard") in ("improved_medium", "multifidelity")
+            )
+            for cfg in configs
+        ]),
+        has_apparent=any(
+            bool(
+                getattr(cfg, "added_mass_enabled", False)
+                or getattr(cfg, "apparent_inertia_enabled", False)
+                or getattr(cfg, "fidelity_mode", "standard") in ("improved_medium", "multifidelity")
+            )
+            for cfg in configs
+        ),
     )
 
 
@@ -664,20 +725,11 @@ def _evaluate_state(
     )
     mach = speed / xp.maximum(air["sound_speed_mps"], 1.0)
     reynolds = speed * params.chord / xp.maximum(air["kinematic_viscosity_m2s"], 1.0e-12)
-    # The canonical 6-DoF path evaluates the aerodynamic model only inside its
-    # validated Reynolds envelope: ``flight_sim.aero_forces`` clamps the
-    # Reynolds number to ``[MODEL_REYNOLDS_MIN, MODEL_REYNOLDS_MAX]`` before it
-    # reaches the shared kernel.  The batch path used the raw Reynolds number,
-    # so for an airframe whose chord is short enough to run above the envelope
-    # (a GA airframe reaches Re ~ 1.7e5 at the release speed) the two paths
-    # evaluated the *same* kernel with a *different* parasite drag: the
-    # Reynolds correction ``cd0 (1e5/Re) ** exponent`` gave the batch 1.5 %
-    # less drag than the canonical path, which moved the load factor by
-    # 1.1e-3 and the peak wing-root stress by the same factor.  The envelope is
-    # a property of the model, so the batch has to apply it as well.
-    reynolds = xp.clip(
-        reynolds, float(MODEL_REYNOLDS_MIN), float(MODEL_REYNOLDS_MAX)
-    )
+    # The aerodynamic model extrapolates outside [MODEL_REYNOLDS_MIN, MODEL_REYNOLDS_MAX]
+    # following PHYSICS_MODELS.md §4.2, and publishes validity via model_valid.
+    # Lower bound 1.0 guards against division by zero in the kernel.
+    reynolds = xp.maximum(reynolds, 1.0)
+
 
     coefficients = aero_kernel.evaluate_coefficients(
         xp,
@@ -701,8 +753,38 @@ def _evaluate_state(
         coefficients["side_n"],
         coefficients["lift_n"],
     )
-    force_world = body_to_world_batch(xp, rotation, force_body) + params.mass[:, xp.newaxis] * gravity_world
-    acceleration = force_world / params.mass[:, xp.newaxis]
+
+    has_apparent = bool(getattr(params, "has_apparent", False))
+    if has_apparent:
+        added = aero_kernel.compute_added_mass(
+            xp, air["density_kgm3"], params.area, params.chord, wingspan_m=params.span
+        )
+        m_add_z = added["added_mass_z_kg"]
+        m_eff_z = params.mass + m_add_z
+        gravity_body = world_to_body_batch(xp, rotation, gravity_world)
+        a_body = (force_body / params.mass[:, xp.newaxis]) + gravity_body
+        a_body_2_app = (force_body[:, 2] + params.mass * gravity_body[:, 2]) / m_eff_z
+        a_body_z = xp.where(params.apparent_active, a_body_2_app, a_body[:, 2])
+        a_body = xp.stack((a_body[:, 0], a_body[:, 1], a_body_z), axis=-1)
+        acceleration = body_to_world_batch(xp, rotation, a_body)
+
+        eff_inertia_mat = xp.copy(params.inertia_matrix)
+        add_xx = xp.where(params.apparent_active, added.get("added_inertia_xx_kgm2", 0.0), 0.0)
+        add_yy = xp.where(params.apparent_active, added.get("added_inertia_yy_kgm2", 0.0), 0.0)
+        add_zz = xp.where(params.apparent_active, added.get("added_inertia_zz_kgm2", 0.0), 0.0)
+        r0 = xp.stack((eff_inertia_mat[:, 0, 0] + add_xx, eff_inertia_mat[:, 0, 1], eff_inertia_mat[:, 0, 2]), axis=-1)
+        r1 = xp.stack((eff_inertia_mat[:, 1, 0], eff_inertia_mat[:, 1, 1] + add_yy, eff_inertia_mat[:, 1, 2]), axis=-1)
+        r2 = xp.stack((eff_inertia_mat[:, 2, 0], eff_inertia_mat[:, 2, 1], eff_inertia_mat[:, 2, 2] + add_zz), axis=-1)
+        eff_inertia_mat = xp.stack((r0, r1, r2), axis=1)
+        eff_inertia_inv = _invert_3x3_batch(xp, eff_inertia_mat)
+
+        cur_mat = eff_inertia_mat
+        cur_inv = eff_inertia_inv
+    else:
+        force_world = body_to_world_batch(xp, rotation, force_body) + params.mass[:, xp.newaxis] * gravity_world
+        acceleration = force_world / params.mass[:, xp.newaxis]
+        cur_mat = params.inertia_matrix
+        cur_inv = params.inertia_inv
 
     beta_rad = _rad(xp, beta)
     moment_body = xp.stack(
@@ -716,11 +798,11 @@ def _evaluate_state(
         xp, params, omega, coefficients["q_dyn"], speed, beta_rad
     )
 
-    if getattr(params, "inertia_matrix", None) is not None:
-        angular_momentum = _contract3(xp, params.inertia_matrix, omega)
+    if cur_mat is not None:
+        angular_momentum = _contract3(xp, cur_mat, omega)
         gyro = _cross(xp, omega, angular_momentum)
         net_moment = moment_body - gyro
-        angular_acceleration = _contract3(xp, params.inertia_inv, net_moment)
+        angular_acceleration = _contract3(xp, cur_inv, net_moment)
     else:
         angular_momentum = params.inertia * omega
         angular_acceleration = (
@@ -1443,12 +1525,9 @@ def simulate_batch(
     trim_reynolds = acc["trim_speed"] * params.chord / xp.maximum(
         trim_air["kinematic_viscosity_m2s"], 1.0e-12
     )
-    # The same Reynolds envelope the canonical path applies to its trim
-    # residual (``flight_sim._trim_residual_cm`` goes through
-    # ``aero_forces``), so the trim sees the same model validity.
-    trim_reynolds = xp.clip(
-        trim_reynolds, float(MODEL_REYNOLDS_MIN), float(MODEL_REYNOLDS_MAX)
-    )
+    # The model extrapolates outside the envelope; lower bound 1.0 guards division by zero.
+    trim_reynolds = xp.maximum(trim_reynolds, 1.0)
+
     trim_mach = acc["trim_speed"] / xp.maximum(trim_air["sound_speed_mps"], 1.0)
     trim_coefficients = aero_kernel.evaluate_coefficients(
         xp,

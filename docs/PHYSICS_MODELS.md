@@ -55,12 +55,66 @@
   例外として、API 契約で公開されている）。
 - **パネル法**（`physics/mesh_domain.py`）は Helmbold の 2.2 倍乖離する。これは `no-finish.md` §A-5 /
   F-8 の **意図的維持** であり、2 つの空力モデルを 1 式に統合しない（統合は単一実装原則を壊す）。
+  さらに、**パネル法は実飛行・GA評価経路に接続されていない**（Issue #95: `panel_aerodynamics()`
+  の呼び出し元はテストのみ。飛行・GAは `aero_domain` / `aero_kernel` / GPU dynamics の
+  係数ベースモデルを使用する）。詳しいデータフローは §2.4。
 
 ### 2.2 検証コマンド
 
 ```
 python -m pytest tests/test_aero.py -q -k helmbold
 ```
+
+### 2.3 パネル法と Helmbold の乖離定量化（Issue #133）
+
+`physics/model_discrepancy.py` が同一形状・同一 Re・同一基準面積での定量比較を提供する。
+
+| 項目 | パネル法 | Helmbold（正規経路） |
+|---|---|---|
+| 揚力傾斜 | `2π` = 6.283 /rad（2次元薄翼） | `2π AR/(2+√(AR²(1+λ)+4AR/π))`、既定 AR=2.67・λ=0.7 で 2.823 /rad（3次元） |
+| 比率 | **2.22 倍**（±2 %） | 1.00（基準） |
+| トリム迎角（C_L=0.5） | 4.56° | 10.15°（傾斜に反比例） |
+| 飛行距離（トリムC_L基準） | 1.00 倍（同C_L→同誘導抗力→同距離） | 1.00（基準） |
+| 飛行距離（誘導支配の境界） | 1/2.22 ≈ 0.45 倍 | 1.00（基準） |
+
+**使い分け**:
+- 飛行予測・GA ランキングは **Helmbold**（3次元補正済み）を使う。
+- パネル法は可視化・局所入射角の診断用。GA 候補順位・Pareto 前線を
+  両モデルで直接比較しないこと（順位逆転リスク ≈ 1.22）。
+- どちらかを無条件に正解とせず、参照実験が無い現状では「モデル間乖離
+  として」記録する。`physics/model_discrepancy.py::flight_impact_summary`
+  が一次近似の下流影響（揚力比・トリム比・誘導抗力・距離比）を返す。
+
+### 2.4 メッシュ由来パネル空力の実経路接続状態（Issue #95）
+
+データフローは以下の通り（静的検索＋呼び出し元確定済み）。
+
+```
+[mesh import]  STL/OBJ/GLB -> MeshLibrary.compute_metrics()
+                    |
+                    +-> S, b, c, AR, cg, inertia  -----> AircraftConfig
+                    |                                        |
+                    |                                        v
+                    |                                   flight_sim / GA
+                    |                                   (aero_domain/aero_kernel,
+                    |                                    GPU dynamics)
+                    |                                        |
+                    v                                        v
+[panel build]  build_panels() -> panel_aerodynamics()  <-- 呼出し元は
+                    |                                   tests/test_mesh.py と
+                    v                                   tests/test_advanced_
+[panel output] total_lift_n / total_moment_nm            physics_audit.py
+                                                       のみ
+```
+
+**未接続であることの明記**:
+- `panel_aerodynamics()` の実飛行・GA fitness 経路に接続していない。
+  メッシュ取り込みで得た面積・重心・慣性テンソルは飛行計算に使うが、
+  局所パネル空力は飛行予測・GA適応度に反映されない。
+- UI / API で「3Dメッシュに基づく空力解析」と表示しないこと。パネル法は
+  可視化・局所入射角の診断専用。
+- 将来接続する場合は、既存係数ベースモデルとの二重計上を避け、有効モデルの
+  明示的切替を実装すること。
 
 ---
 
@@ -216,5 +270,5 @@ python tools/check_gpu_parity.py
 ---
 
 *本書は Issue #47 の 3D CFD ロードマップ（`docs/CFD_ROADMAP.md`）とは別物である。
-CFD ロードマップは **3 次元 Navier–Stokes ソルバ** の導入計画であり、本書が扱う
+CFD ロードマップは **3 次元 Navier–Stokes ソルバ** の目標仕様・導入計画であり、現状存在する 3D Euler 試作ソルバとは区別する。本書が扱う
 **6DoF パネル法 + 経験モデル** の正本とは層が異なる。*

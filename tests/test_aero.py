@@ -102,6 +102,20 @@ def test_separated_pressure_drag_uses_projected_area(cfg, env, alpha):
     assert result.stalled and result.stall_margin < 0.0
 
 
+def test_post_stall_drag_hoerner_asymptotic_limit(cfg, env):
+    """Verify post-stall drag approaches Hoerner flat plate limit without double-counting (Issue #73)."""
+    # At 90 degrees angle of attack, the normal force on a broadside plate is C_D = 2.0.
+    # Prior to fix, parasite drag and induced drag were additively stacked onto separated drag,
+    # producing C_D = 2.0 + C_D0. With convex blending, C_D asymptotically equals 2.0 exactly.
+    res_90 = evaluate_aero(cfg, env, 8.0, 90.0)
+    assert res_90.cd == pytest.approx(2.0, abs=1e-6)
+
+    # At -90 degrees angle of attack
+    res_neg_90 = evaluate_aero(cfg, env, 8.0, -90.0)
+    assert res_neg_90.cd == pytest.approx(2.0, abs=1e-6)
+
+
+
 def test_pressure_drag_transition_is_continuous_and_preserves_attached_polar(cfg):
     # The separated drag starts at the stall angle.  The airframe is
     # symmetric, so the same angle applies in both directions: the previous
@@ -133,9 +147,33 @@ def test_pitch_damping_opposes_rotation_with_standard_rate_normalization(cfg, en
     zero = evaluate_aero(cfg, env, speed, 0.0)
     for pitch_rate in (-1.0, 1.0):
         rotating = evaluate_aero(cfg, env, speed, 0.0, angular_rate=(0.0, pitch_rate, 0.0))
-        expected = (cfg.cm_q + cfg.cm_pitch_rate) * pitch_rate * chord / (2.0 * speed)
+        expected = cfg.cm_q * pitch_rate * chord / (2.0 * speed)
         assert rotating.cm - zero.cm == pytest.approx(expected, rel=1e-12)
         assert (rotating.pitching_moment_nm - zero.pitching_moment_nm) * pitch_rate < 0.0
+
+
+def test_pitch_damping_dual_derivatives_consistency(env):
+    """Issue #76: cm_pitch_rate is deprecated; cm_q is the sole derivative."""
+    speed = 10.0
+    cfg_base = AircraftConfig(cm_q=-12.0, cm_pitch_rate=0.0)
+    chord = derived_properties(cfg_base)["ref_length_m"]
+    res_base = evaluate_aero(cfg_base, env, speed, 0.0, angular_rate=(0.0, 1.0, 0.0))
+    dcm_base = res_base.cm - evaluate_aero(cfg_base, env, speed, 0.0).cm
+    assert dcm_base == pytest.approx(-12.0 * chord / (2.0 * speed), rel=1e-12)
+
+    cfg_clamped = AircraftConfig(cm_q=-10.0, cm_pitch_rate=-2.0).clamp_ranges()
+    assert cfg_clamped.cm_q == pytest.approx(-12.0, rel=1e-12)
+    assert cfg_clamped.cm_pitch_rate == 0.0
+    res_clamped = evaluate_aero(cfg_clamped, env, speed, 0.0, angular_rate=(0.0, 1.0, 0.0))
+    dcm_clamped = res_clamped.cm - evaluate_aero(cfg_clamped, env, speed, 0.0).cm
+    assert dcm_clamped == pytest.approx(dcm_base, rel=1e-12)
+
+    cfg_rate_only = AircraftConfig(cm_q=0.0, cm_pitch_rate=-8.0).clamp_ranges()
+    assert cfg_rate_only.cm_q == pytest.approx(-8.0, rel=1e-12)
+    res_rate = evaluate_aero(cfg_rate_only, env, speed, 0.0, angular_rate=(0.0, 1.0, 0.0))
+    dcm_rate = res_rate.cm - evaluate_aero(cfg_rate_only, env, speed, 0.0).cm
+    assert dcm_rate == pytest.approx(-8.0 * chord / (2.0 * speed), rel=1e-12)
+
 
 
 def _analytic_config() -> AircraftConfig:
@@ -166,15 +204,15 @@ def _analytic_config() -> AircraftConfig:
         cy_beta=-0.25,
         cl_beta=-0.03,
         cn_beta=0.08,
-        cl_roll_rate=0.10,
+        cl_roll_rate=-0.10,
         cm_roll_rate=-0.02,
         cn_roll_rate=-0.08,
         cl_pitch_rate=-0.06,
-        cm_pitch_rate=0.05,
+        cm_pitch_rate=0.0,
         cn_pitch_rate=-0.12,
         cl_yaw_rate=0.08,
         cm_yaw_rate=0.0,
-        cn_yaw_rate=0.15,
+        cn_yaw_rate=-0.15,
         static_margin=0.12,
         cg_offset_x=0.0,
         mass_kg=0.005,
@@ -701,7 +739,6 @@ def test_evaluate_aero_forces_match_their_definitions(cfg: AircraftConfig, env: 
         + cfg.cm_q * q_hat
         + elevon_effects(cfg.elevon_deg, cfg)["dcm"]
         + cfg.cm_roll_rate * p_hat
-        + cfg.cm_pitch_rate * q_hat
         + cfg.cm_yaw_rate * r_hat
     )
     assert result.rolling_moment_nm == pytest.approx(dynamic * area * span * expected_cl, rel=1e-9)

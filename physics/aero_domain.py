@@ -559,13 +559,25 @@ def drag_coefficient(
     cl = lift_coefficient(alpha_deg, cfg, compressible=compressible, mach=mach, cl_offset=cl_offset)
     induced = cl * cl / _polar_constant(cfg)
     factor = 1.0 if ground_height_m is None else ground_effect_factor(ground_height_m, _span(cfg), True)
-    return (
-        parasite_drag_coefficient(cfg, reynolds)
-        + te_fold["dcd"]
-        + induced * factor
-        + separated_pressure_drag_coefficient(alpha_deg, cfg, reynolds)
-        + wave_drag_coefficient(mach, compressible)
-    )
+    parasite = parasite_drag_coefficient(cfg, reynolds) + te_fold["dcd"]
+    attached_drag = parasite + induced * factor
+
+    stall_alpha = effective_stall_alpha_deg(cfg)
+    alpha_norm = (alpha_deg + 180.0) % 360.0 - 180.0
+    rad_a = math.radians(alpha_norm)
+    separated_drag = 2.0 * (math.sin(rad_a) ** 2) + parasite * max(math.cos(rad_a), 0.0)
+
+    # Blend weight
+    excess = abs(alpha_norm) - stall_alpha
+    if excess <= 0.0:
+        w_drag = 0.0
+    else:
+        norm_t = min(max(excess / aero_kernel.POST_STALL_DRAG_BLEND_DEG, 0.0), 1.0)
+        w_drag = norm_t * norm_t * (3.0 - 2.0 * norm_t)
+
+    cd_polar = (1.0 - w_drag) * attached_drag + w_drag * separated_drag
+    return cd_polar + wave_drag_coefficient(mach, compressible)
+
 
 
 # --------------------------------------------------------------------------
@@ -988,8 +1000,9 @@ def evaluate_aero(
     default to the values derived from ``speed_mps`` and the environment.
     Optional local density and kinematic viscosity override the environment
     atmosphere for dynamic pressure and Reynolds number, respectively. An
-    explicit Reynolds number still takes precedence. ``cm_q`` multiplies the
-    standard nondimensional pitch rate ``q * chord / (2 * speed)`` once.
+    explicit Reynolds number still takes precedence. ``cm_q`` is the sole
+    pitch-rate derivative; ``cm_pitch_rate`` is deprecated (merged into
+    ``cm_q`` by ``AircraftConfig.clamp_ranges`` and ignored here).
     """
     geom = _geom(cfg)
     area = max(_finite(geom["ref_area_m2"], 0.015), 1.0e-9)

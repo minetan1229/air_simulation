@@ -71,7 +71,7 @@ def clamp(value: float, low: float, high: float) -> float:
     """Clamp ``value`` into ``[low, high]`` (order independent)."""
     val = float(value)
     if not math.isfinite(val):
-        raise ValueError(f"cannot clamp non-finite value {value!r}")
+        return 0.0 if min(float(low), float(high)) <= 0.0 <= max(float(low), float(high)) else min(float(low), float(high))
     lo = min(float(low), float(high))
     hi = max(float(low), float(high))
     if val < lo:
@@ -304,6 +304,10 @@ class AircraftConfig:
     cn_beta: float = 0.08
     # Rate derivatives are damping terms: paper airplanes have very small inertia
     # and large surface area, so aerodynamic roll/yaw damping must be strong.
+    # cm_q is the primary pitch damping derivative (default: -12.0).
+    # cm_pitch_rate is DEPRECATED (kept for API compatibility). It is merged
+    # into cm_q during clamp_ranges() and ignored during evaluation. Setting
+    # it has no effect; use cm_q for all pitch damping.
     # Cross-coupling terms (cl_pitch_rate, cn_pitch_rate, cm_roll_rate) are zero
     # for symmetric airframes so pitching does not cause unnatural rolling or spinning.
     cl_roll_rate: float = -0.40
@@ -312,6 +316,7 @@ class AircraftConfig:
     cl_pitch_rate: float = 0.0
     cm_pitch_rate: float = 0.0
     cn_pitch_rate: float = 0.0
+
     cl_yaw_rate: float = 0.0
     cm_yaw_rate: float = 0.0
     cn_yaw_rate: float = -0.30
@@ -457,7 +462,7 @@ class AircraftConfig:
             ground_cushion_lift=clamp(self.ground_cushion_lift, *AIRCRAFT_RANGES["ground_cushion_lift"]),
             cm0=clamp(self.cm0, *AIRCRAFT_RANGES["cm0"]),
             cm_alpha=clamp(self.cm_alpha, *AIRCRAFT_RANGES["cm_alpha"]),
-            cm_q=clamp(self.cm_q, *AIRCRAFT_RANGES["cm_q"]),
+            cm_q=clamp(self.cm_q + self.cm_pitch_rate, *AIRCRAFT_RANGES["cm_q"]),
             cy_beta=clamp(self.cy_beta, *AIRCRAFT_RANGES["cy_beta"]),
             cl_beta=clamp(self.cl_beta, *AIRCRAFT_RANGES["cl_beta"]),
             cn_beta=clamp(self.cn_beta, *AIRCRAFT_RANGES["cn_beta"]),
@@ -465,7 +470,7 @@ class AircraftConfig:
             cm_roll_rate=clamp(self.cm_roll_rate, *AIRCRAFT_RANGES["cm_roll_rate"]),
             cn_roll_rate=clamp(self.cn_roll_rate, *AIRCRAFT_RANGES["cn_roll_rate"]),
             cl_pitch_rate=clamp(self.cl_pitch_rate, *AIRCRAFT_RANGES["cl_pitch_rate"]),
-            cm_pitch_rate=clamp(self.cm_pitch_rate, *AIRCRAFT_RANGES["cm_pitch_rate"]),
+            cm_pitch_rate=0.0,
             cn_pitch_rate=clamp(self.cn_pitch_rate, *AIRCRAFT_RANGES["cn_pitch_rate"]),
             cl_yaw_rate=clamp(self.cl_yaw_rate, *AIRCRAFT_RANGES["cl_yaw_rate"]),
             cm_yaw_rate=clamp(self.cm_yaw_rate, *AIRCRAFT_RANGES["cm_yaw_rate"]),

@@ -42,11 +42,17 @@ from physics.origami_genome import (  # noqa: E402
 
 def test_the_three_archetypes_are_available() -> None:
     genomes = archetype_hybrid_genomes()
-    assert [genome.key for genome in genomes] == [
-        "classic_dart",
-        "nakamura_lock",
-        "sky_king",
-    ]
+    keys = [genome.key for genome in genomes]
+    # Issue #89: the three known-good designs plus the new mutable
+    # lineages (baseline, few-fold, wide wing, asymmetric, glider).
+    assert keys[:3] == ["classic_dart", "nakamura_lock", "sky_king"]
+    assert set(keys[3:]) == {
+        "baseline_flat",
+        "few_fold",
+        "wide_wing",
+        "asymmetric",
+        "glider",
+    }
 
 
 @pytest.mark.parametrize("key", ["classic_dart", "nakamura_lock", "sky_king"])
@@ -133,6 +139,29 @@ def test_the_layer_references_never_point_into_the_future() -> None:
         available += 2 if gene.creates_pair else 1
 
 
+def test_the_archetypes_fit_the_step_cap_and_the_seed_honours_it() -> None:
+    """Issue #91: archetypes are not silently truncated; seed_population
+    threads max_steps through to archetype_hybrid_genomes."""
+    from physics.ga2.genome import MAX_FOLD_STEPS as CAP
+
+    for genome in archetype_hybrid_genomes():
+        assert genome.step_count <= CAP
+        assert not genome.meta.get("clamped_to_max_steps", False)
+    assert archetype_hybrid_genomes()[0].step_count > 8
+    rng = random.Random(23)
+    population = seed_population(50, rng, max_steps=15)
+    assert all(g.step_count <= 15 for g in population)
+    # Propagation is distinguishable from the old default-only behaviour:
+    # a small cap must actually clamp archetypes and be recorded.
+    clamped = archetype_hybrid_genomes(max_steps=5)
+    assert all(g.step_count <= 5 for g in clamped)
+    assert any(g.meta.get("clamped_to_max_steps") for g in clamped)
+    assert any(g.meta.get("original_step_count", 0) > 5 for g in clamped)
+    rng2 = random.Random(23)
+    capped_pop = seed_population(50, rng2, max_steps=5)
+    assert all(g.step_count <= 5 for g in capped_pop)
+
+
 def test_the_warm_start_follows_the_fractions_of_the_specification() -> None:
     rng = random.Random(17)
     population = seed_population(1000, rng)
@@ -163,3 +192,70 @@ def test_a_gene_rejects_a_dangling_layer() -> None:
     )
     assert gene.target_layers == (3, 7)
     assert gene.target_layer == 3
+
+
+def test_disabled_predecessor_layer_does_not_become_whole_sheet_fold() -> None:
+    # When all preceding folds that created layers are disabled,
+    # a fold with target_layers must not degenerate into a whole-sheet fold (scope=()).
+    genes = [
+        HybridFoldGene(
+            enabled=False,  # Preceding fold is disabled
+            origin=(0.5, 0.5),
+            crease_angle_deg=0.0,
+            fold_angle_deg=45.0,
+            target_layers=(),
+            creates_group=True,
+        ),
+        HybridFoldGene(
+            enabled=True,
+            origin=(0.5, 0.5),
+            crease_angle_deg=90.0,
+            fold_angle_deg=30.0,
+            target_layers=(0,),  # Targets layer 0 of disabled predecessor
+            creates_group=True,
+        ),
+    ]
+    genome = HybridGenome(genes=genes)
+    origami = hybrid_to_origami(genome)
+    # The second fold must either be skipped or not executed as a whole-sheet fold.
+    # No fold step should have group == () if it originally targeted a specific layer.
+    for step in origami.steps:
+        assert step.group != (), "Specific layer fold must not degenerate to whole sheet fold"
+    assert len(origami.steps) == 0
+
+
+def test_disabled_predecessor_layer_fallback_to_available_layer() -> None:
+    # When fold 0 is enabled (creates layer 0), fold 1 is disabled (would create layer 1),
+    # fold 2 targets layer 1: it should fallback to available layer 0, not whole-sheet.
+    genes = [
+        HybridFoldGene(
+            enabled=True,
+            origin=(0.5, 0.5),
+            crease_angle_deg=0.0,
+            fold_angle_deg=45.0,
+            target_layers=(),
+            creates_group=True,
+        ),
+        HybridFoldGene(
+            enabled=False,
+            origin=(0.5, 0.5),
+            crease_angle_deg=45.0,
+            fold_angle_deg=45.0,
+            target_layers=(),
+            creates_group=True,
+        ),
+        HybridFoldGene(
+            enabled=True,
+            origin=(0.5, 0.5),
+            crease_angle_deg=90.0,
+            fold_angle_deg=30.0,
+            target_layers=(1,),  # Targets layer 1 which doesn't exist because fold 1 is disabled
+            creates_group=True,
+        ),
+    ]
+    genome = HybridGenome(genes=genes)
+    origami = hybrid_to_origami(genome)
+    assert len(origami.steps) == 2
+    # Second executed step must target the available group ('g1'), not ()
+    assert origami.steps[1].group == ("g1",)
+

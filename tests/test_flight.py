@@ -642,9 +642,8 @@ def test_evaluate_flight_accepts_dicts_and_dataclasses_identically(glider_flight
         k: v for k, v in glider_flight.items() if isinstance(v, (int, float)) and not isinstance(v, bool)
     }
     assert {k: from_objects[k] for k in non_numeric} == {k: from_dicts[k] for k in non_numeric} == non_numeric
-    for key, expected in numeric.items():
-        assert from_objects[key] == pytest.approx(expected, rel=1e-9, abs=1e-12)
-        assert from_dicts[key] == pytest.approx(expected, rel=1e-9, abs=1e-12)
+    assert {k: from_objects[k] for k in numeric} == pytest.approx(numeric, rel=1e-9, abs=1e-12)
+    assert {k: from_dicts[k] for k in numeric} == pytest.approx(numeric, rel=1e-9, abs=1e-12)
     # Unknown keys are ignored (the pool pickles plain dicts) and missing keys
     # fall back to the dataclass defaults.
     sparse = flight_sim.evaluate_flight(
@@ -1301,5 +1300,149 @@ def test_landing_stops_and_declares_landed_on_max_bounces():
     summary = sim.simulate(duration_s=2.0, record=True)
     assert summary["status"] in ("landed", "crashed")
     assert sim.state.landed is True or sim.state.crashed is True
+
+
+def test_stiffness_estimate_probes_airspeed_in_wind():
+    """Verify _stiffness_estimate evaluates aerodynamic stiffness with wind even at zero ground speed (Issue #85)."""
+    aircraft = AircraftConfig()
+    env = EnvironmentConfig(wind_speed=5.0, wind_direction_deg=0.0)
+    launch = LaunchConfig(launch_speed=0.0, launch_height_m=10.0)
+    settings = SimulationSettings(collision_enabled=False)
+    sim = FlightSimulator(aircraft, env, launch, settings)
+
+    # State with zero inertial ground velocity at 10m altitude
+    y = np.zeros(13, dtype=np.float64)
+    y[2] = -10.0
+    y[6] = 1.0  # quaternion identity
+
+    core = sim._compute_dynamics(y, 0.0)
+    stiffness = sim._stiffness_estimate(y, 0.0, core)
+    assert math.isfinite(stiffness)
+    assert stiffness > 0.0, "Aerodynamic stiffness must be non-zero in wind even when stationary on ground."
+
+
+def test_wind_force_to_body_orthonormality():
+    """Verify wind_force_to_body forms a strictly orthogonal right-handed triad (Issue #86).
+
+    Tests:
+    1. Flow parallel to body z-axis (vz = +10, vz = -10, with vx=vy=0)
+    2. Flow parallel to body y-axis (vy = +10, vy = -10, with vx=vz=0)
+    3. Sweep around singularities
+    4. Random 3D directions
+    """
+    from physics.geometry_utils import wind_force_to_body
+
+    singular_velocities = [
+        [0.0, 0.0, 10.0],
+        [0.0, 0.0, -10.0],
+        [0.0, 10.0, 0.0],
+        [0.0, -10.0, 0.0],
+        [10.0, 0.0, 0.0],
+        [-10.0, 0.0, 0.0],
+        [1.0e-7, 0.0, 10.0],
+        [-1.0e-7, 0.0, -10.0],
+        [0.0, 10.0, 1.0e-7],
+    ]
+
+    for vel in singular_velocities:
+        v = np.array(vel, dtype=np.float64)
+        speed = float(np.linalg.norm(v))
+        drag_axis = v / speed
+        f_d = wind_force_to_body(v, 1.0, 0.0, 0.0)
+        f_l = wind_force_to_body(v, 0.0, 0.0, 1.0)
+        f_s = wind_force_to_body(v, 0.0, 1.0, 0.0)
+
+        lift_axis = f_l
+        side_axis = f_s
+
+        # Norms must be 1.0
+        assert math.isclose(float(np.linalg.norm(lift_axis)), 1.0, abs_tol=1e-12)
+        assert math.isclose(float(np.linalg.norm(side_axis)), 1.0, abs_tol=1e-12)
+
+        # Orthogonality to drag axis
+        assert abs(float(np.dot(drag_axis, lift_axis))) < 1.0e-12
+        assert abs(float(np.dot(drag_axis, side_axis))) < 1.0e-12
+        assert abs(float(np.dot(lift_axis, side_axis))) < 1.0e-12
+
+
+def test_reynolds_extrapolation_and_model_validity():
+    """Verify Reynolds number is extrapolated without clamping in forces, and model_valid reflects envelope (#74)."""
+    from physics import aero_kernel
+    from physics.aero_kernel import ScalarMath
+
+    aircraft = AircraftConfig(re_cd0_exponent=0.15)
+    env = EnvironmentConfig()
+
+    launch = LaunchConfig(launch_speed=8.0, launch_height_m=5.0)
+    sim = FlightSimulator(aircraft, env, launch)
+
+    # 1. Low Re outside envelope (Re = 200 < MODEL_REYNOLDS_MIN = 1000)
+    forces_low = flight_sim.aero_forces(aircraft, env, speed_mps=1.0, alpha_deg=0.0, beta_deg=0.0, reynolds=200.0)
+    forces_ref = flight_sim.aero_forces(aircraft, env, speed_mps=1.0, alpha_deg=0.0, beta_deg=0.0, reynolds=1000.0)
+    # Parasite drag ~ (1e5 / Re)^0.15 => Re=200 must have strictly greater cd than Re=1000
+    assert forces_low.cd > forces_ref.cd
+
+    # 2. High Re outside envelope (Re = 200,000 > MODEL_REYNOLDS_MAX = 100,000)
+    forces_high = flight_sim.aero_forces(aircraft, env, speed_mps=1.0, alpha_deg=0.0, beta_deg=0.0, reynolds=200000.0)
+    assert forces_high.cd < forces_ref.cd
+
+
+    # 3. Model validity flag correctly indicates False outside [1e3, 1e5]
+    diag_low = aero_kernel.evaluate_model_validity(ScalarMath, mach=0.05, reynolds=200.0, alpha_deg=0.0)
+    assert bool(diag_low["valid"]) is False
+    assert bool(diag_low["re_ok"]) is False
+
+    diag_normal = aero_kernel.evaluate_model_validity(ScalarMath, mach=0.05, reynolds=10000.0, alpha_deg=0.0)
+    assert bool(diag_normal["valid"]) is True
+    assert bool(diag_normal["re_ok"]) is True
+
+
+def test_compute_dynamics_is_side_effect_free():
+    """Verify _compute_dynamics and stiffness probes do not mutate internal lag history (Issue #77)."""
+    aircraft = AircraftConfig(
+        fidelity_mode="improved_medium",
+        dynamic_damping_enabled=True,
+        apparent_inertia_enabled=True,
+        lsb_hysteresis_enabled=True,
+        aeroelastic_flex=0.5,
+        aeroelastic_tau_s=0.05,
+    )
+    env = EnvironmentConfig(wind_speed=3.0)
+    launch = LaunchConfig(launch_speed=8.0, launch_height_m=5.0)
+    sim = FlightSimulator(aircraft, env, launch)
+
+    y = np.zeros(13, dtype=np.float64)
+    y[2] = -5.0
+    y[3] = 8.0
+    y[6] = 1.0
+
+    # Initial lag snapshot
+    initial_dihedral = sim._aero_dihedral_lag
+    initial_twist = sim._aero_twist_lag
+    initial_alpha = sim._prev_alpha_deg
+    initial_stalled = sim._is_stalled_prev
+    initial_cl_lag = sim._unsteady_cl_lag
+
+    # Call _compute_dynamics multiple times directly with large/small times
+    for t in (0.0, 0.5, 1.0, 2.0):
+        core = sim._compute_dynamics(y, t, dt=0.02)
+        assert core is not None
+
+    # Internal state must remain completely unmutated
+    assert sim._aero_dihedral_lag == initial_dihedral
+    assert sim._aero_twist_lag == initial_twist
+    assert sim._prev_alpha_deg == initial_alpha
+    assert sim._is_stalled_prev == initial_stalled
+    assert sim._unsteady_cl_lag == initial_cl_lag
+
+    # Stiffness estimate probe also must not mutate internal lag state
+    core = sim._compute_dynamics(y, 0.0, dt=0.01)
+    _ = sim._stiffness_estimate(y, 0.0, core)
+    assert sim._aero_dihedral_lag == initial_dihedral
+    assert sim._aero_twist_lag == initial_twist
+    assert sim._prev_alpha_deg == initial_alpha
+    assert sim._is_stalled_prev == initial_stalled
+    assert sim._unsteady_cl_lag == initial_cl_lag
+
 
 

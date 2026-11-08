@@ -55,6 +55,9 @@ class Solver3D:
         self.config = config
         self.grid = grid
         self.gamma = config.gamma
+        # Per-cell spectral radius ``sum_f A_f (|u_n| + c)``, populated by
+        # :meth:`compute_stable_dt` and consumed by :meth:`compute_local_cfl`.
+        self._lambda_total: np.ndarray | None = None
 
         self.ni, self.nj, self.nk = grid.vol.shape
 
@@ -256,8 +259,9 @@ class Solver3D:
             self.grid.i_area_y[:-1],
             self.grid.i_area_z[:-1],
         )
-        res += f_i
-        res -= np.roll(f_i, -1, axis=0)
+        # f_i points +i: left cell outward + -> +f_i, right cell outward -.
+        res -= f_i
+        res += np.roll(f_i, -1, axis=0)
 
         # 2. Interior j-faces
         u_bottom_j = u[:, :-1, :, :]
@@ -269,8 +273,9 @@ class Solver3D:
             self.grid.j_area_y[:, 1:-1, :],
             self.grid.j_area_z[:, 1:-1, :],
         )
-        res[:, 1:, :, :] += f_j
-        res[:, :-1, :, :] -= f_j
+        # f_j points +j: bottom cell outward + -> +f_j, top cell outward -.
+        res[:, 1:, :, :] -= f_j
+        res[:, :-1, :, :] += f_j
 
         # Wall boundary at j=0 (Solid slip wall)
         ax_w = self.grid.j_area_x[:, 0, :]
@@ -300,7 +305,8 @@ class Solver3D:
         u_ghost_j[..., 4] = rho_w * e_ghost
 
         f_wall = self.compute_flux(u_ghost_j, u_first_j, ax_w, ay_w, az_w)
-        res[:, 0, :, :] += f_wall
+        # j=0 outward is -j -> contribution -f_wall.
+        res[:, 0, :, :] -= f_wall
 
         # Farfield boundary at j=nj
         ax_far = self.grid.j_area_x[:, -1, :]
@@ -309,7 +315,8 @@ class Solver3D:
         u_inner_j = u[:, -1, :, :]
         u_outer_j = np.broadcast_to(self.u_free, u_inner_j.shape)
         f_far_j = self.compute_flux(u_inner_j, u_outer_j, ax_far, ay_far, az_far)
-        res[:, -1, :, :] -= f_far_j
+        # j=nj outward is +j -> contribution +f_far.
+        res[:, -1, :, :] += f_far_j
 
         # 3. k-faces (Spanwise: k=0 symmetry plane, k=nk outer farfield)
         u_in_k = u[:, :, :-1, :]
@@ -321,8 +328,9 @@ class Solver3D:
             self.grid.k_area_y[:, :, 1:-1],
             self.grid.k_area_z[:, :, 1:-1],
         )
-        res[:, :, 1:, :] += f_k
-        res[:, :, :-1, :] -= f_k
+        # f_k points +k: in-cell outward + -> +f_k, out-cell outward -.
+        res[:, :, 1:, :] -= f_k
+        res[:, :, :-1, :] += f_k
 
         # Root symmetry plane (k=0, normal points along +y, so mirror v_velocity)
         ax_sym = self.grid.k_area_x[:, :, 0]
@@ -333,7 +341,8 @@ class Solver3D:
         u_sym = np.array(u_root)
         u_sym[..., 2] = -u_sym[..., 2]  # reflect v_vel
         f_sym = self.compute_flux(u_sym, u_root, ax_sym, ay_sym, az_sym)
-        res[:, :, 0, :] += f_sym
+        # k=0 outward is -k -> contribution -f_sym.
+        res[:, :, 0, :] -= f_sym
 
         # Wing tip outer farfield (k=nk)
         ax_tip = self.grid.k_area_x[:, :, -1]
@@ -342,12 +351,17 @@ class Solver3D:
         u_tip = u[:, :, -1, :]
         u_tip_outer = np.broadcast_to(self.u_free, u_tip.shape)
         f_tip = self.compute_flux(u_tip, u_tip_outer, ax_tip, ay_tip, az_tip)
-        res[:, :, -1, :] -= f_tip
+        # k=nk outward is +k -> contribution +f_tip.
+        res[:, :, -1, :] += f_tip
 
         return res
 
     def compute_forces(self) -> Tuple[float, float, float]:
-        """Compute aerodynamic coefficients (cl, cd, cm) by surface pressure integration on the wing."""
+        """Compute aerodynamic coefficients (cl, cd, cm) by surface pressure integration on the wing.
+
+        Issue #145: body traction is -p_gauge * area_vector (area vector points
+        into the fluid, outward from the body).
+        """
         _, _, _, _, p_wall, _ = self.get_primitive(self.u[:, 0, :, :])
         p_gauge = p_wall - self.p_inf
 
@@ -359,9 +373,9 @@ class Solver3D:
         p_w = p_gauge[:, :kw]
 
         # Total force on semi-span wing (multiply by 2 for full aircraft)
-        fx = 2.0 * float(np.sum(p_w * ax))
-        fy = 2.0 * float(np.sum(p_w * ay))
-        fz = 2.0 * float(np.sum(p_w * az))
+        fx = 2.0 * float(np.sum(-p_w * ax))
+        fy = 2.0 * float(np.sum(-p_w * ay))
+        fz = 2.0 * float(np.sum(-p_w * az))
 
         q_inf = 0.5 * self.rho_inf * (self.v_inf**2)
         alpha_rad = math.radians(self.config.alpha_deg)
@@ -393,26 +407,75 @@ class Solver3D:
         arm_x = xc_wall - 0.25
         arm_z = zc_wall
 
-        dfx = 2.0 * p_w * ax
-        dfz = 2.0 * p_w * az
+        dfx = 2.0 * -p_w * ax
+        dfz = 2.0 * -p_w * az
         my = float(np.sum(arm_z * dfx - arm_x * dfz))
         cm = float(my / (q_inf * s_ref * c_ref))
 
         return cl, cd, cm
 
     def compute_stable_dt(self) -> float:
-        """Compute stable time-step based on 3D minimum cell width."""
-        _, _, _, _, _, c_field = self.get_primitive(self.u)
-        vel_mag = np.sqrt(
-            (self.u[..., 1] / self.u[..., 0]) ** 2
-            + (self.u[..., 2] / self.u[..., 0]) ** 2
-            + (self.u[..., 3] / self.u[..., 0]) ** 2
-        )
-        char_speed = vel_mag + c_field
-        # Cell width estimate from volume^(1/3)
-        h_cell = self.grid.vol ** (1.0 / 3.0)
-        dt_local = self.config.cfl * h_cell / np.maximum(char_speed, 1.0e-6)
+        """Compute stable time-step using the per-face spectral radius ``sum_f A_f (|u_n| + c)``.
+
+        For each cell the multidimensional spectral radius is
+
+            lambda_cell = sum over the 6 faces of A_f (|u_n| + c)
+
+        and the local stable step is ``dt_cell = cfl * V_cell / lambda_cell``.
+        Because the volume ``V`` shrinks in step with the thin direction of an
+        anisotropic cell while the face area in that direction stays large,
+        ``dt_cell`` scales with the thinnest grid scale rather than with
+        ``V^(1/3)``.  A plain ``V^(1/3) / char_speed`` estimate would overstate
+        the stable step on stretched grids and can violate the local CFL limit
+        near the wing surface.
+
+        The per-cell spectral radius is stored on ``self._lambda_total`` so the
+        resulting local CFL number can be tracked via :meth:`compute_local_cfl`.
+        """
+        rho, u_vel, v_vel, w_vel, _, c_field = self.get_primitive(self.u)
+
+        # i-direction faces (ni+1, nj, nk): (|u_n| + c) * A on both sides.
+        i_ax, i_ay, i_az = self.grid.i_area_x, self.grid.i_area_y, self.grid.i_area_z
+        i_area = np.sqrt(i_ax**2 + i_ay**2 + i_az**2)
+        vn_i_0 = np.abs(u_vel * i_ax[:-1] + v_vel * i_ay[:-1] + w_vel * i_az[:-1])
+        vn_i_1 = np.abs(u_vel * i_ax[1:] + v_vel * i_ay[1:] + w_vel * i_az[1:])
+        lambda_i = (vn_i_0 + c_field * i_area[:-1]) + (vn_i_1 + c_field * i_area[1:])
+
+        # j-direction faces (ni, nj+1, nk).
+        j_ax, j_ay, j_az = self.grid.j_area_x, self.grid.j_area_y, self.grid.j_area_z
+        j_area = np.sqrt(j_ax**2 + j_ay**2 + j_az**2)
+        vn_j_0 = np.abs(u_vel * j_ax[:, :-1, :] + v_vel * j_ay[:, :-1, :] + w_vel * j_az[:, :-1, :])
+        vn_j_1 = np.abs(u_vel * j_ax[:, 1:, :] + v_vel * j_ay[:, 1:, :] + w_vel * j_az[:, 1:, :])
+        lambda_j = (vn_j_0 + c_field * j_area[:, :-1, :]) + (vn_j_1 + c_field * j_area[:, 1:, :])
+
+        # k-direction faces (ni, nj, nk+1).
+        k_ax, k_ay, k_az = self.grid.k_area_x, self.grid.k_area_y, self.grid.k_area_z
+        k_area = np.sqrt(k_ax**2 + k_ay**2 + k_az**2)
+        vn_k_0 = np.abs(u_vel * k_ax[:, :, :-1] + v_vel * k_ay[:, :, :-1] + w_vel * k_az[:, :, :-1])
+        vn_k_1 = np.abs(u_vel * k_ax[:, :, 1:] + v_vel * k_ay[:, :, 1:] + w_vel * k_az[:, :, 1:])
+        lambda_k = (vn_k_0 + c_field * k_area[:, :, :-1]) + (vn_k_1 + c_field * k_area[:, :, 1:])
+
+        lambda_total = np.maximum(lambda_i + lambda_j + lambda_k, 1.0e-12)
+        self._lambda_total = lambda_total
+        dt_local = self.config.cfl * self.grid.vol / lambda_total
         return float(np.min(dt_local))
+
+    def compute_local_cfl(self, dt: float) -> np.ndarray:
+        """Per-cell CFL number ``lambda_total * dt / vol`` for a given step.
+
+        Returns an array of shape ``(ni, nj, nk)``.  By construction, when
+        ``dt`` comes from :meth:`compute_stable_dt`, every cell satisfies
+        ``local_cfl <= config.cfl`` (the cell attaining the minimum step is at
+        the limit; all others are below it), so the configured CFL ceiling is
+        never exceeded on any cell, including anisotropic ones.
+        """
+        lam = self._lambda_total
+        if lam is None:
+            self.compute_stable_dt()
+            lam = self._lambda_total
+        assert lam is not None
+        return lam * dt / np.maximum(self.grid.vol, 1.0e-14)
+
 
     def step_rk2(self, dt: float) -> float:
         """Advance solution one step using Heun's 2-stage Runge-Kutta scheme."""
@@ -429,13 +492,26 @@ class Solver3D:
         return l2_res
 
     def run(self) -> CFDResult3D:
-        """Execute 3D simulation until convergence or max_steps."""
+        """Execute 3D simulation until convergence or max_steps.
+
+        The stable time-step is re-evaluated every step from the current flow
+        state (:meth:`compute_stable_dt`), so the CFL condition holds even as
+        velocity and sound speed evolve.  The step never grows beyond the
+        current stable limit, keeping every cell at or below ``config.cfl``.
+        """
         dt = self.compute_stable_dt()
         res_norm = 1.0
         converged = False
         step = 0
+        dt_min = dt
+        dt_max = dt
 
         for step in range(1, self.config.max_steps + 1):
+            dt_new = self.compute_stable_dt()
+            dt = min(dt, dt_new)  # safe upper-bound control: never exceed the stable limit
+            dt_min = min(dt_min, dt)
+            dt_max = max(dt_max, dt)
+
             res_norm = self.step_rk2(dt)
             if res_norm < self.config.convergence_tol:
                 converged = True
@@ -443,6 +519,10 @@ class Solver3D:
 
         cl, cd, cm = self.compute_forces()
         total_mass_res = float(np.sum(self.evaluate_residuals()[..., 0]))
+
+        # Local CFL for the final step: every cell must be at or below cfl.
+        local_cfl = self.compute_local_cfl(dt)
+        max_local_cfl = float(np.max(local_cfl)) if local_cfl.size else 0.0
 
         return CFDResult3D(
             converged=converged,
@@ -453,5 +533,11 @@ class Solver3D:
             cm=cm,
             mass_conservation_residual=abs(total_mass_res),
             grid_cells=int(self.ni * self.nj * self.nk),
-            metadata={"dt": dt, "aspect_ratio": self.config.aspect_ratio},
+            metadata={
+                "dt": dt,
+                "dt_min": dt_min,
+                "dt_max": dt_max,
+                "aspect_ratio": self.config.aspect_ratio,
+                "max_local_cfl": max_local_cfl,
+            },
         )
