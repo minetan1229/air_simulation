@@ -71,7 +71,7 @@ def clamp(value: float, low: float, high: float) -> float:
     """Clamp ``value`` into ``[low, high]`` (order independent)."""
     val = float(value)
     if not math.isfinite(val):
-        raise ValueError(f"cannot clamp non-finite value {value!r}")
+        return 0.0 if min(float(low), float(high)) <= 0.0 <= max(float(low), float(high)) else min(float(low), float(high))
     lo = min(float(low), float(high))
     hi = max(float(low), float(high))
     if val < lo:

@@ -2290,6 +2290,9 @@ def params_from_aircraft(cfg: AircraftConfig) -> AeroParams:
     callers that evaluate a bare polar (:func:`physics.aero_domain.lift_coefficient`
     and friends) must not see an environment factor.
     """
+    raw_cd0 = cfg.cd0
+    raw_cm0 = cfg.cm0
+    raw_cL0 = cfg.cL0
     # Apply config clamping to merge deprecated cm_pitch_rate into cm_q, etc.
     cfg = cfg.clamp_ranges()
     geom = derived_properties(cfg)
@@ -2304,16 +2307,16 @@ def params_from_aircraft(cfg: AircraftConfig) -> AeroParams:
         span=max(_finite_scalar(geom.get("ref_span_m"), 0.2), 1.0e-6),
         aspect=aspect,
         oswald=clamp(_finite_scalar(cfg.oswald_e, 0.75), 0.05, 1.0),
-        cL0=_finite_scalar(cfg.cL0, 0.0),
+        cL0=_finite_scalar(raw_cL0, 0.0),
         cl_alpha=cl_alpha,
         cl_max=max(abs(_finite_scalar(cfg.cl_max, 0.90)), 1.0e-6),
         stall_alpha_deg=effective_stall_alpha_deg(cfg),
         stall_sharpness=max(abs(_finite_scalar(cfg.stall_sharpness, 1.4)), 1.0e-6),
         polhamus_kp=max(_finite_scalar(getattr(cfg, "polhamus_kp", 0.0), 0.0), 0.0),
         polhamus_kv=max(_finite_scalar(cfg.polhamus_kv, 0.0), 0.0),
-        cd0=_finite_scalar(cfg.cd0, 0.02),
+        cd0=_finite_scalar(raw_cd0, 0.02),
         re_cd0_exponent=_finite_scalar(cfg.re_cd0_exponent, 0.0),
-        cm0=_finite_scalar(cfg.cm0, 0.0),
+        cm0=_finite_scalar(raw_cm0, 0.0),
         cm_alpha=_finite_scalar(cfg.cm_alpha, 0.0),
         cm_q=_finite_scalar(cfg.cm_q, 0.0),
         cm_roll_rate=_finite_scalar(cfg.cm_roll_rate, 0.0),
