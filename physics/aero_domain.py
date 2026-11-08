@@ -172,7 +172,7 @@ MACH_CRITICAL: float = 0.85
 _WAVE_DRAG_GAIN: float = 0.25
 _SUPERSONIC_DRAG_GAIN: float = 0.15
 _CD_FLOOR: float = 1.0e-12
-_TOLERANCE_CM: float = 1.0e-6
+_TOLERANCE_CM: float = 1.0e-5
 
 #: Fallback Reynolds reference chord (m) for the geometry-free callers of
 #: :func:`atmosphere_state`.  Every caller that owns an :class:`AircraftConfig`
@@ -621,7 +621,24 @@ def trim_alpha_from_elevon(cfg: AircraftConfig, elevon_deg: float) -> float:
     if abs(cm_alpha) < 1.0e-12:
         return 0.0
     cm_static = _finite(cfg.cm0) + elevon["dcm"] + te_fold["dcm"]
-    return float(rad2deg(-cm_static / cm_alpha))
+    base = float(rad2deg(-cm_static / cm_alpha))
+    # Fixed-point correction for the deterministic CoP shift cm term:
+    # cm includes -(cp_x-0.25c)/c * CL, with CL linear in alpha. Iterate
+    # the closed form with the shifted CL until self-consistent.
+    from physics.aero_kernel import center_of_pressure_fraction
+    alpha = base
+    for _ in range(5):
+        stall = max(abs(_finite(cfg.stall_alpha_deg, 14.0)), 1.0)
+        frac = float(center_of_pressure_fraction(_SCALAR, alpha, stall, _finite(cfg.cp_shift_gain, 0.0)))
+        # CL approx from Helmbold slope + zero-lift + control (matches kernel linear branch)
+        cl = _finite(cfg.cL0) + lift_slope_per_rad(cfg) * deg2rad(alpha) + elevon["dcl"] + te_fold["dcl"]
+        cm_shift = -(frac - 0.25) * cl if float(cfg.cp_shift_gain) > 0.0 else 0.0
+        new_alpha = float(rad2deg(-(cm_static + cm_shift) / cm_alpha))
+        if abs(new_alpha - alpha) < 1e-9:
+            alpha = new_alpha
+            break
+        alpha = new_alpha
+    return alpha
 
 
 def elevon_for_trim(cfg: AircraftConfig, alpha_deg: float) -> float:
@@ -631,7 +648,23 @@ def elevon_for_trim(cfg: AircraftConfig, alpha_deg: float) -> float:
         return 0.0
     te_fold = trailing_edge_fold_effects(cfg)
     required = -(_finite(cfg.cm0) + _finite(cfg.cm_alpha) * deg2rad(alpha_deg) + te_fold["dcm"])
-    return clamp(-required / gain, -ELEVON_MAX_DEG, ELEVON_MAX_DEG)
+    # Deterministic CoP shift adds -(frac-0.25)*CL(alpha,elevon); fixed-point
+    # on CL(elevon) so the returned deflection really nulls cm.
+    alpha = _finite(alpha_deg)
+    from physics.aero_kernel import center_of_pressure_fraction
+    elevon = clamp(-required / gain, -ELEVON_MAX_DEG, ELEVON_MAX_DEG)
+    for _ in range(5):
+        stall = max(abs(_finite(cfg.stall_alpha_deg, 14.0)), 1.0)
+        frac = float(center_of_pressure_fraction(_SCALAR, alpha, stall, _finite(cfg.cp_shift_gain, 0.0)))
+        cl = _finite(cfg.cL0) + lift_slope_per_rad(cfg) * deg2rad(alpha) + elevon_effects(elevon, cfg)["dcl"] + te_fold["dcl"]
+        cm_shift = -(frac - 0.25) * cl if float(cfg.cp_shift_gain) > 0.0 else 0.0
+        required2 = -(_finite(cfg.cm0) + _finite(cfg.cm_alpha) * deg2rad(alpha) + te_fold["dcm"] + cm_shift)
+        new_elevon = clamp(-required2 / gain, -ELEVON_MAX_DEG, ELEVON_MAX_DEG)
+        if abs(new_elevon - elevon) < 1e-9:
+            elevon = new_elevon
+            break
+        elevon = new_elevon
+    return elevon
 
 
 def trailing_edge_fold_effects(cfg: AircraftConfig) -> Dict[str, float]:

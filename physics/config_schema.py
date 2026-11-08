@@ -334,7 +334,7 @@ class AircraftConfig:
     # Polhamus form with that explicit K_p.
     polhamus_kp: float = 0.0
     step_trip_ratio: float = 0.0  # fold step height to chord ratio (turbulator effect, 0..0.02)
-    cp_shift_gain: float = 0.0  # dynamic center of pressure shift with alpha (0..1.0)
+    cp_shift_gain: float = 1.0  # dynamic center of pressure shift with alpha (0..1.0)
     aeroelastic_flex: float = 0.0  # dynamic dihedral flex gain with dynamic pressure (0..1.0)
     aeroelastic_twist: float = 0.0  # wingtip washout twist gain with dynamic pressure (0..1.0)
     aeroelastic_compliance: float = 0.0  # dynamic camber compliance gain under launch pressure (0..5.0)
@@ -1055,14 +1055,26 @@ class SimulationSettings:
 
         dt_min = clamp(self.dt_min, *SIMULATION_RANGES["dt_min"])
         dt_max = clamp(self.dt_max, dt_min, SIMULATION_RANGES["dt_max"][1])
+        duration_s = clamp(self.duration_s, *SIMULATION_RANGES["duration_s"])
+        # Guard non-adaptive CPU bound: duration/dt_min steps must stay finite.
+        max_steps = 5_000_000
+        if duration_s / dt_min > max_steps:
+            dt_min = duration_s / max_steps
+        record_interval_s = clamp(self.record_interval_s, *SIMULATION_RANGES["record_interval_s"])
+        # Ring-buffer consistency: buffer must hold at least duration/interval
+        # samples, otherwise oldest history is silently dropped. Grow to fit.
+        needed = int(duration_s / max(record_interval_s, 1e-9)) + 64
+        ring_buffer_capacity = int(
+            clamp(max(needed, self.ring_buffer_capacity), *SIMULATION_RANGES["ring_buffer_capacity"])
+        )
         return _replace(
             self,
             dt_min=dt_min,
             dt_max=dt_max,
             max_substeps=int(clamp(self.max_substeps, *SIMULATION_RANGES["max_substeps"])),
-            duration_s=clamp(self.duration_s, *SIMULATION_RANGES["duration_s"]),
-            ring_buffer_capacity=int(clamp(self.ring_buffer_capacity, *SIMULATION_RANGES["ring_buffer_capacity"])),
-            record_interval_s=clamp(self.record_interval_s, *SIMULATION_RANGES["record_interval_s"]),
+            duration_s=duration_s,
+            ring_buffer_capacity=ring_buffer_capacity,
+            record_interval_s=record_interval_s,
             time_scale=clamp(self.time_scale, *SIMULATION_RANGES["time_scale"]),
             adaptive=bool(self.adaptive),
             collision_enabled=bool(self.collision_enabled),
@@ -1599,7 +1611,7 @@ ENVIRONMENT_RANGES: Dict[str, Tuple[float, float]] = {
     "temperature_K": (180.0, 400.0),
     "pressure_Pa": (1.0e3, 3.0e5),
     "humidity_rel": (0.0, 1.0),
-    "altitude_m": (-500.0, 20000.0),
+    "altitude_m": (-500.0, 11000.0),
     "sea_level_temperature_K": (180.0, 340.0),
     "sea_level_pressure_Pa": (1.0e3, 3.0e5),
     "lapse_rate_K_per_m": (-0.02, 0.02),

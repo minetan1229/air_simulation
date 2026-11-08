@@ -3564,6 +3564,7 @@ class FlightSimulator:
             "crashed": diag["crashed"],
             "diverged": bool(self._diverged),
             "rolled_back": bool(self._rolled_back),
+            "terminated": bool(self._state.landed or self._state.crashed or self._diverged),
             "backend": BACKEND,
             "status": self._status(),
             "frames": int(len(self._history)),
@@ -4045,7 +4046,7 @@ def evaluate_flight(
         simulator = FlightSimulator(aircraft, environment, launch, settings)
         summary = simulator.simulate(duration_s=total, record=True)
         samples = simulator.history()
-    except (ValueError, KeyError, TypeError, IndexError) as exc:
+    except (ValueError, KeyError, TypeError, IndexError, RuntimeError) as exc:
         # An implementation error (bad configuration, unexpected payload).  It
         # must never be reported as a legitimate 0 m flight: the optimiser
         # scores the distance and would select a broken design over a

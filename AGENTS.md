@@ -33,6 +33,7 @@
 
 ## 2. Guardrails（常駐制約）
 - **Strict Rules**: ユーザー明示許可なきファイル削除禁止。事前仮説・合否基準なしの変更/実行禁止。偶然動作での完了禁止。ファイル/ログの全文読込・出力禁止。
+- **Plan & Todo 先行の原則（必須）**: いかなる作業・コード変更・調査・検証も、着手前に**必ず Plan（方針・全体像）と Todo リスト（細分化された具体的タスク）を策定・明示してから実行**すること。Todo を経ない即興的な変更や手順飛ばしを禁止する。
 - **Issue 完了・クローズ厳格条件（形式的完了・未解決クローズの厳禁）**:
   1. *テスト追加のみでの完了禁止*: 物理モデル・数値アルゴリズムの未実装や欠陥に対し、現状挙動をアサートするテストを追加しただけで Issue を完了（Completed）にしてはならない。
   2. *ドキュメント明記のみでの完了禁止*: 「制約として仕様書・レポートに追記した」「未実装であることを明記した」ことのみを理由に Issue をクローズしてはならない（制約の明記は「現状記録」であり「問題の解決」ではない）。
@@ -55,12 +56,12 @@
 ---
 
 ## 3. Autonomous Execution Loop (自律実行ループ)
-1. *Observe*: `.agents/Project.md` の Loop State 確認。残タスク無ければPhase 6へ。あれば最小サブタスク定義。
+1. *Plan & Todo (Observe)*: 現状分析と課題・ゴールを整理し、**必ず Plan（方針・全体像）と Todo リスト（細分化された実行ステップ）を策定・明示**する。`.agents/Project.md` の Loop State 確認。残タスク無ければPhase 6へ。あれば最小サブタスク定義。
 2. *Hypothesize*: 事前仮説・合否基準を宣言。
-3. *Execute*: 最小変更・検証を1つ実行（不可逆操作は先行記録、単一コミッター原則）。
+3. *Execute*: Todo に従って最小変更・検証を1つずつ実行（不可逆操作は先行記録、単一コミッター原則）。進捗に応じて Todo を消化・更新。
 4. *Verify*: 合否照合（`.agents/skills/verify-and-test.md`）。不一致時はロールバックしPhase 2へ（上限3回）。
-5. *Distill & Loop*: 確定事実は `.agents/Knowledge.md`、現在地は `.agents/Project.md` へ記録。肥大時は `.agents/skills/loop-handover.md` 実行。
-6. *Finalize & Terminate*: ローカル全通過 → 対象ブランチへマージ&push（既定は master。`genetic-project` フェーズは §2 ブランチ隔離に従い master 宛の操作を禁止）→ CI完了確認 → Issue確認クローズ後HALT。
+5. *Distill & Loop*: 確定事実は `.agents/Knowledge.md`、現在地は `.agents/Project.md` へ記録。残りの Todo を見直し、肥大時は `.agents/skills/loop-handover.md` 実行。
+6. *Finalize & Terminate*: Todo 完遂確認 → ローカル全通過 → 対象ブランチへマージ&push（既定は master。`genetic-project` フェーズは §2 ブランチ隔離に従い master 宛の操作を禁止）→ CI完了確認 → Issue確認クローズ後HALT。
 
 ## 3.1 Proactive Improvement Proposal (積極的提案ルール)
 - 現行の係数ベース準定常モデルの枠内で、数値安定性・一貫性の修正を優先しつつ、LSBヒステリシスの簡易追加・付加質量の回転項・動的減衰の強化・実験校正の導入など、現実の紙飛行機挙動に近づけるための改善案を積極的に提案せよ。
