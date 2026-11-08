@@ -1,4 +1,10 @@
 # 3D Paper Airplane High-Performance 6DoF Flight Simulator & Aero-Structural Engine Specification
+> [← README に戻る](../README.md) / [docs 索引](./README.md)
+
+> **この文書の役割:** 本プロジェクトの技術仕様・物理法則・定数・API の**正本**。数式の個別典拠と適用限界は [PHYSICS_MODELS.md](./PHYSICS_MODELS.md) が、将来の 3D CFD 計画は [CFD_ROADMAP.md](./CFD_ROADMAP.md) が受け持つ。
+> **先に読む:** [architecture.md](./architecture.md)（全体俯瞰）→ [PHYSICS_MODELS.md](./PHYSICS_MODELS.md)（物理量ごとの正本）
+> **本書の構成:** 1. 物理・航空工学理論 / 2. GPU・並列 / 3. REST API (§3.1–3.7) / 4. セキュリティ / 5. 学術引用レジストリ / 6. 監査課題解決履歴 / 7. モジュール構成 / 8. エージェント役割 / 9. 検証・CI ガイド
+
 
 本ドキュメントは、航空力学・構造力学に基づいた「3D紙飛行機シミュレーター」の理論物理モデル、GPUアクセラレーション・並列アーキテクチャ、REST API仕様、セキュリティ基準、および学術的典拠を網羅した包括的技術仕様書である。
 
@@ -42,7 +48,8 @@
   - 3D 空間 Simplex ノイズによる空間相関乱流、高度境界層プロファイル（対数則 / べき乗則）、熱上昇気流（Thermal コラム）。
   - **座標系変換の厳密性**: 風場ドメインは鉛直軸を $+z$ 上向き、水平コンパス軸を north=$+y$ / east=$+x$（`physics/wind_domain.py` が正本）として定義し、`wind_direction_deg` は気象庁風向（北から時計回りの「吹いてくる」方位；流れベクトルはその逆を指す）とする。飛行力学ドメイン（世界 NED 座標系: $+x$ 北/前, $+y$ 東/右, $+z$ 下向き）への受け渡し時に $w_{\text{NED}} = -w_{\text{wind}}$ の符号変換を厳密に実行（Issue #30 整合性検証済み）。
 
-### 1.3 構造応力モデル (Structural Stress)
+- **幾何→空力の受渡仕様** (`physics/origami_domain.py::extract_aero_parameters` / `apply_aero_parameters`): 折紙幾何から無次元パラメータのみを抽出し `AircraftConfig`（`camber_ratio`, `leading_edge_sweep_deg`, `dihedral_eff_deg`, `camber_forward`）へ書き込む。**空力二重実装は origami 側に置かない**（正本は `physics/aero_kernel.py` の単一実装）。$f/c_{packet}=PACKET\_CAMBER\_M/0.10$, $f/c_{TE}=0.5\sin\phi_{TE}\cdot0.055$, $\Lambda_{LE}=\arctan(0.05 W/L)$, 上反角は符号保持。検証: `tests/test_origami_aero_coupling.py`（5 passed）, `tools/check_aero_kernel_parity.py` 差異 0.0。
+- **構造応力モデル (Structural Stress)**:
 - 動圧 $q$、迎角 $\alpha$、および作用加速度（Gフォース）から翼根曲げモーメントを算出。
 - 翼面各頂点に対する動的応力評価値（0.0: 安全 〜 1.0: 破断限界）を算出し、3D ヒートマップとして可視化。
 - **応力インデックスの正規化尺度は単一**: `stress_index = sigma / sigma_allow` であり、分母は機体固有の許容折り応力 `paper_allowable_stress(gsm, stiffness)`（既定 100 g/m²・剛性 0.35 で 2.2 kPa）である。6DoF 経路・ヒートマップ・GPU 最適化バッチ・構造破壊判定はすべてこの尺度を共有する（旧来の 25 kPa / 120 kPa / 2.0e4·gsm の 3 系統は廃止）。荷重分布の min-max 形状は `stress_shape` チャンネルで別途公開する。

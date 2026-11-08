@@ -348,6 +348,13 @@ class AircraftConfig:
     aeroelastic_pressure_scale_pa: float = 160.0  # q_aeroelastic scale (Pa)
     paper_grain_angle_deg: float = 0.0  # paper fiber angle: 0 = MD (longitudinal), 90 = CD (transverse)
     paper_anisotropy_ratio: float = 1.8  # E_MD / E_CD ratio (typical paper 1.5..2.2)
+    # --- origami->aero coupling (Task 3, extractor output; dimensionless) ---
+    # Extractor writes these so aero_kernel (single aero implementation)
+    # consumes them without geometry-side aero duplication.
+    camber_ratio: float = 0.0  # effective camber f/c from packet bulge+TE fold (-0.05..0.10)
+    camber_forward: float = 0.0  # leading-edge sweep/radius contribution to cL0 (-..+)
+    leading_edge_sweep_deg: float = 0.0  # effective LE sweep from crease pattern (+=swept back)
+    dihedral_eff_deg: float = 5.0  # effective (signed) dihedral from wing fold; == dihedral_deg if uncoupled
     added_mass_enabled: bool = False  # apparent mass tensor for lightweight bodies
     aeroelastic_tau_s: float = 0.0  # viscoelastic relaxation time constant (s)
     unsteady_aero_enabled: bool = False  # unsteady circulation / downwash lag

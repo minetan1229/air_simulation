@@ -2264,3 +2264,86 @@ def build_pattern(
     return _compile_pattern(
         archetype, ARCHETYPE_LABELS.get(archetype, archetype), sheet, creases, alpha
     )
+
+
+#: Wing-crease sweep in sheet-u units from the tip to the nose end.
+#: Matches ``_LEADING_SWEEP_U`` used for the wing fold (sheet units).
+_LEADING_SWEEP_U: float = 0.05
+
+#: Reference mean chord for f/c normalisation (m).  Origami geometry only;
+#: consumed via :func:`extract_aero_parameters`.
+_REFERENCE_MAC_M: float = 0.10
+
+
+def extract_aero_parameters(
+    params: Optional[Dict[str, float]] = None,
+    archetype: str = ARCHETYPE_DART,
+    alpha: float = 1.0,
+) -> Dict[str, float]:
+    """Extract dimensionless aero parameters from origami geometry.
+
+    Single-interface rule: this module outputs *geometry only* (no CL/CD).
+    ``aero_kernel.py`` is the sole aero implementation; this extractor maps
+    crease/params to the ``AircraftConfig`` fields it consumes.
+
+    Outputs
+    -------
+    camber_ratio : float
+        Packet bulge ``PACKET_CAMBER_M / _REFERENCE_MAC_M`` plus TE-fold
+        camber ``0.5 * sin(fold_trailing) * (trailing_v / chord)``.
+        Dimensionless f/c.
+    leading_edge_sweep_deg : float
+        ``deg(atan((_LEADING_SWEEP_U * SHEET_WIDTH_M) / SHEET_LENGTH_M))``.
+        Positive = LE swept back (dart).
+    dihedral_eff_deg : float
+        Signed ``dihedral_deg`` (kept, not ``abs()``-ed).
+    camber_forward : float
+        LE packet contribution ``(1-alpha) * 0.5 * leading_edge_sweep_deg/45``.
+    """
+    p = params or {}
+    fold_trailing = float(p.get("fold_trailing_deg", 15.0))
+    dihedral = float(p.get("dihedral_deg", 5.0))
+    fold_leading = float(p.get("fold_leading_deg", 0.0))
+    a = max(min(float(alpha), 1.0), 0.0)
+    sweep_deg = math.degrees(math.atan2(_LEADING_SWEEP_U * SHEET_WIDTH_M, SHEET_LENGTH_M))
+    packet_fc = PACKET_CAMBER_M / _REFERENCE_MAC_M
+    te_fc = 0.5 * math.sin(math.radians(fold_trailing)) * 0.055
+    camber_fc = packet_fc + te_fc
+    # Leading-edge packet bulge grows with fold_leading (collar/belly stacks).
+    le_stack = min(max(fold_leading, 0.0), 90.0) / 90.0
+    camber_forward = (1.0 - a) * 0.5 * (sweep_deg / 45.0) * (1.0 + le_stack)
+    return {
+        "camber_ratio": camber_fc,
+        "leading_edge_sweep_deg": sweep_deg,
+        "dihedral_eff_deg": dihedral,
+        "camber_forward": camber_forward,
+    }
+
+
+def apply_aero_parameters(cfg: Any, params: Optional[Dict[str, float]] = None, archetype: str = ARCHETYPE_DART, alpha: float = 1.0) -> Any:
+    """Return a copy of ``cfg`` with origami aero parameters applied.
+
+    Writes ``camber_ratio``/``leading_edge_sweep_deg``/``dihedral_eff_deg``/
+    ``camber_forward`` and mirrors ``dihedral_deg``.  No aero computation
+    here -- callers pass the result to ``aero_kernel``.
+    """
+    import dataclasses
+
+    aero = extract_aero_parameters(params, archetype, alpha)
+    if dataclasses.is_dataclass(cfg):
+        try:
+            kind = dataclasses.fields(cfg)[0].name  # type: ignore[arg-type]
+        except Exception:
+            pass
+    updates: Dict[str, Any] = {}
+    for k, v in aero.items():
+        updates[k] = v
+    updates["dihedral_deg"] = aero["dihedral_eff_deg"]
+    try:
+        return dataclasses.replace(cfg, **updates)  # type: ignore[arg-type]
+    except Exception:
+        try:
+            cfg2 = cfg.__class__(**{**vars(cfg), **updates})  # type: ignore[call-arg]
+            return cfg2
+        except Exception:
+            return cfg
