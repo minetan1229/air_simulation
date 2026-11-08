@@ -2,8 +2,8 @@
 """Get GPU info from a remote machine via SSH.
 
 Usage:
-    python tools/get_remote_gpu.py --host 192.168.100.2 --user <username>
-    python tools/get_remote_gpu.py --host 192.168.100.2 --user <username> --key ~/.ssh/id_rsa
+    python tools/get_remote_gpu.py --host your_remote_host --user <username>
+    python tools/get_remote_gpu.py --host your_remote_host --user <username> --key ~/.ssh/id_rsa
 """
 
 import argparse

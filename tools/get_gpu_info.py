@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Standalone GPU info script - copy and run on remote machine.
 
-Usage on remote machine (192.168.100.2):
+Usage on remote machine (see `.env`: REMOTE_SSH_HOST):
     python3 get_gpu_info.py
 """
 

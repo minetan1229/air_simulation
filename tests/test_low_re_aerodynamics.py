@@ -77,6 +77,7 @@ class TestHelmboldAndAttachedLiftSlope:
             cl_alpha=helmbold_cl_alpha(2.667, 0.7),
             cl_max=0.90,
             stall_alpha_deg=14.0,
+            low_re_enabled=True,
         )
         audit = low_reynolds_aerodynamics_audit(np, p, reynolds_range=(1.0e4, 1.0e5), num_re_points=5)
         # Lift-curve slope variation across Re sweep must be zero to numerical tolerance
@@ -98,6 +99,7 @@ class TestStallAndPostStallFlatPlateTransition:
             cl_max=0.80,
             stall_alpha_deg=15.0,
             stall_sharpness=1.4,
+            low_re_enabled=True,
         )
         audit_capped = low_reynolds_aerodynamics_audit(np, p_capped, reynolds_range=(1.0e4, 1.0e5), num_re_points=5)
         assert audit_capped["cl_max_variation"] == pytest.approx(0.0, abs=1.0e-7)
@@ -210,6 +212,7 @@ class TestReynoldsParasiteDragScaling:
             cd0=0.02,
             re_cd0_exponent=0.15,
             cl_alpha=helmbold_cl_alpha(2.667, 0.7),
+            low_re_enabled=True,
         )
         audit = low_reynolds_aerodynamics_audit(np, p, reynolds_range=(1.0e4, 1.0e5), num_re_points=3)
         assert audit["cd0_variation"] > 0.0

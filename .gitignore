@@ -67,3 +67,8 @@ checkpoints/
 diff_master.txt
 debug_energy.py
 .local/
+
+# Scratch / temp outputs (regenerable, not project source)
+tmp/
+*.tmp
+*.bak
