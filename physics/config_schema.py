@@ -334,7 +334,7 @@ class AircraftConfig:
     # Polhamus form with that explicit K_p.
     polhamus_kp: float = 0.0
     step_trip_ratio: float = 0.0  # fold step height to chord ratio (turbulator effect, 0..0.02)
-    cp_shift_gain: float = 0.0  # dynamic center of pressure shift with alpha (0..1.0)
+    cp_shift_gain: float = 1.0  # dynamic center of pressure shift with alpha (0..1.0)
     aeroelastic_flex: float = 0.0  # dynamic dihedral flex gain with dynamic pressure (0..1.0)
     aeroelastic_twist: float = 0.0  # wingtip washout twist gain with dynamic pressure (0..1.0)
     aeroelastic_compliance: float = 0.0  # dynamic camber compliance gain under launch pressure (0..5.0)
