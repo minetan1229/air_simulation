@@ -123,12 +123,12 @@ def _seed_individuals() -> List[Individual]:
 
 
 def _audit_individuals(audit_run: Tuple[Any, Dict[str, Any]]) -> List[Individual]:
-    """Real individuals of a real run, plus the engine's seed archetypes."""
+    """Real individuals of a real run evaluated by canonical 6-DoF, plus seeds."""
     run, _summary = audit_run
     individuals: List[Individual] = []
     for island in run.islands:
         for individual in island.population:
-            if individual.tier >= 1:
+            if individual.tier >= 3:
                 individuals.append(individual)
     individuals.extend(_seed_individuals())
     return individuals
