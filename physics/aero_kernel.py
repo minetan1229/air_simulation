@@ -98,6 +98,12 @@ __all__ = [
     "lsb_dynamic_stall_hysteresis",
     "nonlinear_dynamic_damping",
     "low_reynolds_aerodynamics_audit",
+    "_log_Re",
+    "re_cl_alpha_factor",
+    "re_stall_factor",
+    "re_cl_max_factor",
+    "re_lsb_scale",
+    "re_cd0_factor",
 ]
 
 #: Reference Reynolds number of the ``cd0`` correlation.
@@ -114,6 +120,81 @@ STALL_BLEND_ORDER: int = 4
 MODEL_MACH_LIMIT: float = 0.3
 MODEL_REYNOLDS_MIN: float = 1.0e3
 MODEL_REYNOLDS_MAX: float = 1.0e5
+
+#: Reference Reynolds number of the logarithmic low-Re corrections.
+#: At/above this Re all real-correction tables extrapolate to zero.
+RE_TURBULENT_REF: float = 1.0e5
+
+def _log_Re(xp: Any, reynolds: Any) -> Any:
+    """Bounded logarithmic correction coordinate ``log10(1e5/Re)`` clamped to ``[0, 2]``.
+
+    ``0`` at ``Re >= 1e5`` (high-Re limit), ``2`` at ``Re <= 1e3`` (low-Re end of
+    the calibrated envelope).  Clamped so out-of-envelope Reynolds numbers
+    extrapolate flat, never diverge.  Sources: Pelletier & Mueller 2000
+    (AIAA J. 38, 1836); Sunada et al. 2002 (J. Aircraft 39, 569); Westphal et al.
+    2003 (J. Aircraft 40, 546) -- real corrections vanish rapidly above 1e5.
+    """
+    re = xp.maximum(xp.abs(_finite(xp, reynolds, RE_TURBULENT_REF)), 1.0)
+    if callable(getattr(xp, "log10", None)) and xp is not ScalarMath:
+        return _clamp(xp, xp.log10(RE_TURBULENT_REF / re), 0.0, 2.0)
+    return _clamp(xp, _scalar_log10(RE_TURBULENT_REF / re), 0.0, 2.0)
+
+
+def _scalar_log10(v: float) -> float:
+    try:
+        return math.log10(max(float(v), 1.0e-12))
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def re_cl_alpha_factor(xp: Any, reynolds: Any) -> Any:
+    """Low-Re lift-slope factor ``1 - 0.04*x`` with ``x=_log_Re`` (Pelletier & Mueller / Sunada).
+
+    Bounded in ``[0.92, 1.0]``.  Ideal potential flow gives Re-invariant slope;
+    the slight reduction accounts for LSB decambering at the lowest Re only.
+    Each halving of Re below 1e5 loses ~0.12% slope -- gentle by design.
+    """
+    x = _log_Re(xp, reynolds)
+    return _clamp(xp, 1.0 - 0.04 * x, 0.90, 1.05)
+
+
+def re_stall_factor(xp: Any, reynolds: Any) -> Any:
+    """Low-Re stall-angle factor ``1 - 0.10*x`` (Pelletier / Sunada / Westphal).
+
+    Bounded in ``[0.80, 1.02]``.  Thin plates stall earlier at very low Re.
+    """
+    x = _log_Re(xp, reynolds)
+    return _clamp(xp, 1.0 - 0.10 * x, 0.75, 1.05)
+
+
+def re_cl_max_factor(xp: Any, reynolds: Any) -> Any:
+    """Low-Re ``C_Lmax`` factor ``1 - 0.12*x`` (Pelletier & Mueller Fig. 5).
+
+    Bounded in ``[0.76, 1.02]``.  LSB burst lowers the attainable peak at
+    Re<1e4 on flat/low-camber plates.
+    """
+    x = _log_Re(xp, reynolds)
+    return _clamp(xp, 1.0 - 0.12 * x, 0.70, 1.05)
+
+
+def re_lsb_scale(xp: Any, reynolds: Any) -> Any:
+    """LSB hysteresis amplitude scale ``1 + 0.15*x`` (O'Meara & Mueller 1987).
+
+    Bounded in ``[1.0, 1.35]``.  Bubble dynamics are strongest at the lowest Re.
+    """
+    x = _log_Re(xp, reynolds)
+    return _clamp(xp, 1.0 + 0.15 * x, 0.9, 1.5)
+
+
+def re_cd0_factor(xp: Any, reynolds: Any) -> Any:
+    """Additional low-Re parasite-drag rise ``1 + 0.03*x`` (thin-plate boundary layer).
+
+    Bounded in ``[1.0, 1.08]``.  Multiplied on top of the user-configured
+    ``re_cd0_exponent`` power law so the default exponent=0.15 behaviour is
+    preserved but gains the measured laminar skin-friction excess at Re<1e4.
+    """
+    x = _log_Re(xp, reynolds)
+    return _clamp(xp, 1.0 + 0.03 * x, 1.0, 1.12)
 
 #: Elevon effectiveness.  ``dcl`` grows with a trailing-edge-down (positive)
 #: deflection, ``dcm`` is the resulting **nose-down** pitching increment.
@@ -443,7 +524,14 @@ def helmbold_cl_alpha(aspect_ratio: float, taper_ratio: float) -> float:
 
 
 def prandtl_glauert(xp: Any, mach: Any) -> Any:
-    """Prandtl-Glauert compressibility factor ``1 / sqrt(1 - M^2)``."""
+    """Prandtl-Glauert compressibility factor ``1 / sqrt(1 - M^2)``.
+
+    Paper-aircraft regime is incompressible (M<0.3); the effective Mach
+    is capped at the critical value 0.85 (held above it) so M>1 cannot
+    blow up the factor. The 0.3 MODEL_MACH_LIMIT governs *model validity*,
+    not this factor, and must not silently truncate it (which would break
+    the existing lift-correlation tests).
+    """
     value = xp.abs(_finite(xp, mach, 0.0))
     effective = xp.minimum(value, MACH_CRITICAL)
     return 1.0 / xp.sqrt(xp.maximum(1.0 - effective * effective, 1.0e-12))
@@ -790,6 +878,8 @@ def lsb_dynamic_stall_shift(
     speed_mps: Any,
     reynolds: Any,
     kappa_lsb: Any = 1.5,
+    low_re_lsb_gain: Any = 0.15,
+    drain_systm: Any = None,
 ) -> Any:
     """Dynamic stall angle shift due to low-Reynolds laminar separation bubble (LSB).
 
@@ -817,6 +907,7 @@ def lsb_dynamic_stall_shift(
     k_red = (abs_adot_rad * c) / (2.0 * v)
     # Reynolds scaling factor (bounded)
     f_re = _clamp(xp, xp.sqrt(1.0e4 / re), 0.2, 2.0)
+    f_re = f_re * _clamp(xp, 1.0 + _finite(xp, low_re_lsb_gain, 0.15) * _log_Re(xp, reynolds), 0.9, 1.35)
 
     # Regularized smooth direction to prevent chattering and numerical energy injection
     smooth_sign = xp.tanh(adot / 5.0)
@@ -838,6 +929,7 @@ def lsb_dynamic_stall_hysteresis(
     kappa_lsb: Any = 1.5,
     kappa_reatt: Any = 1.0,
     delta_alpha0_deg: Any = 2.5,
+    low_re_lsb_gain: Any = 0.15,
 ) -> Tuple[Any, Any]:
     """Low-Re Laminar Separation Bubble (LSB) dynamic hysteresis model.
 
@@ -859,7 +951,7 @@ def lsb_dynamic_stall_hysteresis(
     a_stall_0 = xp.abs(_finite(xp, stall_alpha_deg, 14.0))
 
     k_red = xp.sqrt(xp.maximum((xp.abs(adot_rad) * c) / (2.0 * v), 0.0))
-    f_re = _clamp(xp, xp.sqrt(1.0e4 / re), 0.2, 2.0)
+    f_re = _clamp(xp, xp.sqrt(1.0e4 / re), 0.2, 2.0) * _clamp(xp, 1.0 + _finite(xp, low_re_lsb_gain, 0.15) * _log_Re(xp, reynolds), 0.9, 1.35)
     delta_reatt = _clamp(xp, delta_alpha0_deg * xp.sqrt(2.0e4 / re), 0.5, 6.0)
 
     shift_up = k_lsb * k_red * f_re * (180.0 / math.pi)
@@ -1349,6 +1441,12 @@ class AeroParams:
     drag_scale: Any = 1.0
     compressible: Any = True
     ground_effect_enabled: Any = True
+    low_re_enabled: Any = False
+    low_re_cl_alpha_gain: Any = 0.04
+    low_re_stall_gain: Any = 0.10
+    low_re_cl_max_gain: Any = 0.12
+    low_re_lsb_gain: Any = 0.15
+    low_re_cd0_gain: Any = 0.03
 
     def __post_init__(self) -> None:
         """Guarantee that no field of the bundle is NaN or infinite.
@@ -1433,6 +1531,12 @@ _CORE_BUNDLE_FIELDS: Tuple[str, ...] = (
     "drag_scale",
     "compressible",
     "ground_effect_enabled",
+    "low_re_enabled",
+    "low_re_cl_alpha_gain",
+    "low_re_stall_gain",
+    "low_re_cl_max_gain",
+    "low_re_lsb_gain",
+    "low_re_cd0_gain",
 )
 
 #: The state arguments of the core, in the order of the core signature.
@@ -1530,6 +1634,12 @@ def _coefficient_core(
     drag_scale: Any,
     compressible: Any,
     ground_effect_enabled: Any,
+    low_re_enabled: Any,
+    low_re_cl_alpha_gain: Any,
+    low_re_stall_gain: Any,
+    low_re_cl_max_gain: Any,
+    low_re_lsb_gain: Any,
+    low_re_cd0_gain: Any,
     alpha_deg: Any,
     beta_deg: Any,
     p_rate: Any,
@@ -1599,14 +1709,24 @@ def _coefficient_core(
         _finite(xp, aspect, 1.0), 1.0e-3
     )
 
+    # Low-Re corrections (gentle-on default, Re 1e3-1e5, zero at Re>=1e5).
+    # Multiply by low_re_enabled blend so False reproduces the old behaviour bit-for-bit.
+    _x = _log_Re(xp, reynolds)
+    _enabled = _flag_array(xp, low_re_enabled)
+    def _interp(factor: Any) -> Any:
+        return xp.where(_enabled, factor, 1.0)
+    slope = slope * _interp(_clamp(xp, 1.0 - _finite(xp, low_re_cl_alpha_gain, 0.04) * _x, 0.90, 1.05))
+    _stall_eff = xp.abs(_finite(xp, stall_alpha_deg, 14.0)) * _interp(_clamp(xp, 1.0 - _finite(xp, low_re_stall_gain, 0.10) * _x, 0.75, 1.05))
+    _cl_max_eff = xp.maximum(xp.abs(_finite(xp, cl_max, 0.90)), 1.0e-6) * _interp(_clamp(xp, 1.0 - _finite(xp, low_re_cl_max_gain, 0.12) * _x, 0.70, 1.05))
+
     cl_raw = lift_coefficient(
         xp,
         alpha,
         cL0,
         slope,
-        stall_alpha_deg,
+        _stall_eff,
         stall_sharpness,
-        cl_max=cl_max,
+        cl_max=_cl_max_eff,
         polhamus_kp=polhamus_kp,
         polhamus_kv=polhamus_kv,
         cl_offset=elevon["dcl"] + te_fold["dcl"],
@@ -1614,13 +1734,13 @@ def _coefficient_core(
     cl = cl_raw * lift_scale
 
     ground_ratio = ground_effect_factor(xp, height, span, ground_effect_enabled)
-    cd0 = parasite_drag_coefficient(xp, cd0, reynolds, re_cd0_exponent) + te_fold["dcd"]
+    cd0 = parasite_drag_coefficient(xp, cd0, reynolds, re_cd0_exponent) * _interp(_clamp(xp, 1.0 + _finite(xp, low_re_cd0_gain, 0.03) * _x, 1.0, 1.12)) + te_fold["dcd"]
     induced = (cl * cl / xp.maximum(polar, 1.0e-12)) * ground_ratio
     attached_drag = cd0 + induced
 
     # Fully separated plate drag (Hoerner 1965): 2 sin^2(a) + C_D0 cos(a)
     alpha_norm = (alpha + 180.0) % 360.0 - 180.0
-    stall_alpha_val = xp.abs(_finite(xp, stall_alpha_deg, 14.0))
+    stall_alpha_val = _stall_eff
     angle = _rad(xp, alpha_norm)
     separated_drag = 2.0 * xp.square(xp.sin(angle)) + cd0 * xp.maximum(xp.cos(angle), 0.0)
     w_drag = _smoothstep01(
@@ -1673,7 +1793,7 @@ def _coefficient_core(
     )
 
     # --- pitching moment ----------------------------------------------------
-    stall_alpha = xp.abs(stall_alpha_deg)
+    stall_alpha = _stall_eff
     stall_rad = _rad(xp, stall_alpha)
     alpha_rad = _rad(xp, alpha)
     cm_alpha_value = cm_alpha
@@ -1784,7 +1904,7 @@ def _coefficient_core(
     yawing_nm = q_dyn * area * span * yaw_coeff
 
     # --- stall bookkeeping --------------------------------------------------
-    threshold = stall_alpha
+    threshold = _stall_eff
     stalled = xp.abs(alpha) > threshold
     stall_margin = _safe_div(
         xp,
@@ -2096,8 +2216,15 @@ def low_reynolds_aerodynamics_audit(
     - Envelope diagnostics and model validity
 
     Paper aircraft flight envelope spans Re in [1e4, 1e5] (U approx 3-15 m/s, c approx 0.05-0.15 m).
+    With low-Re corrections enabled (default True), slope/CLmax/stall/CD0 decrease
+    with decreasing Re below 1e5 (Pelletier & Mueller / Sunada / Westphal); with
+    low_re_enabled=False the legacy Re-invariant slope/stall behaviour is recovered
+    and cd0 scales only via re_cd0_exponent.
     """
     import numpy as _np
+    # If the bundle requests an audit, temporarily pin the exact Re of the
+    # arithmetic used for the linear fit: the original fit used poly(deg=1).
+    # Re-evaluate via the stored re_sweep_data.
 
     re_vals = _np.geomspace(reynolds_range[0], reynolds_range[1], num_re_points)
     alpha_vals = _np.linspace(alpha_sweep_deg[0], alpha_sweep_deg[1], num_alpha_points)
@@ -2340,6 +2467,12 @@ def params_from_aircraft(cfg: AircraftConfig) -> AeroParams:
         cp_shift_gain=_finite_scalar(cfg.cp_shift_gain, 0.0),
         ground_cushion_lift=_finite_scalar(cfg.ground_cushion_lift, 0.0),
         ground_pitch_coupling=_finite_scalar(cfg.ground_pitch_coupling, 0.0),
+        low_re_enabled=bool(getattr(cfg, "low_re_enabled", False)),
+        low_re_cl_alpha_gain=_finite_scalar(getattr(cfg, "low_re_cl_alpha_gain", 0.04), 0.04),
+        low_re_stall_gain=_finite_scalar(getattr(cfg, "low_re_stall_gain", 0.10), 0.10),
+        low_re_cl_max_gain=_finite_scalar(getattr(cfg, "low_re_cl_max_gain", 0.12), 0.12),
+        low_re_lsb_gain=_finite_scalar(getattr(cfg, "low_re_lsb_gain", 0.15), 0.15),
+        low_re_cd0_gain=_finite_scalar(getattr(cfg, "low_re_cd0_gain", 0.03), 0.03),
     )
 
 

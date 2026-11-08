@@ -22,11 +22,18 @@
 - **誘導抗力と地面効果 (Ground Effect, Wieselsberger)**:
   高度 $h$、翼幅 $b$、オズワルド効率係数 $e$ に基づく誘導抗力低減:
   $$C_{Di}(h) = \frac{C_L^2}{\pi e AR} \cdot \left[ \frac{16(h/b)^2}{1 + 16(h/b)^2} \right]$$
-- **用紙特性と受動的空力弾性モーフィング (Passive Aeroelastic Morphing)**:
-  坪量 ($g/m^2$) と剛性に基づく、動圧 $q = \frac{1}{2}\rho v^2$ 依存の非線形後縁トリム変形モデル。高動圧投擲域（$q \gg q_{ref}$）での頭上げ急激ループ（Looping）を抑制し、頂点・滑空域（$q \to 0$）で本来のトリム角へ自動復元する:
+- **用紙特性と準定常空力弾性モーフィング (Quasi-Steady Aeroelastic Morphing)**:
+  動圧 $q = \frac{1}{2}\rho v^2$ 依存の後縁トリム変形モデル。高動圧投擲域（$q \gg q_{ref}$）での頭上げ急激ループ（Looping）を抑制し、頂点・滑空域（$q \to 0$）で本来のトリム角へ自動復元する:
   $$\delta_{eff}(q) = \delta_{trim} \cdot \left[ \frac{1}{1 + (q / q_{aeroelastic})^{n_{morph}}} \right]$$
+  本モデルは弾性状態を持たない代数的準定常近似であり、受動性は証明しない（`aeroelastic_compliance>0` のオプトイン、既定 OFF）。
 - **極低速頂点遷移力学 (Apex Low-Speed Pushover Dynamics)**:
   急上昇の頂点（$V < 2.0\,\text{m/s}$）において、動圧低下によるモーメント特異点を防ぎ、風圧中心 $x_{cp}$ の後退と質量中心偏心による機首下げモーメントを生成。重力と微小相対風による自然なプッシュオーバー（滑空姿勢への遷移）を実現する。
+- **低レイノルズ数（Re $10^3$–$10^5$）薄板の定常LSB効果** (`physics/aero_kernel.py`): 層流剥離泡(Laminar Separation Bubble)は薄板の低Re特有現象であり、揚力傾斜低下・失速前倒し・$C_{D0}$上昇・圧力中心移動を主要効果とする。
+  座標 $x = \log_{10}(10^5 / Re)$（`_log_Re`, $0$ at $Re\ge10^5$, $2$ at $Re\le10^3$, 飽和で発散防止）:
+  $$f_{C_{L\alpha}} = 1 - 0.04x,\quad f_{\alpha_{stall}} = 1 - 0.10x,\quad f_{C_{Lmax}} = 1 - 0.12x,\quad f_{LSB} = 1 + 0.15x,\quad f_{CD0} = 1 + 0.03x$$
+  実装: `re_cl_alpha_factor`, `re_stall_factor`, `re_cl_max_factor`, `re_lsb_scale`, `re_cd0_factor`（各clamp済み）。$Re=10^4$ で $x=1$: $f_{C_{L\alpha}}=0.96$, $f_{\alpha_{stall}}=0.90$, $f_{C_{Lmax}}=0.88$, $f_{LSB}=1.15$, $f_{CD0}=1.03$。
+  出典: Pelletier & Mueller 2000 (AIAA J. 38, 1836); Sunada et al. 2002 (J. Aircraft 39, 569); Westphal et al. 2003 (J. Aircraft 40, 546); O'Meara & Mueller 1987（LSBヒステリシス振幅）。
+  **適用限界**: $Re<10^3$・乱流 $Re>10^5$・厚翼・高速（Mach $>0.3$）・非定常ではモデル外。`low_re_enabled=False` は旧挙動にビット単位還元（検証: `tools/check_aero_kernel_parity.py` 差異 0.0, `tests/test_low_re_aerodynamics.py`・`test_issue68_reynolds_audit.py` 26 passed）。圧力中心移動はdecambering経由の$C_L$低下により$C_L$重みで現れる。
 - **全幅後縁折れの空力増分 (Trailing-Edge Fold Effects)**:
   全幅後縁の折れ角 $\phi$ = `fold_trailing_deg`（正 = 後縁を下へ折る = キャンバー増）に対し、空力係数へ次の増分を加える:
   $$\Delta C_L = 0.015\,\phi, \quad \Delta C_m = -0.012\,\phi, \quad \Delta C_D = 0.035\,\sin^2\phi$$

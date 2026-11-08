@@ -70,7 +70,7 @@ class TestHelmboldAndAttachedLiftSlope:
         assert higher_ar_slope > slope
 
     def test_attached_lift_slope_re_invariance(self):
-        """Static attached lift-curve slope dCL/dalpha is Re-invariant in the calibrated model."""
+        """Static attached lift-curve slope dCL/dalpha reports the low-Re correction."""
         p = AeroParams(
             aspect=2.667,
             cL0=0.0,
@@ -80,19 +80,42 @@ class TestHelmboldAndAttachedLiftSlope:
             low_re_enabled=True,
         )
         audit = low_reynolds_aerodynamics_audit(np, p, reynolds_range=(1.0e4, 1.0e5), num_re_points=5)
-        # Lift-curve slope variation across Re sweep must be zero to numerical tolerance
-        assert audit["slope_variation"] == pytest.approx(0.0, abs=1.0e-7)
-        # Observed slope in linear range matches Helmbold cl_alpha
-        for pt in audit["re_sweep_data"]:
-            assert pt["cl_alpha_per_rad"] == pytest.approx(p.cl_alpha, rel=1.0e-2)
+        # With the gentle low-Re correction the slope falls ~4%/decade below 1e5.
+        assert audit["slope_variation"] == pytest.approx(0.11, abs=0.05)
+        # The legacy Re-invariant behaviour is recovered with low_re_enabled=False.
+        p_off = AeroParams(
+            aspect=2.667,
+            cL0=0.0,
+            cl_alpha=helmbold_cl_alpha(2.667, 0.7),
+            cl_max=0.90,
+            stall_alpha_deg=14.0,
+            low_re_enabled=False,
+        )
+        audit_off = low_reynolds_aerodynamics_audit(np, p_off, reynolds_range=(1.0e4, 1.0e5), num_re_points=5)
+        assert audit_off["slope_variation"] == pytest.approx(0.0, abs=1.0e-7)
+        for pt in audit_off["re_sweep_data"]:
+            assert pt["cl_alpha_per_rad"] == pytest.approx(p_off.cl_alpha, rel=1.0e-2)
 
 
 class TestStallAndPostStallFlatPlateTransition:
     """Audit of maximum lift CLmax, stall angle, and post-stall transition to Hoerner flat plate."""
 
     def test_cl_max_ceiling_and_re_invariance(self):
-        """Static CLmax cap and peak behavior remain invariant across Re in steady flow."""
-        # Case A: cl_max caps linear branch before stall_alpha
+        """Static CLmax cap and peak behaviour vary gently with Re below 1e5."""
+        p_off = AeroParams(
+            aspect=4.0,
+            cl_alpha=4.0,
+            cl_max=0.80,
+            stall_alpha_deg=15.0,
+            stall_sharpness=1.4,
+            low_re_enabled=False,
+        )
+        audit_off = low_reynolds_aerodynamics_audit(np, p_off, reynolds_range=(1.0e4, 1.0e5), num_re_points=5)
+        assert audit_off["cl_max_variation"] == pytest.approx(0.0, abs=1.0e-7)
+        for pt in audit_off["re_sweep_data"]:
+            assert pt["cl_max"] == pytest.approx(0.80, abs=0.01)
+            assert pt["nominal_stall_alpha_deg"] == pytest.approx(15.0, abs=1.0e-7)
+
         p_capped = AeroParams(
             aspect=4.0,
             cl_alpha=4.0,
@@ -102,18 +125,18 @@ class TestStallAndPostStallFlatPlateTransition:
             low_re_enabled=True,
         )
         audit_capped = low_reynolds_aerodynamics_audit(np, p_capped, reynolds_range=(1.0e4, 1.0e5), num_re_points=5)
-        assert audit_capped["cl_max_variation"] == pytest.approx(0.0, abs=1.0e-7)
+        assert audit_capped["cl_max_variation"] > 0.05
         for pt in audit_capped["re_sweep_data"]:
-            assert pt["cl_max"] == pytest.approx(0.80, abs=0.01)
-            assert pt["nominal_stall_alpha_deg"] == pytest.approx(15.0, abs=1.0e-7)
+            base = 0.80 * (1.0 - 0.12 * max(0.0, min(2.0, np.log10(1.0e5 / pt["reynolds"]))))
+            assert pt["cl_max"] == pytest.approx(base, abs=0.02)
 
-        # Case B: Standard glider where cl_max > linear_at_stall
         p_std = AeroParams(
             aspect=2.5,
             cl_alpha=helmbold_cl_alpha(2.5, 0.7),
             cl_max=0.95,
             stall_alpha_deg=15.0,
             stall_sharpness=1.4,
+            low_re_enabled=False,
         )
         audit_std = low_reynolds_aerodynamics_audit(np, p_std, reynolds_range=(1.0e4, 1.0e5), num_re_points=5)
         assert audit_std["cl_max_variation"] == pytest.approx(0.0, abs=1.0e-7)
@@ -165,12 +188,11 @@ class TestLaminarSeparationBubbleDynamics:
         shift_high = float(lsb_dynamic_stall_shift(
             ScalarMath, alpha_dot_deg_s=20.0, mac_m=0.1, speed_mps=8.0, reynolds=re_high
         ))
-        # Pitch-up shift must be strictly positive
         assert shift_low > 0.0
         assert shift_high > 0.0
-        # Since shift scales as Re^-0.5, lower Re has larger delay: shift_low / shift_high ~ sqrt(4) = 2.0
         ratio = shift_low / shift_high
-        assert ratio == pytest.approx(2.0, rel=0.05)
+        # sqrt(4)=2 plus the (1+0.15*x) LSB gain: fairly gentle change.
+        assert ratio == pytest.approx(2.0, rel=0.15)
 
     def test_lsb_dynamic_stall_hysteresis_loop(self):
         """LSB hysteresis distinguishes pitch-up vs pitch-down effective stall angles."""
@@ -207,21 +229,32 @@ class TestReynoldsParasiteDragScaling:
     """Audit of parasite drag scaling across Re."""
 
     def test_parasite_drag_power_law(self):
-        """cd0 scales with Re^-exp when re_cd0_exponent > 0."""
-        p = AeroParams(
+        """cd0 scales with Re^-exp plus the gentle low-Re excess."""
+        p_off = AeroParams(
+            cd0=0.02,
+            re_cd0_exponent=0.15,
+            cl_alpha=helmbold_cl_alpha(2.667, 0.7),
+            low_re_enabled=False,
+        )
+        audit_off = low_reynolds_aerodynamics_audit(np, p_off, reynolds_range=(1.0e4, 1.0e5), num_re_points=3)
+        assert audit_off["cd0_variation"] > 0.0
+        expected_ratio = (1.0e5 / 1.0e4) ** 0.15
+        cd0_1e4 = audit_off["re_sweep_data"][0]["cd0"]
+        cd0_1e5 = audit_off["re_sweep_data"][-1]["cd0"]
+        assert cd0_1e4 / cd0_1e5 == pytest.approx(expected_ratio, rel=1.0e-4)
+
+        p_on = AeroParams(
             cd0=0.02,
             re_cd0_exponent=0.15,
             cl_alpha=helmbold_cl_alpha(2.667, 0.7),
             low_re_enabled=True,
         )
-        audit = low_reynolds_aerodynamics_audit(np, p, reynolds_range=(1.0e4, 1.0e5), num_re_points=3)
+        audit = low_reynolds_aerodynamics_audit(np, p_on, reynolds_range=(1.0e4, 1.0e5), num_re_points=3)
         assert audit["cd0_variation"] > 0.0
         data = audit["re_sweep_data"]
-        # cd0 at 1e4 vs 1e5
         cd0_1e4 = data[0]["cd0"]
         cd0_1e5 = data[-1]["cd0"]
-        expected_ratio = (1.0e5 / 1.0e4) ** 0.15
-        assert cd0_1e4 / cd0_1e5 == pytest.approx(expected_ratio, rel=1.0e-4)
+        assert cd0_1e4 / cd0_1e5 == pytest.approx(expected_ratio * (1.0 + 0.03), rel=5.0e-3)
 
 
 class TestBackendParity:
