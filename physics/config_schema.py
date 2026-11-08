@@ -354,6 +354,12 @@ class AircraftConfig:
     unsteady_k_circ: float = 2.0  # circulatory lag scaling factor
     lsb_hysteresis_enabled: bool = False  # laminar separation bubble dynamic hysteresis
     lsb_kappa: float = 1.5  # LSB dynamic stall overshoot sensitivity (deg)
+    low_re_enabled: bool = False  # low-Re corrections opt-in (see aero_kernel); legacy default is Re-invariant so existing lift correlations hold bit-for-bit
+    low_re_cl_alpha_gain: float = 0.04  # CLalpha loss per decade of Re below 1e5 (Pelletier & Mueller / Sunada)
+    low_re_stall_gain: float = 0.10  # stall alpha loss per decade below 1e5 (Pelletier / Sunada / Westphal)
+    low_re_cl_max_gain: float = 0.12  # CLmax loss per decade below 1e5 (Pelletier & Mueller)
+    low_re_lsb_gain: float = 0.15  # LSB amplitude growth per decade below 1e5 (O'Meara & Mueller)
+    low_re_cd0_gain: float = 0.03  # extra CD0 rise per decade below 1e5 (thin-plate boundary layer)
     residual_cl: float = 0.0  # post-stall residual lift parameter
     dynamic_damping_enabled: bool = False  # separation-aware non-linear dynamic damping
     apparent_inertia_enabled: bool = False  # 3-DoF thin plate rotational apparent inertia
@@ -454,6 +460,12 @@ class AircraftConfig:
             unsteady_k_circ=clamp(self.unsteady_k_circ, *AIRCRAFT_RANGES["unsteady_k_circ"]),
             lsb_hysteresis_enabled=bool(self.lsb_hysteresis_enabled),
             lsb_kappa=clamp(self.lsb_kappa, *AIRCRAFT_RANGES["lsb_kappa"]),
+            low_re_enabled=bool(self.low_re_enabled),
+            low_re_cl_alpha_gain=clamp(self.low_re_cl_alpha_gain, *AIRCRAFT_RANGES["low_re_cl_alpha_gain"]),
+            low_re_stall_gain=clamp(self.low_re_stall_gain, *AIRCRAFT_RANGES["low_re_stall_gain"]),
+            low_re_cl_max_gain=clamp(self.low_re_cl_max_gain, *AIRCRAFT_RANGES["low_re_cl_max_gain"]),
+            low_re_lsb_gain=clamp(self.low_re_lsb_gain, *AIRCRAFT_RANGES["low_re_lsb_gain"]),
+            low_re_cd0_gain=clamp(self.low_re_cd0_gain, *AIRCRAFT_RANGES["low_re_cd0_gain"]),
             residual_cl=clamp(self.residual_cl, *AIRCRAFT_RANGES["residual_cl"]),
             dynamic_damping_enabled=bool(self.dynamic_damping_enabled),
             apparent_inertia_enabled=bool(self.apparent_inertia_enabled),
@@ -1582,6 +1594,11 @@ AIRCRAFT_RANGES: Dict[str, Tuple[float, float]] = {
     "aeroelastic_tau_s": (0.0, 5.0),
     "unsteady_k_circ": (0.0, 10.0),
     "lsb_kappa": (0.0, 10.0),
+    "low_re_cl_alpha_gain": (0.0, 0.20),
+    "low_re_stall_gain": (0.0, 0.40),
+    "low_re_cl_max_gain": (0.0, 0.40),
+    "low_re_lsb_gain": (0.0, 0.50),
+    "low_re_cd0_gain": (0.0, 0.20),
     "residual_cl": (0.0, 1.0),
     "paper_grain_angle_deg": (-90.0, 90.0),
     "paper_anisotropy_ratio": (1.0, 5.0),
