@@ -93,39 +93,6 @@ flowchart TD
 
 ---
 
-## クイックスタート
-
-### 動作要件
-- Python 3.10 以上 (3.11 推奨)
-- WebGL 2.0 対応ブラウザ (Chrome, Edge, Firefox 等)
-- (任意) NVIDIA GPU / CUDA 12.x（GPUがない環境でも自動でCPU動作します）
-
-### セットアップ
-
-```bash
-# リポジトリのクローン
-git clone https://github.com/minetan1229/air_simulation.git
-cd air_simulation
-
-# 仮想環境の作成と有効化
-python -m venv .venv
-# Windows: .\.venv\Scripts\Activate.ps1
-# Linux/macOS: source .venv/bin/activate
-
-# 依存パッケージのインストール
-pip install -e ".[dev]"
-```
-*(Windows では `.\setup.ps1`、Linux/macOS では `./setup.sh` による自動セットアップも利用可能です)*
-
-### 起動方法
-
-```bash
-python app.py
-```
-起動後、ブラウザで [http://127.0.0.1:5000](http://127.0.0.1:5000) にアクセスしてください。
-
----
-
 ## ディレクトリ構成の概要
 
 ```text
