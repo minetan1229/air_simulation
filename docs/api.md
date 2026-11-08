@@ -2,6 +2,11 @@
 
 本ドキュメントでは、本システムで提供される Flask REST API の全エンドポイント、リクエスト/レスポンス形式、およびエラーハンドリングについて説明します。
 
+> **インタラクティブ仕様**: サーバー起動後に [Swagger UI](http://127.0.0.1:5000/docs)（`GET /docs`）で
+> cURL / Python / JavaScript のリクエスト例を試演できます。機械可読仕様は
+> [`GET /api/openapi.json`](http://127.0.0.1:5000/api/openapi.json)（OpenAPI 3.0.3、自動生成。生成元: `api/openapi.py`）から取得可能です。
+> 本 Markdown は人間可読の要約であり、正本はランタイム仕様です。
+
 ---
 
 ## 1. 共通仕様・エラーハンドリング
@@ -153,7 +158,29 @@
 
 ---
 
-## 4. 関連ドキュメント
+## 4. ヘッドレス実行（Web UI を介さない）
+
+```bash
+# Python 単体（サーバー不要）
+python examples/quick_simulation.py --duration 6.0
+
+# REST 経路（サーバー起動後）
+curl -X POST http://127.0.0.1:5000/api/v1/simulation/launch \
+  -H 'Content-Type: application/json' \
+  -d '{"launch":{"launch_speed":12.0,"launch_angle_deg":12.0}}'
+
+# 認証が必要な場合（API_KEY が設定されているとき）
+curl -X POST http://127.0.0.1:5000/api/v1/optimizer/run \
+  -H "Authorization: Bearer $API_KEY" \
+  -H 'Content-Type: application/json' \
+  -d '{"algorithm":"nsga2","objectives":["max_distance"],"population_size":24,"generations":10}'
+```
+
+詳細は [examples/quick_simulation.py](../examples/quick_simulation.py) を参照。
+
+---
+
+## 5. 関連ドキュメント
 
 - [クイックスタート (docs/getting-started.md)](./getting-started.md)
 - [システムアーキテクチャ (docs/architecture.md)](./architecture.md)

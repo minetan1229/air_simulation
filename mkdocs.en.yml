@@ -1,0 +1,99 @@
+site_name: 3D Paper Airplane Simulator
+site_description: 6DoF RK4 flight dynamics × low-Re aerodynamics × GPU parallel optimisation — a paper-airplane simulation platform
+site_author: minetan1229
+site_url: https://minetan1229.github.io/air_simulation/
+repo_name: minetan1229/air_simulation
+repo_url: https://github.com/minetan1229/air_simulation
+edit_uri: edit/master/docs/
+
+docs_dir: docs
+
+theme:
+  name: material
+  language: en
+  palette:
+    - media: "(prefers-color-scheme)"
+      scheme: default
+      toggle:
+        icon: material/brightness-7
+        name: Light / Dark
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      toggle:
+        icon: material/brightness-4
+        name: Dark / Light
+  features:
+    - navigation.instant
+    - navigation.instant.progress
+    - navigation.tabs
+    - navigation.tabs.sticky
+    - navigation.sections
+    - navigation.top
+    - search.suggest
+    - search.highlight
+    - content.code.copy
+    - content.action.view
+  icon:
+    repo: fontawesome/brands/github
+
+markdown_extensions:
+  - pymdownx.extra
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.details
+  - pymdownx.mark
+  - pymdownx.caret
+  - pymdownx.tilde
+  - pymdownx.magicbonnet
+  - toc:
+      permalink: true
+  - attr_list
+
+extra:
+  generator: false
+  alternate:
+    - name: 日本語
+      link: /air_simulation/
+      lang: ja
+    - name: English
+      link: /air_simulation/en/
+      lang: en
+
+plugins:
+  - search:
+      lang: en
+      min_search_length: 2
+  - mkdocstrings:
+      default_handler: python
+      handlers:
+        python:
+          options:
+            show_root_heading: false
+
+nav:
+  - Home: index.en.md
+  - Getting Started:
+      - Quickstart: getting-started.md
+      - User Guide: usage.md
+      - Troubleshooting: troubleshooting.md
+  - Physics & Theory:
+      - Specification (canonical): SPECIFICATION.md
+      - Physics Models (canonical): PHYSICS_MODELS.md
+      - Verification & Validation (V&V): VALIDATION.md
+      - Architecture: architecture.md
+  - API Reference:
+      - REST API: api.md
+      - OpenAPI (Swagger UI): ../README.en.md
+  - Development & Ops:
+      - Development Guide: development.md
+      - GA V2 Architecture: GA_V2_ARCHITECTURE.md
+      - CFD Roadmap: CFD_ROADMAP.md
+      - Paper Registry Pipeline: PAPER_REGISTRY_PIPELINE.md
+      - Discord Bridge: discord-bridge.md
+      - Remote Compute: REMOTE_COMPUTE_ENVIRONMENT.md
+      - Code Review Findings: CODE_REVIEW_FINDINGS.md

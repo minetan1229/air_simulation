@@ -41,7 +41,7 @@ def test_independent_drag_polar_and_induced_drag():
     cfg = AircraftConfig(fold_trailing_deg=0.0)
     props = derived_properties(cfg)
     ar = props["aspect_ratio"]
-    
+
     # Evaluate drag at alpha=0 vs alpha=4 deg where CL is known
     env = EnvironmentConfig()
     res0 = evaluate_aero(cfg, env, speed_mps=8.0, alpha_deg=0.0)
@@ -59,7 +59,7 @@ def test_hoerner_flat_plate_high_alpha_limit():
     """Verify Hoerner separated flat-plate lift formulation: 2 * sin(a) * cos^2(a)."""
     # At alpha = 0, CL = 0
     assert math.isclose(flat_plate_lift_coefficient(0.0), 0.0, abs_tol=1e-6)
-    
+
     # Peak occurs at alpha = arcsin(1/sqrt(3)) ~= 35.264 degrees
     alpha_peak = math.degrees(math.asin(1.0 / math.sqrt(3.0)))
     cl_peak = flat_plate_lift_coefficient(alpha_peak)

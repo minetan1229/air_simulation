@@ -40,6 +40,7 @@ from api.routes import (
     records_bp,
     sim_bp,
 )
+from api.openapi import register_openapi_routes
 from tools.branch_guard import BranchViolation, assert_branch_allowed, describe_status
 
 logging.basicConfig(
@@ -228,6 +229,9 @@ def _handle_options(path: str = ""):
 @app.get("/")
 def index():
     return render_template("index.html")
+
+
+register_openapi_routes(app)
 
 
 @app.get("/healthz")

@@ -1,0 +1,101 @@
+cff-version: 1.2.0
+title: 3D Paper Airplane Simulator
+message: "本ソフトウェアを論文・報告で引用する場合は以下をお使いください。"
+type: software
+authors:
+  - name: "minetan1229"
+    organization: "Engineering Team"
+repository-code: "https://github.com/minetan1229/air_simulation"
+url: "https://minetan1229.github.io/air_simulation/"
+version: 3.0.0
+date-released: 2026-11-09
+license: Proprietary
+keywords:
+  - paper-airplane
+  - 6DoF
+  - aerodynamics
+  - RK4
+  - low-Reynolds
+  - GPU-optimisation
+  - evolutionary-optimisation
+references:
+  - id: helmbold_1942
+    title: "Der unverwundene Dreiecksflügel als Trägerfläche höchsten Auftriebs"
+    author:
+      - family: Helmbold
+        given: H. B.
+    year: 1942
+    type: article
+    journal: "Jahrbuch 1942 der deutschen Luftfahrtforschung, I, 111-113"
+  - id: polhamus_1966
+    title: "A Concept of the Vortex Lift of Sharp-Edge Delta Wings Based on a Leading-Edge-Suction Analogy"
+    author:
+      - family: Polhamus
+        given: E. C.
+    year: 1966
+    type: report
+    collection: "NASA Technical Note NASA TN D-3767"
+    identifiers:
+      - type: url
+        value: "https://ntrs.nasa.gov/citations/19670003058"
+  - id: hoerner_1965
+    title: "Fluid-Dynamic Drag: Practical Information on Aerodynamic Drag and Hydrodynamic Resistance"
+    author:
+      - family: Hoerner
+        given: S. F.
+    year: 1965
+    type: book
+    publisher: "Hoerner Fluid Dynamics"
+  - id: viterna_corrigan_1982
+    title: "Fixed Pitch Rotor Performance of Large Horizontal Axis Wind Turbines"
+    author:
+      - family: Viterna
+        given: L. A.
+      - family: Corrigan
+        given: R. D.
+    year: 1982
+    type: report
+    collection: "NASA TM-83021"
+    identifiers:
+      - type: url
+        value: "https://ntrs.nasa.gov/citations/19830006272"
+  - id: wieselsberger_1922
+    title: "Wing Resistance Near the Ground"
+    author:
+      - family: Wieselsberger
+        given: C.
+    year: 1922
+    type: article
+    journal: "ZFM, Vol. 12, pp. 145-147 (NACA TM 77 translation)"
+    identifiers:
+      - type: url
+        value: "https://ntrs.nasa.gov/citations/19930090888"
+  - id: usa_1976
+    title: "U.S. Standard Atmosphere, 1976"
+    author:
+      - family: "NOAA, NASA, and USAF"
+        given: ""
+    year: 1976
+    type: report
+    collection: "NOAA-S/T 76-1562, NASA-TM-X-74335"
+    identifiers:
+      - type: url
+        value: "https://ntrs.nasa.gov/citations/19770009539"
+  - id: pelletier_mueller_2000
+    title: "Low Reynolds Number Aerodynamics at Low Mach Numbers"
+    author:
+      - family: Pelletier
+        given: F.-J.
+      - family: Mueller
+        given: T. J.
+    year: 2000
+    type: article
+    journal: "AIAA Journal, 38(10), 1836-1842"
+  - id: sunada_2002
+    title: "Aerodynamic Characteristics of Low Reynolds Number Paper Airplane Wings"
+    author:
+      - family: Sunada
+        given: S.
+    year: 2002
+    type: article
+    journal: "Journal of Aircraft, 39, 569-576"

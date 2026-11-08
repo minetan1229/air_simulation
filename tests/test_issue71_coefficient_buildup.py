@@ -76,7 +76,7 @@ def test_buildup_wind_to_body_transformation_and_signs():
     # At alpha = 0, beta = 0: Wind drag is along body +X backward (-body X), Lift is along -Z
     res0 = evaluate_aero(cfg, env, speed_mps=10.0, alpha_deg=0.0, beta_deg=0.0)
     f_body = aerodynamic_force_body(res0.drag_n, res0.side_n, res0.lift_n)
-    
+
     # Body axes: X forward, Y right, Z down
     # Drag opposes forward motion -> fx < 0
     # Lift opposes gravity (upward) -> fz < 0
@@ -115,7 +115,7 @@ def test_buildup_symmetry_and_continuity_across_stall():
     # Continuity across stall transition alpha in [10 deg, 25 deg]
     alphas = np.linspace(5.0, 30.0, 51)
     cls = [evaluate_aero(cfg, env, speed_mps=8.0, alpha_deg=a).cl for a in alphas]
-    
+
     # Check that there are no NaN, infinite or jump discontinuities
     for i in range(len(cls) - 1):
         diff = abs(cls[i+1] - cls[i])

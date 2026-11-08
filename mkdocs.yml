@@ -1,0 +1,92 @@
+site_name: 3D Paper Airplane Simulator
+site_description: 6DoF RK4 飛行力学 × 低 Re 空力 × GPU 並列最適化の紙飛行機シミュレーション基盤
+site_author: minetan1229
+site_url: https://minetan1229.github.io/air_simulation/
+repo_name: minetan1229/air_simulation
+repo_url: https://github.com/minetan1229/air_simulation
+edit_uri: edit/master/docs/
+
+docs_dir: docs
+
+theme:
+  name: material
+  language: ja
+  palette:
+    - media: "(prefers-color-scheme)"
+      scheme: default
+      toggle:
+        icon: material/brightness-7
+        name: ライト/ダーク
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      toggle:
+        icon: material/brightness-4
+        name: ダーク/ライト
+  features:
+    - navigation.instant
+    - navigation.instant.progress
+    - navigation.tabs
+    - navigation.tabs.sticky
+    - navigation.sections
+    - navigation.top
+    - search.suggest
+    - search.highlight
+    - content.code.copy
+    - content.action.view
+  icon:
+    repo: fontawesome/brands/github
+
+markdown_extensions:
+  - pymdownx.extra
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.details
+  - pymdownx.mark
+  - pymdownx.caret
+  - pymdownx.tilde
+  - pymdownx.magicbonnet
+  - toc:
+      permalink: true
+  - attr_list
+
+extra:
+  generator: false
+
+plugins:
+  - search:
+      lang: ja
+      min_search_length: 2
+  - mkdocstrings:
+      default_handler: python
+      handlers:
+        python:
+          options:
+            show_root_heading: false
+
+nav:
+  - ホーム: index.md
+  - 導入ガイド:
+      - クイックスタート: getting-started.md
+      - 操作マニュアル: usage.md
+      - トラブルシューティング: troubleshooting.md
+  - 物理・理論:
+      - 技術仕様 (正本): SPECIFICATION.md
+      - 物理モデル正本: PHYSICS_MODELS.md
+      - 検証と妥当性確認 (V&V): VALIDATION.md
+      - アーキテクチャ: architecture.md
+  - API リファレンス:
+      - REST API 仕様: api.md
+      - OpenAPI (Swagger UI): ../README.md
+  - 開発・運用:
+      - 開発ガイド: development.md
+      - GA V2 アーキテクチャ: GA_V2_ARCHITECTURE.md
+      - CFD ロードマップ: CFD_ROADMAP.md
+      - 紙レジストリパイプライン: PAPER_REGISTRY_PIPELINE.md
+      - Discord ブリッジ: discord-bridge.md
+      - リモート計算環境: REMOTE_COMPUTE_ENVIRONMENT.md
+      - コードレビュー知見: CODE_REVIEW_FINDINGS.md
