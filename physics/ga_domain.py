@@ -1601,6 +1601,11 @@ class ResearchRun:
             return []
         if len(cases) < 4 or self.config.processes == 1:
             return [evaluate_case(case) for case in cases]
+        try:
+            from tools.hybrid_split import hybrid_evaluate
+            return hybrid_evaluate(cases, processes=int(self.config.processes))
+        except Exception:
+            pass
         return parallel_evaluate(cases, processes=int(self.config.processes))
 
     # ------------------------------------------------------------------

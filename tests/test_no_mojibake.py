@@ -58,7 +58,7 @@ SELF_REFERENCE = frozenset({
     "tools/check_mojibake.py",
     "tests/test_no_mojibake.py",
     "tools/check_records_ja.py",
-    "tools/build_fixed_records_domain.py",
+    "tools/dev/build_fixed_records_domain.py",
 })
 
 #: Mojibake that is owned by somebody else in this worktree, keyed by the
