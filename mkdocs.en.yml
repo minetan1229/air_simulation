@@ -1,7 +1,7 @@
 site_name: 3D Paper Airplane Simulator
 site_description: 6DoF RK4 flight dynamics × low-Re aerodynamics × GPU parallel optimisation — a paper-airplane simulation platform
 site_author: minetan1229
-site_url: https://minetan1229.github.io/air_simulation/
+site_url: https://minetan1229.github.io/air_simulation/en/
 repo_name: minetan1229/air_simulation
 repo_url: https://github.com/minetan1229/air_simulation
 edit_uri: edit/master/docs/
@@ -10,7 +10,11 @@ docs_dir: docs
 
 theme:
   name: material
+  custom_dir: docs/overrides
   language: en
+  font:
+    text: Inter
+    code: JetBrains Mono
   palette:
     - media: "(prefers-color-scheme)"
       scheme: default
@@ -19,6 +23,7 @@ theme:
         name: Light / Dark
     - media: "(prefers-color-scheme: dark)"
       scheme: slate
+      primary: light blue
       toggle:
         icon: material/brightness-4
         name: Dark / Light
@@ -28,16 +33,22 @@ theme:
     - navigation.tabs
     - navigation.tabs.sticky
     - navigation.sections
+    - navigation.index
+    - navigation.expand
     - navigation.top
     - search.suggest
     - search.highlight
     - content.code.copy
+    - content.code.annotate
     - content.action.view
+    - content.action.edit
   icon:
     repo: fontawesome/brands/github
 
 markdown_extensions:
   - pymdownx.extra
+  - pymdownx.arithmatex:
+      generic: true
   - pymdownx.superfences:
       custom_fences:
         - name: mermaid
@@ -49,10 +60,16 @@ markdown_extensions:
   - pymdownx.mark
   - pymdownx.caret
   - pymdownx.tilde
-  - pymdownx.magicbonnet
+  - pymdownx.snippets
   - toc:
       permalink: true
   - attr_list
+
+extra_css:
+  - stylesheets/extra.css
+
+extra_javascript:
+  - javascripts/extra.js
 
 extra:
   generator: false
@@ -67,7 +84,6 @@ extra:
 plugins:
   - search:
       lang: en
-      min_search_length: 2
   - mkdocstrings:
       default_handler: python
       handlers:
@@ -86,9 +102,10 @@ nav:
       - Physics Models (canonical): PHYSICS_MODELS.md
       - Verification & Validation (V&V): VALIDATION.md
       - Architecture: architecture.md
+      - Physics Roadmap: PHYSICS_ROADMAP.md
   - API Reference:
       - REST API: api.md
-      - OpenAPI (Swagger UI): ../README.en.md
+      - OpenAPI (Swagger UI): https://github.com/minetan1229/air_simulation#api-reference
   - Development & Ops:
       - Development Guide: development.md
       - GA V2 Architecture: GA_V2_ARCHITECTURE.md
