@@ -126,4 +126,4 @@ mkdocs serve      # → http://127.0.0.1:8000
 mkdocs build
 ```
 
-> **Web サイトは未公開です**（GitHub Pages 未有効）。`.github/workflows/docs.yml` が `master` への push でビルドしますが、Pages が有効化されるまで URL は発行されません。計画 URL は `https://minetan1229.github.io/air_simulation/` です。
+`docs/` への push で `.github/workflows/docs.yml` が GitHub Pages（https://minetan1229.github.io/air_simulation/）へ自動公開します。

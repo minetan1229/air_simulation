@@ -17,7 +17,7 @@ GPU バッチ計算と遺伝的アルゴリズムで探索します。
 [![CodeQL](https://github.com/minetan1229/air_simulation/actions/workflows/codeql.yml/badge.svg)](https://github.com/minetan1229/air_simulation/actions/workflows/codeql.yml)
 [![License](https://img.shields.io/badge/license-Proprietary-red.svg)](./LICENSE)
 
-[ドキュメント（ローカル）](./docs/README.md) ·
+[ドキュメント](https://minetan1229.github.io/air_simulation/) ·
 [API リファレンス](./docs/api.md) ·
 [物理モデル](./docs/PHYSICS_MODELS.md) ·
 [開発ガイド](./CONTRIBUTING.md) ·
@@ -202,7 +202,7 @@ flowchart TD
 
 ## 📚 詳細ドキュメント
 
-> Web サイト版は **未公開**（GitHub Pages が有効化されるまで生成されません）。ワークフローは [`.github/workflows/docs.yml`](./.github/workflows/docs.yml) を参照し、ローカルでは `pip install mkdocs-material && mkdocs serve` で確認できます。
+Web サイト版: <https://minetan1229.github.io/air_simulation/>（`mkdocs.yml` から GitHub Pages へ自動公開）
 
 | カテゴリ | 文書 |
 | :--- | :--- |

@@ -26,7 +26,7 @@ import time
 import traceback
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from physics.config_schema import OBJECTIVE_DIRECTIONS
 
