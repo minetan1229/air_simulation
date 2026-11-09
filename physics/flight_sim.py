@@ -944,7 +944,9 @@ def wind_vector(position: VectorLike, env: EnvironmentConfig, time_s: float = 0.
     upstream solver is defined on a *z-up* height axis (its boundary layer, ground
     clamp and thermal plume all assume "height above the ground plane, positive
     up"), so the query point is converted with
-    ``height = ground_level_m - z_state`` and the returned vertical component is
+    ``z_up = -z_state`` (the z-up coordinate of the point itself; the solver
+    forms the height above the ground plane as ``z_up - ground_level_m``) and
+    the returned vertical component is
     negated back into the z-down world frame used by the integrator.  Fallback:
     :func:`_local_wind`, which returns the exact zero vector for a calm
     atmosphere so the coupling is perfectly inert.
@@ -1952,6 +1954,7 @@ class FlightSimulator:
         self._aero_twist_lag: float = 0.0
         self._unsteady_cl_lag: float = 0.0
         self._prev_alpha_deg: float = 0.0
+        self._prev_alpha_valid: bool = False
         self._alpha_dot_deg_s: float = 0.0
         self._lsb_shift_deg: float = 0.0
         self._is_stalled_prev: bool = False
@@ -2090,6 +2093,7 @@ class FlightSimulator:
         self._aero_twist_lag = 0.0
         self._unsteady_cl_lag = 0.0
         self._prev_alpha_deg = 0.0
+        self._prev_alpha_valid = False
         self._alpha_dot_deg_s = 0.0
         self._lsb_shift_deg = 0.0
         self._is_stalled_prev = False
@@ -2136,6 +2140,7 @@ class FlightSimulator:
         self._aero_twist_lag = 0.0
         self._unsteady_cl_lag = 0.0
         self._prev_alpha_deg = 0.0
+        self._prev_alpha_valid = False
         self._alpha_dot_deg_s = 0.0
         self._lsb_shift_deg = 0.0
         self._is_stalled_prev = False
@@ -2405,7 +2410,14 @@ class FlightSimulator:
 
         # Finite difference pitch rate / alpha rate estimation
         if dt_step > 1.0e-6:
-            alpha_dot = (alpha_deg - curr_prev_alpha) / dt_step
+            has_history = (
+                "_prev_alpha_deg" in l_states
+                or bool(getattr(self, "_prev_alpha_valid", False))
+            )
+            if has_history:
+                alpha_dot = (alpha_deg - curr_prev_alpha) / dt_step
+            else:
+                alpha_dot = 0.0
         else:
             alpha_dot = 0.0
 
@@ -2819,6 +2831,7 @@ class FlightSimulator:
             self._aero_twist_lag = float(lag_states["_aero_twist_lag"])
         if "_prev_alpha_deg" in lag_states:
             self._prev_alpha_deg = float(lag_states["_prev_alpha_deg"])
+            self._prev_alpha_valid = True
         if "_alpha_dot_deg_s" in lag_states:
             self._alpha_dot_deg_s = float(lag_states["_alpha_dot_deg_s"])
         if "_is_stalled_prev" in lag_states:
@@ -3275,20 +3288,61 @@ class FlightSimulator:
                 if impact_speed > CRASH_IMPACT_SPEED_MPS or overstressed:
                     crashed = True
 
-        # Safety net: an impulsive resolution cannot create energy, but guard
-        # against any numerical overshoot.  The bound is E_post <= E_pre - the
-        # previous implementation used a fixed fraction (max(e^2, 0.25)), which
+        # Energy guard: a sequential impulse resolution must not create
+        # energy, but guard against any numerical overshoot.  The previous
+        # implementation used a fixed fraction (max(e^2, 0.25)), which
         # authorised a 25 % energy retention even for a perfectly inelastic
         # impact and made the wingtip and the body enforce different budgets.
+        # The uniform velocity/rate rescale `v,w *= sqrt(e_pre/e_post)` is
+        # also removed: it distorts the already impulse-solved restitution
+        # and angular momentum regardless of source.  The counteracting
+        # impulse is instead recomputed from the over-energy itself and
+        # applied as a normal-direction pressure gain with the solve loop in
+        # `_resolve_contact`.  The target is at most the most-penetrating
+        # station's downward direction so no new restitution target is
+        # introduced.
         vx, vy, new_vz = (float(velocity[0]), float(velocity[1]), float(velocity[2]))
         omega = [float(rates[0]), float(rates[1]), float(rates[2])]
         e_post = 0.5 * mass * float(velocity @ velocity) + 0.5 * float(rates @ inertia @ rates)
         if e_pre > 0.0 and e_post > e_pre * (1.0 + 1.0e-9):
-            scale = math.sqrt(e_pre / e_post)
-            velocity = velocity * scale
-            rates = rates * scale
-            vx, vy, new_vz = (float(velocity[0]), float(velocity[1]), float(velocity[2]))
-            omega = [float(rates[0]), float(rates[1]), float(rates[2])]
+            # Recompute a normal-direction impulse that removes the
+            # over-energy along the most-penetrating station's downward
+            # normal.  No velocity/rate rescale is performed.
+            guard_station = r_keel
+            guard_alt = min_alt
+            for _r_body, _alt in (
+                (r_nose, alt_nose),
+                (r_ltip, alt_ltip),
+                (r_rtip, alt_rtip),
+                (r_tail, alt_tail),
+                (r_keel, alt_keel),
+            ):
+                if float(_alt) < float(guard_alt):
+                    guard_alt = float(_alt)
+                    guard_station = _r_body
+            r_guard_world = body_to_world(state.quaternion, guard_station)
+            guard_vn = float((velocity + np.cross(rates, r_guard_world))[2])
+            if guard_vn > 1.0e-12:
+                normal = np.array([0.0, 0.0, 1.0], dtype=np.float64)
+                lever_g = np.cross(r_guard_world, normal)
+                inv_term_g = 1.0 / mass + float(lever_g @ (inertia_inv @ lever_g))
+                m_eff_g = 1.0 / max(inv_term_g, 1.0e-18)
+                # Energy the impulse must remove: impulse J ~ m_eff_g * guard_vn
+                # times the over-energy ratio, bounded to avoid overshoot.
+                over = max(e_post - e_pre, 0.0)
+                # Required normal impulse magnitude from energy budget:
+                # dE = J*|v_n| - J^2/(2*m_eff)  ->  solve for J >= 0.
+                denom = max(0.5 * m_eff_g * guard_vn * guard_vn, 1.0e-30)
+                radicand = max(0.0, 1.0 - over / denom)
+                j_req = m_eff_g * guard_vn * (1.0 - math.sqrt(radicand)) if over > 0 else 0.0
+                j_req = max(float(j_req), 0.0)
+                if j_req > 0.0:
+                    impulse_g = np.array([0.0, 0.0, -j_req], dtype=np.float64)
+                    velocity = velocity + impulse_g / mass
+                    rates = rates + inertia_inv @ np.cross(r_guard_world, impulse_g)
+                    vx, vy, new_vz = (float(velocity[0]), float(velocity[1]), float(velocity[2]))
+                    omega = [float(rates[0]), float(rates[1]), float(rates[2])]
+
         # If any station penetrates ground plane, push altitude so lowest station is at ground level
         new_z = float(state.position_m[2])
         if min_alt < 0.0:

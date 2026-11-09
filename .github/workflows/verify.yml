@@ -65,7 +65,7 @@ jobs:
         run: python tools/run_ci_tests.py
 
       - name: エンドツーエンドスモークテスト
-        run: python smoke_test.py
+        run: python scripts/smoke_test.py
 
       - name: テスト失敗時のIssue起票
         if: failure() && steps.pytest_step.outcome == 'failure'

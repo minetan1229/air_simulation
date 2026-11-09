@@ -36,6 +36,9 @@ bridge = [
     "discord.py>=2.7.1,<3.0",
     "psutil>=7.2.2",
 ]
+remote = [
+    "paramiko>=3.0.0",
+]
 
 [tool.setuptools.packages.find]
 where = ["."]

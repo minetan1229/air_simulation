@@ -170,13 +170,12 @@ OTHERS 燃焼しない。検証: `tests/test_physics_model_registry.py`。
 |---|---|---|---|
 | 抗力係数 `C_D0` | **依存** | `C_D0(Re) = cd0 · (1e5 / Re)^re_cd0_exponent` | `physics/aero_domain.py::parasite_drag_coefficient` |
 | 動的失速・LSB遅延 | **依存** | `delta_alpha_hyst = sgn(adot) * kappa_lsb * sqrt(k_red) * sqrt(1e4 / Re)` | `physics/aero_kernel.py::lsb_dynamic_stall_shift` |
-| 揚力傾斜 `C_Lα` | **非依存** | `helmbold_cl_alpha(AR, λ)` | `physics/aero_kernel.py` |
-| 失速後揚力 | **非依存** | `post_stall_lift_coefficient` | `physics/aero_kernel.py` |
+| 揚力傾斜 `C_Lα` | **非依存（既定）** | `helmbold_cl_alpha(AR, λ)` | `physics/aero_kernel.py` |
+| 失速後揚力 | **非依存（既定）** | `post_stall_lift_coefficient` | `physics/aero_kernel.py` |
 | 誘導抗力 `C_L²/(π e AR)` | **非依存** | — | `physics/aero_domain.py` |
 | 翼根曲げ応力 | **非依存** | 幾何と `nz` のみ | `physics/stress_domain.py` |
 
-`re_cd0_exponent` の既定は **0**（`AircraftConfig`）。既定機体では `C_D0` は Re に依存しない。
-層流境界線 Blasius 則に対応させる場合は `re_cd0_exponent = 0.5`（`C_f ~ 1.328 / sqrt(Re)`）を設定可能。
+`re_cd0_exponent` の既定は **0.15**（`AircraftConfig`）。既定機体では `C_D0` は `Re^(-0.15)` に弱く依存する。層流境界線 Blasius 則に対応させる場合は `re_cd0_exponent = 0.5`（`C_f ~ 1.328 / sqrt(Re)`）を設定可能。
 また、低 Reynolds 数（`1e3 <= Re <= 5e4`）特有の層流剥離泡（LSB）によるピッチアップ失速遅延およびピッチダウン再付着遅延は、
 `lsb_dynamic_stall_shift` / `lsb_dynamic_stall_hysteresis` によって動的にモデル化されている（`f(Re) = sqrt(1e4 / Re)`）。
 

@@ -369,17 +369,41 @@ def _release_cached_pool() -> None:
 atexit.register(_release_cached_pool)
 
 
+def _in_spawn_worker() -> bool:
+    """True when running inside a spawn-pool worker process.
+
+    ``multiprocessing`` on Windows uses ``spawn``: the child re-imports
+    ``__main__``.  If the caller stored a guarded block incorrectly, the
+    child would recursively try to create a new pool.  Detecting the
+    worker via :func:`worker_id` (set by :func:`_pool_init`) lets the
+    engine fall back to serial evaluation instead of recursing.
+    """
+    try:
+        return bool(worker_id() >= 0)
+    except Exception:
+        return False
+
+
 def _get_cached_pool(workers: int) -> Any:
     """Return the cached spawn pool, creating or recreating it as needed.
 
     A pool whose worker count differs from the request is released and
     rebuilt so every caller gets exactly the concurrency it asked for.
+    The call is refused inside a spawn worker: workers must not spawn
+    workers.  The caller (:func:`parallel_evaluate`) falls back to the
+    serial path when a pool cannot be created.
     """
+    if _in_spawn_worker():
+        raise RuntimeError(
+            "spawn worker must not create a nested process pool; "
+            "evaluate serially inside the worker"
+        )
     global _CACHED_POOL, _CACHED_POOL_WORKERS
     if _CACHED_POOL is not None and _CACHED_POOL_WORKERS == workers:
         return _CACHED_POOL
     _release_cached_pool()
     context = multiprocessing.get_context("spawn")
+    workers = max(1, min(int(workers), os.cpu_count() or 1))
     pool = context.Pool(processes=workers, initializer=_pool_init, initargs=(-1,))
     _CACHED_POOL = pool
     _CACHED_POOL_WORKERS = workers
@@ -610,7 +634,7 @@ def evaluate_flight_surrogate(
     # --- ground effect on induced drag ------------------------------------
     glide_height = max(float(lau.launch_height_m), 0.0)
     hb = glide_height / max(span, 1.0e-6)
-    ground_ratio = (16.0 * hb * hb) / (1.0 + 16.0 * hb * hb) if ground_effect_enabled else 0.0
+    ground_ratio = (16.0 * hb * hb) / (1.0 + 16.0 * hb * hb) if ground_effect_enabled else 1.0
 
     # --- best glide condition ---------------------------------------------
     cl_glide = math.sqrt(cd0 * math.pi * oswald * aspect)
@@ -862,7 +886,12 @@ def parallel_evaluate(
         if progress_cb is not None:
             progress_cb(len(results), total, best_seen if math.isfinite(best_seen) else 0.0)
 
-    if workers == 1:
+    # Spawn workers must never spawn nested pools.  When this module is
+    # re-entered from inside a spawn worker (see _in_spawn_worker), fall back
+    # to the serial path so the batch completes instead of recursing into
+    #   RuntimeError: start a new process before bootstrapping finished
+    # which on Windows/spawn leaves orphaned worker processes behind.
+    if workers == 1 or _in_spawn_worker():
         for item in materialised:
             if cancel_cb is not None and bool(cancel_cb()):
                 return results
@@ -873,7 +902,21 @@ def parallel_evaluate(
         return results
 
     tasks = [(evaluate_case, [materialised[index] for index in chunk]) for chunk in plan]
-    pool = _get_cached_pool(workers)
+    try:
+        pool = _get_cached_pool(workers)
+    except RuntimeError:
+        _backend_state.override = "serial"
+        try:
+            for item in materialised:
+                if cancel_cb is not None and bool(cancel_cb()):
+                    return results
+                result = evaluate_case(item)
+                results.append(result)
+                consider(result)
+                emit()
+            return results
+        finally:
+            _backend_state.override = None
     cancelled = False
     try:
         iterator = pool.imap(_pool_worker, tasks)
@@ -893,8 +936,15 @@ def parallel_evaluate(
         # The pool is cached and reused across optimiser generations instead
         # of being torn down per call.  It is released once at interpreter
         # exit through ``atexit`` (_release_cached_pool) so no child
-        # processes linger.
-        pass
+        # processes linger.  Terminate on cancel is handled by the caller.
+        if cancelled:
+            try:
+                pool.terminate()
+                pool.join()
+            except Exception:
+                pass
+            _CACHED_POOL = None
+            _CACHED_POOL_WORKERS = 0
     if cancelled:
         return results
     emit()

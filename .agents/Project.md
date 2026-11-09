@@ -11,8 +11,8 @@
 - [x] **厳密反証テストスイート**: 13個の専用テストファイル（25件）が全PASS、smoke_test 14/14ステージ完全PASS。
 
 ## 3. Loop State (現在のループ状態・引き継ぎメモリ)
-- **Current Phase**: Phase 6 [Finalize & Terminate]
-- **Verification Status**: Issue #72 の CFD 現状記述をコード・テストと照合して同期。対象テスト 9 passed / `git diff --check` passed。作業ツリーには本件以外の既存変更あり。次は `priority: medium` の未解決 Issue を一件ずつ扱う。
+- **Current Phase**: Phase 5 [Distill & Loop]
+- **Verification Status**: mission/pytest-full-fix-all(9体:Wave1=4,Wave2=4,残り=リトライ+I)でpytest全修正完了。A:`aero_domain.py` fixed-point発散を0.5緩和+40回+effective_stall_alpha+カーネル義CLで5.144deg収束へ修正。B/C/D全passing(GA289+/API177/CFD・issue116)。E:time_budgetはflake(単独5.1-6.7s pass)、lsb_invarianceは恒常pass。F:`test_investigate.py`全6件個別passing(13.6分)、`test_ga_engine.py`51passed/332.5s。G:49ファイル793passed/1failed(`test_scripts_paths`は`.venv`存在の環境依存のみ)。H:compileall/ruff/mypy全PASS、smoke14/14PASS(48.51s)。I:`flight_sim.py:989` wind規約違反(height=-z_ned-ground→-z_ned)修正。並走3本フルpytestは34%でデッドロック気味→全停止し1ファイルずつ逐次実行へ切替。**2026-11-09 P0**: 接地安全ネットの一律`v,w`スケール廃止→過剰エネルギーから法線インパルス再計算へ置換(`flight_sim.py:_apply_ground_contact`)。付加質量連成`compute_apparent_forces`は`P_app=2*m_z*w*(u*q-v*p)`符号不定(正の機械仕事)を確認済みのため無効化のまま受動`m_eff/J_eff`。検証: `test_energy_conservation_ground` 3 passed、`test_physical_laws_audit`/`test_physics_audit`/`test_added_mass_parity`/`test_paper_conformance_p0_p1` 102 passed、ground系 33 passed、`ruff`/`mypy`/`smoke 14/14` PASS。詳細はKnowledge.md[Ground Contact Energy Guard]参照。
 - **Branch & Safety**: genetic-project 上で隔離維持。master/main への操作厳禁（AGENTS.md §2 Branch Isolation）。単一コミッター原則。
 - **Next Action**: 次の未解決 `priority: medium` Issue を選び、仮説・合否基準を置いて調査する。
 

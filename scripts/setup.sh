@@ -4,8 +4,9 @@ set -euo pipefail
 
 echo "[SETUP] Bootstrapping Paper Airplane Simulation Environment..."
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-cd "$SCRIPT_DIR"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+PROJECT_ROOT="$SCRIPT_DIR"
+cd "$PROJECT_ROOT"
 
 PYTHON_BIN=""
 for cmd in python3 python py; do
@@ -38,7 +39,7 @@ fi
 PY_VERSION=$("$PYTHON_BIN" -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')")
 echo "[SETUP] Detected Python version: $PY_VERSION"
 
-VENV_DIR="$SCRIPT_DIR/.venv"
+VENV_DIR="$PROJECT_ROOT/.venv"
 if [ ! -d "$VENV_DIR" ]; then
     echo "[SETUP] Creating virtual environment at .venv..."
     "$PYTHON_BIN" -m venv "$VENV_DIR"
@@ -52,10 +53,10 @@ echo "[SETUP] Upgrading pip, setuptools, and wheel..."
 
 if command -v uv >/dev/null 2>&1; then
     echo "[SETUP] Detected 'uv'. Installing dependencies via uv..."
-    uv pip install -e ".[dev]" --python "$VENV_PYTHON"
+    uv pip install -e "$PROJECT_ROOT[dev]" --python "$VENV_PYTHON"
 else
     echo "[SETUP] Installing dependencies via pip..."
-    "$VENV_PYTHON" -m pip install -e ".[dev]"
+    "$VENV_PYTHON" -m pip install -e "$PROJECT_ROOT[dev]"
 fi
 
 echo "[SETUP] Verifying CUDA GPU acceleration (optional; CPU-only environments continue)..."

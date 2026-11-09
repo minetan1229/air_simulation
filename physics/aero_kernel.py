@@ -1412,7 +1412,7 @@ class AeroParams:
     polhamus_kp: Any = 0.0
     polhamus_kv: Any = 0.0
     cd0: Any = 0.02
-    re_cd0_exponent: Any = 0.0
+    re_cd0_exponent: Any = 0.15
     cm0: Any = 0.0
     cm_alpha: Any = 0.0
     cm_q: Any = 0.0

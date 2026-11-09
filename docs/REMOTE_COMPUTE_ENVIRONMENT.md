@@ -106,6 +106,16 @@ sudo reboot
 
 ## 4. ローカル（メインPC）からの連携管理
 
+> **導入（#159）:** リモート連携ツールは `paramiko` を **任意の `remote` extra** として宣言しており、通常の `pip install -e .` では入りません。SSH 操作に必要な場合のみ以下を実行してください。
+> ```bash
+> pip install -e ".[remote]"   # または: pip install paramiko
+> ```
+> クリーン venv（remote extra 未インストール状態）でも、共通モジュール `tools/remote_auth.py` と各スクリプトの** import 自体は遅延 import のため成功**します。実際に SSH 接続しようとした時点でのみ、導入手順付きのエラーが出ます。
+
+> **ホスト鍵検証（#160）:** `tools/remote_auth.py` の `build_ssh_client()` は `load_system_host_keys()` 後に **`RejectPolicy`** を設定します。登録済み鍵のないホストへの接続は**拒否**されます（従来の `AutoAddPolicy` による自動登録は廃止）。必要に応じて `~/.ssh/known_hosts` へ事前に登録してください。パスワードはログに出力されません。
+
+> **sudo パスワード（#161）:** sudo 実行は `sudo -S -p ''` + 接続先 stdin への送信とし、**パスワードをコマンド文字列へ埋め込みません**。特殊文字を含むパスワードでもそのまま伝達され、`ps` 表示・ログ・シェル履歴への漏出を防ぎます。
+
 ローカルリポジトリ側の `tools/remote_compute_manager.py` を用いて、
 ローカルからワンコマンドで以下の操作が可能：
 - リモートホストの状態監視（CPU/GPU使用率、メモリ）
