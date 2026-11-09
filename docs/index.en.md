@@ -128,4 +128,4 @@ mkdocs serve      # → http://127.0.0.1:8000
 mkdocs build
 ```
 
-> **The web site is not yet published** (GitHub Pages is not enabled). `.github/workflows/docs.yml` builds on push to `master`, but no URL is issued until Pages is enabled. The planned URL is `https://minetan1229.github.io/air_simulation/`.
+Pushes to `docs/` trigger `.github/workflows/docs.yml`, which auto-publishes to GitHub Pages (https://minetan1229.github.io/air_simulation/).
