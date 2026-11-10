@@ -722,6 +722,10 @@ def _fill_triangle(
     squared = float(np.dot(normal, normal))
     if squared < 1.0e-12:
         return
+    norm_len = math.sqrt(squared)
+    unit_normal = normal / norm_len
+    # Bound normal distance to within thin plate threshold (half cell thickness approx 0.866)
+    max_plane_distance = 0.866
     for xi in range(min(ax, bx, cx), max(ax, bx, cx) + 1):
         if not (0 <= xi < nx):
             continue
@@ -734,6 +738,9 @@ def _fill_triangle(
                 point = np.asarray(
                     [xi + 0.5 - ax, yi + 0.5 - ay, zi + 0.5 - az], dtype=np.float64
                 )
+                dist_to_plane = abs(float(np.dot(point, unit_normal)))
+                if dist_to_plane > max_plane_distance:
+                    continue
                 weight_b = float(np.dot(np.cross(point, edge_ac), normal)) / squared
                 weight_c = float(np.dot(np.cross(edge_ab, point), normal)) / squared
                 weight_a = 1.0 - weight_b - weight_c
