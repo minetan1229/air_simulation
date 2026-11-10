@@ -338,6 +338,7 @@ class AircraftConfig:
     cp_shift_gain: float = 1.0  # dynamic center of pressure shift with alpha (0..1.0)
     aeroelastic_flex: float = 0.0  # dynamic dihedral flex gain with dynamic pressure (0..1.0)
     aeroelastic_twist: float = 0.0  # wingtip washout twist gain with dynamic pressure (0..1.0)
+    washout_deg: float = 0.0  # geometric wingtip reflex / washout angle in degrees (-10..15)
     aeroelastic_compliance: float = 0.0  # dynamic camber compliance gain under launch pressure (0..5.0)
     # Passive aeroelastic morphing (SPEC 1.1): the trailing-edge trim deflection
     # washes out with dynamic pressure,
@@ -458,6 +459,7 @@ class AircraftConfig:
             cp_shift_gain=clamp(self.cp_shift_gain, *AIRCRAFT_RANGES["cp_shift_gain"]),
             aeroelastic_flex=clamp(self.aeroelastic_flex, *AIRCRAFT_RANGES["aeroelastic_flex"]),
             aeroelastic_twist=clamp(self.aeroelastic_twist, *AIRCRAFT_RANGES["aeroelastic_twist"]),
+            washout_deg=clamp(self.washout_deg, *AIRCRAFT_RANGES.get("washout_deg", (-10.0, 15.0))),
             aeroelastic_compliance=clamp(self.aeroelastic_compliance, *AIRCRAFT_RANGES["aeroelastic_compliance"]),
             aeroelastic_morph_exponent=clamp(self.aeroelastic_morph_exponent, *AIRCRAFT_RANGES["aeroelastic_morph_exponent"]),
             aeroelastic_pressure_scale_pa=clamp(self.aeroelastic_pressure_scale_pa, *AIRCRAFT_RANGES["aeroelastic_pressure_scale_pa"]),
@@ -1597,6 +1599,7 @@ AIRCRAFT_RANGES: Dict[str, Tuple[float, float]] = {
     "cp_shift_gain": (0.0, 2.0),
     "aeroelastic_flex": (0.0, 5.0),
     "aeroelastic_twist": (0.0, 5.0),
+    "washout_deg": (-10.0, 15.0),
     "aeroelastic_compliance": (0.0, 5.0),
     "aeroelastic_morph_exponent": (0.5, 12.0),
     "aeroelastic_pressure_scale_pa": (1.0, 1.0e4),
