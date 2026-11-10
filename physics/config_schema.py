@@ -334,6 +334,7 @@ class AircraftConfig:
     # Polhamus form with that explicit K_p.
     polhamus_kp: float = 0.0
     step_trip_ratio: float = 0.0  # fold step height to chord ratio (turbulator effect, 0..0.02)
+    low_ar_stall_delay_enabled: bool = False  # Enable low-aspect-ratio tip-vortex stall delay (Torres & Mueller 2004)
     cp_shift_gain: float = 1.0  # dynamic center of pressure shift with alpha (0..1.0)
     aeroelastic_flex: float = 0.0  # dynamic dihedral flex gain with dynamic pressure (0..1.0)
     aeroelastic_twist: float = 0.0  # wingtip washout twist gain with dynamic pressure (0..1.0)
@@ -453,6 +454,7 @@ class AircraftConfig:
             polhamus_kv=clamp(self.polhamus_kv, *AIRCRAFT_RANGES["polhamus_kv"]),
             polhamus_kp=clamp(self.polhamus_kp, *AIRCRAFT_RANGES["polhamus_kp"]),
             step_trip_ratio=clamp(self.step_trip_ratio, *AIRCRAFT_RANGES["step_trip_ratio"]),
+            low_ar_stall_delay_enabled=bool(self.low_ar_stall_delay_enabled),
             cp_shift_gain=clamp(self.cp_shift_gain, *AIRCRAFT_RANGES["cp_shift_gain"]),
             aeroelastic_flex=clamp(self.aeroelastic_flex, *AIRCRAFT_RANGES["aeroelastic_flex"]),
             aeroelastic_twist=clamp(self.aeroelastic_twist, *AIRCRAFT_RANGES["aeroelastic_twist"]),

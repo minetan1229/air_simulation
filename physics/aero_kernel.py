@@ -85,6 +85,7 @@ __all__ = [
     "evaluate_coefficients",
     "coefficient_buildup_audit",
     "effective_stall_alpha_deg",
+    "low_ar_stall_delay",
     "fused_gpu_state",
     "params_from_config",
     "estimate_polhamus_kv",
@@ -880,6 +881,7 @@ def lsb_dynamic_stall_shift(
     kappa_lsb: Any = 1.5,
     low_re_lsb_gain: Any = 0.15,
     drain_systm: Any = None,
+    turbulence_intensity: Any = 0.0,
 ) -> Any:
     """Dynamic stall angle shift due to low-Reynolds laminar separation bubble (LSB).
 
@@ -913,6 +915,11 @@ def lsb_dynamic_stall_shift(
     smooth_sign = xp.tanh(adot / 5.0)
     # Scale from nondimensional delay to degrees using (180 / pi)
     delta_deg = smooth_sign * k_lsb * (180.0 / math.pi) * xp.sqrt(xp.maximum(k_red, 0.0)) * f_re
+    # Turbulence suppression factor (Hoffmann 1991: LSB hysteresis disappears for Tu > 1.5%)
+    tu = xp.maximum(_finite(xp, turbulence_intensity, 0.0), 0.0)
+    tu_factor = xp.exp(-tu / 0.015)
+    delta_deg = delta_deg * tu_factor
+
     # Physical clamp on maximum dynamic stall overshoot (+/- 10 degrees)
     return _clamp(xp, delta_deg, -10.0, 10.0)
 
@@ -930,6 +937,7 @@ def lsb_dynamic_stall_hysteresis(
     kappa_reatt: Any = 1.0,
     delta_alpha0_deg: Any = 2.5,
     low_re_lsb_gain: Any = 0.15,
+    turbulence_intensity: Any = 0.0,
 ) -> Tuple[Any, Any]:
     """Low-Re Laminar Separation Bubble (LSB) dynamic hysteresis model.
 
@@ -957,6 +965,11 @@ def lsb_dynamic_stall_hysteresis(
     shift_up = k_lsb * k_red * f_re * (180.0 / math.pi)
     shift_down = -(delta_reatt + k_reatt * k_red * f_re * (180.0 / math.pi))
     delta_shift = xp.where(adot >= 0.0, shift_up, shift_down)
+
+    # Turbulence suppression factor (Hoffmann 1991: LSB loop collapses under freestream turbulence)
+    tu = xp.maximum(_finite(xp, turbulence_intensity, 0.0), 0.0)
+    tu_factor = xp.exp(-tu / 0.015)
+    delta_shift = delta_shift * tu_factor
 
     is_prev = _flag_array(xp, is_stalled_prev)
     eff_stall = xp.where(
@@ -2392,21 +2405,44 @@ def _finite_scalar(value: Any, default: float = 0.0) -> float:
     return out if math.isfinite(out) else float(default)
 
 
-def effective_stall_alpha_deg(cfg: AircraftConfig) -> float:
-    """Stall angle of attack modified by the fold-step turbulator trip wire.
+def low_ar_stall_delay(aspect_ratio: float, max_delay_deg: float = 18.0) -> float:
+    """Stall angle delay due to low-aspect-ratio tip-vortex downwash.
 
-    When ``cfg.step_trip_ratio > 0`` the fold step acts as a boundary-layer
-    trip wire, preventing the laminar bubble burst and delaying full stall
-    separation by up to several degrees.
+    Based on experimental findings (Torres and Mueller 2004, DeVoria and Mohseni 2017),
+    low-aspect-ratio wings (AR < 3.0) experience strong spanwise tip-vortex downwash
+    that suppresses leading-edge separation and delays stall:
+        Delta_alpha_stall ~ min(15.0 / max(AR, 0.1), max_delay_deg)
+    For high-aspect-ratio gliders (AR >= 6.0), the delay is minimal (< 2.5 deg).
+    For low-aspect-ratio dart paper planes (AR ~ 1.0), stall is delayed by ~15 deg.
+    """
+    ar = max(_finite_scalar(aspect_ratio, 1.0), 0.1)
+    delay = 15.0 / ar
+    return min(max(delay, 0.0), max_delay_deg)
+
+
+def effective_stall_alpha_deg(cfg: AircraftConfig) -> float:
+    """Stall angle of attack modified by optional low-AR delay and fold-step turbulator trip wire.
+
+    Combines:
+    1. Low-AR tip stall delay (Torres and Mueller 2004) when cfg.low_ar_stall_delay_enabled is True.
+    2. Fold-step boundary-layer turbulator trip wire (when step_trip_ratio > 0).
 
     The airframe is symmetric, so the same angle applies in both directions.
     """
     stall_alpha = abs(_finite_scalar(cfg.stall_alpha_deg, 14.0))
+    ar_delay = 0.0
+    if bool(getattr(cfg, "low_ar_stall_delay_enabled", False)):
+        geom = derived_properties(cfg)
+        aspect = max(_finite_scalar(geom.get("aspect_ratio"), getattr(cfg, "aspect_ratio", 1.0)), 0.1)
+        ar_delay = low_ar_stall_delay(aspect)
+
+    # Trip-wire delay
     trip_ratio = max(_finite_scalar(cfg.step_trip_ratio, 0.0), 0.0)
+    trip_delay = 0.0
     if trip_ratio > 0.0:
-        delay = 250.0 * trip_ratio / (1.0 + 50.0 * trip_ratio)
-        return stall_alpha + delay
-    return stall_alpha
+        trip_delay = 250.0 * trip_ratio / (1.0 + 50.0 * trip_ratio)
+
+    return stall_alpha + ar_delay + trip_delay
 
 
 def params_from_aircraft(cfg: AircraftConfig) -> AeroParams:

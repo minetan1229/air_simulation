@@ -2420,6 +2420,13 @@ class FlightSimulator:
             lsb_kappa = float(getattr(self.aircraft, "lsb_kappa", 1.5))
             prev_stalled = curr_is_stalled
             base_stall_a = float(getattr(self.aircraft, "stall_alpha_deg", 14.0))
+            # Turbulence intensity for LSB suppression (Hoffmann 1991)
+            tu_intensity = 0.0
+            if bool(getattr(self.environment, "wind_tunnel_enabled", False)):
+                tu_intensity = float(getattr(self.environment, "wind_tunnel_turbulence_intensity", 0.0))
+            else:
+                tu_intensity = float(getattr(self.environment, "gust_intensity", 0.0))
+
             eff_stall_a, eff_stalled = aero_kernel.lsb_dynamic_stall_hysteresis(
                 ScalarMath,
                 alpha_deg,
@@ -2430,6 +2437,7 @@ class FlightSimulator:
                 reynolds,
                 is_stalled_prev=prev_stalled,
                 kappa_lsb=lsb_kappa,
+                turbulence_intensity=tu_intensity,
             )
             lsb_shift_deg = float(eff_stall_a) - base_stall_a
             curr_stalled = eff_stalled
