@@ -322,12 +322,13 @@ class LbmDnsSolver:
         span = max(float(mesh["span_m"]), 1.0e-3)
         area = max(float(mesh["wing_area_m2"]), 1.0e-6)
 
-        # The lattice unit: the chord of the wing covers a fixed number of
-        # cells and the flow crosses one tenth of a cell per time step, so
-        # the lattice Mach number stays in the range the scheme is accurate
-        # in.  The physical quantities follow from the non dimensionalising.
-        cells_per_chord = max(4, int(round(nx * 0.25)))
-        dx = chord / cells_per_chord
+        # The lattice unit: ensure the physical lattice cell width dx is consistent
+        # with the geometric embedding scale dx = 1.0 / scale
+        lows, highs = mesh["bounds"]
+        span_x = max(highs[1] - lows[1], 1.0e-6)
+        scale = (nx - 4.0) / span_x
+        dx = 1.0 / max(scale, 1.0e-9)
+        cells_per_chord = max(4, int(round(chord / dx)))
         viscosity = 1.5e-5
         lattice_speed = _LATTICE_INFLOW
         dt = lattice_speed * dx / max(speed, 0.1)
