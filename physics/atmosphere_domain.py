@@ -240,12 +240,16 @@ def isa_density(
     return pressure / (R_AIR * temperature)
 
 
-def scale_altitude_m(lapse_rate_K_per_m: float = LAPSE_RATE_ISA) -> float:
+def scale_altitude_m(
+    lapse_rate_K_per_m: float = LAPSE_RATE_ISA,
+    sea_level_temperature_K: float = T0_ISA,
+) -> float:
     """Tropospheric temperature scale altitude ``H = T0 / L`` (metres)."""
     lapse = float(lapse_rate_K_per_m)
+    t0 = float(sea_level_temperature_K)
     if lapse == 0.0:
         return float("inf")
-    return abs(T0_ISA / lapse)
+    return abs(t0 / lapse)
 
 
 # --------------------------------------------------------------------------
@@ -455,7 +459,7 @@ def evaluate_atmosphere(
         "specific_heat_ratio": float(GAMMA_AIR),
         # ISA metadata
         "altitude_m": float(height),
-        "scale_altitude_m": float(scale_altitude_m(env.lapse_rate_K_per_m)),
+        "scale_altitude_m": float(scale_altitude_m(env.lapse_rate_K_per_m, env.sea_level_temperature_K)),
         "lapse_rate_K_per_m": float(env.lapse_rate_K_per_m),
         "isa_mode": bool(env.isa_mode),
         "gravity": float(gravity),

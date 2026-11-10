@@ -173,7 +173,16 @@ def test_isa_sea_level_reference_is_configurable():
 
 def test_isa_scale_altitude():
     assert atmo.scale_altitude_m(LAPSE_RATE_ISA) == pytest.approx(T0_ISA / LAPSE_RATE_ISA, rel=1.0e-15)
-    assert math.isinf(atmo.scale_altitude_m(0.0))
+    assert atmo.scale_altitude_m(0.005, 305.0) == pytest.approx(305.0 / 0.005, rel=1.0e-15)
+    assert math.isinf(atmo.scale_altitude_m(0.0, 300.0))
+
+    env_custom = EnvironmentConfig(
+        isa_mode=True,
+        sea_level_temperature_K=310.0,
+        lapse_rate_K_per_m=0.005,
+    )
+    res = atmo.evaluate_atmosphere(env_custom)
+    assert res["scale_altitude_m"] == pytest.approx(310.0 / 0.005, rel=1.0e-12)
 
 
 # ==========================================================================
