@@ -599,8 +599,8 @@ class LbmDnsSolver:
                 iz = int(round((point[2] - origin[2]) * scale))
                 projected.append((ix, iy, iz))
             _fill_triangle(host, projected, nx, ny, nz)
-        host[0, :, :] = True
-        host[nx - 1, :, :] = True
+        # Note: Do not solidify the inflow/outflow end boundaries (host[0] / host[nx-1]),
+        # so that fluid momentum flux through inlet and outlet planes is accurately resolved.
         solid = xp.asarray(host)
         solid_velocity = xp.zeros((3, nx, ny, nz), dtype=np.float64)
         interface = _interface_cells(solid)
