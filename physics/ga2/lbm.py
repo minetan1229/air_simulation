@@ -826,11 +826,13 @@ class _ModalStructure:
     ) -> Any:
         """The velocity of the solid at the interface cells.
 
-        The bending mode moves the cells up and down, the torsion mode moves
-        them with the rotation of the section.
+        The bending mode moves the cells up and down along vertical lattice z (field[2]),
+        scaling with spanwise fraction along lattice iz (the span axis).
+        The torsion mode produces angular pitch velocity around the span axis.
         """
         xp = np if isinstance(ix, np.ndarray) else __import__("cupy")
-        span_fraction = (ix.astype(xp.float64) + 0.5) / float(nx)
+        # In LBM embedding, iz corresponds to origami z (spanwise direction)
+        span_fraction = (iz.astype(xp.float64) + 0.5) / float(max(nz, 1))
         bending = self.velocity[_MODE_BENDING] * span_fraction**2
         torsion = self.velocity[_MODE_TORSION] * span_fraction
         field = xp.zeros((3, ix.shape[0]), dtype=np.float64)
