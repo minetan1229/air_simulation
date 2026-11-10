@@ -153,15 +153,10 @@ DRAG_POLAR_DEFAULT_REYNOLDS: float = 1.0e4
 #: in ``tests/test_aero.py``).
 STALL_BLEND_ORDER: int = 4
 
-#: Elevon effectiveness per degree of deflection [1/deg].
-#: 0.020 /deg corresponds to approx 1.146 /rad (dCL/ddelta), which matches thin airfoil
-#: control flap theory for flap chord ratio cf/c ~ 0.20-0.25 (theoretical flap effectiveness ~ 0.35-0.40 * 2*pi).
-#: ``dcl`` grows with a trailing-edge-down (positive) deflection,
-#: ``dcm`` is the resulting **nose-down** pitching increment per degree (-0.030 /deg = -1.719 /rad).
+#: Elevon effectiveness.  ``dcl`` grows with a trailing-edge-down (positive)
+#: deflection, ``dcm`` is the resulting **nose-down** pitching increment.
 ELEVON_LIFT_PER_DEG: float = 0.020
 ELEVON_MOMENT_PER_DEG: float = 0.030
-ELEVON_LIFT_PER_RAD: float = ELEVON_LIFT_PER_DEG * (180.0 / math.pi)
-ELEVON_MOMENT_PER_RAD: float = ELEVON_MOMENT_PER_DEG * (180.0 / math.pi)
 #: Mechanical travel limit applied when a trim solution would need an
 #: impossible elevon angle; a clamped solution reports ``trimmed = False``.
 #: Matches the physical +/-45 deg elevon travel limit (the guard is the
@@ -619,51 +614,31 @@ def elevon_effects(elevon_deg: float, cfg: AircraftConfig) -> Dict[str, float]:
 
 
 def trim_alpha_from_elevon(cfg: AircraftConfig, elevon_deg: float) -> float:
-    """Angle of attack that nulls the static pitching moment.
-
-    Uses iterative evaluation against the kernel's force-model-linked CP so
-    the trim is consistent with the moment produced by evaluate_aero.  Calls
-    ``evaluate_coefficients`` (not ``evaluate_aero``) to avoid the recursive
-    ``evaluate_aero -> trim_alpha_deg -> evaluate_aero`` cycle.
-    """
+    """Closed-form angle of attack that nulls the static pitching moment."""
     elevon = elevon_effects(elevon_deg, cfg)
     te_fold = trailing_edge_fold_effects(cfg)
     cm_alpha = _finite(cfg.cm_alpha)
     if abs(cm_alpha) < 1.0e-12:
         return 0.0
     cm_static = _finite(cfg.cm0) + elevon["dcm"] + te_fold["dcm"]
-    alpha = float(rad2deg(-cm_static / cm_alpha))
-    from physics.config_schema import EnvironmentConfig
-
-    env = EnvironmentConfig()
-    trimmed_cfg = replace(cfg, elevon_deg=float(elevon_deg))
-    cm_alpha_per_deg = cm_alpha * (math.pi / 180.0)
-    if abs(cm_alpha_per_deg) < 1.0e-12:
-        cm_alpha_per_deg = -0.01
-    for _ in range(30):
-        params = aero_kernel.params_from_config(trimmed_cfg, env)
-        coefficients = aero_kernel.evaluate_coefficients(
-            _SCALAR,
-            params,
-            alpha_deg=alpha,
-            beta_deg=0.0,
-            p_rate=0.0,
-            q_rate=0.0,
-            r_rate=0.0,
-            speed=9.0,
-            reynolds=9.0 * _chord(trimmed_cfg) / 1.5e-5,
-            mach=0.026,
-            ground_height_m=1.0,
-            density=1.225,
-        )
-        cm = float(coefficients["cm"])
-        if abs(cm) < 1.0e-10:
+    base = float(rad2deg(-cm_static / cm_alpha))
+    # Fixed-point correction for the deterministic CoP shift cm term:
+    # cm includes -(cp_x-0.25c)/c * CL, with CL linear in alpha. Iterate
+    # the closed form with the shifted CL until self-consistent.
+    from physics.aero_kernel import center_of_pressure_fraction
+    alpha = base
+    for _ in range(5):
+        stall = max(abs(_finite(cfg.stall_alpha_deg, 14.0)), 1.0)
+        frac = float(center_of_pressure_fraction(_SCALAR, alpha, stall, _finite(cfg.cp_shift_gain, 0.0)))
+        # CL approx from Helmbold slope + zero-lift + control (matches kernel linear branch)
+        cl = _finite(cfg.cL0) + lift_slope_per_rad(cfg) * deg2rad(alpha) + elevon["dcl"] + te_fold["dcl"]
+        cm_shift = -(frac - 0.25) * cl if float(cfg.cp_shift_gain) > 0.0 else 0.0
+        new_alpha = float(rad2deg(-(cm_static + cm_shift) / cm_alpha))
+        if abs(new_alpha - alpha) < 1e-9:
+            alpha = new_alpha
             break
-        step = -cm / cm_alpha_per_deg
-        alpha = alpha + 0.7 * step
-        if abs(step) < 1.0e-12:
-            break
-    return float(alpha)
+        alpha = new_alpha
+    return alpha
 
 
 def elevon_for_trim(cfg: AircraftConfig, alpha_deg: float) -> float:
