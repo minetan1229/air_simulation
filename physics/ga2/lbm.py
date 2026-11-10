@@ -588,8 +588,8 @@ class LbmDnsSolver:
         host = np.zeros((nx, ny, nz), dtype=bool)
         origin = (
             lows[1] - margin / scale,
-            lows[0] - (ny / 2.0) * span_y / max(scale, 1.0e-9),
-            lows[2] - (nz / 3.0) * span_z / max(scale, 1.0e-9),
+            lows[0] - (ny / 2.0 - span_y * scale / 2.0) / max(scale, 1.0e-9),
+            lows[2] - (nz / 2.0 - span_z * scale / 2.0) / max(scale, 1.0e-9),
         )
         for triangle in mesh["triangles"]:
             projected = []
