@@ -205,6 +205,10 @@ def _mesh_of(request: Stage3Request) -> Optional[Dict[str, Any]]:
 
     The solid is returned as the list of the triangles of the folded wing
     together with the bounding box of the airframe.
+    Stage 3 uses zero-thickness thin-shell aerodynamics representation for LBM
+    immersed boundary solver, where the physical mass and inertia of multi-layer
+    folded paper are accurately reflected through geometry.mass_kg, while avoiding
+    artificial volume blockage at high Reynolds or low grid resolution.
     """
     from ..origami_genome import fold_genome
     from .genome import HybridGenome, hybrid_to_origami
