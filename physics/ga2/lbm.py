@@ -577,10 +577,15 @@ class LbmDnsSolver:
         xp = self.xp
         nx, ny, nz = self.nx, self.ny, self.nz
         lows, highs = mesh["bounds"]
-        # The lattice runs along the chord of the wing: the sheet is folded in
-        # its own frame, where x is the span of the sheet, y its length (the
-        # chord of the wing) and z the height, so the chord is mapped onto the
-        # stream direction of the lattice.
+        # Coordinate frame mapping from origami sheet to LBM grid:
+        # In origami_domain fold_genome output:
+        #   point[0] is sheet transverse/span coordinate
+        #   point[1] is longitudinal chordwise coordinate (streamwise)
+        #   point[2] is normal/thickness/camber coordinate
+        # In LBM lattice:
+        #   ix: streamwise direction (aligned with point[1], chordwise)
+        #   iy: cross-stream transverse direction (aligned with point[0])
+        #   iz: vertical / spanwise direction (aligned with point[2])
         span_x = max(highs[1] - lows[1], 1.0e-6)
         span_y = max(highs[0] - lows[0], 1.0e-6)
         span_z = max(highs[2] - lows[2], 1.0e-6)
