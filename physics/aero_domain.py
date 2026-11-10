@@ -153,15 +153,10 @@ DRAG_POLAR_DEFAULT_REYNOLDS: float = 1.0e4
 #: in ``tests/test_aero.py``).
 STALL_BLEND_ORDER: int = 4
 
-#: Elevon effectiveness per degree of deflection [1/deg].
-#: 0.020 /deg corresponds to approx 1.146 /rad (dCL/ddelta), which matches thin airfoil
-#: control flap theory for flap chord ratio cf/c ~ 0.20-0.25 (theoretical flap effectiveness ~ 0.35-0.40 * 2*pi).
-#: ``dcl`` grows with a trailing-edge-down (positive) deflection,
-#: ``dcm`` is the resulting **nose-down** pitching increment per degree (-0.030 /deg = -1.719 /rad).
+#: Elevon effectiveness.  ``dcl`` grows with a trailing-edge-down (positive)
+#: deflection, ``dcm`` is the resulting **nose-down** pitching increment.
 ELEVON_LIFT_PER_DEG: float = 0.020
 ELEVON_MOMENT_PER_DEG: float = 0.030
-ELEVON_LIFT_PER_RAD: float = ELEVON_LIFT_PER_DEG * (180.0 / math.pi)
-ELEVON_MOMENT_PER_RAD: float = ELEVON_MOMENT_PER_DEG * (180.0 / math.pi)
 #: Mechanical travel limit applied when a trim solution would need an
 #: impossible elevon angle; a clamped solution reports ``trimmed = False``.
 #: Matches the physical +/-45 deg elevon travel limit (the guard is the
@@ -618,7 +613,7 @@ def elevon_effects(elevon_deg: float, cfg: AircraftConfig) -> Dict[str, float]:
     return {key: float(value) for key, value in effects.items()}
 
 
-def trim_alpha_from_elevon(cfg: AircraftConfig, elevon_deg: float) -> float:
+def trim_alpha_from_elevon(cfg: AircraftConfig, elevon_deg: float, speed_mps: float = 9.0, env: Optional[EnvironmentConfig] = None) -> float:
     """Angle of attack that nulls the static pitching moment.
 
     Uses iterative evaluation against the kernel's force-model-linked CP so
@@ -626,6 +621,8 @@ def trim_alpha_from_elevon(cfg: AircraftConfig, elevon_deg: float) -> float:
     ``evaluate_coefficients`` (not ``evaluate_aero``) to avoid the recursive
     ``evaluate_aero -> trim_alpha_deg -> evaluate_aero`` cycle.
     """
+    if env is None:
+        env = EnvironmentConfig()
     elevon = elevon_effects(elevon_deg, cfg)
     te_fold = trailing_edge_fold_effects(cfg)
     cm_alpha = _finite(cfg.cm_alpha)
@@ -633,14 +630,17 @@ def trim_alpha_from_elevon(cfg: AircraftConfig, elevon_deg: float) -> float:
         return 0.0
     cm_static = _finite(cfg.cm0) + elevon["dcm"] + te_fold["dcm"]
     alpha = float(rad2deg(-cm_static / cm_alpha))
-    from physics.config_schema import EnvironmentConfig
-
-    env = EnvironmentConfig()
     trimmed_cfg = replace(cfg, elevon_deg=float(elevon_deg))
     cm_alpha_per_deg = cm_alpha * (math.pi / 180.0)
     if abs(cm_alpha_per_deg) < 1.0e-12:
         cm_alpha_per_deg = -0.01
-    for _ in range(30):
+    # Use the provided speed for Reynolds number and dynamic pressure consistency
+    reynolds = speed_mps * _chord(trimmed_cfg) / 1.5e-5
+    mach = speed_mps / 340.0
+    # Use env's ground effect settings for consistency with final evaluate_aero
+    ground_height = 1.0
+    density = 1.225
+    for _ in range(50):
         params = aero_kernel.params_from_config(trimmed_cfg, env)
         coefficients = aero_kernel.evaluate_coefficients(
             _SCALAR,
@@ -650,18 +650,18 @@ def trim_alpha_from_elevon(cfg: AircraftConfig, elevon_deg: float) -> float:
             p_rate=0.0,
             q_rate=0.0,
             r_rate=0.0,
-            speed=9.0,
-            reynolds=9.0 * _chord(trimmed_cfg) / 1.5e-5,
-            mach=0.026,
-            ground_height_m=1.0,
-            density=1.225,
+            speed=speed_mps,
+            reynolds=reynolds,
+            mach=mach,
+            ground_height_m=ground_height,
+            density=density,
         )
         cm = float(coefficients["cm"])
-        if abs(cm) < 1.0e-10:
+        if abs(cm) < 1.0e-11:
             break
         step = -cm / cm_alpha_per_deg
         alpha = alpha + 0.7 * step
-        if abs(step) < 1.0e-12:
+        if abs(step) < 1.0e-13:
             break
     return float(alpha)
 

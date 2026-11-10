@@ -552,7 +552,13 @@ def test_the_entry_points_refuse_to_run_on_a_protected_branch(monkeypatch, capsy
     time, because they resolve two different bindings.
     """
     import app as app_module
-    import smoke_test
+    import importlib.util
+    _smoke_path = ROOT / "scripts" / "smoke_test.py"
+    _smoke_spec = importlib.util.spec_from_file_location("smoke_test", _smoke_path)
+    assert _smoke_spec is not None and _smoke_spec.loader is not None
+    smoke_test = importlib.util.module_from_spec(_smoke_spec)
+    sys.modules.setdefault("smoke_test", smoke_test)
+    _smoke_spec.loader.exec_module(smoke_test)
 
     from tools import branch_guard
     from tools.branch_guard import BranchViolation

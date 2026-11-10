@@ -220,10 +220,6 @@ def _remote_run(cfg: Dict[str, Any], remote_cases: List[Dict[str, Any]], process
         timeout=cfg["timeout_s"],
     )
     out, err = stdout.read().decode("utf-8", errors="replace"), b""
-    try:
-        err = _stderr_bytes(client, err) if False else err
-    except Exception:
-        pass
     status = stdout.channel.recv_exit_status()
     if status != 0:
         raise RuntimeError(f"remote worker exit {status}")
