@@ -48,6 +48,8 @@ __all__ = [
     "CorrectionModel",
     "train_correction_model",
     "apply_correction",
+    "expected_improvement",
+    "hierarchical_kriging_predict",
 ]
 
 
@@ -292,6 +294,8 @@ class CorrectionModel:
         self._mean: Optional[np.ndarray] = None
         self._scale: Optional[np.ndarray] = None
         self._weights: Optional[np.ndarray] = None
+        self._cov_matrix: Optional[np.ndarray] = None
+        self._residual_variance: Optional[np.ndarray] = None
 
     # ------------------------------------------------------------------
     # State
@@ -370,6 +374,20 @@ class CorrectionModel:
         self._mean = mean
         self._scale = scale
         self._weights = weights
+
+        # Analytical parameter covariance: Cov(W) = (X^T X + lambda I)^-1
+        try:
+            cov = np.linalg.inv(gram)
+        except np.linalg.LinAlgError:
+            cov = np.linalg.pinv(gram)
+        self._cov_matrix = cov
+
+        # Residual variance: s^2 = ||Y - X W||^2 / (N - p)
+        residuals = response - matrix @ weights
+        df = max(samples - matrix.shape[1], 1)
+        res_var = np.sum(residuals ** 2, axis=0) / float(df)
+        self._residual_variance = np.maximum(res_var, 1.0e-12)
+
         return self
 
     # ------------------------------------------------------------------
@@ -421,6 +439,38 @@ class CorrectionModel:
         if single:
             return prediction.reshape(-1)
         return prediction
+
+    def predict_with_uncertainty(self, features: Any) -> Tuple[np.ndarray, np.ndarray]:
+        """Predict the mean correction and analytical prediction variance s_e^2(x).
+
+        Based on Han & Görtz (2012) and Forrester et al. (2007):
+            s_e^2(x) = s^2 * (1 + x^T (X^T X + lambda I)^-1 x)
+        Returns:
+            (predictions, variances)
+        """
+        if self._mean is None or self._scale is None or self._weights is None or self._cov_matrix is None or self._residual_variance is None:
+            raise RuntimeError("the correction model is not fitted")
+        
+        design = np.asarray(features, dtype=np.float64)
+        if design.ndim == 1:
+            design = design.reshape(1, -1)
+            single = True
+        else:
+            single = False
+        
+        normalised = (design - self._mean) / self._scale
+        matrix = np.hstack([np.ones((design.shape[0], 1), dtype=np.float64), normalised])
+        pred = matrix @ self._weights
+
+        # Analytical prediction variance per sample: x_i^T Cov x_i + 1
+        # (N, p) @ (p, p) -> (N, p)
+        leverage = np.sum((matrix @ self._cov_matrix) * matrix, axis=1, keepdims=True)
+        # Variance = s^2 * (1 + leverage)
+        variance = (1.0 + np.maximum(leverage, 0.0)) * self._residual_variance.reshape(1, -1)
+
+        if single:
+            return pred, variance
+        return pred, variance
 
     # ------------------------------------------------------------------
     # Serialisation
@@ -549,3 +599,46 @@ def apply_correction(
         corrected.append(updated)
     return corrected
 
+
+
+def expected_improvement(
+    mu: float,
+    sigma: float,
+    current_best: float,
+    maximize: bool = True,
+    xi: float = 0.01,
+) -> float:
+    """Expected Improvement (EI) infill criterion (Jones et al. 1998, Forrester 2007).
+
+    Evaluates the expected gain over current_best given Gaussian prediction N(mu, sigma^2).
+    """
+    s = max(float(sigma), 0.0)
+    if s < 1.0e-12:
+        diff = (mu - current_best) if maximize else (current_best - mu)
+        return max(0.0, float(diff))
+
+    diff = (mu - current_best - xi) if maximize else (current_best - mu - xi)
+    z = diff / s
+    # Standard normal CDF and PDF
+    phi = 0.5 * (1.0 + math.erf(z / math.sqrt(2.0)))
+    pdf = math.exp(-0.5 * z * z) / math.sqrt(2.0 * math.pi)
+
+    ei = diff * phi + s * pdf
+    return max(0.0, float(ei))
+
+
+def hierarchical_kriging_predict(
+    low_fi_trend: float,
+    correction_mu: float,
+    correction_sigma: float,
+    beta: float = 1.0,
+) -> Tuple[float, float]:
+    """Hierarchical Kriging (HK) composite prediction (Han & Görtz 2012).
+
+    Combines a fast low-fidelity simulation baseline with a learned high-fidelity correction:
+        y_HK(x) = beta * y_low(x) + delta_high(x)
+        sigma_HK(x) = sigma_correction(x)
+    """
+    y_composite = float(beta) * float(low_fi_trend) + float(correction_mu)
+    s_composite = float(correction_sigma)
+    return y_composite, s_composite
