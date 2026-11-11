@@ -1946,23 +1946,49 @@ def _coefficient_core(
     pushover_moment = xp.where(low_speed & (xp.abs(alpha) > 0.1), pushover, 0.0)
 
     # --- low-speed cross-flow rotational damping ---------------------------
+    # At low speeds / zero airspeed (speed -> 0), conventional dynamic pressure
+    # q_dyn -> 0 extinguishes linear damping moments (p_hat, q_hat, r_hat).
+    # Cross-flow drag of rotating surfaces through quiescent air provides
+    # bluff-body rotational damping proportional to omega * |omega|:
+    #   Pitch (q): rotating chord strips c * dx
+    #   Roll  (p): rotating span strips b * dy
+    #   Yaw   (r): rotating fuselage/keel and wing drag
     q_rate_value = _finite(xp, q_rate, 0.0)
-    rot_damping = (
+    p_rate_value = _finite(xp, p_rate, 0.0)
+    r_rate_value = _finite(xp, r_rate, 0.0)
+
+    rot_damping_q = (
         -0.5 * density * 1.2 * area * xp.square(chord) * xp.abs(q_rate_value) * q_rate_value
         - 0.00015 * area * chord * density * q_rate_value
     ) * speed_gate
-    rot_damping = xp.where(
-        low_speed & (area > 1.0e-6) & (chord > 1.0e-4), rot_damping, 0.0
+    rot_damping_q = xp.where(
+        low_speed & (area > 1.0e-6) & (chord > 1.0e-4), rot_damping_q, 0.0
+    )
+
+    rot_damping_p = (
+        -0.5 * density * 1.2 * area * xp.square(span) * (1.0 / 12.0) * xp.abs(p_rate_value) * p_rate_value
+        - 0.00015 * area * span * density * p_rate_value
+    ) * speed_gate
+    rot_damping_p = xp.where(
+        low_speed & (area > 1.0e-6) & (span > 1.0e-4), rot_damping_p, 0.0
+    )
+
+    rot_damping_r = (
+        -0.5 * density * 1.2 * area * xp.square(span) * (1.0 / 16.0) * xp.abs(r_rate_value) * r_rate_value
+        - 0.00015 * area * span * density * r_rate_value
+    ) * speed_gate
+    rot_damping_r = xp.where(
+        low_speed & (area > 1.0e-6) & (span > 1.0e-4), rot_damping_r, 0.0
     )
 
     pitching_nm = (
         q_dyn * area * chord * cm
         + cg_offset_x * lift_n
         + pushover_moment
-        + rot_damping
+        + rot_damping_q
     )
-    rolling_nm = q_dyn * area * span * roll_coeff
-    yawing_nm = q_dyn * area * span * yaw_coeff
+    rolling_nm = q_dyn * area * span * roll_coeff + rot_damping_p
+    yawing_nm = q_dyn * area * span * yaw_coeff + rot_damping_r
 
     # --- stall bookkeeping --------------------------------------------------
     threshold = _stall_eff
