@@ -108,6 +108,7 @@ __all__ = [
     "pitching_moment_offset_nm",
     "center_of_pressure_x",
     "polhamus_lift_coefficient",
+    "polhamus_vortex_drag",
     "effective_stall_alpha_deg",
     "atmosphere_state",
     "evaluate_aero",
@@ -367,6 +368,15 @@ def polhamus_lift_coefficient(alpha_deg: float, cfg: AircraftConfig, kp: Optiona
     return k_p * sin_a * (cos_a ** 2) + k_v * (sin_a ** 2) * cos_a * vortex_sign
 
 
+def polhamus_vortex_drag(alpha_deg: float, cfg: AircraftConfig) -> float:
+    """Polhamus suction analogy vortex-induced drag increment.
+
+    :math:`\\Delta C_{D,v} = K_v \\sin^2\\alpha |\\sin\\alpha|`.
+    """
+    kv = max(_finite(getattr(cfg, "polhamus_kv", 0.0), 0.0), 0.0)
+    return float(aero_kernel.polhamus_vortex_drag(_SCALAR, alpha_deg, kv))
+
+
 def stall_blend_weight(alpha_deg: float, cfg: AircraftConfig) -> float:
     """Smooth logistic blend weight between the linear and post-stall branch.
 
@@ -557,10 +567,18 @@ def drag_coefficient(
     """
     te_fold = trailing_edge_fold_effects(cfg)
     cl = lift_coefficient(alpha_deg, cfg, compressible=compressible, mach=mach, cl_offset=cl_offset)
-    induced = cl * cl / _polar_constant(cfg)
+    kv = max(_finite(getattr(cfg, "polhamus_kv", 0.0), 0.0), 0.0)
+    vortex_cd = polhamus_vortex_drag(alpha_deg, cfg)
+    alpha_rad = deg2rad(_finite(alpha_deg))
+    sin_a = math.sin(alpha_rad)
+    cos_a = math.cos(alpha_rad)
+    vortex_sign = 1.0 if sin_a >= 0.0 else -1.0
+    cl_vortex = kv * (sin_a ** 2) * cos_a * vortex_sign if kv > 0.0 else 0.0
+    cl_pot = cl - cl_vortex if kv > 0.0 else cl
+    induced_pot = cl_pot * cl_pot / _polar_constant(cfg)
     factor = 1.0 if ground_height_m is None else ground_effect_factor(ground_height_m, _span(cfg), True)
     parasite = parasite_drag_coefficient(cfg, reynolds) + te_fold["dcd"]
-    attached_drag = parasite + induced * factor
+    attached_drag = parasite + (induced_pot + vortex_cd) * factor
 
     stall_alpha = effective_stall_alpha_deg(cfg)
     alpha_norm = (alpha_deg + 180.0) % 360.0 - 180.0

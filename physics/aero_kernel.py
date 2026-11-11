@@ -76,6 +76,7 @@ __all__ = [
     "flat_plate_lift_coefficient",
     "post_stall_lift_coefficient",
     "polhamus_attached_branch",
+    "polhamus_vortex_drag",
     "lift_coefficient",
     "separated_pressure_drag_coefficient",
     "drag_coefficient",
@@ -1125,6 +1126,25 @@ def polhamus_attached_branch(
     return xp.where((kp <= 0.0) & (kv > 0.0), attached + vortex, attached)
 
 
+def polhamus_vortex_drag(xp: Any, alpha_deg: Any, polhamus_kv: Any) -> Any:
+    r"""Polhamus suction analogy vortex-induced drag increment.
+
+    According to the Polhamus suction analogy (1966/1971), leading-edge separation
+    converts the potential leading-edge suction force into normal vortex force,
+    resulting in zero suction for the vortex contribution. The vortex lift
+    :math:`C_{L,v} = K_v \sin^2\alpha \cos\alpha` acts purely normal to the wing
+    chord, which resolves in wind axes to:
+        :math:`\Delta C_{D,v} = |C_{L,v} \tan\alpha| = K_v \sin^2\alpha |\sin\alpha|`
+
+    When ``polhamus_kv <= 0.0``, this increment is identically 0.0.
+    """
+    kv = xp.maximum(_finite(xp, polhamus_kv, 0.0), 0.0)
+    alpha_rad = _rad(xp, _finite(xp, alpha_deg, 0.0))
+    sin_a = xp.sin(alpha_rad)
+    vortex_cd = kv * xp.square(sin_a) * xp.abs(sin_a)
+    return xp.where(kv > 0.0, vortex_cd, _f64(xp, 0.0))
+
+
 def lift_coefficient(
     xp: Any,
     alpha_deg: Any,
@@ -1258,7 +1278,19 @@ def drag_coefficient(
         residual_cl=residual_cl,
     )
     parasite = parasite_drag_coefficient(xp, cd0, reynolds, re_exponent)
-    induced = cl * cl / xp.maximum(_finite(xp, polar_constant, 1.0), 1.0e-12)
+    # Polhamus suction analogy: separate potential lift and vortex lift induced drag
+    # Potential: C_Di,p = C_L,p^2 / (pi * AR * e)
+    # Vortex:    Delta C_D,v = |C_L,v * tan(alpha)| = K_v * sin^2(alpha) * |sin(alpha)|
+    kv_val = xp.maximum(_finite(xp, polhamus_kv, 0.0), 0.0)
+    vortex_cd = polhamus_vortex_drag(xp, alpha_deg, kv_val)
+    cl_vortex = xp.where(
+        kv_val > 0.0,
+        kv_val * xp.square(xp.sin(_rad(xp, alpha_deg))) * xp.cos(_rad(xp, alpha_deg)) * xp.where(_rad(xp, alpha_deg) >= 0.0, _f64(xp, 1.0), _f64(xp, -1.0)),
+        _f64(xp, 0.0),
+    )
+    cl_pot = xp.where(kv_val > 0.0, cl - cl_vortex, cl)
+    induced_pot = cl_pot * cl_pot / xp.maximum(_finite(xp, polar_constant, 1.0), 1.0e-12)
+    induced = induced_pot + vortex_cd
     attached_drag = parasite + induced * _finite(xp, ground_ratio, 1.0)
 
     # Fully separated plate drag (Hoerner 1965): 2 sin^2(a) + C_D0 cos(a)
@@ -1749,7 +1781,16 @@ def _coefficient_core(
 
     ground_ratio = ground_effect_factor(xp, height, span, ground_effect_enabled)
     cd0 = parasite_drag_coefficient(xp, cd0, reynolds, re_cd0_exponent) * _interp(_clamp(xp, 1.0 + _finite(xp, low_re_cd0_gain, 0.03) * _x, 1.0, 1.12)) + te_fold["dcd"]
-    induced = (cl * cl / xp.maximum(polar, 1.0e-12)) * ground_ratio
+    kv_core = xp.maximum(_finite(xp, polhamus_kv, 0.0), 0.0)
+    vortex_cd_core = polhamus_vortex_drag(xp, alpha, kv_core)
+    cl_vortex_core = xp.where(
+        kv_core > 0.0,
+        kv_core * xp.square(xp.sin(_rad(xp, alpha))) * xp.cos(_rad(xp, alpha)) * xp.where(_rad(xp, alpha) >= 0.0, _f64(xp, 1.0), _f64(xp, -1.0)),
+        _f64(xp, 0.0),
+    )
+    cl_pot_core = xp.where(kv_core > 0.0, cl - cl_vortex_core * lift_scale, cl)
+    induced_pot_core = (cl_pot_core * cl_pot_core / xp.maximum(polar, 1.0e-12)) * ground_ratio
+    induced = induced_pot_core + vortex_cd_core * ground_ratio
     attached_drag = cd0 + induced
 
     # Fully separated plate drag (Hoerner 1965): 2 sin^2(a) + C_D0 cos(a)
@@ -1815,10 +1856,16 @@ def _coefficient_core(
     w_stall = stall_blend_weight(xp, alpha, stall_alpha, stall_sharpness)
     linear_val = cm_alpha_value * xp.copysign(stall_rad, alpha_rad)
     flat_plate_cm = cm_alpha_value * xp.sin(alpha_rad) * xp.abs(xp.cos(alpha_rad)) * stall_rad
+    # Harmonize post-stall pitching moment when dynamic center-of-pressure travel is active:
+    # When cp_shift_gain > 0, physical center-of-pressure shift -(cp_x - 0.25c)/c * cl
+    # models the post-stall aft shift to the bluff centroid 0.50c. To prevent double-counting
+    # with the empirical flat_plate_cm surrogate, scale flat_plate_cm by (1.0 - cp_gain).
+    cp_gain_blend = xp.minimum(xp.maximum(_finite(xp, cp_shift_gain, 0.0), 0.0), 1.0)
+    effective_flat_plate_cm = (1.0 - cp_gain_blend) * flat_plate_cm
     cm_alpha_term = xp.where(
         attached,
         cm_alpha_value * alpha_rad,
-        (1.0 - w_stall) * linear_val + w_stall * flat_plate_cm,
+        (1.0 - w_stall) * linear_val + w_stall * effective_flat_plate_cm,
     )
 
     cm = (
