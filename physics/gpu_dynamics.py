@@ -426,9 +426,25 @@ def wind_batch(
             return mean
         out[...] = mean
         return out
-    # The wind field is evaluated on the host, so the query points have to be
-    # brought back explicitly.  ``np.asarray`` on a CuPy array raises
-    # "Implicit conversion to a NumPy array is not allowed".
+    # If running on GPU with CuPy, evaluate directly on the device without host D-to-H roundtrip
+    if hasattr(positions, "__cuda_array_interface__") or (hasattr(xp, "__name__") and "cupy" in xp.__name__):
+        pts_device = xp.stack(
+            (positions[:, 0], positions[:, 1], -positions[:, 2]),
+            axis=-1,
+        )
+        values = velocity_components(
+            pts_device,
+            params.env,
+            float(time_s),
+            backend=params.wind_backend,
+            return_host=False,
+        )
+        wind = xp.stack((values[:, 0], values[:, 1], -values[:, 2]), axis=-1)
+        if out is None:
+            return wind
+        out[...] = wind
+        return out
+
     host_positions = positions.get() if hasattr(positions, "get") else np.asarray(positions)
     points = np.stack(
         (
@@ -438,7 +454,7 @@ def wind_batch(
         ),
         axis=-1,
     )
-    values = velocity_components(points, params.env, float(time_s), params.wind_backend)
+    values = velocity_components(points, params.env, float(time_s), params.wind_backend, return_host=True)
     values = np.asarray(values, dtype=np.float64)
     wind = xp.asarray(
         np.stack((values[:, 0], values[:, 1], -values[:, 2]), axis=-1),
@@ -601,7 +617,7 @@ def build_params(
         chord_scale=chord_scale,
         tip_factor=tip_factor,
         allowable_pa=allowable,
-        wind_backend="numpy",
+        wind_backend="cupy" if hasattr(xp, "__name__") and "cupy" in xp.__name__ else "numpy",
         mean_wind=wind,
         use_mean_wind_only=use_mean_wind,
         inertia_matrix=inertia_matrix,
@@ -763,7 +779,9 @@ def _evaluate_state(
         m_eff_z = params.mass + m_add_z
         gravity_body = world_to_body_batch(xp, rotation, gravity_world)
         a_body = (force_body / params.mass[:, xp.newaxis]) + gravity_body
-        a_body_2_app = (force_body[:, 2] + params.mass * gravity_body[:, 2]) / m_eff_z
+        # Equivalence principle: gravity accelerates the body and the ambient fluid equally
+        # (zero relative acceleration), so added mass resists only fluid aerodynamic forces.
+        a_body_2_app = gravity_body[:, 2] + (force_body[:, 2] / m_eff_z)
         a_body_z = xp.where(params.apparent_active, a_body_2_app, a_body[:, 2])
         a_body = xp.stack((a_body[:, 0], a_body[:, 1], a_body_z), axis=-1)
         acceleration = body_to_world_batch(xp, rotation, a_body)

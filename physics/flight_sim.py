@@ -2724,7 +2724,9 @@ class FlightSimulator:
             m_eff_z = self._mass + m_add_z
             gravity_body = world_to_body(quaternion, gravity_world)
             a_body = (force_body / self._mass) + gravity_body
-            a_body[2] = (force_body[2] + self._mass * gravity_body[2]) / m_eff_z
+            # Equivalence principle: gravity accelerates the body and the ambient fluid equally
+            # (zero relative acceleration), so added mass resists only fluid aerodynamic forces.
+            a_body[2] = gravity_body[2] + (force_body[2] / m_eff_z)
             acceleration = body_to_world(quaternion, a_body)
 
             eff_inertia = np.copy(self._inertia)
