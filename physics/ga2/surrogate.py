@@ -450,14 +450,14 @@ class CorrectionModel:
         """
         if self._mean is None or self._scale is None or self._weights is None or self._cov_matrix is None or self._residual_variance is None:
             raise RuntimeError("the correction model is not fitted")
-        
+
         design = np.asarray(features, dtype=np.float64)
         if design.ndim == 1:
             design = design.reshape(1, -1)
             single = True
         else:
             single = False
-        
+
         normalised = (design - self._mean) / self._scale
         matrix = np.hstack([np.ones((design.shape[0], 1), dtype=np.float64), normalised])
         pred = matrix @ self._weights
