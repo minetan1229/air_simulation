@@ -18,7 +18,9 @@
 | :--- | :--- |
 | 初めて動かす | [getting-started](./getting-started.md) → [usage](./usage.md) → [troubleshooting](./troubleshooting.md) |
 | 開発者・修正者 | [development](./development.md) → [architecture](./architecture.md) → [api](./api.md) → [SPECIFICATION §3](./SPECIFICATION.md) |
-| 物理をいじる | [architecture §2](./architecture.md) → [PHYSICS_MODELS](./PHYSICS_MODELS.md) → [SPECIFICATION §1](./SPECIFICATION.md) |
+| 物理をいじる | [architecture §2](./architecture.md) → [PHYSICS_MODELS](./PHYSICS_MODELS.md) → [PHYSICS_ALGORITHM](./PHYSICS_ALGORITHM.md) → [SPECIFICATION §1](./SPECIFICATION.md) |
+| GAをいじる | [architecture §3](./architecture.md) → [GA_ALGORITHM](./GA_ALGORITHM.md) → [GA_V2_ARCHITECTURE](./GA_V2_ARCHITECTURE.md) |
+| 高校生・初学者 | [GA_HIGH_SCHOOL](./GA_HIGH_SCHOOL.md) → [PHYSICS_HIGH_SCHOOL](./PHYSICS_HIGH_SCHOOL.md) → [getting-started](./getting-started.md) |
 | 運用・サーバ | [discord-bridge](./discord-bridge.md) → [REMOTE_COMPUTE_ENVIRONMENT](./REMOTE_COMPUTE_ENVIRONMENT.md) |
 
 ---
@@ -47,6 +49,10 @@
 | :--- | :--- | :--- |
 | [SPECIFICATION.md](./SPECIFICATION.md) | 仕様・定数・法則を横断確認（最優先の正本） | 正本 |
 | [PHYSICS_MODELS.md](./PHYSICS_MODELS.md) | 係数・式の典拠と適用限界を調べる | 正本（補足） |
+| [GA_ALGORITHM.md](./GA_ALGORITHM.md) | 遺伝的アルゴリズム統合アーキテクチャの技術詳細 | 正本（新規） |
+| [PHYSICS_ALGORITHM.md](./PHYSICS_ALGORITHM.md) | 物理計算アルゴリズム（空力・6-DoF・応力・大気・GPU） | 正本（新規） |
+| [GA_HIGH_SCHOOL.md](./GA_HIGH_SCHOOL.md) | 高校生向け GA 仕組み解説（数式なし・図解中心） | 入門（新規） |
+| [PHYSICS_HIGH_SCHOOL.md](./PHYSICS_HIGH_SCHOOL.md) | 高校生向け物理シミュレーション解説（物理基礎レベル） | 入門（新規） |
 | [CFD_ROADMAP.md](./CFD_ROADMAP.md) | 3D Navier–Stokes 追加の将来計画（Issue #47） | 設計文書（コード変更なし） |
 
 ## 4. 最適化・データ
