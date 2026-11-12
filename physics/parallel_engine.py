@@ -1787,6 +1787,9 @@ def evaluate_cases_on_device(
             initial,
             xp.asarray(group_durations, dtype=xp.float64),
             2.0e-2,
+            max_steps=1500,
+            max_steps_per_case=1500,
+            capture_timeout_s=10.0,
         )
 
         state = _to_host(xp, batch["state"])

@@ -12,6 +12,8 @@ from physics.config_schema import AircraftConfig, EnvironmentConfig, LaunchConfi
 from physics.parallel_engine import gpu_batch_evaluate_cases
 
 
+@pytest.mark.gpu
+@pytest.mark.slow
 def test_duration_default_parity():
     """Verify that omitting duration_s uses the same default and produces consistent duration_s."""
     case = {
@@ -32,6 +34,8 @@ def test_duration_default_parity():
     )
 
 
+@pytest.mark.gpu
+@pytest.mark.slow
 def test_duration_clamping_parity_short():
     """Verify that a very short duration (e.g. 0.05s) behaves identically in both paths."""
     case = {
@@ -51,6 +55,8 @@ def test_duration_clamping_parity_short():
     assert cpu_res["status"] == device_res["status"]
 
 
+@pytest.mark.gpu
+@pytest.mark.slow
 def test_duration_clamping_parity_long():
     """Verify that a very long duration (e.g. 200.0s) behaves identically in both paths."""
     case = {

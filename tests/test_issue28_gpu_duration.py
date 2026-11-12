@@ -10,6 +10,8 @@ from physics.config_schema import AircraftConfig, EnvironmentConfig, LaunchConfi
 from physics.parallel_engine import gpu_batch_evaluate_cases
 
 
+@pytest.mark.gpu
+@pytest.mark.slow
 def test_gpu_batch_respects_individual_case_durations():
     """Verify that cases with shorter duration_s in a mixed batch do not exceed their own duration limit."""
     cases = [
@@ -53,6 +55,8 @@ def test_gpu_batch_respects_individual_case_durations():
     assert results[2]["flight_time_s"] <= 15.0
 
 
+@pytest.mark.gpu
+@pytest.mark.slow
 def test_gpu_batch_landing_within_duration():
     """Verify that a case that lands before its duration_s is marked as landed."""
     cases = [
@@ -86,6 +90,7 @@ def test_gpu_batch_landing_within_duration():
     assert results[1]["flight_time_s"] <= 3.0
 
 
+@pytest.mark.gpu
 def test_cpu_batch_fallback_respects_durations():
     """Verify that when running in CPU fallback mode (force_cpu=True), duration and schema are respected."""
     cases = [

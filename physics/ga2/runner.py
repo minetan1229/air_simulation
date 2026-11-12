@@ -907,6 +907,7 @@ class EvolutionRunner:
                 float(self.profile.stage1_duration_s),
                 float(self.profile.stage1_dt_max),
                 int(self.profile.stage1_max_steps),
+                capture_timeout_s=10.0,
             )
         except Exception:  # pragma: no cover - the reference must not stop the run
             return

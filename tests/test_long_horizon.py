@@ -12,6 +12,7 @@ from __future__ import annotations
 import math
 
 import numpy as np
+import pytest
 
 from physics.config_schema import AircraftConfig, EnvironmentConfig, LaunchConfig, SimulationSettings
 from physics.flight_sim import FlightSimulator, quaternion_normalize
@@ -72,6 +73,7 @@ def _integrate_quaternion_only(omega_vec, dt: float, duration: float) -> np.ndar
     return y[6:10]
 
 
+@pytest.mark.slow
 def test_constant_rate_spin_matches_analytic_after_10s() -> None:
     for omega in ((2.0, 0.0, 0.0), (0.0, 1.0, 0.0)):
         q_num = _integrate_quaternion_only(omega, dt=0.01, duration=10.0)
@@ -80,6 +82,7 @@ def test_constant_rate_spin_matches_analytic_after_10s() -> None:
         assert err < 0.01, f"10 s spin {omega} drifted {err:.6f} deg"
 
 
+@pytest.mark.slow
 def test_spin_geodesic_error_shrinks_with_dt() -> None:
     omega = (2.0, 1.0, 0.5)
     errs = []
@@ -121,6 +124,8 @@ def _glide_final(dt_max: float):
     return sim, res
 
 
+@pytest.mark.slow
+@pytest.mark.integration
 def test_glide_dt_convergence_and_energy_monotone() -> None:
     sim_coarse, res_coarse = _glide_final(0.01)
     sim_fine, res_fine = _glide_final(0.005)

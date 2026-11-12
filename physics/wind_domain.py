@@ -886,8 +886,14 @@ def _turbulence_components(P, env: EnvironmentConfig, drift_host: np.ndarray, op
     return stacked * (local_amplitude[:, None] * weights)
 
 
-def velocity_components(points, env: EnvironmentConfig, time_s: float = 0.0, backend: str = "numpy") -> np.ndarray:
-    """Complete ``(N, 3)`` velocity field on the NumPy host -- the reference path.
+def velocity_components(
+    points,
+    env: EnvironmentConfig,
+    time_s: float = 0.0,
+    backend: str = "numpy",
+    return_host: bool = True,
+) -> Any:
+    """Complete ``(N, 3)`` velocity field on the NumPy host or backend device.
 
     This is the single source of truth shared by :func:`wind_velocity` (which is
     the NumPy specialisation used by the flight integrator) and
@@ -918,16 +924,26 @@ def velocity_components(points, env: EnvironmentConfig, time_s: float = 0.0, bac
        component is exactly ``0`` at and below ``env.ground_level_m``.
     """
     backend_name, _ = _resolve_backend(backend)
-    return _velocity_device(np.asarray(points, dtype=np.float64), env, float(time_s), backend_name)
+    return _velocity_device(points, env, float(time_s), backend_name, return_host=return_host)
 
 
-def _velocity_device(points: np.ndarray, env: EnvironmentConfig, time_s: float, backend: str) -> np.ndarray:
-    """Run the field maths with ``backend`` and return a NumPy ``(N, 3)`` array."""
+def _velocity_device(
+    points: Any,
+    env: EnvironmentConfig,
+    time_s: float,
+    backend: str,
+    return_host: bool = True,
+) -> Any:
+    """Run the field maths with ``backend`` and return either host or device array."""
     ops = _Ops(backend)
     xp = ops.xp
     n = int(points.shape[0])
     if n == 0:
-        return np.zeros((0, 3), dtype=np.float64)
+        res = xp.zeros((0, 3), dtype=xp.float64)
+        return ops.to_host(res) if return_host else res
+
+    # Ensure query points are on the device if using GPU
+    P = points if (hasattr(points, "__cuda_array_interface__") or ops.name == "numpy") else ops.const(points)
 
     # --- wind tunnel measurement mode (REQ-07, AGENTS.md 5) -----------------------
     # The stream is the velocity of the **air** along the tunnel axis (+x), not
@@ -938,10 +954,9 @@ def _velocity_device(points: np.ndarray, env: EnvironmentConfig, time_s: float, 
     # incidence is evaluated as the requested positive alpha.
     if bool(env.wind_tunnel_enabled):
         speed = float(env.wind_tunnel_speed)
-        stream = np.zeros((n, 3), dtype=np.float64)
         tunnel_radius = float(getattr(env, "wind_tunnel_radius_m", 2.5))
         wall_thickness = float(getattr(env, "wind_tunnel_wall_thickness_m", 0.15))
-        r_wall = np.sqrt(points[:, 1] ** 2 + points[:, 2] ** 2)
+        r_wall = xp.sqrt(P[:, 1] ** 2 + P[:, 2] ** 2)
         # Wall boundary-layer damping: the streamwise speed is reduced within
         # ``wall_thickness`` of the tunnel wall (the wall layer is set by the
         # distance from the wall, not by the model height).  The damping factor
@@ -950,13 +965,16 @@ def _velocity_device(points: np.ndarray, env: EnvironmentConfig, time_s: float, 
         # preserved everywhere except the physical wall layer.
         if wall_thickness > 0.0 and tunnel_radius > 0.0:
             dist_to_wall = tunnel_radius - r_wall
+            wall_damping = xp.ones(n, dtype=xp.float64)
             in_layer = (dist_to_wall > 0.0) & (dist_to_wall <= wall_thickness)
-            wall_damping = np.ones(n, dtype=np.float64)
-            wall_damping[in_layer] = np.clip(
-                1.0 - np.exp(-dist_to_wall[in_layer] / wall_thickness), 0.0, 1.0
-            )
+            outside = dist_to_wall <= 0.0
+            layer_val = xp.clip(1.0 - xp.exp(-dist_to_wall / wall_thickness), 0.0, 1.0)
+            wall_damping = xp.where(in_layer, layer_val, wall_damping)
+            wall_damping = xp.where(outside, 1.0, wall_damping)
         else:
-            wall_damping = np.ones(n, dtype=np.float64)
+            wall_damping = xp.ones(n, dtype=xp.float64)
+
+        stream = xp.zeros((n, 3), dtype=xp.float64)
         if bool(getattr(env, "wind_tunnel_boundary_correction", False)):
             # Full boundary correction: blockage contraction, free-stream TI
             # and the wall layer.  All of blockage / radius / TI / wall
@@ -967,15 +985,13 @@ def _velocity_device(points: np.ndarray, env: EnvironmentConfig, time_s: float, 
             if n > 0:
                 ti = float(getattr(env, "wind_tunnel_turbulence_intensity", 0.005))
                 phase = time_s * 15.0
-                stream[:, 0] += v_eff * ti * np.sin(points[:, 1] * 20.0 + phase)
-                stream[:, 1] += v_eff * ti * np.cos(points[:, 0] * 20.0 + phase)
-                stream[:, 2] += v_eff * ti * np.sin(points[:, 2] * 20.0 + phase * 0.7)
+                stream[:, 0] += v_eff * ti * xp.sin(P[:, 1] * 20.0 + phase)
+                stream[:, 1] += v_eff * ti * xp.cos(P[:, 0] * 20.0 + phase)
+                stream[:, 2] += v_eff * ti * xp.sin(P[:, 2] * 20.0 + phase * 0.7)
         else:
             # Baseline test-contract: uniform stream with the wall layer only.
             stream[:, 0] = speed * wall_damping
-        return stream
-
-
+        return ops.to_host(stream) if return_host else stream
 
     ground = float(env.ground_level_m)
     gust = gust_factor(env, time_s)
@@ -997,17 +1013,23 @@ def _velocity_device(points: np.ndarray, env: EnvironmentConfig, time_s: float, 
     # reference path (:func:`physics.flight_sim.wind_vector`) and the batched
     # path (:func:`physics.gpu_dynamics.wind_batch`) both convert their world
     # position with ``z_up = -z_ned``.
-    heights_agl = points[:, 2] - ground
+    heights_agl = P[:, 2] - ground
     if bool(env.boundary_layer_enabled):
-        ratio_host = boundary_layer_ratio(heights_agl, env)
+        roughness, ref_h = _roughness_and_reference(env)
+        denom = math.log(ref_h / roughness)
+        if denom <= 0.0:
+            denom = 1.0e-6
+        clamped = xp.maximum(heights_agl, roughness)
+        ratio = xp.maximum(xp.log(clamped / roughness) / denom, 0.0)
     else:
-        ratio_host = np.ones(n, dtype=np.float64)
-    horizontal_speed = mean_speed * gust * ratio_host
-    u_mean = horizontal_speed * (float(mean_vector[0]) / mean_speed if mean_speed > _MIN_DIRECTION_SPEED else 0.0)
-    v_mean = horizontal_speed * (float(mean_vector[1]) / mean_speed if mean_speed > _MIN_DIRECTION_SPEED else 0.0)
+        ratio = xp.ones(n, dtype=xp.float64)
+    horizontal_speed = mean_speed * gust * ratio
+    dir_u = float(mean_vector[0]) / mean_speed if mean_speed > _MIN_DIRECTION_SPEED else 0.0
+    dir_v = float(mean_vector[1]) / mean_speed if mean_speed > _MIN_DIRECTION_SPEED else 0.0
+    u_mean = horizontal_speed * dir_u
+    v_mean = horizontal_speed * dir_v
 
     # --- thermal plume, faded out by the impermeable ground --------------
-    P = ops.const(points)
     thermal = _thermal_components(P, env, time_s, ops)
     height_agl = P[:, 2] - ground
     # Mean (plume) vertical motion: ramped smoothly to zero across the
@@ -1028,13 +1050,13 @@ def _velocity_device(points: np.ndarray, env: EnvironmentConfig, time_s: float, 
 
     total = xp.stack(
         [
-            thermal[:, 0] + ops.const(u_mean) + turbulence[:, 0],
-            thermal[:, 1] + ops.const(v_mean) + turbulence[:, 1],
+            thermal[:, 0] + u_mean + turbulence[:, 0],
+            thermal[:, 1] + v_mean + turbulence[:, 1],
             thermal[:, 2] * damping + turbulence[:, 2] * turb_damping,
         ],
         axis=-1,
     )
-    return ops.to_host(total)
+    return ops.to_host(total) if return_host else total
 
 
 def wind_velocity(position, env: EnvironmentConfig, time_s: float = 0.0) -> np.ndarray:

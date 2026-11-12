@@ -27,6 +27,7 @@ of length ``N`` that broadcast against each other.
 from __future__ import annotations
 
 import math
+import threading
 from dataclasses import dataclass
 from typing import Any, Dict, Optional, Tuple
 
@@ -1040,7 +1041,7 @@ def _is_device_module(xp: Any) -> bool:
 
 
 def _capture_step(
-    xp: Any, step: Any, snapshot: Any, restore: Any
+    xp: Any, step: Any, snapshot: Any, restore: Any, timeout_s: float = 10.0
 ) -> Tuple[Any, Any, Any]:
     """Capture one integration step into a CUDA graph.
 
@@ -1074,6 +1075,9 @@ def _capture_step(
     array module cannot capture: the CPU path, a host without a CUDA device,
     or a driver that refuses the capture.  The caller then runs the eager
     step.
+
+    A thread-based timeout is used because CuPy's ``stream.synchronize()``
+    does not support timeouts and can hang indefinitely on some drivers.
     """
     if not _is_device_module(xp):
         return None, None, None
@@ -1081,30 +1085,46 @@ def _capture_step(
         import cupy as cp
     except Exception:  # pragma: no cover - depends on the host
         return None, None, None
-    try:
-        stream = cp.cuda.Stream(non_blocking=True)
-        pool = cp.cuda.MemoryPool()
-        saved = snapshot()
-        with cp.cuda.using_allocator(pool.malloc):
-            # The warm-up: the step runs once, outside the capture, so that
-            # the private pool holds every block the capture allocates.  The
-            # state is restored in any case: the warm-up advances the flight
-            # by one step.
-            try:
-                step()
-            finally:
-                restore(saved)
-            with stream:
-                stream.begin_capture(mode=CAPTURE_MODE_RELAXED)
-                step()
-                graph = stream.end_capture()
-        # Upload the graph to the device so the first replay does not pay
-        # for the upload.
-        graph.upload(stream)
-        stream.synchronize()
-    except Exception:  # pragma: no cover - depends on the driver
+
+    result: Dict[str, Any] = {"graph": None, "stream": None, "pool": None, "error": None}
+
+    def capture_worker() -> None:
+        try:
+            stream = cp.cuda.Stream(non_blocking=True)
+            pool = cp.cuda.MemoryPool()
+            saved = snapshot()
+            with cp.cuda.using_allocator(pool.malloc):
+                # Warm-up: run once outside capture to populate the pool
+                try:
+                    step()
+                finally:
+                    restore(saved)
+                with stream:
+                    stream.begin_capture(mode=CAPTURE_MODE_RELAXED)
+                    step()
+                    graph = stream.end_capture()
+            graph.upload(stream)
+            stream.synchronize()
+            result["graph"] = graph
+            result["stream"] = stream
+            result["pool"] = pool
+        except Exception as e:
+            result["error"] = e
+
+    thread = threading.Thread(target=capture_worker, daemon=True)
+    thread.start()
+    thread.join(timeout=timeout_s)
+
+    if thread.is_alive():
+        # Capture timed out - cannot cleanly terminate the thread, but we can
+        # return None to fall back to eager mode. The thread will be abandoned
+        # (daemon thread will exit when process ends).
         return None, None, None
-    return graph, stream, pool
+
+    if result["error"] is not None:
+        return None, None, None
+
+    return result["graph"], result["stream"], result["pool"]
 
 
 def graph_kernel_launches(graph: Any) -> int:
@@ -1130,9 +1150,11 @@ def simulate_batch(
     duration_s: float,
     dt_max: float = 0.01,
     max_steps: int = 20000,
+    max_steps_per_case: int = 10000,
     use_graph: Optional[bool] = None,
     record_interval_s: Optional[float] = None,
     sample_wind_stages: bool = False,
+    capture_timeout_s: float = 10.0,
 ) -> Dict[str, Any]:
     """Integrate a batch of airframes with the 6-DoF rigid-body model.
 
@@ -1204,6 +1226,8 @@ def simulate_batch(
         "trim_alpha": xp.zeros(count),
         "trim_speed": xp.zeros(count),
         "trim_altitude": xp.zeros(count),
+        # Per-case step counter to enforce max_steps_per_case limit
+        "steps": xp.zeros(count, dtype=xp.int32),
         # Every case keeps its own clock: the step size is a per-case
         # quantity (it depends on the local rate, speed and stiffness), so a
         # shared clock would silently truncate the cases that take smaller
@@ -1492,17 +1516,17 @@ def simulate_batch(
 
     params.sample_wind_stages = bool(sample_wind_stages)
     if use_graph is None:
-        use_graph = _is_device_module(xp)
+        use_graph = False  # Default to eager mode; graph capture is opt-in
     graph = None
     stream = None
     pool = None
     if use_graph:
-        graph, stream, pool = _capture_step(xp, step, snapshot, restore)
+        graph, stream, pool = _capture_step(xp, step, snapshot, restore, timeout_s=capture_timeout_s)
     launches_per_step = graph_kernel_launches(graph)
 
     steps_executed = 0
     for _ in range(int(max_steps)):
-        active = (~acc["landed"]) & (~acc["crashed"]) & (acc["time"] < duration)
+        active = (~acc["landed"]) & (~acc["crashed"]) & (acc["time"] < duration) & (acc["steps"] < max_steps_per_case)
         if not bool(xp.any(active)):
             break
         # The wind field is sampled once per step for the whole batch, at
@@ -1521,6 +1545,7 @@ def simulate_batch(
             graph.launch()
         else:
             step()
+        acc["steps"][...] = xp.where(active, acc["steps"] + 1, acc["steps"])
         steps_executed += 1
     if graph is not None and stream is not None:
         stream.synchronize()
@@ -1590,6 +1615,8 @@ def simulate_batch(
         "last_recorded_y": acc["record_y"],
         "record_interval_s": float(record_interval),
         "integration_steps": int(steps_executed),
+        "steps_per_case": acc["steps"],
+        "max_steps_per_case": int(max_steps_per_case),
         "kernel_launches_per_step": int(launches_per_step),
         "kernel_launches_total": int(launches_per_step * steps_executed),
         "graph_captured": bool(launches_per_step > 0),
