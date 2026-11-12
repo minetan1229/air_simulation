@@ -799,51 +799,49 @@ def compute_apparent_forces(
     omega: Any,
     added_mass_z_kg: Any,
 ) -> Tuple[Any, Any]:
-    """Apparent-mass Coriolis and Munk terms for a body moving through fluid.
+    r"""Apparent-mass Coriolis and Munk terms for a body moving through fluid.
 
     The fluid momentum carried by the body is ``P_A = [0, 0, m_z * w]`` (added
-    mass acts only in the z direction).  In body axes with z down:
+    mass acts primarily in the z direction for a thin plate).
+    According to Kirchhoff's equations of motion for a rigid body in an ideal fluid
+    (Lamb 'Hydrodynamics' §124, Milne-Thomson §17.40):
+        Fluid Coriolis force on body:   :math:`\mathbf{F}_{\mathrm{app}} = - \boldsymbol{\omega} \times \mathbf{P}_A`
+        Munk apparent moment on body:   :math:`\mathbf{M}_{\mathrm{app}} = - \mathbf{v}_{\mathrm{rel}} \times \mathbf{P}_A`
 
-        Fluid Coriolis force:   F_app = omega x P_A
-        Munk apparent moment:   M_app = -v_rel x P_A
-
-    Expanding:
-
-        F_app_x = + q * m_z * w
-        F_app_y = - p * m_z * w
-        F_app_z = 0
-
-        M_app_x = - v * m_z * w   (roll apparent moment)
-        M_app_y = + u * m_z * w   (pitch apparent moment)
-        M_app_z = 0
-
-    The inertial (added-mass) term ``-dP_A/dt`` is handled separately by the
-    caller through the effective mass ``m_eff_z = m + m_add_z``; this function
-    returns only the rotational coupling terms.  These terms transfer energy
-    between body motion and fluid kinetic energy; they do not conserve power
-    by themselves.
+    Conservation of Energy:
+        :math:`\mathbf{F}_{\mathrm{app}} \cdot \mathbf{v} = - (\boldsymbol{\omega} \times \mathbf{P}_A) \cdot \mathbf{v} = - \mathbf{P}_A \cdot (\mathbf{v} \times \boldsymbol{\omega})`
+        :math:`\mathbf{M}_{\mathrm{app}} \cdot \boldsymbol{\omega} = - (\mathbf{v} \times \mathbf{P}_A) \cdot \boldsymbol{\omega} = + \mathbf{P}_A \cdot (\mathbf{v} \times \boldsymbol{\omega})`
+        :math:`\implies \mathbf{F}_{\mathrm{app}} \cdot \mathbf{v} + \mathbf{M}_{\mathrm{app}} \cdot \boldsymbol{\omega} \equiv 0.0` identically.
+    The apparent rotational coupling terms perform zero net mechanical work.
     """
-    v_arr = xp.asarray(body_velocity, dtype=xp.float64)
-    w_arr = xp.asarray(omega, dtype=xp.float64)
-    m_z = xp.asarray(added_mass_z_kg, dtype=xp.float64)
-
-    u = v_arr[..., 0]
-    v = v_arr[..., 1]
-    w = v_arr[..., 2]
-    p = w_arr[..., 0]
-    q = w_arr[..., 1]
-
-    fx = q * m_z * w
-    fy = -p * m_z * w
-    fz = xp.zeros_like(fx)
-    force_apparent = xp.stack((fx, fy, fz), axis=-1)
-
-    mx = -v * m_z * w
-    my = u * m_z * w
-    mz = xp.zeros_like(mx)
-    moment_apparent = xp.stack((mx, my, mz), axis=-1)
-
-    return force_apparent, moment_apparent
+    if hasattr(body_velocity, "shape") and len(body_velocity.shape) > 1:
+        u = body_velocity[..., 0]
+        v = body_velocity[..., 1]
+        w = body_velocity[..., 2]
+        p = omega[..., 0]
+        q = omega[..., 1]
+        m_z = added_mass_z_kg
+        fx = -q * m_z * w
+        fy = p * m_z * w
+        fz = xp.zeros_like(fx)
+        mx = -v * m_z * w
+        my = u * m_z * w
+        mz = xp.zeros_like(mx)
+        return xp.stack((fx, fy, fz), axis=-1), xp.stack((mx, my, mz), axis=-1)
+    else:
+        u = float(body_velocity[0])
+        v = float(body_velocity[1])
+        w = float(body_velocity[2])
+        p = float(omega[0])
+        q = float(omega[1])
+        m_z = float(added_mass_z_kg)
+        fx = -q * m_z * w
+        fy = p * m_z * w
+        fz = 0.0
+        mx = -v * m_z * w
+        my = u * m_z * w
+        mz = 0.0
+        return (fx, fy, fz), (mx, my, mz)
 
 
 def unsteady_circulation_lag(
@@ -1854,7 +1852,11 @@ def _coefficient_core(
     attached = xp.abs(alpha_rad) <= stall_rad
     w_stall = stall_blend_weight(xp, alpha, stall_alpha, stall_sharpness)
     linear_val = cm_alpha_value * xp.copysign(stall_rad, alpha_rad)
-    flat_plate_cm = cm_alpha_value * xp.sin(alpha_rad) * xp.abs(xp.cos(alpha_rad)) * stall_rad
+    # First-principles flat-plate pitching moment about 0.25c (Hoerner 1965):
+    # Normal force C_N = 2 sin(alpha). Center of pressure is at 0.50c (geometric centroid).
+    # Moment arm about 0.25c: -(0.50 - 0.25) = -0.25.
+    # Therefore, C_M,0.25c = -0.25 * C_N = -0.5 * sin(alpha).
+    flat_plate_cm = -0.5 * xp.sin(alpha_rad)
     # Harmonize post-stall pitching moment when dynamic center-of-pressure travel is active:
     # When cp_shift_gain > 0, physical center-of-pressure shift -(cp_x - 0.25c)/c * cl
     # models the post-stall aft shift to the bluff centroid 0.50c. To prevent double-counting
