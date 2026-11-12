@@ -1290,8 +1290,7 @@ def drag_coefficient(
     )
     cl_pot = xp.where(kv_val > 0.0, cl - cl_vortex, cl)
     induced_pot = cl_pot * cl_pot / xp.maximum(_finite(xp, polar_constant, 1.0), 1.0e-12)
-    induced = induced_pot + vortex_cd
-    attached_drag = parasite + induced * _finite(xp, ground_ratio, 1.0)
+    attached_drag = parasite + induced_pot * _finite(xp, ground_ratio, 1.0) + vortex_cd
 
     # Fully separated plate drag (Hoerner 1965): 2 sin^2(a) + C_D0 cos(a)
     alpha = (_finite(xp, alpha_deg, 0.0) + 180.0) % 360.0 - 180.0
@@ -1790,7 +1789,7 @@ def _coefficient_core(
     )
     cl_pot_core = xp.where(kv_core > 0.0, cl - cl_vortex_core * lift_scale, cl)
     induced_pot_core = (cl_pot_core * cl_pot_core / xp.maximum(polar, 1.0e-12)) * ground_ratio
-    induced = induced_pot_core + vortex_cd_core * ground_ratio
+    induced = induced_pot_core + vortex_cd_core
     attached_drag = cd0 + induced
 
     # Fully separated plate drag (Hoerner 1965): 2 sin^2(a) + C_D0 cos(a)
@@ -1939,7 +1938,10 @@ def _coefficient_core(
     low_speed = speed < 3.0
     v_norm = _clamp(xp, speed / 3.0, 0.0, 1.0)
     speed_gate = 1.0 - v_norm * v_norm * (3.0 - 2.0 * v_norm)
-    q_eff = 0.5 * density * xp.square(xp.maximum(speed, 0.8))
+    # Zero-airspeed extinction: ramp down to 0 below 0.8 m/s to prevent artificial torque
+    # injection at standstill while retaining the dynamic pressure floor for stall recovery.
+    zero_speed_gate = _smoothstep01(xp, speed / 0.8)
+    q_eff = 0.5 * density * xp.square(xp.maximum(speed, 0.8)) * zero_speed_gate
     alpha_gate = xp.tanh(xp.abs(alpha) / 8.0)
     sin_a = xp.sin(_rad(xp, _clamp(xp, alpha, -90.0, 90.0)))
     pushover = -q_eff * area * chord * 0.85 * sin_a * speed_gate * alpha_gate

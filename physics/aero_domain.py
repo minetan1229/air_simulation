@@ -578,7 +578,7 @@ def drag_coefficient(
     induced_pot = cl_pot * cl_pot / _polar_constant(cfg)
     factor = 1.0 if ground_height_m is None else ground_effect_factor(ground_height_m, _span(cfg), True)
     parasite = parasite_drag_coefficient(cfg, reynolds) + te_fold["dcd"]
-    attached_drag = parasite + (induced_pot + vortex_cd) * factor
+    attached_drag = parasite + induced_pot * factor + vortex_cd
 
     stall_alpha = effective_stall_alpha_deg(cfg)
     alpha_norm = (alpha_deg + 180.0) % 360.0 - 180.0
