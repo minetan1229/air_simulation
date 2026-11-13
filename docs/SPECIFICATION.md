@@ -366,17 +366,17 @@ physics/origami_genome.py の GripThresholds 既定（最低高さ 8 mm / 前後
 
 ```powershell
 # 1. 構文検証
-python -m compileall physics api tools app.py smoke_test.py
+python -m compileall physics api tools app.py scripts/smoke_test.py
 
 # 2. 静的解析 & コード品質検査
 ruff check .
-mypy physics api app.py smoke_test.py
+mypy physics api app.py scripts/smoke_test.py
 
 # 3. ユニットテストおよび監査テストの全実行
 python -m pytest tests -q
 
 # 4. エンドツーエンド統合テスト (API連鎖・最適化ジョブ・ETA・3Dモデル解析)
-python smoke_test.py
+python scripts/smoke_test.py
 ```
 
 ### GitHub Actions および Git 運用

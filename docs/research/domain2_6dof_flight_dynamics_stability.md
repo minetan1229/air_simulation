@@ -6,10 +6,10 @@
 - **作成日**: 2026年11月10日
 - **保存先パス**: `docs/research/domain2_6dof_flight_dynamics_stability.md`
 - **関連モジュール**:
-  - 運動方程式・数値積分: [`physics/flight_sim.py`](file:///c:/Users/theor/OneDrive/Desktop/dev/minegishi/paper_airplanes/simulation/v3/physics/flight_sim.py)
-  - 空力・動的減衰・非定常流核: [`physics/aero_kernel.py`](file:///c:/Users/theor/OneDrive/Desktop/dev/minegishi/paper_airplanes/simulation/v3/physics/aero_kernel.py)
-  - 物性・安定微係数スキーマ: [`physics/config_schema.py`](file:///c:/Users/theor/OneDrive/Desktop/dev/minegishi/paper_airplanes/simulation/v3/physics/config_schema.py)
-  - 物理モデル正本: [`docs/PHYSICS_MODELS.md`](file:///c:/Users/theor/OneDrive/Desktop/dev/minegishi/paper_airplanes/simulation/v3/docs/PHYSICS_MODELS.md)
+  - 運動方程式・数値積分: [`physics/flight_sim.py`](../../physics/flight_sim.py)
+  - 空力・動的減衰・非定常流核: [`physics/aero_kernel.py`](../../physics/aero_kernel.py)
+  - 物性・安定微係数スキーマ: [`physics/config_schema.py`](../../physics/config_schema.py)
+  - 物理モデル正本: [`docs/PHYSICS_MODELS.md`](../PHYSICS_MODELS.md)
 
 ---
 
@@ -58,7 +58,7 @@
   - 飛行モードの分岐: 重心位置 $x_{cg}/c$ を前後に移動させると、(1) はためき・タンブリング運動（Flutter/Tumble, $x_{cg} > 0.35c$）、(2) 定常安定滑空（Steady Gliding, $0.20c < x_{cg} < 0.30c$）、(3) 急降下ダイブ（Steep Dive, $x_{cg} < 0.15c$）へと超臨界ホップ分岐（Supercritical Hopf Bifurcation）する。
 - **本シミュレータへの工学的インプリケーション**:
   - 機首折り重ね（Nose fold packet）によって重心 $x_{cg}$ を前縁から $20\% \sim 25\%$ 位置に固定することが、折り紙航空機が水平尾翼なしで受動的静安定を獲得する物理的必須条件である。
-  - シミュレータの [`physics/aero_kernel.py`](file:///c:/Users/theor/OneDrive/Desktop/dev/minegishi/paper_airplanes/simulation/v3/physics/aero_kernel.py) において、$x_{cp}$ が一定ではなく迎え角 $\alpha$ に伴って前後に移動する非線形シフト項（`cp_shift_gain`）を正確に評価することが不可欠。
+  - シミュレータの [`physics/aero_kernel.py`](../../physics/aero_kernel.py) において、$x_{cp}$ が一定ではなく迎え角 $\alpha$ に伴って前後に移動する非線形シフト項（`cp_shift_gain`）を正確に評価することが不可欠。
 
 ---
 
@@ -86,7 +86,7 @@
     - $V_{trim} < V_0 < 2.5 V_{trim}$: 減衰フゴイド波動滑空（Damped Wave）
     - $V_0 > 2.8 V_{trim}$: 宙返り（Vertical Loop / Apogee stall）
 - **本シミュレータへの工学的インプリケーション**:
-  - 本プロジェクトの [`physics/flight_sim.py`](file:///c:/Users/theor/OneDrive/Desktop/dev/minegishi/paper_airplanes/simulation/v3/physics/flight_sim.py) におけるフゴイド周期のベースライン検証値として $\omega_{n} \propto 1/V$ の関係が厳密に成立することを確認する根拠となる。
+  - 本プロジェクトの [`physics/flight_sim.py`](../../physics/flight_sim.py) におけるフゴイド周期のベースライン検証値として $\omega_{n} \propto 1/V$ の関係が厳密に成立することを確認する根拠となる。
   - 滑空比 $L/D$ の向上は滑空距離を伸ばす反面、フゴイド減衰比 $\zeta_{ph}$ を低下させ、大気外乱に対して波打つピッチング振動が持続しやすくなるトレードオフを規定する。
 
 ---
@@ -137,7 +137,7 @@
   - 縦減衰微係数結合項:
     $$(C_{mq} + C_{m\dot{\alpha}}) \approx -1.8 \sim -2.6\text{ rad}^{-1}$$
 - **本シミュレータへの工学的インプリケーション**:
-  - 本リポジトリの物理正本 [`docs/PHYSICS_MODELS.md`](file:///c:/Users/theor/OneDrive/Desktop/dev/minegishi/paper_airplanes/simulation/v3/docs/PHYSICS_MODELS.md) §2（Helmbold揚力傾斜）および §4（$C_{D0}(Re)$ スケーリング則）の理論的バックボーンとなる基準実験データである。
+  - 本リポジトリの物理正本 [`docs/PHYSICS_MODELS.md`](../PHYSICS_MODELS.md) §2（Helmbold揚力傾斜）および §4（$C_{D0}(Re)$ スケーリング則）の理論的バックボーンとなる基準実験データである。
 
 ---
 
@@ -160,7 +160,7 @@
   - ピッチ減衰微係数 $C_{mq}$:
     線形領域で $C_{mq} \approx -1.2 \sim -1.8\text{ rad}^{-1}$。失速領域突入に伴い一時的に減衰が激減（$-0.3$ 付近へ低下）する。
 - **本シミュレータへの工学的インプリケーション**:
-  - [`physics/aero_kernel.py`](file:///c:/Users/theor/OneDrive/Desktop/dev/minegishi/paper_airplanes/simulation/v3/physics/aero_kernel.py) の `lsb_dynamic_stall_shift` および `lsb_dynamic_stall_hysteresis` の物理パラメータ（`kappa_lsb = 1.5`, `delta_alpha0_deg = 2.5`）が、Sunadaらの極薄翼実験データと正確に整合することを確認。
+  - [`physics/aero_kernel.py`](../../physics/aero_kernel.py) の `lsb_dynamic_stall_shift` および `lsb_dynamic_stall_hysteresis` の物理パラメータ（`kappa_lsb = 1.5`, `delta_alpha0_deg = 2.5`）が、Sunadaらの極薄翼実験データと正確に整合することを確認。
 
 ---
 
@@ -238,7 +238,7 @@
   - 空力弾性セルフ・トリミング効果:
     動圧増加に伴い膜翼が受動的に変形（Washout）し、高突風時におけるロールモーメント擾乱を自動的に緩和。
 - **本シミュレータへの工学的インプリケーション**:
-  - 本リポジトリの [`physics/config_schema.py`](file:///c:/Users/theor/OneDrive/Desktop/dev/minegishi/paper_airplanes/simulation/v3/physics/config_schema.py) におけるデフォルト微係数（`cl_roll_rate = -0.40`, `cn_yaw_rate = -0.30`, `cy_beta = -0.25`, `cl_beta = -0.03`, `cn_beta = 0.08`）の実験的妥当性を直接裏付ける最重要文献である。
+  - 本リポジトリの [`physics/config_schema.py`](../../physics/config_schema.py) におけるデフォルト微係数（`cl_roll_rate = -0.40`, `cn_yaw_rate = -0.30`, `cy_beta = -0.25`, `cl_beta = -0.03`, `cn_beta = 0.08`）の実験的妥当性を直接裏付ける最重要文献である。
 
 ---
 
@@ -300,7 +300,7 @@
   - 完全剥離領域におけるブラフボディ抗力減衰への遷移:
     $$\Delta C_{l,damp} = - C_{D,cross} \left(\frac{p b}{2V}\right) \left|\frac{p b}{2V}\right|$$
 - **本シミュレータへの工学的インプリケーション**:
-  - [`physics/aero_kernel.py`](file:///c:/Users/theor/OneDrive/Desktop/dev/minegishi/paper_airplanes/simulation/v3/physics/aero_kernel.py) の `nonlinear_dynamic_damping` 関数において、失速進行度 $w_{sep}$ に応じてポテンシャル線形減衰からブラフボディ交差流抗力減衰（$|p|, |q|, |r|$ 依存項）へ滑らかにスイッチングする実装の物理的正当性を保証する。
+  - [`physics/aero_kernel.py`](../../physics/aero_kernel.py) の `nonlinear_dynamic_damping` 関数において、失速進行度 $w_{sep}$ に応じてポテンシャル線形減衰からブラフボディ交差流抗力減衰（$|p|, |q|, |r|$ 依存項）へ滑らかにスイッチングする実装の物理的正当性を保証する。
 
 ---
 
@@ -325,7 +325,7 @@
   - RKMK幾何学的積分法:
     Lie代数 $\mathfrak{so}(3)$ 上で増分ベクトルを計算し、指数写像 $\exp: \mathfrak{so}(3) \to SO(3)$（四元数の Rodrigues 回転式）を介して積分することで、機械精度（$10^{-16}$）でノルム $\|q\| = 1$ を恒等的に保存する。
 - **本シミュレータへの工学的インプリケーション**:
-  - 本リポジトリ [`physics/flight_sim.py`](file:///c:/Users/theor/OneDrive/Desktop/dev/minegishi/paper_airplanes/simulation/v3/physics/flight_sim.py) の `_unpack` および `quaternion_normalize` において採用されている「高精度RK4 ＋ ステップ毎ノルム正規化（許容ドリフト `QUATERNION_NORM_TOLERANCE = 5.0e-3`）」が、航空力学シミュレーションとして理論的に正当化される。
+  - 本リポジトリ [`physics/flight_sim.py`](../../physics/flight_sim.py) の `_unpack` および `quaternion_normalize` において採用されている「高精度RK4 ＋ ステップ毎ノルム正規化（許容ドリフト `QUATERNION_NORM_TOLERANCE = 5.0e-3`）」が、航空力学シミュレーションとして理論的に正当化される。
 
 ---
 
@@ -366,7 +366,7 @@
     $$\mathbf{F}_{app} = \boldsymbol{\omega} \times \mathbf{P}_A \implies \begin{cases} F_{app,x} = + q \cdot m_{add,z} \cdot w \\ F_{app,y} = - p \cdot m_{add,z} \cdot w \\ F_{app,z} = 0 \end{cases}$$
     $$\mathbf{M}_{app} = - \mathbf{V}_{rel} \times \mathbf{P}_A \implies \begin{cases} M_{app,x} = - v \cdot m_{add,z} \cdot w \\ M_{app,y} = + u \cdot m_{add,z} \cdot w \\ M_{app,z} = 0 \end{cases}$$
 - **本シミュレータへの工学的インプリケーション**:
-  - [`physics/aero_kernel.py`](file:///c:/Users/theor/OneDrive/Desktop/dev/minegishi/paper_airplanes/simulation/v3/physics/aero_kernel.py) の `compute_apparent_forces` および `thin_plate_apparent_inertia` の数式・符号・係数が、Newmanの海洋流体力学原典の理論厳密解と完全一致することを確認。
+  - [`physics/aero_kernel.py`](../../physics/aero_kernel.py) の `compute_apparent_forces` および `thin_plate_apparent_inertia` の数式・符号・係数が、Newmanの海洋流体力学原典の理論厳密解と完全一致することを確認。
 
 ---
 
@@ -407,7 +407,7 @@
   - 突風や急激な姿勢変化に対する揚力立ち上がり遅れ:
     ステップ入力に対し、瞬間揚力は非循環付加質量項（撃力）を除いて定常値の約半分（$50\%$）から始まり、後方への渦放出に伴って時定数 $\tau_{circ}$ で $100\%$ へ漸近する。
 - **本シミュレータへの工学的インプリケーション**:
-  - [`physics/aero_kernel.py`](file:///c:/Users/theor/OneDrive/Desktop/dev/minegishi/paper_airplanes/simulation/v3/physics/aero_kernel.py) の `unsteady_circulation_lag` 関数における時定数計算式 `tau = (k * c) / (2.0 * max(v, 0.1))`（既定 $k=2.0$）の直接の理論的出典である。
+  - [`physics/aero_kernel.py`](../../physics/aero_kernel.py) の `unsteady_circulation_lag` 関数における時定数計算式 `tau = (k * c) / (2.0 * max(v, 0.1))`（既定 $k=2.0$）の直接の理論的出典である。
 
 ---
 
@@ -505,7 +505,7 @@
 
 以下の表は、本調査で抽出された20本の学術論文、風洞試験値、水槽実験、および実飛行パラメータ同定結果を総合し、**標準的な折り紙紙飛行機（質量 $m = 2 \sim 5\text{ g}$, $AR = 1.0 \sim 3.0$, $Re = 1.0 \times 10^4 \sim 5.0 \times 10^4$）における6自由度安定微係数の推奨値・物理的許容範囲**を取りまとめたものである。
 
-本リポジトリの [`physics/config_schema.py`](file:///c:/Users/theor/OneDrive/Desktop/dev/minegishi/paper_airplanes/simulation/v3/physics/config_schema.py) および [`physics/aero_kernel.py`](file:///c:/Users/theor/OneDrive/Desktop/dev/minegishi/paper_airplanes/simulation/v3/physics/aero_kernel.py) のデフォルト値およびクランプ範囲との整合性も併記する。
+本リポジトリの [`physics/config_schema.py`](../../physics/config_schema.py) および [`physics/aero_kernel.py`](../../physics/aero_kernel.py) のデフォルト値およびクランプ範囲との整合性も併記する。
 
 | 記号 / 微係数名 | 物理的意味 | 標準推奨値 (Typical) | 物理的許容範囲 (Min ~ Max) | 単位 | コード正本 / 対応パラメータ | 主要文献根拠 |
 |:---|:---|:---:|:---:|:---:|:---|:---|
@@ -547,4 +547,4 @@
 3. **極軽量構造体特有の付加質量と過渡非定常循環遅れ**:
    空気と紙の質量比が近接しているため、流体付加質量テンソル（Newman, 1977; Andersen et al., 2005）およびWagner循環立ち上がり遅れ（Leishman & Beddoes, 1989）を6DoF運動方程式に正しく連成させることが、手投げ射出時の突風応答およびアポジー（最高到達点）遷移の忠実度を決定づける。
 
-これらの数理モデルは、現在本リポジトリで整備されている [`physics/flight_sim.py`](file:///c:/Users/theor/OneDrive/Desktop/dev/minegishi/paper_airplanes/simulation/v3/physics/flight_sim.py) および [`physics/aero_kernel.py`](file:///c:/Users/theor/OneDrive/Desktop/dev/minegishi/paper_airplanes/simulation/v3/physics/aero_kernel.py) の高度物理モジュール群と完全に軌を一にしており、今後のGA最適化およびCFD検証における厳密な照合正本として機能する。
+これらの数理モデルは、現在本リポジトリで整備されている [`physics/flight_sim.py`](../../physics/flight_sim.py) および [`physics/aero_kernel.py`](../../physics/aero_kernel.py) の高度物理モジュール群と完全に軌を一にしており、今後のGA最適化およびCFD検証における厳密な照合正本として機能する。
