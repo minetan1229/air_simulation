@@ -1781,12 +1781,19 @@ def evaluate_cases_on_device(
             ),
             dtype=xp.float64,
         )
+        max_dur = max(group_durations) if group_durations else 20.0
+        # Allow sufficient integration steps for long flights while preventing infinite loops:
+        # At typical minimum dt ~ 1e-3 to 2e-3, steps scale proportionally to flight duration.
+        calculated_steps = min(max(int(max_dur / 1.5e-3) + 1000, 2500), 40000)
         batch = gpu_dynamics.simulate_batch(
             xp,
             params,
             initial,
             xp.asarray(group_durations, dtype=xp.float64),
             2.0e-2,
+            max_steps=calculated_steps,
+            max_steps_per_case=calculated_steps,
+            capture_timeout_s=10.0,
         )
 
         state = _to_host(xp, batch["state"])

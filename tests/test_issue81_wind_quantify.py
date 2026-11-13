@@ -5,6 +5,7 @@ from __future__ import annotations
 import math
 
 import numpy as np
+import pytest
 
 from physics.flight_sim import wind_vector
 from physics.ga2.wind_model_scope import (
@@ -30,6 +31,7 @@ def _population(n=8):
     return pop
 
 
+@pytest.mark.slow
 def test_variable_wind_changes_trajectory_vs_mean():
     from physics.config_schema import EnvironmentConfig
 
@@ -55,6 +57,8 @@ def test_variable_wind_changes_trajectory_vs_mean():
     assert not np.allclose(w_t0, w_t1, atol=1e-9), "gust must make the field time-varying"
 
 
+@pytest.mark.slow
+@pytest.mark.integration
 def test_rank_correlation_and_miss_rate_in_range():
     pop = _population()
     report = measure_wind_rank_risk(pop, top_k=3)
@@ -73,6 +77,7 @@ def test_rank_correlation_and_miss_rate_in_range():
     print("rank risk:", report["correlation"], report["miss_rate"])
 
 
+@pytest.mark.slow
 def test_deterministic_under_fixed_seed():
     pop = _population()
     r1 = measure_wind_rank_risk(pop, top_k=3, seed=99)
@@ -82,6 +87,8 @@ def test_deterministic_under_fixed_seed():
     assert r1["scores"] == r2["scores"]
 
 
+@pytest.mark.slow
+@pytest.mark.integration
 def test_stable_glide_ranking_quantified_and_scope_stated():
     pop = _population()
     report = measure_wind_rank_risk(pop, top_k=2)

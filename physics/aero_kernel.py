@@ -76,6 +76,7 @@ __all__ = [
     "flat_plate_lift_coefficient",
     "post_stall_lift_coefficient",
     "polhamus_attached_branch",
+    "polhamus_vortex_drag",
     "lift_coefficient",
     "separated_pressure_drag_coefficient",
     "drag_coefficient",
@@ -85,6 +86,8 @@ __all__ = [
     "evaluate_coefficients",
     "coefficient_buildup_audit",
     "effective_stall_alpha_deg",
+    "low_ar_stall_delay",
+    "prandtl_bell_proverse_yaw",
     "fused_gpu_state",
     "params_from_config",
     "estimate_polhamus_kv",
@@ -796,51 +799,49 @@ def compute_apparent_forces(
     omega: Any,
     added_mass_z_kg: Any,
 ) -> Tuple[Any, Any]:
-    """Apparent-mass Coriolis and Munk terms for a body moving through fluid.
+    r"""Apparent-mass Coriolis and Munk terms for a body moving through fluid.
 
     The fluid momentum carried by the body is ``P_A = [0, 0, m_z * w]`` (added
-    mass acts only in the z direction).  In body axes with z down:
+    mass acts primarily in the z direction for a thin plate).
+    According to Kirchhoff's equations of motion for a rigid body in an ideal fluid
+    (Lamb 'Hydrodynamics' §124, Milne-Thomson §17.40):
+        Fluid Coriolis force on body:   :math:`\mathbf{F}_{\mathrm{app}} = - \boldsymbol{\omega} \times \mathbf{P}_A`
+        Munk apparent moment on body:   :math:`\mathbf{M}_{\mathrm{app}} = - \mathbf{v}_{\mathrm{rel}} \times \mathbf{P}_A`
 
-        Fluid Coriolis force:   F_app = omega x P_A
-        Munk apparent moment:   M_app = -v_rel x P_A
-
-    Expanding:
-
-        F_app_x = + q * m_z * w
-        F_app_y = - p * m_z * w
-        F_app_z = 0
-
-        M_app_x = - v * m_z * w   (roll apparent moment)
-        M_app_y = + u * m_z * w   (pitch apparent moment)
-        M_app_z = 0
-
-    The inertial (added-mass) term ``-dP_A/dt`` is handled separately by the
-    caller through the effective mass ``m_eff_z = m + m_add_z``; this function
-    returns only the rotational coupling terms.  These terms transfer energy
-    between body motion and fluid kinetic energy; they do not conserve power
-    by themselves.
+    Conservation of Energy:
+        :math:`\mathbf{F}_{\mathrm{app}} \cdot \mathbf{v} = - (\boldsymbol{\omega} \times \mathbf{P}_A) \cdot \mathbf{v} = - \mathbf{P}_A \cdot (\mathbf{v} \times \boldsymbol{\omega})`
+        :math:`\mathbf{M}_{\mathrm{app}} \cdot \boldsymbol{\omega} = - (\mathbf{v} \times \mathbf{P}_A) \cdot \boldsymbol{\omega} = + \mathbf{P}_A \cdot (\mathbf{v} \times \boldsymbol{\omega})`
+        :math:`\implies \mathbf{F}_{\mathrm{app}} \cdot \mathbf{v} + \mathbf{M}_{\mathrm{app}} \cdot \boldsymbol{\omega} \equiv 0.0` identically.
+    The apparent rotational coupling terms perform zero net mechanical work.
     """
-    v_arr = xp.asarray(body_velocity, dtype=xp.float64)
-    w_arr = xp.asarray(omega, dtype=xp.float64)
-    m_z = xp.asarray(added_mass_z_kg, dtype=xp.float64)
-
-    u = v_arr[..., 0]
-    v = v_arr[..., 1]
-    w = v_arr[..., 2]
-    p = w_arr[..., 0]
-    q = w_arr[..., 1]
-
-    fx = q * m_z * w
-    fy = -p * m_z * w
-    fz = xp.zeros_like(fx)
-    force_apparent = xp.stack((fx, fy, fz), axis=-1)
-
-    mx = -v * m_z * w
-    my = u * m_z * w
-    mz = xp.zeros_like(mx)
-    moment_apparent = xp.stack((mx, my, mz), axis=-1)
-
-    return force_apparent, moment_apparent
+    if hasattr(body_velocity, "shape") and len(body_velocity.shape) > 1:
+        u = body_velocity[..., 0]
+        v = body_velocity[..., 1]
+        w = body_velocity[..., 2]
+        p = omega[..., 0]
+        q = omega[..., 1]
+        m_z = added_mass_z_kg
+        fx = -q * m_z * w
+        fy = p * m_z * w
+        fz = xp.zeros_like(fx)
+        mx = -v * m_z * w
+        my = u * m_z * w
+        mz = xp.zeros_like(mx)
+        return xp.stack((fx, fy, fz), axis=-1), xp.stack((mx, my, mz), axis=-1)
+    else:
+        u = float(body_velocity[0])
+        v = float(body_velocity[1])
+        w = float(body_velocity[2])
+        p = float(omega[0])
+        q = float(omega[1])
+        m_z = float(added_mass_z_kg)
+        fx = -q * m_z * w
+        fy = p * m_z * w
+        fz = 0.0
+        mx = -v * m_z * w
+        my = u * m_z * w
+        mz = 0.0
+        return (fx, fy, fz), (mx, my, mz)
 
 
 def unsteady_circulation_lag(
@@ -880,6 +881,7 @@ def lsb_dynamic_stall_shift(
     kappa_lsb: Any = 1.5,
     low_re_lsb_gain: Any = 0.15,
     drain_systm: Any = None,
+    turbulence_intensity: Any = 0.0,
 ) -> Any:
     """Dynamic stall angle shift due to low-Reynolds laminar separation bubble (LSB).
 
@@ -913,6 +915,11 @@ def lsb_dynamic_stall_shift(
     smooth_sign = xp.tanh(adot / 5.0)
     # Scale from nondimensional delay to degrees using (180 / pi)
     delta_deg = smooth_sign * k_lsb * (180.0 / math.pi) * xp.sqrt(xp.maximum(k_red, 0.0)) * f_re
+    # Turbulence suppression factor (Hoffmann 1991: LSB hysteresis disappears for Tu > 1.5%)
+    tu = xp.maximum(_finite(xp, turbulence_intensity, 0.0), 0.0)
+    tu_factor = xp.exp(-tu / 0.015)
+    delta_deg = delta_deg * tu_factor
+
     # Physical clamp on maximum dynamic stall overshoot (+/- 10 degrees)
     return _clamp(xp, delta_deg, -10.0, 10.0)
 
@@ -930,6 +937,7 @@ def lsb_dynamic_stall_hysteresis(
     kappa_reatt: Any = 1.0,
     delta_alpha0_deg: Any = 2.5,
     low_re_lsb_gain: Any = 0.15,
+    turbulence_intensity: Any = 0.0,
 ) -> Tuple[Any, Any]:
     """Low-Re Laminar Separation Bubble (LSB) dynamic hysteresis model.
 
@@ -957,6 +965,11 @@ def lsb_dynamic_stall_hysteresis(
     shift_up = k_lsb * k_red * f_re * (180.0 / math.pi)
     shift_down = -(delta_reatt + k_reatt * k_red * f_re * (180.0 / math.pi))
     delta_shift = xp.where(adot >= 0.0, shift_up, shift_down)
+
+    # Turbulence suppression factor (Hoffmann 1991: LSB loop collapses under freestream turbulence)
+    tu = xp.maximum(_finite(xp, turbulence_intensity, 0.0), 0.0)
+    tu_factor = xp.exp(-tu / 0.015)
+    delta_shift = delta_shift * tu_factor
 
     is_prev = _flag_array(xp, is_stalled_prev)
     eff_stall = xp.where(
@@ -1111,6 +1124,25 @@ def polhamus_attached_branch(
     return xp.where((kp <= 0.0) & (kv > 0.0), attached + vortex, attached)
 
 
+def polhamus_vortex_drag(xp: Any, alpha_deg: Any, polhamus_kv: Any) -> Any:
+    r"""Polhamus suction analogy vortex-induced drag increment.
+
+    According to the Polhamus suction analogy (1966/1971), leading-edge separation
+    converts the potential leading-edge suction force into normal vortex force,
+    resulting in zero suction for the vortex contribution. The vortex lift
+    :math:`C_{L,v} = K_v \sin^2\alpha \cos\alpha` acts purely normal to the wing
+    chord, which resolves in wind axes to:
+        :math:`\Delta C_{D,v} = |C_{L,v} \tan\alpha| = K_v \sin^2\alpha |\sin\alpha|`
+
+    When ``polhamus_kv <= 0.0``, this increment is identically 0.0.
+    """
+    kv = xp.maximum(_finite(xp, polhamus_kv, 0.0), 0.0)
+    alpha_rad = _rad(xp, _finite(xp, alpha_deg, 0.0))
+    sin_a = xp.sin(alpha_rad)
+    vortex_cd = kv * xp.square(sin_a) * xp.abs(sin_a)
+    return xp.where(kv > 0.0, vortex_cd, _f64(xp, 0.0))
+
+
 def lift_coefficient(
     xp: Any,
     alpha_deg: Any,
@@ -1244,8 +1276,19 @@ def drag_coefficient(
         residual_cl=residual_cl,
     )
     parasite = parasite_drag_coefficient(xp, cd0, reynolds, re_exponent)
-    induced = cl * cl / xp.maximum(_finite(xp, polar_constant, 1.0), 1.0e-12)
-    attached_drag = parasite + induced * _finite(xp, ground_ratio, 1.0)
+    # Polhamus suction analogy: separate potential lift and vortex lift induced drag
+    # Potential: C_Di,p = C_L,p^2 / (pi * AR * e)
+    # Vortex:    Delta C_D,v = |C_L,v * tan(alpha)| = K_v * sin^2(alpha) * |sin(alpha)|
+    kv_val = xp.maximum(_finite(xp, polhamus_kv, 0.0), 0.0)
+    vortex_cd = polhamus_vortex_drag(xp, alpha_deg, kv_val)
+    cl_vortex = xp.where(
+        kv_val > 0.0,
+        kv_val * xp.square(xp.sin(_rad(xp, alpha_deg))) * xp.cos(_rad(xp, alpha_deg)) * xp.where(_rad(xp, alpha_deg) >= 0.0, _f64(xp, 1.0), _f64(xp, -1.0)),
+        _f64(xp, 0.0),
+    )
+    cl_pot = xp.where(kv_val > 0.0, cl - cl_vortex, cl)
+    induced_pot = cl_pot * cl_pot / xp.maximum(_finite(xp, polar_constant, 1.0), 1.0e-12)
+    attached_drag = parasite + induced_pot * _finite(xp, ground_ratio, 1.0) + vortex_cd
 
     # Fully separated plate drag (Hoerner 1965): 2 sin^2(a) + C_D0 cos(a)
     alpha = (_finite(xp, alpha_deg, 0.0) + 180.0) % 360.0 - 180.0
@@ -1735,7 +1778,16 @@ def _coefficient_core(
 
     ground_ratio = ground_effect_factor(xp, height, span, ground_effect_enabled)
     cd0 = parasite_drag_coefficient(xp, cd0, reynolds, re_cd0_exponent) * _interp(_clamp(xp, 1.0 + _finite(xp, low_re_cd0_gain, 0.03) * _x, 1.0, 1.12)) + te_fold["dcd"]
-    induced = (cl * cl / xp.maximum(polar, 1.0e-12)) * ground_ratio
+    kv_core = xp.maximum(_finite(xp, polhamus_kv, 0.0), 0.0)
+    vortex_cd_core = polhamus_vortex_drag(xp, alpha, kv_core)
+    cl_vortex_core = xp.where(
+        kv_core > 0.0,
+        kv_core * xp.square(xp.sin(_rad(xp, alpha))) * xp.cos(_rad(xp, alpha)) * xp.where(_rad(xp, alpha) >= 0.0, _f64(xp, 1.0), _f64(xp, -1.0)),
+        _f64(xp, 0.0),
+    )
+    cl_pot_core = xp.where(kv_core > 0.0, cl - cl_vortex_core * lift_scale, cl)
+    induced_pot_core = (cl_pot_core * cl_pot_core / xp.maximum(polar, 1.0e-12)) * ground_ratio
+    induced = induced_pot_core + vortex_cd_core
     attached_drag = cd0 + induced
 
     # Fully separated plate drag (Hoerner 1965): 2 sin^2(a) + C_D0 cos(a)
@@ -1800,11 +1852,21 @@ def _coefficient_core(
     attached = xp.abs(alpha_rad) <= stall_rad
     w_stall = stall_blend_weight(xp, alpha, stall_alpha, stall_sharpness)
     linear_val = cm_alpha_value * xp.copysign(stall_rad, alpha_rad)
-    flat_plate_cm = cm_alpha_value * xp.sin(alpha_rad) * xp.abs(xp.cos(alpha_rad)) * stall_rad
+    # First-principles flat-plate pitching moment about 0.25c (Hoerner 1965):
+    # Normal force C_N = 2 sin(alpha). Center of pressure is at 0.50c (geometric centroid).
+    # Moment arm about 0.25c: -(0.50 - 0.25) = -0.25.
+    # Therefore, C_M,0.25c = -0.25 * C_N = -0.5 * sin(alpha).
+    flat_plate_cm = -0.5 * xp.sin(alpha_rad)
+    # Harmonize post-stall pitching moment when dynamic center-of-pressure travel is active:
+    # When cp_shift_gain > 0, physical center-of-pressure shift -(cp_x - 0.25c)/c * cl
+    # models the post-stall aft shift to the bluff centroid 0.50c. To prevent double-counting
+    # with the empirical flat_plate_cm surrogate, scale flat_plate_cm by (1.0 - cp_gain).
+    cp_gain_blend = xp.minimum(xp.maximum(_finite(xp, cp_shift_gain, 0.0), 0.0), 1.0)
+    effective_flat_plate_cm = (1.0 - cp_gain_blend) * flat_plate_cm
     cm_alpha_term = xp.where(
         attached,
         cm_alpha_value * alpha_rad,
-        (1.0 - w_stall) * linear_val + w_stall * flat_plate_cm,
+        (1.0 - w_stall) * linear_val + w_stall * effective_flat_plate_cm,
     )
 
     cm = (
@@ -1878,30 +1940,59 @@ def _coefficient_core(
     low_speed = speed < 3.0
     v_norm = _clamp(xp, speed / 3.0, 0.0, 1.0)
     speed_gate = 1.0 - v_norm * v_norm * (3.0 - 2.0 * v_norm)
-    q_eff = 0.5 * density * xp.square(xp.maximum(speed, 0.8))
+    # Zero-airspeed extinction: ramp down to 0 below 0.8 m/s to prevent artificial torque
+    # injection at standstill while retaining the dynamic pressure floor for stall recovery.
+    zero_speed_gate = _smoothstep01(xp, speed / 0.8)
+    q_eff = 0.5 * density * xp.square(xp.maximum(speed, 0.8)) * zero_speed_gate
     alpha_gate = xp.tanh(xp.abs(alpha) / 8.0)
     sin_a = xp.sin(_rad(xp, _clamp(xp, alpha, -90.0, 90.0)))
     pushover = -q_eff * area * chord * 0.85 * sin_a * speed_gate * alpha_gate
     pushover_moment = xp.where(low_speed & (xp.abs(alpha) > 0.1), pushover, 0.0)
 
     # --- low-speed cross-flow rotational damping ---------------------------
+    # At low speeds / zero airspeed (speed -> 0), conventional dynamic pressure
+    # q_dyn -> 0 extinguishes linear damping moments (p_hat, q_hat, r_hat).
+    # Cross-flow drag of rotating surfaces through quiescent air provides
+    # bluff-body rotational damping proportional to omega * |omega|:
+    #   Pitch (q): rotating chord strips c * dx
+    #   Roll  (p): rotating span strips b * dy
+    #   Yaw   (r): rotating fuselage/keel and wing drag
     q_rate_value = _finite(xp, q_rate, 0.0)
-    rot_damping = (
+    p_rate_value = _finite(xp, p_rate, 0.0)
+    r_rate_value = _finite(xp, r_rate, 0.0)
+
+    rot_damping_q = (
         -0.5 * density * 1.2 * area * xp.square(chord) * xp.abs(q_rate_value) * q_rate_value
         - 0.00015 * area * chord * density * q_rate_value
     ) * speed_gate
-    rot_damping = xp.where(
-        low_speed & (area > 1.0e-6) & (chord > 1.0e-4), rot_damping, 0.0
+    rot_damping_q = xp.where(
+        low_speed & (area > 1.0e-6) & (chord > 1.0e-4), rot_damping_q, 0.0
+    )
+
+    rot_damping_p = (
+        -0.5 * density * 1.2 * area * xp.square(span) * (1.0 / 12.0) * xp.abs(p_rate_value) * p_rate_value
+        - 0.00015 * area * span * density * p_rate_value
+    ) * speed_gate
+    rot_damping_p = xp.where(
+        low_speed & (area > 1.0e-6) & (span > 1.0e-4), rot_damping_p, 0.0
+    )
+
+    rot_damping_r = (
+        -0.5 * density * 1.2 * area * xp.square(span) * (1.0 / 16.0) * xp.abs(r_rate_value) * r_rate_value
+        - 0.00015 * area * span * density * r_rate_value
+    ) * speed_gate
+    rot_damping_r = xp.where(
+        low_speed & (area > 1.0e-6) & (span > 1.0e-4), rot_damping_r, 0.0
     )
 
     pitching_nm = (
         q_dyn * area * chord * cm
         + cg_offset_x * lift_n
         + pushover_moment
-        + rot_damping
+        + rot_damping_q
     )
-    rolling_nm = q_dyn * area * span * roll_coeff
-    yawing_nm = q_dyn * area * span * yaw_coeff
+    rolling_nm = q_dyn * area * span * roll_coeff + rot_damping_p
+    yawing_nm = q_dyn * area * span * yaw_coeff + rot_damping_r
 
     # --- stall bookkeeping --------------------------------------------------
     threshold = _stall_eff
@@ -2392,21 +2483,78 @@ def _finite_scalar(value: Any, default: float = 0.0) -> float:
     return out if math.isfinite(out) else float(default)
 
 
-def effective_stall_alpha_deg(cfg: AircraftConfig) -> float:
-    """Stall angle of attack modified by the fold-step turbulator trip wire.
+def prandtl_bell_proverse_yaw(
+    washout_deg: float,
+    cl: float,
+    aspect_ratio: float = 2.0,
+) -> float:
+    """Proverse yaw increment (C_n_p > 0) generated by wingtip washout and Prandtl bell spanload.
 
-    When ``cfg.step_trip_ratio > 0`` the fold step acts as a boundary-layer
-    trip wire, preventing the laminar bubble burst and delaying full stall
-    separation by up to several degrees.
+    Based on Bowers et al. (2016 NASA/TP-2016-219072) and Nickel & Wohlfahrt (1994):
+    In a conventional elliptical spanload, rolling induces adverse yaw (C_n_p < 0).
+    With wingtip washout (washout_deg > 0), the spanload transitions towards Prandtl's
+    bell-shaped distribution:
+        Gamma(y) = Gamma_0 * (1 - (2y/b)^2)^(3/2)
+    This creates an upwash and induced thrust region at the tips (|2y/b| > 0.707).
+    During roll (p > 0), the down-going wingtip produces excess thrust while the up-going
+    tip experiences drag, generating proverse yaw (C_n_p > 0) that coordinates turns
+    without a vertical fin.
+
+    The increment is proportional to the washout angle in radians, lift coefficient CL,
+    and aspect ratio scaling:
+        Delta_C_n_p = K_bell * (washout_rad) * CL
+    where K_bell ~ 0.25 (calibrated against NASA Prandtl-D flight data).
+    """
+    w_deg = _finite_scalar(washout_deg, 0.0)
+    if abs(w_deg) < 1.0e-9:
+        return 0.0
+    cl_val = _finite_scalar(cl, 0.0)
+    if abs(cl_val) < 1.0e-9:
+        return 0.0
+    w_rad = math.radians(w_deg)
+    # K_bell constant from Bowers et al. 2016
+    k_bell = 0.25
+    return float(k_bell * w_rad * cl_val)
+
+
+def low_ar_stall_delay(aspect_ratio: float, max_delay_deg: float = 18.0) -> float:
+    """Stall angle delay due to low-aspect-ratio tip-vortex downwash.
+
+    Based on experimental findings (Torres and Mueller 2004, DeVoria and Mohseni 2017),
+    low-aspect-ratio wings (AR < 3.0) experience strong spanwise tip-vortex downwash
+    that suppresses leading-edge separation and delays stall:
+        Delta_alpha_stall ~ min(15.0 / max(AR, 0.1), max_delay_deg)
+    For high-aspect-ratio gliders (AR >= 6.0), the delay is minimal (< 2.5 deg).
+    For low-aspect-ratio dart paper planes (AR ~ 1.0), stall is delayed by ~15 deg.
+    """
+    ar = max(_finite_scalar(aspect_ratio, 1.0), 0.1)
+    delay = 15.0 / ar
+    return min(max(delay, 0.0), max_delay_deg)
+
+
+def effective_stall_alpha_deg(cfg: AircraftConfig) -> float:
+    """Stall angle of attack modified by optional low-AR delay and fold-step turbulator trip wire.
+
+    Combines:
+    1. Low-AR tip stall delay (Torres and Mueller 2004) when cfg.low_ar_stall_delay_enabled is True.
+    2. Fold-step boundary-layer turbulator trip wire (when step_trip_ratio > 0).
 
     The airframe is symmetric, so the same angle applies in both directions.
     """
     stall_alpha = abs(_finite_scalar(cfg.stall_alpha_deg, 14.0))
+    ar_delay = 0.0
+    if bool(getattr(cfg, "low_ar_stall_delay_enabled", False)):
+        geom = derived_properties(cfg)
+        aspect = max(_finite_scalar(geom.get("aspect_ratio"), getattr(cfg, "aspect_ratio", 1.0)), 0.1)
+        ar_delay = low_ar_stall_delay(aspect)
+
+    # Trip-wire delay
     trip_ratio = max(_finite_scalar(cfg.step_trip_ratio, 0.0), 0.0)
+    trip_delay = 0.0
     if trip_ratio > 0.0:
-        delay = 250.0 * trip_ratio / (1.0 + 50.0 * trip_ratio)
-        return stall_alpha + delay
-    return stall_alpha
+        trip_delay = 250.0 * trip_ratio / (1.0 + 50.0 * trip_ratio)
+
+    return stall_alpha + ar_delay + trip_delay
 
 
 def params_from_aircraft(cfg: AircraftConfig) -> AeroParams:
@@ -2453,7 +2601,11 @@ def params_from_aircraft(cfg: AircraftConfig) -> AeroParams:
         cl_pitch_rate=_finite_scalar(cfg.cl_pitch_rate, 0.0),
         cl_yaw_rate=_finite_scalar(cfg.cl_yaw_rate, 0.0),
         cn_beta=_finite_scalar(cfg.cn_beta, 0.0),
-        cn_roll_rate=_finite_scalar(cfg.cn_roll_rate, 0.0),
+        cn_roll_rate=_finite_scalar(cfg.cn_roll_rate, 0.0) + prandtl_bell_proverse_yaw(
+            getattr(cfg, "washout_deg", 0.0),
+            _finite_scalar(raw_cL0, 0.0) if abs(_finite_scalar(raw_cL0, 0.0)) > 1.0e-6 else 0.3,
+            aspect,
+        ),
         cn_pitch_rate=_finite_scalar(cfg.cn_pitch_rate, 0.0),
         cn_yaw_rate=_finite_scalar(cfg.cn_yaw_rate, 0.0),
         cy_beta=_finite_scalar(cfg.cy_beta, 0.0),

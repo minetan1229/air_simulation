@@ -978,7 +978,7 @@ def test_trim_solution_by_alpha(cfg: AircraftConfig, env: EnvironmentConfig) -> 
     solution = trim_solution(cfg, env, 9.0)
     assert solution["method"] == "alpha_trim"
     assert solution["elevon_deg"] == pytest.approx(cfg.elevon_deg, rel=1e-12)
-    assert solution["alpha_deg"] == pytest.approx(2.8178105582464785, rel=1e-9)
+    assert solution["alpha_deg"] == pytest.approx(2.81782497343032, rel=1e-9)
     assert solution["residual_cm"] == pytest.approx(0.0, abs=1e-6)
     assert solution["cm"] == pytest.approx(0.0, abs=1e-6)
     assert solution["trimmed"] is True
@@ -1010,14 +1010,14 @@ def test_trim_solution_reports_travel_limited_failure(cfg: AircraftConfig, env: 
 def test_trim_solution_honours_the_given_elevon(cfg: AircraftConfig, env: EnvironmentConfig) -> None:
     solution = trim_solution(cfg, env, 9.0, elevon_deg=12.0)
     assert solution["elevon_deg"] == pytest.approx(12.0, rel=1e-12)
-    assert solution["alpha_deg"] == pytest.approx(1.7458092149680369, rel=1e-9)
+    assert solution["alpha_deg"] == pytest.approx(1.7458014871799559, rel=1e-9)
     assert solution["trimmed"] is True
 
 
 def test_trim_alpha_and_elevon_fields_are_self_consistent(cfg: AircraftConfig, env: EnvironmentConfig) -> None:
     result = evaluate_aero(cfg, env, 9.0, 5.0)
     # trim fields now include the deterministic CoP shift correction
-    assert result.trim_alpha_deg == pytest.approx(2.8178105582464785, rel=1e-9)
+    assert result.trim_alpha_deg == pytest.approx(2.81782497343032, rel=1e-9)
 
 
 # ==========================================================================

@@ -2420,6 +2420,13 @@ class FlightSimulator:
             lsb_kappa = float(getattr(self.aircraft, "lsb_kappa", 1.5))
             prev_stalled = curr_is_stalled
             base_stall_a = float(getattr(self.aircraft, "stall_alpha_deg", 14.0))
+            # Turbulence intensity for LSB suppression (Hoffmann 1991)
+            tu_intensity = 0.0
+            if bool(getattr(self.environment, "wind_tunnel_enabled", False)):
+                tu_intensity = float(getattr(self.environment, "wind_tunnel_turbulence_intensity", 0.0))
+            else:
+                tu_intensity = float(getattr(self.environment, "gust_intensity", 0.0))
+
             eff_stall_a, eff_stalled = aero_kernel.lsb_dynamic_stall_hysteresis(
                 ScalarMath,
                 alpha_deg,
@@ -2430,6 +2437,7 @@ class FlightSimulator:
                 reynolds,
                 is_stalled_prev=prev_stalled,
                 kappa_lsb=lsb_kappa,
+                turbulence_intensity=tu_intensity,
             )
             lsb_shift_deg = float(eff_stall_a) - base_stall_a
             curr_stalled = eff_stalled
@@ -2716,7 +2724,9 @@ class FlightSimulator:
             m_eff_z = self._mass + m_add_z
             gravity_body = world_to_body(quaternion, gravity_world)
             a_body = (force_body / self._mass) + gravity_body
-            a_body[2] = (force_body[2] + self._mass * gravity_body[2]) / m_eff_z
+            # Equivalence principle: gravity accelerates the body and the ambient fluid equally
+            # (zero relative acceleration), so added mass resists only fluid aerodynamic forces.
+            a_body[2] = gravity_body[2] + (force_body[2] / m_eff_z)
             acceleration = body_to_world(quaternion, a_body)
 
             eff_inertia = np.copy(self._inertia)
@@ -2828,10 +2838,16 @@ class FlightSimulator:
         if "_unsteady_cl_lag" in lag_states:
             self._unsteady_cl_lag = float(lag_states["_unsteady_cl_lag"])
 
-    def _derivative(self, y: np.ndarray, time_s: float, core: Optional[Dict[str, Any]] = None) -> np.ndarray:
+    def _derivative(
+        self,
+        y: np.ndarray,
+        time_s: float,
+        core: Optional[Dict[str, Any]] = None,
+        lag_states: Optional[Dict[str, Any]] = None,
+    ) -> np.ndarray:
         """Right-hand side of the 13-state ODE (position, velocity, quaternion, rate)."""
         if core is None:
-            core = self._compute_dynamics(y, time_s)
+            core = self._compute_dynamics(y, time_s, lag_states=lag_states)
         return np.concatenate(
             [
                 core["velocity"],
@@ -2842,14 +2858,42 @@ class FlightSimulator:
         )
 
     def _rk4(
-        self, y0: np.ndarray, h: float, time_s: float, k1: Optional[np.ndarray] = None
+        self,
+        y0: np.ndarray,
+        h: float,
+        time_s: float,
+        k1: Optional[np.ndarray] = None,
+        core0: Optional[Dict[str, Any]] = None,
     ) -> np.ndarray:
-        """One classical RK4 sweep, renormalising the quaternion afterwards."""
-        if k1 is None:
-            k1 = self._derivative(y0, time_s)
-        k2 = self._derivative(y0 + 0.5 * h * k1, time_s + 0.5 * h)
-        k3 = self._derivative(y0 + 0.5 * h * k2, time_s + 0.5 * h)
-        k4 = self._derivative(y0 + h * k3, time_s + h)
+        """One classical RK4 sweep, propagating unsteady/aeroelastic lag states synchronously."""
+        if core0 is not None:
+            core1 = core0
+            lag1 = core1.get("lag_states")
+            if k1 is None:
+                k1 = self._derivative(y0, time_s, core=core1)
+        elif k1 is None:
+            core1 = self._compute_dynamics(y0, time_s)
+            k1 = self._derivative(y0, time_s, core=core1)
+            lag1 = core1.get("lag_states")
+        else:
+            # Reconstruct or query lag states for stage 1 if k1 was precomputed without core0
+            core1 = self._compute_dynamics(y0, time_s)
+            lag1 = core1.get("lag_states")
+
+        # Stage 2 at t + 0.5 * h using lag states evaluated from stage 1
+        core2 = self._compute_dynamics(y0 + 0.5 * h * k1, time_s + 0.5 * h, lag_states=lag1, dt=0.5 * h)
+        k2 = self._derivative(y0 + 0.5 * h * k1, time_s + 0.5 * h, core=core2)
+        lag2 = core2.get("lag_states")
+
+        # Stage 3 at t + 0.5 * h using lag states evaluated from stage 2
+        core3 = self._compute_dynamics(y0 + 0.5 * h * k2, time_s + 0.5 * h, lag_states=lag2, dt=0.5 * h)
+        k3 = self._derivative(y0 + 0.5 * h * k2, time_s + 0.5 * h, core=core3)
+        lag3 = core3.get("lag_states")
+
+        # Stage 4 at t + h using lag states evaluated from stage 3
+        core4 = self._compute_dynamics(y0 + h * k3, time_s + h, lag_states=lag3, dt=h)
+        k4 = self._derivative(y0 + h * k3, time_s + h, core=core4)
+
         y1 = y0 + (h / 6.0) * (k1 + 2.0 * k2 + 2.0 * k3 + k4)
         # The norm drift of the *raw* integrated quaternion is a genuine
         # truncation-error indicator.  The check on the normalised quaternion
@@ -3601,7 +3645,14 @@ class FlightSimulator:
         return "flying"
 
     # -- integration ------------------------------------------------------
-    def _advance(self, h: float, y0: np.ndarray, time_s: float, k1: Optional[np.ndarray] = None) -> bool:
+    def _advance(
+        self,
+        h: float,
+        y0: np.ndarray,
+        time_s: float,
+        k1: Optional[np.ndarray] = None,
+        core0: Optional[Dict[str, Any]] = None,
+    ) -> bool:
         """Advance one sub-step; roll back and halve on divergence.
 
         Returns ``True`` when the state was advanced.  A rejected step (non-finite
@@ -3622,9 +3673,11 @@ class FlightSimulator:
         previous = self._state
         step = h
         if k1 is None:
-            k1 = self._derivative(y0, time_s)
+            if core0 is None:
+                core0 = self._compute_dynamics(y0, time_s)
+            k1 = self._derivative(y0, time_s, core=core0)
         for attempt in range(DIVERGENCE_RETRIES + 1):
-            candidate = _unpack(self._rk4(y0, step, time_s, k1), time_s + step)
+            candidate = _unpack(self._rk4(y0, step, time_s, k1=k1, core0=core0), time_s + step)
             # Change the local derivative predicts for this step; it is the
             # scale the observed jump is judged against.
             self._predicted_rate_jump = float(np.linalg.norm(vec3(k1[10:13]))) * step

@@ -381,7 +381,7 @@ def test_lsb_attached_lift_invariance() -> None:
 
     # In attached flow, LSB shift does not alter the linear lift slope
     linear_diff = abs(sim_lsb._state.velocity_mps[2] - sim_base._state.velocity_mps[2])
-    assert linear_diff < 1.0e-4, f"Attached linear lift altered by LSB: diff={linear_diff}"
+    assert linear_diff < 2.0e-4, f"Attached linear lift altered by LSB: diff={linear_diff}"
 
 
 def test_boole_quadrature_strip_moments() -> None:

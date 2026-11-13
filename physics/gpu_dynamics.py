@@ -27,6 +27,7 @@ of length ``N`` that broadcast against each other.
 from __future__ import annotations
 
 import math
+import threading
 from dataclasses import dataclass
 from typing import Any, Dict, Optional, Tuple
 
@@ -426,9 +427,25 @@ def wind_batch(
             return mean
         out[...] = mean
         return out
-    # The wind field is evaluated on the host, so the query points have to be
-    # brought back explicitly.  ``np.asarray`` on a CuPy array raises
-    # "Implicit conversion to a NumPy array is not allowed".
+    # If running on GPU with CuPy, evaluate directly on the device without host D-to-H roundtrip
+    if hasattr(positions, "__cuda_array_interface__") or (hasattr(xp, "__name__") and "cupy" in xp.__name__):
+        pts_device = xp.stack(
+            (positions[:, 0], positions[:, 1], -positions[:, 2]),
+            axis=-1,
+        )
+        values = velocity_components(
+            pts_device,
+            params.env,
+            float(time_s),
+            backend=params.wind_backend,
+            return_host=False,
+        )
+        wind = xp.stack((values[:, 0], values[:, 1], -values[:, 2]), axis=-1)
+        if out is None:
+            return wind
+        out[...] = wind
+        return out
+
     host_positions = positions.get() if hasattr(positions, "get") else np.asarray(positions)
     points = np.stack(
         (
@@ -438,7 +455,7 @@ def wind_batch(
         ),
         axis=-1,
     )
-    values = velocity_components(points, params.env, float(time_s), params.wind_backend)
+    values = velocity_components(points, params.env, float(time_s), params.wind_backend, return_host=True)
     values = np.asarray(values, dtype=np.float64)
     wind = xp.asarray(
         np.stack((values[:, 0], values[:, 1], -values[:, 2]), axis=-1),
@@ -601,7 +618,7 @@ def build_params(
         chord_scale=chord_scale,
         tip_factor=tip_factor,
         allowable_pa=allowable,
-        wind_backend="numpy",
+        wind_backend="cupy" if hasattr(xp, "__name__") and "cupy" in xp.__name__ else "numpy",
         mean_wind=wind,
         use_mean_wind_only=use_mean_wind,
         inertia_matrix=inertia_matrix,
@@ -763,7 +780,9 @@ def _evaluate_state(
         m_eff_z = params.mass + m_add_z
         gravity_body = world_to_body_batch(xp, rotation, gravity_world)
         a_body = (force_body / params.mass[:, xp.newaxis]) + gravity_body
-        a_body_2_app = (force_body[:, 2] + params.mass * gravity_body[:, 2]) / m_eff_z
+        # Equivalence principle: gravity accelerates the body and the ambient fluid equally
+        # (zero relative acceleration), so added mass resists only fluid aerodynamic forces.
+        a_body_2_app = gravity_body[:, 2] + (force_body[:, 2] / m_eff_z)
         a_body_z = xp.where(params.apparent_active, a_body_2_app, a_body[:, 2])
         a_body = xp.stack((a_body[:, 0], a_body[:, 1], a_body_z), axis=-1)
         acceleration = body_to_world_batch(xp, rotation, a_body)
@@ -1022,7 +1041,7 @@ def _is_device_module(xp: Any) -> bool:
 
 
 def _capture_step(
-    xp: Any, step: Any, snapshot: Any, restore: Any
+    xp: Any, step: Any, snapshot: Any, restore: Any, timeout_s: float = 10.0
 ) -> Tuple[Any, Any, Any]:
     """Capture one integration step into a CUDA graph.
 
@@ -1056,6 +1075,9 @@ def _capture_step(
     array module cannot capture: the CPU path, a host without a CUDA device,
     or a driver that refuses the capture.  The caller then runs the eager
     step.
+
+    A thread-based timeout is used because CuPy's ``stream.synchronize()``
+    does not support timeouts and can hang indefinitely on some drivers.
     """
     if not _is_device_module(xp):
         return None, None, None
@@ -1063,30 +1085,46 @@ def _capture_step(
         import cupy as cp
     except Exception:  # pragma: no cover - depends on the host
         return None, None, None
-    try:
-        stream = cp.cuda.Stream(non_blocking=True)
-        pool = cp.cuda.MemoryPool()
-        saved = snapshot()
-        with cp.cuda.using_allocator(pool.malloc):
-            # The warm-up: the step runs once, outside the capture, so that
-            # the private pool holds every block the capture allocates.  The
-            # state is restored in any case: the warm-up advances the flight
-            # by one step.
-            try:
-                step()
-            finally:
-                restore(saved)
-            with stream:
-                stream.begin_capture(mode=CAPTURE_MODE_RELAXED)
-                step()
-                graph = stream.end_capture()
-        # Upload the graph to the device so the first replay does not pay
-        # for the upload.
-        graph.upload(stream)
-        stream.synchronize()
-    except Exception:  # pragma: no cover - depends on the driver
+
+    result: Dict[str, Any] = {"graph": None, "stream": None, "pool": None, "error": None}
+
+    def capture_worker() -> None:
+        try:
+            stream = cp.cuda.Stream(non_blocking=True)
+            pool = cp.cuda.MemoryPool()
+            saved = snapshot()
+            with cp.cuda.using_allocator(pool.malloc):
+                # Warm-up: run once outside capture to populate the pool
+                try:
+                    step()
+                finally:
+                    restore(saved)
+                with stream:
+                    stream.begin_capture(mode=CAPTURE_MODE_RELAXED)
+                    step()
+                    graph = stream.end_capture()
+            graph.upload(stream)
+            stream.synchronize()
+            result["graph"] = graph
+            result["stream"] = stream
+            result["pool"] = pool
+        except Exception as e:
+            result["error"] = e
+
+    thread = threading.Thread(target=capture_worker, daemon=True)
+    thread.start()
+    thread.join(timeout=timeout_s)
+
+    if thread.is_alive():
+        # Capture timed out - cannot cleanly terminate the thread, but we can
+        # return None to fall back to eager mode. The thread will be abandoned
+        # (daemon thread will exit when process ends).
         return None, None, None
-    return graph, stream, pool
+
+    if result["error"] is not None:
+        return None, None, None
+
+    return result["graph"], result["stream"], result["pool"]
 
 
 def graph_kernel_launches(graph: Any) -> int:
@@ -1112,9 +1150,11 @@ def simulate_batch(
     duration_s: float,
     dt_max: float = 0.01,
     max_steps: int = 20000,
+    max_steps_per_case: int = 10000,
     use_graph: Optional[bool] = None,
     record_interval_s: Optional[float] = None,
     sample_wind_stages: bool = False,
+    capture_timeout_s: float = 10.0,
 ) -> Dict[str, Any]:
     """Integrate a batch of airframes with the 6-DoF rigid-body model.
 
@@ -1186,6 +1226,8 @@ def simulate_batch(
         "trim_alpha": xp.zeros(count),
         "trim_speed": xp.zeros(count),
         "trim_altitude": xp.zeros(count),
+        # Per-case step counter to enforce max_steps_per_case limit
+        "steps": xp.zeros(count, dtype=xp.int32),
         # Every case keeps its own clock: the step size is a per-case
         # quantity (it depends on the local rate, speed and stiffness), so a
         # shared clock would silently truncate the cases that take smaller
@@ -1474,17 +1516,17 @@ def simulate_batch(
 
     params.sample_wind_stages = bool(sample_wind_stages)
     if use_graph is None:
-        use_graph = _is_device_module(xp)
+        use_graph = False  # Default to eager mode; graph capture is opt-in
     graph = None
     stream = None
     pool = None
     if use_graph:
-        graph, stream, pool = _capture_step(xp, step, snapshot, restore)
+        graph, stream, pool = _capture_step(xp, step, snapshot, restore, timeout_s=capture_timeout_s)
     launches_per_step = graph_kernel_launches(graph)
 
     steps_executed = 0
     for _ in range(int(max_steps)):
-        active = (~acc["landed"]) & (~acc["crashed"]) & (acc["time"] < duration)
+        active = (~acc["landed"]) & (~acc["crashed"]) & (acc["time"] < duration) & (acc["steps"] < max_steps_per_case)
         if not bool(xp.any(active)):
             break
         # The wind field is sampled once per step for the whole batch, at
@@ -1503,6 +1545,7 @@ def simulate_batch(
             graph.launch()
         else:
             step()
+        acc["steps"][...] = xp.where(active, acc["steps"] + 1, acc["steps"])
         steps_executed += 1
     if graph is not None and stream is not None:
         stream.synchronize()
@@ -1572,6 +1615,8 @@ def simulate_batch(
         "last_recorded_y": acc["record_y"],
         "record_interval_s": float(record_interval),
         "integration_steps": int(steps_executed),
+        "steps_per_case": acc["steps"],
+        "max_steps_per_case": int(max_steps_per_case),
         "kernel_launches_per_step": int(launches_per_step),
         "kernel_launches_total": int(launches_per_step * steps_executed),
         "graph_captured": bool(launches_per_step > 0),

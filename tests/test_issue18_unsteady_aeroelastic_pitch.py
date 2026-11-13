@@ -76,9 +76,9 @@ def test_apex_low_speed_pushover_restoring_moment() -> None:
     assert res_apex.cm < 0.0
     assert res_apex.pitching_moment_nm < 0.0
 
-    # Higher alpha produces stronger restoring nose-down moment
+    # Higher alpha produces stronger restoring nose-down moment (in physical dimensional torque)
     res_apex_high = aero_domain.evaluate_aero(cfg, env, speed_mps=1.2, alpha_deg=25.0)
-    assert res_apex_high.cm <= res_apex.cm
+    assert res_apex_high.pitching_moment_nm <= res_apex.pitching_moment_nm
 
 
 def test_added_mass_and_inertia_dimensions_and_scaling() -> None:

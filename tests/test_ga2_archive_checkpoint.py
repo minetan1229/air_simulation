@@ -117,6 +117,22 @@ def test_the_pareto_front_is_capped() -> None:
     assert len(front) <= 10
 
 
+def test_the_pareto_front_protects_extreme_solutions() -> None:
+    front = ParetoFront(capacity=4)
+    # Add extreme points (best in distance, best in L/D) along with crowded cluster
+    front.add("ext_dist", {"distance_m": 100.0, "max_ld_ratio": 1.0})
+    front.add("ext_ld", {"distance_m": 1.0, "max_ld_ratio": 20.0})
+    front.add("mid_1", {"distance_m": 50.0, "max_ld_ratio": 10.0})
+    front.add("mid_2", {"distance_m": 51.0, "max_ld_ratio": 9.9})
+    front.add("mid_3", {"distance_m": 49.0, "max_ld_ratio": 10.1})
+
+    assert len(front) <= 4
+    surviving_keys = {key for key, _ in front.front()}
+    # Crowding distance trimming must preserve extreme solutions
+    assert "ext_dist" in surviving_keys
+    assert "ext_ld" in surviving_keys
+
+
 def test_the_pareto_front_round_trips() -> None:
     front = ParetoFront(capacity=50)
     front.add("a", {"distance_m": 3.0, "max_ld_ratio": 2.0})

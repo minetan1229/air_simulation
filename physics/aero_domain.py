@@ -108,6 +108,7 @@ __all__ = [
     "pitching_moment_offset_nm",
     "center_of_pressure_x",
     "polhamus_lift_coefficient",
+    "polhamus_vortex_drag",
     "effective_stall_alpha_deg",
     "atmosphere_state",
     "evaluate_aero",
@@ -367,6 +368,15 @@ def polhamus_lift_coefficient(alpha_deg: float, cfg: AircraftConfig, kp: Optiona
     return k_p * sin_a * (cos_a ** 2) + k_v * (sin_a ** 2) * cos_a * vortex_sign
 
 
+def polhamus_vortex_drag(alpha_deg: float, cfg: AircraftConfig) -> float:
+    """Polhamus suction analogy vortex-induced drag increment.
+
+    :math:`\\Delta C_{D,v} = K_v \\sin^2\\alpha |\\sin\\alpha|`.
+    """
+    kv = max(_finite(getattr(cfg, "polhamus_kv", 0.0), 0.0), 0.0)
+    return float(aero_kernel.polhamus_vortex_drag(_SCALAR, alpha_deg, kv))
+
+
 def stall_blend_weight(alpha_deg: float, cfg: AircraftConfig) -> float:
     """Smooth logistic blend weight between the linear and post-stall branch.
 
@@ -557,10 +567,18 @@ def drag_coefficient(
     """
     te_fold = trailing_edge_fold_effects(cfg)
     cl = lift_coefficient(alpha_deg, cfg, compressible=compressible, mach=mach, cl_offset=cl_offset)
-    induced = cl * cl / _polar_constant(cfg)
+    kv = max(_finite(getattr(cfg, "polhamus_kv", 0.0), 0.0), 0.0)
+    vortex_cd = polhamus_vortex_drag(alpha_deg, cfg)
+    alpha_rad = deg2rad(_finite(alpha_deg))
+    sin_a = math.sin(alpha_rad)
+    cos_a = math.cos(alpha_rad)
+    vortex_sign = 1.0 if sin_a >= 0.0 else -1.0
+    cl_vortex = kv * (sin_a ** 2) * cos_a * vortex_sign if kv > 0.0 else 0.0
+    cl_pot = cl - cl_vortex if kv > 0.0 else cl
+    induced_pot = cl_pot * cl_pot / _polar_constant(cfg)
     factor = 1.0 if ground_height_m is None else ground_effect_factor(ground_height_m, _span(cfg), True)
     parasite = parasite_drag_coefficient(cfg, reynolds) + te_fold["dcd"]
-    attached_drag = parasite + induced * factor
+    attached_drag = parasite + induced_pot * factor + vortex_cd
 
     stall_alpha = effective_stall_alpha_deg(cfg)
     alpha_norm = (alpha_deg + 180.0) % 360.0 - 180.0
@@ -613,32 +631,57 @@ def elevon_effects(elevon_deg: float, cfg: AircraftConfig) -> Dict[str, float]:
     return {key: float(value) for key, value in effects.items()}
 
 
-def trim_alpha_from_elevon(cfg: AircraftConfig, elevon_deg: float) -> float:
-    """Closed-form angle of attack that nulls the static pitching moment."""
+def trim_alpha_from_elevon(cfg: AircraftConfig, elevon_deg: float, speed_mps: float = 9.0, env: Optional[EnvironmentConfig] = None) -> float:
+    """Angle of attack that nulls the static pitching moment.
+
+    Uses iterative evaluation against the kernel's force-model-linked CP so
+    the trim is consistent with the moment produced by evaluate_aero.  Calls
+    ``evaluate_coefficients`` (not ``evaluate_aero``) to avoid the recursive
+    ``evaluate_aero -> trim_alpha_deg -> evaluate_aero`` cycle.
+    """
+    if env is None:
+        env = EnvironmentConfig()
     elevon = elevon_effects(elevon_deg, cfg)
     te_fold = trailing_edge_fold_effects(cfg)
     cm_alpha = _finite(cfg.cm_alpha)
     if abs(cm_alpha) < 1.0e-12:
         return 0.0
     cm_static = _finite(cfg.cm0) + elevon["dcm"] + te_fold["dcm"]
-    base = float(rad2deg(-cm_static / cm_alpha))
-    # Fixed-point correction for the deterministic CoP shift cm term:
-    # cm includes -(cp_x-0.25c)/c * CL, with CL linear in alpha. Iterate
-    # the closed form with the shifted CL until self-consistent.
-    from physics.aero_kernel import center_of_pressure_fraction
-    alpha = base
-    for _ in range(5):
-        stall = max(abs(_finite(cfg.stall_alpha_deg, 14.0)), 1.0)
-        frac = float(center_of_pressure_fraction(_SCALAR, alpha, stall, _finite(cfg.cp_shift_gain, 0.0)))
-        # CL approx from Helmbold slope + zero-lift + control (matches kernel linear branch)
-        cl = _finite(cfg.cL0) + lift_slope_per_rad(cfg) * deg2rad(alpha) + elevon["dcl"] + te_fold["dcl"]
-        cm_shift = -(frac - 0.25) * cl if float(cfg.cp_shift_gain) > 0.0 else 0.0
-        new_alpha = float(rad2deg(-(cm_static + cm_shift) / cm_alpha))
-        if abs(new_alpha - alpha) < 1e-9:
-            alpha = new_alpha
+    alpha = float(rad2deg(-cm_static / cm_alpha))
+    trimmed_cfg = replace(cfg, elevon_deg=float(elevon_deg))
+    cm_alpha_per_deg = cm_alpha * (math.pi / 180.0)
+    if abs(cm_alpha_per_deg) < 1.0e-12:
+        cm_alpha_per_deg = -0.01
+    # Use the provided speed for Reynolds number and dynamic pressure consistency
+    reynolds = speed_mps * _chord(trimmed_cfg) / 1.5e-5
+    mach = speed_mps / 340.0
+    # Use env's ground effect settings for consistency with final evaluate_aero
+    ground_height = 1.0
+    density = 1.225
+    for _ in range(50):
+        params = aero_kernel.params_from_config(trimmed_cfg, env)
+        coefficients = aero_kernel.evaluate_coefficients(
+            _SCALAR,
+            params,
+            alpha_deg=alpha,
+            beta_deg=0.0,
+            p_rate=0.0,
+            q_rate=0.0,
+            r_rate=0.0,
+            speed=speed_mps,
+            reynolds=reynolds,
+            mach=mach,
+            ground_height_m=ground_height,
+            density=density,
+        )
+        cm = float(coefficients["cm"])
+        if abs(cm) < 1.0e-11:
             break
-        alpha = new_alpha
-    return alpha
+        step = -cm / cm_alpha_per_deg
+        alpha = alpha + 0.7 * step
+        if abs(step) < 1.0e-13:
+            break
+    return float(alpha)
 
 
 def elevon_for_trim(cfg: AircraftConfig, alpha_deg: float) -> float:

@@ -539,18 +539,63 @@ class ParetoFront:
         self._trim()
         return any(point[0] == text for point in self._points)
 
+    def _crowding_distances(self) -> List[float]:
+        """Compute NSGA-II crowding distances with infinite distance for extreme points.
+
+        Points that achieve the best or worst value in any objective dimension
+        are assigned infinite distance (math.inf) so they are preserved across
+        trimming. For internal points, distance is the sum across objectives of
+        the normalised difference between their neighbors.
+        """
+        n_points = len(self._points)
+        n_obj = len(self._objective_names)
+        if n_points <= 2 or n_obj == 0:
+            return [math.inf] * n_points
+
+        distances = [0.0] * n_points
+
+        for obj_idx in range(n_obj):
+            direction = self._direction_vector[obj_idx]
+            # Sort indices based on directed objective value
+            sorted_indices = sorted(
+                range(n_points),
+                key=lambda idx: direction * self._points[idx][1][obj_idx],
+            )
+            # Boundary (extreme) points get infinite distance
+            distances[sorted_indices[0]] = math.inf
+            distances[sorted_indices[-1]] = math.inf
+
+            min_val = direction * self._points[sorted_indices[0]][1][obj_idx]
+            max_val = direction * self._points[sorted_indices[-1]][1][obj_idx]
+            span = max_val - min_val
+
+            if span > 0.0:
+                for rank in range(1, n_points - 1):
+                    prev_val = direction * self._points[sorted_indices[rank - 1]][1][obj_idx]
+                    next_val = direction * self._points[sorted_indices[rank + 1]][1][obj_idx]
+                    distances[sorted_indices[rank]] += (next_val - prev_val) / span
+
+        return distances
+
     def _trim(self) -> None:
-        """Drop the worst points until the front fits into its capacity."""
+        """Drop points from crowded regions while protecting extreme solutions."""
         if len(self._points) <= self.capacity:
             return
-        scores = self._normalised_scores()
+
         while len(self._points) > self.capacity:
+            distances = self._crowding_distances()
             worst_index = 0
-            for index in range(1, len(scores)):
-                if scores[index] <= scores[worst_index]:
-                    worst_index = index
+            worst_dist = distances[0]
+            worst_key = self._points[0][0]
+            for idx in range(1, len(self._points)):
+                d = distances[idx]
+                k = self._points[idx][0]
+                if d < worst_dist or (d == worst_dist and k > worst_key):
+                    worst_index = idx
+                    worst_dist = d
+                    worst_key = k
+
             self._points.pop(worst_index)
-            scores.pop(worst_index)
 
     def _normalised_scores(self) -> List[float]:
         """The mean of the normalised objectives of every point of the front.

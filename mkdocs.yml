@@ -100,14 +100,20 @@ nav:
   - 物理・理論:
       - 技術仕様 (正本): SPECIFICATION.md
       - 物理モデル正本: PHYSICS_MODELS.md
+      - 物理計算アルゴリズム: PHYSICS_ALGORITHM.md
       - 検証と妥当性確認 (V&V): VALIDATION.md
+      - 学術文献調査 (Domain 1-6): research/paper_survey_master_index.md
       - アーキテクチャ: architecture.md
       - 物理ロードマップ: PHYSICS_ROADMAP.md
+  - 高校生向け解説:
+      - 飛行機物理入門: PHYSICS_HIGH_SCHOOL.md
+      - 遺伝的アルゴリズム入門: GA_HIGH_SCHOOL.md
   - API リファレンス:
       - REST API 仕様: api.md
       - OpenAPI (Swagger UI): https://github.com/minetan1229/air_simulation#api-リファレンス
   - 開発・運用:
       - 開発ガイド: development.md
+      - GA アルゴリズム: GA_ALGORITHM.md
       - GA V2 アーキテクチャ: GA_V2_ARCHITECTURE.md
       - CFD ロードマップ: CFD_ROADMAP.md
       - 紙レジストリパイプライン: PAPER_REGISTRY_PIPELINE.md

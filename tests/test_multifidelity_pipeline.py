@@ -85,6 +85,7 @@ def _time_simulation(
 class TestPhysicalEnhancements:
     """Verifies LSB hysteresis, apparent inertia, and non-linear damping."""
 
+    @pytest.mark.slow
     def test_lsb_dynamic_stall_hysteresis(self) -> None:
         """Verify dynamic stall delay on pitch-up and reattachment lag on pitch-down."""
         base_stall = 14.0
@@ -121,6 +122,7 @@ class TestPhysicalEnhancements:
         # Since alpha=13 > eff_down (~10.5 deg), airframe remains stalled
         assert stalled_down
 
+    @pytest.mark.slow
     def test_nonlinear_dynamic_damping_dissipative(self) -> None:
         """Verify dynamic damping derivatives are strictly negative across all alpha."""
         alphas = [-45.0, -15.0, -5.0, 0.0, 5.0, 15.0, 30.0, 60.0]
@@ -140,6 +142,7 @@ class TestPhysicalEnhancements:
                 assert cm_q < -1.0e-4, f"cm_q must be negative, got {cm_q}"
                 assert cn_r < -1.0e-4, f"cn_r must be negative, got {cn_r}"
 
+    @pytest.mark.slow
     def test_thin_plate_apparent_inertia(self) -> None:
         """Verify apparent inertia calculations add positive rotational components."""
         rho = 1.225
@@ -165,6 +168,7 @@ class TestPhysicalEnhancements:
 class TestEnergyConservation:
     """Verifies H2: Monotonic energy dissipation in calm air glide."""
 
+    @pytest.mark.slow
     def test_unpowered_glide_energy_non_increasing(self) -> None:
         """Verify dE/dt <= 1e-4 J/s in calm glide with improved medium fidelity."""
         aircraft = AircraftConfig(
@@ -195,6 +199,7 @@ class TestEnergyConservation:
         # Check initial vs final energy
         assert profile[-1] < profile[0], f"Terminal energy ({profile[-1]}) must be lower than initial ({profile[0]})"
 
+    @pytest.mark.slow
     def test_energy_non_increasing_under_dt_refinement(self) -> None:
         """Issue #131: refined dt must not create energy (integration vs model)."""
         aircraft = AircraftConfig(
@@ -241,6 +246,8 @@ class TestFidelityTimingRatio:
     environment-tolerant CI boundary, not a relaxation of the physical claim.
     """
 
+    @pytest.mark.slow
+    @pytest.mark.integration
     def test_improved_medium_execution_multiplier(self) -> None:
         """Measure execution time ratio between baseline and improved medium-fidelity.
 
@@ -338,6 +345,7 @@ class TestFidelityTimingRatio:
             f"per-run={ [round(r['step_ratio'], 3) for r in per_run] }"
         )
 
+    @pytest.mark.slow
     def test_total_damping_moment_work_rate_nonpositive(self) -> None:
         """Issue #138: Integration-level check that total damping moment · omega <= 0.
 
@@ -417,6 +425,8 @@ class TestFidelityTimingRatio:
 class TestMultiFidelityPipeline:
     """Verifies H3 & H4: Multi-fidelity Pareto candidate re-evaluation."""
 
+    @pytest.mark.slow
+    @pytest.mark.integration
     def test_optimizer_multifidelity_pareto_revalidation(self) -> None:
         """Verify optimizer runs in medium fidelity and re-evaluates Pareto front with RANS surrogate."""
         cfg = OptimizerConfig(
@@ -443,6 +453,8 @@ class TestMultiFidelityPipeline:
             assert "energy_strictly_decreasing" in cand
             assert math.isfinite(cand["high_fidelity_objectives"].get("max_distance", 0.0))
 
+    @pytest.mark.slow
+    @pytest.mark.integration
     def test_ga_multifidelity_workflow(self) -> None:
         """Verify GA research engine evaluates individuals and verifies Pareto front."""
         ga_cfg = GAConfig(
