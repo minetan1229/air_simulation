@@ -2769,33 +2769,21 @@ class ResearchRun:
             "result": self._result_payload(best),
         }
 
-        # Multi-fidelity pipeline: re-evaluate final Pareto / hall of fame candidates with high fidelity
         if getattr(self.config, "fidelity_mode", "standard") == "multifidelity":
-            from . import flight_sim
+            from .multifidelity import evaluate_rans_calibrated_flight
             top_k = int(getattr(self.config, "high_fidelity_reval_top_k", 10))
             verified_pareto = []
             for cand in self.hall_of_fame[:top_k]:
                 air_cfg = self._aircraft_payload(cand)
-                # Steady RANS + experimental calibration corrections
-                air_cfg["polhamus_kv"] = max(float(air_cfg.get("polhamus_kv", 0.0)), 0.35)
-                air_cfg["step_trip_ratio"] = max(float(air_cfg.get("step_trip_ratio", 0.0)), 0.008)
-                air_cfg["residual_cl"] = max(float(air_cfg.get("residual_cl", 0.0)), 0.05)
-                air_cfg["apparent_inertia_enabled"] = True
-                air_cfg["dynamic_damping_enabled"] = True
-                air_cfg["fidelity_mode"] = "standard"
-
                 launch_cfg = self._launch_payload(cand.throw, float(self.config.launch_height_m))
                 env_cfg = self._environment(3, seed=0)
-                try:
-                    hifi_flight = flight_sim.evaluate_flight(
-                        air_cfg,
-                        env_cfg,
-                        launch_cfg,
-                        float(self._tier3_duration()),
-                        0.005,  # Fine timestep
-                    )
-                except Exception as exc:
-                    hifi_flight = {"status": "error", "distance_m": 0.0, "error": str(exc)}
+                hifi_flight = evaluate_rans_calibrated_flight(
+                    air_cfg,
+                    env_cfg,
+                    launch_cfg,
+                    duration_s=float(self._tier3_duration()),
+                    dt_max=0.005,
+                )
 
                 verified_pareto.append({
                     "individual_index": int(cand.index),

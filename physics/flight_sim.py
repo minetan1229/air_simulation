@@ -1948,13 +1948,8 @@ class FlightSimulator:
         self._next_record_time = 0.0
         self._diagnostics_cache: Optional[Dict[str, Any]] = None
         self._stiffness_cache: Optional[Tuple[float, float]] = None
-        self._aero_dihedral_lag: float = 0.0
-        self._aero_twist_lag: float = 0.0
-        self._unsteady_cl_lag: float = 0.0
-        self._prev_alpha_deg: float = 0.0
-        self._alpha_dot_deg_s: float = 0.0
-        self._lsb_shift_deg: float = 0.0
-        self._is_stalled_prev: bool = False
+        from .aeroelastic import AeroelasticManager
+        self._aeroelastic_mgr = AeroelasticManager()
         self._energy_history: List[float] = []
         self._last_dt: float = 0.01
         self._last_dynamics_core: Optional[Dict[str, Any]] = None
@@ -1962,6 +1957,63 @@ class FlightSimulator:
         if bool(self.settings.collision_enabled) and not self._state.crashed:
             self._state = self._apply_ground_contact(self._state)
         self._record_sample()
+
+    # -- aeroelastic & lag state backward-compatibility properties --------
+    @property
+    def _aero_dihedral_lag(self) -> float:
+        return self._aeroelastic_mgr.state.aero_dihedral_lag
+
+    @_aero_dihedral_lag.setter
+    def _aero_dihedral_lag(self, val: float) -> None:
+        self._aeroelastic_mgr.state.aero_dihedral_lag = float(val)
+
+    @property
+    def _aero_twist_lag(self) -> float:
+        return self._aeroelastic_mgr.state.aero_twist_lag
+
+    @_aero_twist_lag.setter
+    def _aero_twist_lag(self, val: float) -> None:
+        self._aeroelastic_mgr.state.aero_twist_lag = float(val)
+
+    @property
+    def _unsteady_cl_lag(self) -> float:
+        return self._aeroelastic_mgr.state.unsteady_cl_lag
+
+    @_unsteady_cl_lag.setter
+    def _unsteady_cl_lag(self, val: float) -> None:
+        self._aeroelastic_mgr.state.unsteady_cl_lag = float(val)
+
+    @property
+    def _prev_alpha_deg(self) -> float:
+        return self._aeroelastic_mgr.state.prev_alpha_deg
+
+    @_prev_alpha_deg.setter
+    def _prev_alpha_deg(self, val: float) -> None:
+        self._aeroelastic_mgr.state.prev_alpha_deg = float(val)
+
+    @property
+    def _alpha_dot_deg_s(self) -> float:
+        return self._aeroelastic_mgr.state.alpha_dot_deg_s
+
+    @_alpha_dot_deg_s.setter
+    def _alpha_dot_deg_s(self, val: float) -> None:
+        self._aeroelastic_mgr.state.alpha_dot_deg_s = float(val)
+
+    @property
+    def _lsb_shift_deg(self) -> float:
+        return self._aeroelastic_mgr.state.lsb_shift_deg
+
+    @_lsb_shift_deg.setter
+    def _lsb_shift_deg(self, val: float) -> None:
+        self._aeroelastic_mgr.state.lsb_shift_deg = float(val)
+
+    @property
+    def _is_stalled_prev(self) -> bool:
+        return self._aeroelastic_mgr.state.is_stalled_prev
+
+    @_is_stalled_prev.setter
+    def _is_stalled_prev(self, val: bool) -> None:
+        self._aeroelastic_mgr.state.is_stalled_prev = bool(val)
 
     # -- configuration ----------------------------------------------------
     def _refresh_derived(self) -> None:
@@ -2796,16 +2848,7 @@ class FlightSimulator:
 
     def _lag_snapshot(self) -> Dict[str, Any]:
         """Return a snapshot copy of current internal unsteady and deformation lag states."""
-        return {
-            "_aero_dihedral_lag": float(self._aero_dihedral_lag),
-            "_aero_twist_lag": float(self._aero_twist_lag),
-            "_unsteady_cl_lag": float(self._unsteady_cl_lag),
-            "_prev_alpha_deg": float(self._prev_alpha_deg),
-            "_alpha_dot_deg_s": float(self._alpha_dot_deg_s),
-            "_lsb_shift_deg": float(self._lsb_shift_deg),
-            "_is_stalled_prev": bool(self._is_stalled_prev),
-            "_last_dt": float(self._last_dt),
-        }
+        return self._aeroelastic_mgr.snapshot(last_dt=getattr(self, "_last_dt", 0.01))
 
     def _lag_restore(self, snapshot: Optional[Dict[str, Any]]) -> None:
         """Alias for _restore_lag_snapshot."""
@@ -2815,7 +2858,7 @@ class FlightSimulator:
         """Restore internal unsteady and deformation lag states from a snapshot."""
         if not snapshot:
             return
-        self._apply_lag_states(snapshot)
+        self._aeroelastic_mgr.restore(snapshot)
         if "_last_dt" in snapshot:
             self._last_dt = float(snapshot["_last_dt"])
 
@@ -2823,20 +2866,7 @@ class FlightSimulator:
         """Apply committed unsteady and deformation lag states to the instance."""
         if not lag_states:
             return
-        if "_aero_dihedral_lag" in lag_states:
-            self._aero_dihedral_lag = float(lag_states["_aero_dihedral_lag"])
-        if "_aero_twist_lag" in lag_states:
-            self._aero_twist_lag = float(lag_states["_aero_twist_lag"])
-        if "_prev_alpha_deg" in lag_states:
-            self._prev_alpha_deg = float(lag_states["_prev_alpha_deg"])
-        if "_alpha_dot_deg_s" in lag_states:
-            self._alpha_dot_deg_s = float(lag_states["_alpha_dot_deg_s"])
-        if "_is_stalled_prev" in lag_states:
-            self._is_stalled_prev = bool(lag_states["_is_stalled_prev"])
-        if "_lsb_shift_deg" in lag_states:
-            self._lsb_shift_deg = float(lag_states["_lsb_shift_deg"])
-        if "_unsteady_cl_lag" in lag_states:
-            self._unsteady_cl_lag = float(lag_states["_unsteady_cl_lag"])
+        self._aeroelastic_mgr.apply_states(lag_states)
 
     def _derivative(
         self,

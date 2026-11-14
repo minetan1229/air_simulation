@@ -410,32 +410,22 @@ def revalidate_candidate_rans_calibrated(
     Uses fine-timestep RK4 (dt_max=0.005s), boundary layer trip and Polhamus vortex suction
     from steady RANS, and strict energy monotonicity validation.
     """
-    from . import flight_sim
+    from .multifidelity import evaluate_rans_calibrated_flight
     names = list(objectives)
     case = case_for_vector(vector, cfg)
-    air_cfg = dict(case["aircraft"])
-    # High-fidelity calibrated parameters (steady RANS + experimental flight data surrogate)
-    air_cfg["polhamus_kv"] = max(float(air_cfg.get("polhamus_kv", 0.0)), 0.35)
-    air_cfg["step_trip_ratio"] = max(float(air_cfg.get("step_trip_ratio", 0.0)), 0.008)
-    air_cfg["residual_cl"] = max(float(air_cfg.get("residual_cl", 0.0)), 0.05)
-    air_cfg["apparent_inertia_enabled"] = True
-    air_cfg["dynamic_damping_enabled"] = True
-    air_cfg["fidelity_mode"] = "standard"
-
-    try:
-        flight = flight_sim.evaluate_flight(
-            air_cfg,
-            case["environment"],
-            case["launch"],
-            float(case["duration_s"]),
-            0.005,  # 4x finer adaptive timestep
-        )
-    except Exception as exc:
+    flight = evaluate_rans_calibrated_flight(
+        case["aircraft"],
+        case["environment"],
+        case["launch"],
+        float(case["duration_s"]),
+        dt_max=0.005,
+    )
+    if flight.get("status") == "error" and "error" in flight:
         return {
             "model": "rans_calibrated_6dof",
             "verified": False,
             "status": "error",
-            "error": str(exc),
+            "error": str(flight["error"]),
             "objectives": {},
             "infeasible": True,
             "distance_m": 0.0,
