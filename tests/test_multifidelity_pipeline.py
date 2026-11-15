@@ -339,9 +339,10 @@ class TestFidelityTimingRatio:
         )
         # Deterministic cross-check: with adaptive timestepping active, integration step count
         # depends on trajectory dynamics, stiffness, and chunking (median_step may be ~0.8-1.2x).
-        # We assert a reasonable floor (>0.5x) so step integration hasn't collapsed.
-        assert median_step >= 0.5, (
-            f"Improved medium step count ratio (median {median_step:.3f}x) is below floor 0.5x. "
+        # We assert a reasonable floor (>0.5x) and upper band (<=3.25x) so step integration hasn't collapsed or blown up.
+        assert 0.5 <= median_step <= 3.25, (
+            f"Improved medium step count ratio (median {median_step:.3f}x) is outside expected band [0.5, 3.25]. "
+            "Adaptive time stepping may have collapsed or diverged. "
             f"per-run={ [round(r['step_ratio'], 3) for r in per_run] }"
         )
 
