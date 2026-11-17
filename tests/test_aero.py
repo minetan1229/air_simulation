@@ -1554,3 +1554,18 @@ def test_finite_difference_derivative_boundedness(cfg: AircraftConfig, env: Envi
         assert math.isfinite(dcl_da) and abs(dcl_da) < 1.0  # < 1.0 per deg (= 57 per rad)
         assert math.isfinite(dcd_da) and abs(dcd_da) < 1.0
         assert math.isfinite(dcm_da) and abs(dcm_da) < 1.0
+
+
+def test_drag_coefficient_floor_non_negative(cfg: AircraftConfig) -> None:
+    """Total drag coefficient must remain strictly >= 0 under any condition (P-AERO-06)."""
+    env = EnvironmentConfig(drag_scale=1.0)
+    # Test across broad sweep of alphas, mach, fold, elevon
+    for alpha in (-90.0, -45.0, -14.0, 0.0, 14.0, 45.0, 90.0):
+        for fold in (-30.0, 0.0, 30.0):
+            test_cfg = AircraftConfig(**{**as_dict(cfg), "fold_trailing_deg": fold, "cd0": 0.0})
+            res = evaluate_aero(test_cfg, env, speed_mps=10.0, alpha_deg=alpha)
+            assert res.cd >= 0.0
+            assert res.drag_n >= 0.0
+            cd_standalone = drag_coefficient(alpha, test_cfg)
+            assert cd_standalone >= 0.0
+

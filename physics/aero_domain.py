@@ -124,6 +124,7 @@ __all__ = [
     "AERO_BACKEND",
     "POST_STALL_PLATE_BLEND_DEG",
     "POST_STALL_DRAG_BLEND_DEG",
+    "MIN_DRAG_COEFFICIENT",
     "MAX_ABS_LIFT_COEFFICIENT",
     "STALL_BLEND_ORDER",
 ]
@@ -428,6 +429,10 @@ POST_STALL_PLATE_BLEND_DEG = 45.0
 #: zero at the stall angle to the full Hoerner value.
 POST_STALL_DRAG_BLEND_DEG = 15.0
 
+#: Physical floor on total drag coefficient C_D to guarantee non-negative drag
+#: and prevent unphysical self-propulsion (C_D < 0) under any trim/fold configuration.
+MIN_DRAG_COEFFICIENT: float = 0.0
+
 #: Hard ceiling on |C_L|.  A thin aerofoil section cannot exceed roughly
 #: 2*sin(a)*cos^2(a) + a modest attached-flow contribution, so anything beyond
 #: this is numerical, not physical, and is clipped.
@@ -594,7 +599,8 @@ def drag_coefficient(
         w_drag = norm_t * norm_t * (3.0 - 2.0 * norm_t)
 
     cd_polar = (1.0 - w_drag) * attached_drag + w_drag * separated_drag
-    return cd_polar + wave_drag_coefficient(mach, compressible)
+    total_cd = cd_polar + wave_drag_coefficient(mach, compressible)
+    return max(total_cd, MIN_DRAG_COEFFICIENT)
 
 
 

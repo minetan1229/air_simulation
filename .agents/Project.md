@@ -11,8 +11,8 @@
 - [x] **厳密反証テストスイート**: 13個の専用テストファイル（25件）が全PASS、smoke_test 14/14ステージ完全PASS。
 
 ## 3. Loop State (現在のループ状態・引き継ぎメモリ)
-- **Current Phase**: Phase 6 [Finalize & Terminate]
-- **Verification Status**: Issue #72 の CFD 現状記述をコード・テストと照合して同期。対象テスト 9 passed / `git diff --check` passed。作業ツリーには本件以外の既存変更あり。次は `priority: medium` の未解決 Issue を一件ずつ扱う。
-- **Branch & Safety**: genetic-project 上で隔離維持。master/main への操作厳禁（AGENTS.md §2 Branch Isolation）。単一コミッター原則。
-- **Next Action**: 次の未解決 `priority: medium` Issue を選び、仮説・合否基準を置いて調査する。
+- **Current Phase**: Phase 5 [Distill & Loop]
+- **Verification Status**: P-AERO-06（CD < 0 によるエネルギー保存則違反・永動機挙動リスク）を解消。MIN_DRAG_COEFFICIENT=0.0 を aero_kernel / aero_domain に導入しフロア制約を追加。tests/test_aero.py (135件) / test_physics_audit.py (45件) / test_gpu_kernel_parity.py 全件通過。
+- **Branch & Safety**: mission/physics-law-fixes 上で隔離維持。master/main への操作厳禁（AGENTS.md §2 Branch Isolation）。単一コミッター原則。
+- **Next Action**: 監査レポート内の残る高優先度課題（P-AERO-02 失速後抗力ブレンド、P-AERO-03 CM基準点等）の順次対応、またはPR/マージ準備。
 
