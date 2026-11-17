@@ -1,0 +1,33 @@
+# Configuration for v3 Headless CUI 3D MAP-Elites Research Framework
+# Zero-placeholder, production deterministic configuration
+
+search:
+  seed: 42
+  bootstrap_count: 5
+  mcts_iterations: 30
+  map_elites_iterations: 100
+  mutation_rate: 0.35
+
+grid:
+  bins: [8, 8, 8]
+  wing_loading_range: [1.0, 7.0]
+  stability_range: [0.0, 1.0]
+  aspect_ratio_range: [1.0, 6.0]
+
+benchmark:
+  low_speed_mps: 6.0
+  mid_speed_mps: 10.0
+  duration_s: 8.0
+  dt_max: 0.02
+  launch_height_m: 1.5
+
+trim:
+  enabled: true
+  max_iterations: 20
+  elevon_bounds_deg: [-5.0, 10.0]
+  dihedral_bounds_deg: [0.0, 10.0]
+
+evaluation:
+  dryden_duration_s: 6.0
+  top_k_export: 3
+  output_dir: "output/v3"
