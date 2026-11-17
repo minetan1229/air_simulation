@@ -10,7 +10,7 @@ import random
 import time
 from typing import Callable, List, Optional
 
-from v3.interfaces import AircraftCandidate
+from v3.interfaces import AircraftCandidate, ParametricOrigamiConfig
 from v3.origami.adapter import OrigamiAdapter, validate_tier0
 from v3.origami.mcts import MCTSOrigamiGenerator
 from v3.physics.benchmark import DeterministicFlightBenchmark
@@ -43,6 +43,13 @@ class MAPElitesEngine:
             if valid:
                 self.benchmark.evaluate_candidate(candidate)
                 self.archive.add_candidate(candidate)
+
+        if not self.archive.cells:
+            default_cand = self.adapter.compile_candidate(
+                ParametricOrigamiConfig(), candidate_id="init-seed-001"
+            )
+            self.benchmark.evaluate_candidate(default_cand)
+            self.archive.add_candidate(default_cand)
 
     def run_iterations(
         self,
@@ -93,8 +100,9 @@ class MAPElitesEngine:
         if global_best is None:
             # Fallback compile default candidate
             global_best = self.adapter.compile_candidate(
-                self.adapter.compiler.compile_steps.__func__.__defaults__[0]  # type: ignore[attr-defined]
-                if hasattr(self.adapter.compiler, "default")
-                else None  # type: ignore[arg-type]
+                ParametricOrigamiConfig(),
+                candidate_id="fallback-elite-001",
             )
+            self.benchmark.evaluate_candidate(global_best)
+            self.archive.add_candidate(global_best)
         return global_best

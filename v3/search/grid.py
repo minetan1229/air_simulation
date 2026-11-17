@@ -62,7 +62,7 @@ class MAPElitesGridArchive:
     def add_candidate(self, candidate: AircraftCandidate) -> bool:
         """Add candidate to archive if niche is empty or candidate exceeds current best."""
         self.total_evaluations += 1
-        if candidate.benchmark is None or not candidate.benchmark.valid:
+        if candidate.benchmark is None:
             return False
 
         desc = candidate.descriptor
