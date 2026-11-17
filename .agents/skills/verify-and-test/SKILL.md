@@ -20,7 +20,7 @@ python scripts/smoke_test.py
 ```
 
 ### 2. Git & CI 運用
-- **ブランチ作成**: `git checkout -b <type>/<desc>` (`feat/`, `fix/`, `docs/`, `test/`等)
+- **リモート最新取得 & ブランチ作成**: 作業着手前に `git fetch origin` で GitHub 最新を取得・同期した上で、`git checkout -b <type>/<desc>` (`feat/`, `fix/`, `docs/`, `test/`等) または `mission/<slug>` を作成
 - **マージ&プッシュ**: ローカル全通過後、実動コードのみマージ → `git push`（※`.agents/context.md` のブランチ制約を遵守）
 - **CI/Issue確認**: `python tools/check_runs.py` でCI完了確認 → `python tools/check_issues.py` & `python tools/close_resolved_issue.py` でIssueクローズ。
 

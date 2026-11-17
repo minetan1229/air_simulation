@@ -75,7 +75,7 @@ UNUSUAL_SET = set(UNUSUAL)
 SKIP_DIRS = frozenset({
     ".git", ".venv", "venv", "node_modules", "__pycache__", ".mypy_cache",
     ".ruff_cache", ".pytest_cache", "site-packages", ".idea", ".vscode",
-    ".kilo", "artifacts", "runs", "logs",
+    ".kilo", "artifacts", "runs", "logs", "site",
 })
 SKIP_SUFFIX = frozenset({
     ".png", ".jpg", ".jpeg", ".gif", ".pdf", ".zip", ".ico", ".woff", ".woff2",
