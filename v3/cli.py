@@ -35,8 +35,8 @@ def _load_yaml_config(path_str: str) -> Dict[str, Any]:
     current_section = res
     with open(p, "r", encoding="utf-8") as f:
         for line in f:
-            line = line.strip()
-            if not line or line.startswith("#"):
+            line = line.split("#", 1)[0].strip()
+            if not line:
                 continue
             if ":" in line:
                 parts = line.split(":", 1)
