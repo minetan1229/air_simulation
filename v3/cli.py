@@ -156,8 +156,9 @@ def run_pipeline(
         evaluator.export_candidate_json(cand, str(json_file))
         evaluator.export_candidate_obj(cand, str(obj_file))
 
+        score = cand.benchmark.composite_score if cand.benchmark else 0.0
         print(f"  Elite #{rank} [{cand.candidate_id}]:")
-        print(f"    Hang-Time Score  : {cand.benchmark.composite_score:.3f}")
+        print(f"    Hang-Time Score  : {score:.3f}")
         print(f"    Dryden Survival  : {report.dryden_survival_rate * 100:.0f}%")
         print(f"    Robustness Score : {report.overall_robustness_score:.3f}")
         print(f"    Exported Files   : {json_file.name}, {obj_file.name}")
