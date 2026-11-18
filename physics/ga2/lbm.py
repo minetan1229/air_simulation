@@ -337,7 +337,7 @@ class LbmDnsSolver:
         lattice_speed = _LATTICE_INFLOW
         dt = lattice_speed * dx / max(speed, 0.1)
         nu_lattice = viscosity * dt / (dx * dx)
-        tau = min(max(0.5 + 3.0 * nu_lattice, 0.51), 2.0)
+        tau = min(max(0.5 + 3.0 * nu_lattice, 0.5005), 2.0)
 
         populations = self._initial_population(lattice_speed, angle)
         structure = _ModalStructure(
@@ -371,7 +371,19 @@ class LbmDnsSolver:
                     populations, solid, solid_velocity, inflow, tau
                 )
                 if not bool(xp.all(xp.isfinite(populations))):
-                    break
+                    return Stage3Result(
+                        index=int(request.index),
+                        status="diverged",
+                        lift_to_drag=0.0,
+                        cl=0.0,
+                        cd=0.0,
+                        cm=0.0,
+                        pitch_damping=0.0,
+                        flutter_margin=0.0,
+                        separation_tolerance=0.0,
+                        grid_cells=int(self.grid_cells),
+                        wall_time_s=0.0,
+                    )
                 force = self._couple_structure(
                     populations, solid, solid_velocity, interface, structure
                 )
@@ -473,7 +485,7 @@ class LbmDnsSolver:
         if self.scheme == "local_dns_bidirectional_fsi":
             nu_turbulent = xp.zeros_like(nu_turbulent)
         nu_turbulent = xp.minimum(nu_turbulent, _TURBULENCE_CLAMP)
-        tau_local = 0.5 + (nu_lattice_base(tau) + nu_turbulent)
+        tau_local = 0.5 + 3.0 * (nu_lattice_base(tau) + nu_turbulent)
 
         # --- the collision -------------------------------------------------
         post = xp.empty_like(populations)
@@ -517,8 +529,18 @@ class LbmDnsSolver:
             )
         collided = xp.where(solid[None, :, :, :], populations, streamed)
 
-        inflow_plane = _shift(collided, -1, 0, 0)
-        collided[:, 0, :, :] = inflow_plane[:, 0, :, :]
+        # Enforce dynamic inflow velocity on the inlet plane (x = 0)
+        u_inlet = float(inflow)
+        for index in range(19):
+            vx, vy, vz = D3Q19_VELOCITIES[index]
+            if vx > 0:
+                cu = 3.0 * (vx * u_inlet)
+                collided[index, 0, :, :] = D3Q19_WEIGHTS[index] * (
+                    1.0 + cu + 0.5 * cu * cu - 1.5 * u_inlet * u_inlet
+                )
+            else:
+                shift_plane = _shift(collided[index], -1, 0, 0)
+                collided[index, 0, :, :] = shift_plane[0, :, :]
         outflow_plane = _shift(collided, 1, 0, 0)
         collided[:, nx - 1, :, :] = outflow_plane[:, nx - 1, :, :]
         return collided
@@ -609,8 +631,14 @@ class LbmDnsSolver:
                 iz = int(round((point[2] - origin[2]) * scale))
                 projected.append((ix, iy, iz))
             _fill_triangle(host, projected, nx, ny, nz)
-        # Note: Do not solidify the inflow/outflow end boundaries (host[0] / host[nx-1]),
-        # so that fluid momentum flux through inlet and outlet planes is accurately resolved.
+        # Solidify y/z domain boundaries (ground, ceiling, sidewalls) for no-slip wall conditions
+        host[:, 0, :] = True       # sidewall y = 0
+        host[:, ny - 1, :] = True  # sidewall y = ny - 1
+        host[:, :, 0] = True       # ground z = 0
+        host[:, :, nz - 1] = True  # ceiling z = nz - 1
+        # Inflow (x=0) and outflow (x=nx-1) planes remain open
+        host[0, :, :] = False
+        host[nx - 1, :, :] = False
         solid = xp.asarray(host)
         solid_velocity = xp.zeros((3, nx, ny, nz), dtype=np.float64)
         interface = _interface_cells(solid)
