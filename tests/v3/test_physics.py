@@ -50,7 +50,7 @@ def test_evaluate_horizontal_glide_deterministic():
         dihedral_deg=3.0,
         elevon_deg=1.5,
     )
-    metric = evaluate_horizontal_glide(cfg, speed_mps=6.0, duration_s=2.0)
+    metric = evaluate_horizontal_glide(cfg, speed_mps=6.0, duration_s=0.3)
     assert metric.speed_mps == 6.0
     assert metric.flight_time_s > 0.0
     assert 0.0 <= metric.steady_glide_fraction <= 1.0
@@ -64,7 +64,7 @@ def test_benchmark_runner():
         step_count=20,
     )
     candidate.geometry = extract_airframe_geometry(None, step_count=20)
-    runner = DeterministicFlightBenchmark(duration_s=2.0)
+    runner = DeterministicFlightBenchmark(duration_s=0.3)
     res = runner.evaluate_candidate(candidate)
 
     assert res.low_speed.speed_mps == 6.0

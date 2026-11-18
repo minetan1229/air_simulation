@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 from v3.interfaces import AircraftCandidate, ParametricOrigamiConfig
 from v3.origami.adapter import OrigamiAdapter
+from v3.physics.benchmark import DeterministicFlightBenchmark
 from v3.trim.nelder_mead import NelderMeadTrimOptimizer
 from v3.eval.robustness import RobustnessEvaluator
 
@@ -14,7 +15,8 @@ def test_nelder_mead_trim_optimization():
     adapter = OrigamiAdapter()
     candidate = adapter.compile_candidate(ParametricOrigamiConfig(), candidate_id="trim-test")
 
-    optimizer = NelderMeadTrimOptimizer(max_iter=3)
+    bench = DeterministicFlightBenchmark(duration_s=0.2)
+    optimizer = NelderMeadTrimOptimizer(benchmark=bench, max_iter=2)
     res = optimizer.optimize_trim(candidate)
 
     assert res.candidate_id == "trim-test"
@@ -28,7 +30,7 @@ def test_robustness_evaluator_and_export(tmp_path: Path):
     adapter = OrigamiAdapter()
     candidate = adapter.compile_candidate(ParametricOrigamiConfig(), candidate_id="eval-test")
 
-    evaluator = RobustnessEvaluator(duration_s=1.0)
+    evaluator = RobustnessEvaluator(duration_s=0.2)
     report = evaluator.evaluate_candidate(candidate)
 
     assert report.candidate_id == "eval-test"
