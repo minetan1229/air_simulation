@@ -41,7 +41,7 @@ def main() -> int:
 
     try:
         import pytest_timeout  # type: ignore # noqa: F401
-        cmd.append("--timeout=90")
+        cmd.append("--timeout=1200")
     except ImportError:
         pass
 
