@@ -96,28 +96,26 @@ def run_pipeline(
 
     # Stage 2: 3D MAP-Elites Illumination
     print("\n[Stage 2] Running 3D MAP-Elites illumination search...")
-    jsonl_file = open(jsonl_log_path, "w", encoding="utf-8")
+    with open(jsonl_log_path, "w", encoding="utf-8") as jsonl_file:
+        def progress(it: int, score: float, niches: int) -> None:
+            cov = grid.coverage() * 100.0
+            sys.stdout.write(
+                f"\r  Iteration {it:04d}/{iterations} | Niches: {niches:03d} ({cov:.1f}%) | Best Score: {score:.3f}"
+            )
+            sys.stdout.flush()
 
-    def progress(it: int, score: float, niches: int) -> None:
-        cov = grid.coverage() * 100.0
-        sys.stdout.write(
-            f"\r  Iteration {it:04d}/{iterations} | Niches: {niches:03d} ({cov:.1f}%) | Best Score: {score:.3f}"
-        )
-        sys.stdout.flush()
+            # Log to JSONL
+            entry = {
+                "iteration": it,
+                "niches_filled": niches,
+                "coverage_pct": cov,
+                "best_score": score,
+                "timestamp": time.time(),
+            }
+            jsonl_file.write(json.dumps(entry) + "\n")
+            jsonl_file.flush()
 
-        # Log to JSONL
-        entry = {
-            "iteration": it,
-            "niches_filled": niches,
-            "coverage_pct": cov,
-            "best_score": score,
-            "timestamp": time.time(),
-        }
-        jsonl_file.write(json.dumps(entry) + "\n")
-        jsonl_file.flush()
-
-    engine.run_iterations(iterations=iterations, progress_callback=progress)
-    jsonl_file.close()
+        engine.run_iterations(iterations=iterations, progress_callback=progress)
     print("\n  MAP-Elites illumination completed.")
 
     # Stage 3: Nelder-Mead Precision Trim Optimization

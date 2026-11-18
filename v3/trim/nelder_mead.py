@@ -111,9 +111,23 @@ class NelderMeadTrimOptimizer:
             worst_cost, worst_v, _ = simplex[-1]
             second_worst_cost, _, _ = simplex[-2]
 
+            # Only declare convergence if we have found at least one valid glidable configuration (cost < 0.0)
             if abs(worst_cost - best_cost) < 1.0e-4:
-                converged = True
-                break
+                if best_cost < -1.0e-4:
+                    converged = True
+                    break
+                else:
+                    # All points in current simplex scored 0.0 (crash/stall).
+                    # Perturb the simplex across allowable bounds to escape zero-score region.
+                    p1_e = self.elevon_bounds[0] + 0.3 * (self.elevon_bounds[1] - self.elevon_bounds[0])
+                    p1_d = self.dihedral_bounds[0] + 0.3 * (self.dihedral_bounds[1] - self.dihedral_bounds[0])
+                    cost1, cand1 = self._evaluate_point(p1_e, p1_d, candidate)
+                    simplex[1] = (cost1, (p1_e, p1_d), cand1)
+
+                    p2_e = self.elevon_bounds[0] + 0.7 * (self.elevon_bounds[1] - self.elevon_bounds[0])
+                    p2_d = self.dihedral_bounds[0] + 0.7 * (self.dihedral_bounds[1] - self.dihedral_bounds[0])
+                    cost2, cand2 = self._evaluate_point(p2_e, p2_d, candidate)
+                    simplex[2] = (cost2, (p2_e, p2_d), cand2)
 
             # Centroid of all vertices except worst
             c_e = 0.5 * (simplex[0][1][0] + simplex[1][1][0])

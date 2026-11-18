@@ -51,8 +51,9 @@ class MAPElitesGridArchive:
 
         indices: List[int] = []
         for val, (low, high), num_bins in zip(vals, self.ranges, self.bins):
-            clamped = _clamp(val, low, high - 1.0e-5)
-            frac = (clamped - low) / (high - low)
+            clamped = _clamp(val, low, high)
+            span = max(1.0e-9, high - low)
+            frac = (clamped - low) / span
             idx = int(frac * num_bins)
             idx = max(0, min(num_bins - 1, idx))
             indices.append(idx)
@@ -62,7 +63,11 @@ class MAPElitesGridArchive:
     def add_candidate(self, candidate: AircraftCandidate) -> bool:
         """Add candidate to archive if niche is empty or candidate exceeds current best."""
         self.total_evaluations += 1
-        if candidate.benchmark is None:
+        if (
+            candidate.benchmark is None
+            or not candidate.benchmark.valid
+            or candidate.benchmark.composite_score <= 1.0e-5
+        ):
             return False
 
         desc = candidate.descriptor
