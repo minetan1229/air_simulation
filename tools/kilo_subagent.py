@@ -101,7 +101,7 @@ def execute_kilo_worker(
             try:
                 data = json.loads(line_str)
                 events.append(data)
-                
+
                 # Check session id
                 sid = data.get("sessionID") or (data.get("part") or {}).get("sessionID")
                 if sid:
