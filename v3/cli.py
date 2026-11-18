@@ -16,7 +16,7 @@ import os
 import sys
 import time
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Tuple
 
 from v3.eval.robustness import RobustnessEvaluator
 from v3.origami.adapter import OrigamiAdapter
@@ -73,6 +73,11 @@ def run_pipeline(
     output_dir: str = "output/v3",
     top_k: int = 3,
     trim_iterations: int = 15,
+    grid_bins: Tuple[int, int, int] = (10, 10, 10),
+    bootstrap_count: int = 5,
+    mcts_iterations: int = 30,
+    elevon_bounds: Tuple[float, float] = (-4.0, 8.0),
+    dihedral_bounds: Tuple[float, float] = (0.0, 8.0),
 ) -> None:
     """Run full headless v3 pipeline."""
     out_path = Path(output_dir)
@@ -84,6 +89,7 @@ def run_pipeline(
     print("=" * 70)
     print(f"  Random Seed           : {seed}")
     print(f"  Search Iterations     : {iterations}")
+    print(f"  Grid Bins             : {grid_bins} ({grid_bins[0]*grid_bins[1]*grid_bins[2]} niches)")
     print(f"  Trim Optimization     : {trim_iterations} iterations")
     print(f"  Output Directory      : {out_path.resolve()}")
     print("=" * 70)
@@ -91,15 +97,21 @@ def run_pipeline(
     # Initialize subsystems
     adapter = OrigamiAdapter()
     benchmark = DeterministicFlightBenchmark(duration_s=6.0)
-    grid = MAPElitesGridArchive(bins=(8, 8, 8))
+    grid = MAPElitesGridArchive(bins=grid_bins)
     engine = MAPElitesEngine(archive=grid, adapter=adapter, benchmark=benchmark, seed=seed)
-    trim_optimizer = NelderMeadTrimOptimizer(adapter=adapter, benchmark=benchmark, max_iter=trim_iterations)
+    trim_optimizer = NelderMeadTrimOptimizer(
+        adapter=adapter,
+        benchmark=benchmark,
+        max_iter=trim_iterations,
+        elevon_bounds=elevon_bounds,
+        dihedral_bounds=dihedral_bounds,
+    )
     evaluator = RobustnessEvaluator(duration_s=6.0)
 
     # Stage 1: MCTS Bootstrap
     print("\n[Stage 1] Bootstrapping 20-step origami skeletons with MCTS...")
     t0 = time.time()
-    engine.bootstrap_population(count=4, mcts_iterations=20)
+    engine.bootstrap_population(count=bootstrap_count, mcts_iterations=mcts_iterations)
     initial_elites = len(grid.cells)
     print(f"  Initialized {initial_elites} compliant niche elites in {time.time() - t0:.2f}s.")
 
@@ -183,6 +195,8 @@ def main() -> None:
 
     cfg = _load_yaml_config(args.config)
     search_cfg = cfg.get("search", {})
+    grid_cfg = cfg.get("grid", {})
+    trim_cfg = cfg.get("trim", {})
     eval_cfg = cfg.get("evaluation", {})
 
     iters = args.iterations or int(search_cfg.get("map_elites_iterations", 50))
@@ -190,12 +204,29 @@ def main() -> None:
     out_dir = args.output_dir or str(eval_cfg.get("output_dir", "output/v3"))
     top_k = args.top_k or int(eval_cfg.get("top_k_export", 3))
 
+    raw_bins = grid_cfg.get("bins", [10, 10, 10])
+    grid_bins = (int(raw_bins[0]), int(raw_bins[1]), int(raw_bins[2])) if len(raw_bins) >= 3 else (10, 10, 10)
+    boot_count = int(search_cfg.get("bootstrap_count", 5))
+    mcts_iters = int(search_cfg.get("mcts_iterations", 30))
+
+    raw_e_bounds = trim_cfg.get("elevon_bounds_deg", [-4.0, 8.0])
+    raw_d_bounds = trim_cfg.get("dihedral_bounds_deg", [0.0, 8.0])
+    e_bounds = (float(raw_e_bounds[0]), float(raw_e_bounds[1])) if len(raw_e_bounds) >= 2 else (-4.0, 8.0)
+    d_bounds = (float(raw_d_bounds[0]), float(raw_d_bounds[1])) if len(raw_d_bounds) >= 2 else (0.0, 8.0)
+
+    trim_iters = args.trim_iter if args.trim_iter != 15 else int(trim_cfg.get("max_iterations", 15))
+
     run_pipeline(
         iterations=iters,
         seed=seed,
         output_dir=out_dir,
         top_k=top_k,
-        trim_iterations=args.trim_iter,
+        trim_iterations=trim_iters,
+        grid_bins=grid_bins,
+        bootstrap_count=boot_count,
+        mcts_iterations=mcts_iters,
+        elevon_bounds=e_bounds,
+        dihedral_bounds=d_bounds,
     )
 
 

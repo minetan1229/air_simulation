@@ -33,6 +33,7 @@ def main() -> int:
         "--tb=short",
         "--cov=physics",
         "--cov=api",
+        "--cov=v3",
         "--cov-report=term-missing:skip-covered",
     ]
     print(f"Running: {' '.join(cmd)}", flush=True)

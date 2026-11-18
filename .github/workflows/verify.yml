@@ -2,11 +2,11 @@ name: Python Code Verification
 
 on:
   push:
-    # The genetic-project phase is isolated from master, so its own branch
-    # has to be verified too.
-    branches: [ "master", "genetic-project" ]
+    # The genetic-project and v3 branches are isolated from master, so they
+    # have to be verified too.
+    branches: [ "master", "genetic-project", "v3" ]
   pull_request:
-    branches: [ "master" ]
+    branches: [ "master", "v3" ]
 
 # The branch guard refuses to run the suite on a protected branch.  Inside CI
 # the checkout is the triggering ref - ``actions/checkout`` creates a local
@@ -47,7 +47,7 @@ jobs:
         run: ruff check .
 
       - name: 静的型検査 (Mypy)
-        run: mypy --config-file mypy.ini physics app.py
+        run: mypy --config-file mypy.ini physics app.py v3
 
       # コンソールは ES モジュールグラフであり、1 ファイルでも構文エラーが
       # あればアプリケーション全体の JavaScript が無効になる。GitHub ランナー
