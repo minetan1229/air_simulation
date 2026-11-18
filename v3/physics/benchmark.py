@@ -121,9 +121,16 @@ def evaluate_horizontal_glide(
     # Pitch restoring stability is positive when pitch attitude oscillations remain bounded
     if crashed or diverged:
         stability = 0.0
-    else:
         # Calculate pitch attitude variance or RMS pitch rate from samples if available
-        q_rates = [abs(float(s.q_rate_radps)) for s in samples] if samples else []
+        if samples and len(samples) >= 2:
+            q_rates = [
+                abs(math.radians(s2.pitch_deg - s1.pitch_deg) / max(1.0e-4, s2.time_s - s1.time_s))
+                for s1, s2 in zip(samples[:-1], samples[1:])
+            ]
+        elif samples:
+            q_rates = [abs(float(getattr(s, "q_rate_radps", 0.0))) for s in samples]
+        else:
+            q_rates = []
         mean_q = sum(q_rates) / max(1, len(q_rates)) if q_rates else 0.0
         # Aerodynamic static margin contribution (nominal positive static margin ~0.10)
         sm = float(getattr(aircraft_config, "static_margin", 0.12))
