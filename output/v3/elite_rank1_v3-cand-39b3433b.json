@@ -1,0 +1,385 @@
+{
+  "candidate_id": "v3-cand-39b3433b",
+  "step_count": 20,
+  "config": {
+    "nose": {
+      "fold_count": 4,
+      "taper_ratio": 0.55,
+      "nose_length_ratio": 0.28,
+      "fold_angles_deg": [
+        180.0,
+        -180.0,
+        180.0,
+        -180.0
+      ]
+    },
+    "keel": {
+      "keel_depth_ratio": 0.08,
+      "has_lock_fold": true,
+      "lock_fold_angle_deg": 180.0,
+      "keel_layers": 4,
+      "crease_offset_u": 0.5
+    },
+    "wing": {
+      "wingspan_ratio": 0.75,
+      "dihedral_deg": 3.5,
+      "elevon_left_deg": 2.0,
+      "elevon_right_deg": 2.0,
+      "winglet_angle_deg": 45.0,
+      "has_winglet": true
+    },
+    "paper_gsm": 100.0
+  },
+  "geometry": {
+    "mass_kg": 0.0062369999999999995,
+    "wing_area_m2": 0.030011288819653887,
+    "wingspan_m": 0.13974326739231221,
+    "chord_m": 0.29699999999999993,
+    "aspect_ratio": 0.6506945069513507,
+    "cg_m": [
+      -0.004215573850551684,
+      -0.02697497310800689,
+      8.779445321718903e-06
+    ],
+    "keel_height_m": 0.10495906207923722,
+    "keel_length_m": 0.29699999999999993,
+    "keel_layers": 5,
+    "step_count": 20
+  },
+  "descriptor": {
+    "wing_loading_kg_m2": 0.2078217979067761,
+    "static_stability": 0.7691203196867431,
+    "aspect_ratio": 0.6506945069513507
+  },
+  "benchmark": {
+    "low_speed": {
+      "speed_mps": 6.0,
+      "flight_time_s": 0.2,
+      "max_ld_ratio": 4.089084514381206,
+      "steady_glide_fraction": 0.0,
+      "stability": 0.7691203196867431,
+      "distance_m": 1.0430355034364276,
+      "max_altitude_m": 1.6487758353482436,
+      "landed": false,
+      "crashed": false,
+      "diverged": false,
+      "status": "flying",
+      "deterministic_score": 0.0
+    },
+    "mid_speed": {
+      "speed_mps": 10.0,
+      "flight_time_s": 0.2,
+      "max_ld_ratio": 4.233676122111436,
+      "steady_glide_fraction": 0.0,
+      "stability": 0.7269790704214452,
+      "distance_m": 1.7339151362252907,
+      "max_altitude_m": 1.8724975827068997,
+      "landed": false,
+      "crashed": false,
+      "diverged": false,
+      "status": "flying",
+      "deterministic_score": 0.0
+    },
+    "composite_score": 0.0,
+    "valid": false,
+    "rejection_reason": "Failed benchmark: low_score=0.000, mid_score=0.000"
+  },
+  "metadata": {
+    "tier0_valid": true,
+    "tier0_reasons": [],
+    "robustness_report": {
+      "candidate_id": "v3-cand-39b3433b",
+      "dryden_survival_rate": 1.0,
+      "dryden_mean_hangtime_s": 0.2,
+      "jitter_robustness_score": 1.0,
+      "high_pitch_recovery_rate": 1.0,
+      "overall_robustness_score": 1.0,
+      "details": {
+        "dryden_metrics": {
+          "glide_entry_time_s": null,
+          "stable_glide_duration_s": 0.0,
+          "apex_recovery_status": "not_observed",
+          "energy_profile_j": [
+            0.291330114075,
+            0.2852723430353735,
+            0.28169900883167825,
+            0.2794006568285745,
+            0.27750275796535595,
+            0.27581250812083874,
+            0.2738826506707867,
+            0.2718499950368083,
+            0.26964889535353037,
+            0.26759285318251436,
+            0.26545204215786566,
+            0.2635518037916495,
+            0.2613557764404487,
+            0.2592562824913559,
+            0.2571220145980374,
+            0.2550244239542499,
+            0.25297961457220564,
+            0.2509273810943282,
+            0.2490815007491315
+          ],
+          "energy_strictly_decreasing": true,
+          "frames": 19,
+          "points": 19,
+          "flight_time_s": 0.2,
+          "distance_m": 1.4374375374445163,
+          "range_x_m": 1.4315459628153646,
+          "range_y_m": 0.12293547885200062,
+          "horizontal_range_m": 1.4368148717261873,
+          "max_altitude_m": 1.7480415175461577,
+          "apogee_time_s": 0.19881805515876358,
+          "post_apogee_time_s": 0.001181944841236432,
+          "max_speed_mps": 7.842524586658343,
+          "final_speed_mps": 6.351397724993735,
+          "final_altitude_m": 1.7496859870596655,
+          "max_g_load": 7.4267584197639165,
+          "max_ld_ratio": 4.171834098777139,
+          "max_stress_index": 0.058916329455486825,
+          "max_stress_pa": 129.615924802071,
+          "stall_margin": 0.9125841090923911,
+          "stalled": false,
+          "landed": false,
+          "crashed": false,
+          "diverged": false,
+          "status": "flying",
+          "launch_speed_mps": 8.0,
+          "backend": "numpy",
+          "backends": {
+            "aero": "upstream",
+            "atmosphere": "upstream",
+            "wind": "upstream",
+            "stress": "upstream",
+            "backend": "numpy"
+          },
+          "final_state": {
+            "time_s": 0.2,
+            "position_m": [
+              1.4393036373882606,
+              -0.12378998258172454,
+              -1.7496859870596655
+            ],
+            "velocity_mps": [
+              6.560374603380928,
+              -0.7227138240637277,
+              -1.3903601396614478
+            ],
+            "quaternion": [
+              0.9929117547213269,
+              -0.03300538735757076,
+              0.005176751807821622,
+              0.11406179457781838
+            ],
+            "angular_velocity_radps": [
+              0.4688178329368058,
+              0.37039057417566246,
+              -0.47431618601965453
+            ],
+            "acceleration_mps2": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "angular_accel_radps2": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "landed": false,
+            "crashed": false
+          }
+        },
+        "jitter_metrics": {
+          "glide_entry_time_s": null,
+          "stable_glide_duration_s": 0.0,
+          "apex_recovery_status": "not_observed",
+          "energy_profile_j": [
+            0.2913332962239514,
+            0.28294504180758495,
+            0.2778842392625729,
+            0.27419804869017117,
+            0.2714043323821213,
+            0.2688967874505198,
+            0.2666517416317428,
+            0.2644791109085074,
+            0.26250598208275816,
+            0.2604575052833423,
+            0.2585266488510561,
+            0.2566943411013862,
+            0.25507358025364374,
+            0.25321142294306914,
+            0.2513798682572207,
+            0.24965659084662295,
+            0.24787303292406945,
+            0.24617908412323541
+          ],
+          "energy_strictly_decreasing": true,
+          "frames": 18,
+          "points": 18,
+          "flight_time_s": 0.2,
+          "distance_m": 1.3519465865961686,
+          "range_x_m": 1.3513606830300875,
+          "range_y_m": 0.037835702282717605,
+          "horizontal_range_m": 1.3518902455476076,
+          "max_altitude_m": 1.7967151428486692,
+          "apogee_time_s": 0.1923043410884534,
+          "post_apogee_time_s": 0.00769565891154661,
+          "max_speed_mps": 7.952084005118181,
+          "final_speed_mps": 6.564449101940041,
+          "final_altitude_m": 1.809276864089824,
+          "max_g_load": 7.741525308709918,
+          "max_ld_ratio": 4.148910724979072,
+          "max_stress_index": 0.06141336903623714,
+          "max_stress_pa": 135.10941187972168,
+          "stall_margin": 0.8814150243870035,
+          "stalled": false,
+          "landed": false,
+          "crashed": false,
+          "diverged": false,
+          "status": "flying",
+          "launch_speed_mps": 8.0,
+          "backend": "numpy",
+          "backends": {
+            "aero": "upstream",
+            "atmosphere": "upstream",
+            "wind": "upstream",
+            "stress": "upstream",
+            "backend": "numpy"
+          },
+          "final_state": {
+            "time_s": 0.2,
+            "position_m": [
+              1.400475602040278,
+              -0.038564737487095296,
+              -1.809276864089824
+            ],
+            "velocity_mps": [
+              6.36047363457463,
+              -0.09181295962268651,
+              -1.627696509368624
+            ],
+            "quaternion": [
+              0.9988768824044947,
+              0.04059664230275579,
+              0.014984301509223768,
+              -0.019296557721522795
+            ],
+            "angular_velocity_radps": [
+              -0.03613059543287065,
+              0.49194301970480697,
+              0.10900062427494019
+            ],
+            "acceleration_mps2": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "angular_accel_radps2": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "landed": false,
+            "crashed": false
+          }
+        },
+        "climb_metrics": {
+          "glide_entry_time_s": null,
+          "stable_glide_duration_s": 0.0,
+          "apex_recovery_status": "not_observed",
+          "energy_profile_j": [
+            0.34434461407499994,
+            0.33339667915694104,
+            0.3265852476529757,
+            0.3221425597070007,
+            0.31882630893720065,
+            0.3154596604274649,
+            0.31290003480940815,
+            0.310477526918565,
+            0.30814528070486596,
+            0.30589580177182574,
+            0.30372278522771845,
+            0.301538001285113,
+            0.2994465425559987,
+            0.29737677829494535,
+            0.29533246402107616,
+            0.29342304231275584,
+            0.29150796302630744,
+            0.289689559200275,
+            0.28785130191812486
+          ],
+          "energy_strictly_decreasing": true,
+          "frames": 19,
+          "points": 19,
+          "flight_time_s": 0.2,
+          "distance_m": 1.3322228988412252,
+          "range_x_m": 1.3322228502539666,
+          "range_y_m": 0.00032313091499427314,
+          "horizontal_range_m": 1.3322228894416996,
+          "max_altitude_m": 2.247283021108724,
+          "apogee_time_s": 0.1949009532998928,
+          "post_apogee_time_s": 0.005099046700107218,
+          "max_speed_mps": 8.889779540436107,
+          "final_speed_mps": 6.898644193638684,
+          "final_altitude_m": 2.265883074749721,
+          "max_g_load": 9.494264072962814,
+          "max_ld_ratio": 4.202495674523983,
+          "max_stress_index": 0.07531781141170477,
+          "max_stress_pa": 165.69918510575044,
+          "stall_margin": 0.90357430627777,
+          "stalled": false,
+          "landed": false,
+          "crashed": false,
+          "diverged": false,
+          "status": "flying",
+          "launch_speed_mps": 8.999999999999998,
+          "backend": "numpy",
+          "backends": {
+            "aero": "upstream",
+            "atmosphere": "upstream",
+            "wind": "upstream",
+            "stress": "upstream",
+            "backend": "numpy"
+          },
+          "final_state": {
+            "time_s": 0.2,
+            "position_m": [
+              1.362218294809989,
+              -0.0003248755097781233,
+              -2.265883074749721
+            ],
+            "velocity_mps": [
+              5.862690257270152,
+              -0.0003327178353829657,
+              -3.6377909809418743
+            ],
+            "quaternion": [
+              0.9867429064027508,
+              8.961148415798742e-05,
+              0.1622911796300896,
+              -4.05944390500423e-05
+            ],
+            "angular_velocity_radps": [
+              0.0016578384379041515,
+              0.5199261374155881,
+              -0.0075773446886524655
+            ],
+            "acceleration_mps2": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "angular_accel_radps2": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "landed": false,
+            "crashed": false
+          }
+        }
+      }
+    }
+  }
+}

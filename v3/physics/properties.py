@@ -16,7 +16,7 @@ def extract_airframe_geometry(
     """Extract physical dimensions and mass properties from folded genome geometry.
 
     Safely extracts properties whether geometry_obj is a GenomeGeometry instance
-    or a dict representation.
+    or a dict representation. Uses real grip / keel dimensions when available.
     """
     if geometry_obj is None:
         # Fallback conservative geometry
@@ -61,10 +61,23 @@ def extract_airframe_geometry(
     safe_area = max(1.0e-5, wing_area)
     aspect_ratio = (span * span) / safe_area
 
-    # Approximate keel dimensions based on sheet proportions and step count
+    # Calculate actual grip / keel dimensions via evaluate_grip if GenomeGeometry
     keel_height = max(0.008, chord * 0.10)
     keel_length = max(0.030, chord * 0.50)
     keel_layers = max(2, total_layers)
+
+    try:
+        from physics.origami_genome import evaluate_grip
+        if hasattr(geometry_obj, "faces") and hasattr(geometry_obj, "pattern"):
+            report = evaluate_grip(geometry_obj)
+            if report.grip_height_m > 0.0:
+                keel_height = report.grip_height_m
+            if report.grip_length_m > 0.0:
+                keel_length = report.grip_length_m
+            if report.grip_layers > 0:
+                keel_layers = report.grip_layers
+    except Exception:
+        pass
 
     return AirframeGeometry(
         mass_kg=mass,
