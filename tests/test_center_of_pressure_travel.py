@@ -117,6 +117,19 @@ def test_cop_c1_continuity_at_boundaries() -> None:
     # Ensure left and right derivatives agree (C^1 continuous transition at stall)
     assert abs(d_cp_dalpha_stall_left - d_cp_dalpha_stall_right) < 1e-4
 
+    # C^2 second-derivative continuity at stall boundary (Issue #134 resolution)
+    # The quintic smootherstep ensures S''(1) = 0, eliminating angular acceleration shock
+    eps2 = 1e-4
+    d2_left = (center_of_pressure_fraction(ScalarMath, stall_alpha, stall_alpha, gain)
+               - 2.0 * center_of_pressure_fraction(ScalarMath, stall_alpha - eps2, stall_alpha, gain)
+               + center_of_pressure_fraction(ScalarMath, stall_alpha - 2.0 * eps2, stall_alpha, gain)) / (eps2 ** 2)
+    d2_right = (center_of_pressure_fraction(ScalarMath, stall_alpha + 2.0 * eps2, stall_alpha, gain)
+                - 2.0 * center_of_pressure_fraction(ScalarMath, stall_alpha + eps2, stall_alpha, gain)
+                + center_of_pressure_fraction(ScalarMath, stall_alpha, stall_alpha, gain)) / (eps2 ** 2)
+    assert abs(d2_left) < 1e-3
+    assert abs(d2_right) < 1e-7
+    assert abs(d2_left - d2_right) < 1e-3
+
 
 # ---------------------------------------------------------------------------
 # 5. Static margin sensitivity and pitching moment bounds

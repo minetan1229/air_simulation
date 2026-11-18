@@ -31,11 +31,26 @@ def main() -> int:
         "pytest",
         "-ra",
         "--tb=short",
+    ]
+
+    try:
+        import xdist  # type: ignore # noqa: F401
+        cmd.extend(["-n", "auto"])
+    except ImportError:
+        pass
+
+    try:
+        import pytest_timeout  # type: ignore # noqa: F401
+        cmd.append("--timeout=90")
+    except ImportError:
+        pass
+
+    cmd.extend([
         "--cov=physics",
         "--cov=api",
         "--cov=v3",
         "--cov-report=term-missing:skip-covered",
-    ]
+    ])
     print(f"Running: {' '.join(cmd)}", flush=True)
 
     proc = subprocess.Popen(
