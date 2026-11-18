@@ -9,10 +9,11 @@
 - [x] **多忠実度パレート再評価パイプライン**: 最適化探索中は中忠実度（2.00x）で母集団を評価し、最終パレート候補のみ定常RANS / 実験校正サロゲート（RK4 fine dt=0.005s）で再評価。
 - [x] **物理法則欠陥台帳（全14課題）の完全解決**: P-01(Kirchhoff付加質量/Munk), P-02(キール二重減衰排除), P-03(Ixzテンソルパリティ), P-05(失速後抗力ブレンド), P-06(横すべり側力連続性), P-07(ARゼロ除算防護), P-08(翼端渦散逸上限), P-14(接地クーロンdt), P-26(サーマル質量保存), P-27(紙直交異方性ヤング率), P-51(デルタ翼ロール慣性b^2/24), P-53/P-55(サロゲート地面効果/応力Pa), P-61/P-62(GA2静安定/座屈), P-63(エラスティカ大たわみ)。
 - [x] **厳密反証テストスイート**: 13個の専用テストファイル（25件）が全PASS、smoke_test 14/14ステージ完全PASS。
+- [x] **v3 アーキテクチャ刷新（CUI専用・決定論的パイプライン）**: 20工程パラメトリック折り紙MCTS + 3D MAP-Elites + Nelder-Meadトリム + Stage 4ロバストネス検証を完全統合。全18件単体・総合テスト PASS、CUI疎通確認完了。
 
 ## 3. Loop State (現在のループ状態・引き継ぎメモリ)
 - **Current Phase**: Phase 5 [Distill & Loop]
-- **Verification Status**: P-AERO-06（CD < 0 によるエネルギー保存則違反・永動機挙動リスク）を解消。MIN_DRAG_COEFFICIENT=0.0 を aero_kernel / aero_domain に導入しフロア制約を追加。tests/test_aero.py (135件) / test_physics_audit.py (45件) / test_gpu_kernel_parity.py 全件通過。
-- **Branch & Safety**: mission/physics-law-fixes 上で隔離維持。master/main への操作厳禁（AGENTS.md §2 Branch Isolation）。単一コミッター原則。
-- **Next Action**: 監査レポート内の残る高優先度課題（P-AERO-02 失速後抗力ブレンド、P-AERO-03 CM基準点等）の順次対応、またはPR/マージ準備。
+- **Verification Status**: v3 ブランチへ全タスク（physics, origami, search, trim, eval, cli）を `--no-ff` マージ統合完了。`tests/v3/` 全18テストPASS、Ruff/Mypy型検査100%通過。CUIエンドツーエンド疎通テスト完了。
+- **Branch & Safety**: `v3` ブランチ上。直接編集禁止、タスク別ブランチ運用プロトコルを維持。
+- **Next Action**: ユーザー指示に従い、探索規模の拡大・本番運用パラメータチューニング、またはドキュメント/CI連携の整備。
 
