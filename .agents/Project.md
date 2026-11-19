@@ -13,7 +13,7 @@
 
 ## 3. Loop State (現在のループ状態・引き継ぎメモリ)
 - **Current Phase**: Phase 5 [Distill & Loop]
-- **Verification Status**: v3 ブランチへ全タスク（physics, origami, search, trim, eval, cli）を `--no-ff` マージ統合完了。`tests/v3/` 全18テストPASS、Ruff/Mypy型検査100%通過。CUIエンドツーエンド疎通テスト完了。
-- **Branch & Safety**: `v3` ブランチ上。直接編集禁止、タスク別ブランチ運用プロトコルを維持。
-- **Next Action**: ユーザー指示に従い、探索規模の拡大・本番運用パラメータチューニング、またはドキュメント/CI連携の整備。
+- **Verification Status**: PR #212 (mission/deep-investigation-audit -> v3) 実行中。Issue #210, #211, #95, #108, #134, #184, #188, #189, #190, #191, #196 解消。Ruff/Mypy/UI検査100%通過。CIテスト並列化 (xdist + 1200s timeout) 反映完了。
+- **Branch & Safety**: Worktree `mission/deep-investigation-audit` 上で独立作業中。master直接編集禁止プロトコル完全遵守。
+- **Next Action**: PR #212 の CI 通過確認後、v3 へのマージおよび親リポジトリ同期・クリーンアップ。
 

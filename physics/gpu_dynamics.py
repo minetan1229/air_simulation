@@ -817,6 +817,19 @@ def _evaluate_state(
         xp, params, omega, coefficients["q_dyn"], speed, beta_rad
     )
 
+    if has_apparent:
+        # Issue #194: Kirchhoff added-mass Munk moment coupling (GPU batch)
+        u_rel = body_relative[:, 0]
+        v_rel = body_relative[:, 1]
+        w_rel = body_relative[:, 2]
+        stalled_mask = xp.asarray(coefficients.get("stalled", 0.0))
+        munk_factor = xp.where(params.apparent_active, xp.where(stalled_mask > 0.5, 0.0, 1.0), 0.0)
+        munk_x = -v_rel * m_add_z * w_rel * munk_factor
+        munk_y = u_rel * m_add_z * w_rel * munk_factor
+        munk_z = xp.zeros_like(munk_x)
+        munk_moment = xp.stack((munk_x, munk_y, munk_z), axis=-1)
+        moment_body = moment_body + munk_moment
+
     if cur_mat is not None:
         angular_momentum = _contract3(xp, cur_mat, omega)
         gyro = _cross(xp, omega, angular_momentum)

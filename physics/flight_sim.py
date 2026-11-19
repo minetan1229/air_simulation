@@ -2785,7 +2785,21 @@ class FlightSimulator:
             eff_inertia[0, 0] += float(added.get("added_inertia_xx_kgm2", 0.0))
             eff_inertia[1, 1] += float(added.get("added_inertia_yy_kgm2", 0.0))
             eff_inertia[2, 2] += float(added.get("added_inertia_zz_kgm2", 0.0))
-            angular_acceleration = angular_acceleration_body(eff_inertia, omega, moment_body)
+
+            # Issue #194: Kirchhoff added-mass Munk moment coupling
+            # Momentum: P_A = [0, 0, m_add_z * w_rel]
+            # Munk moment: M_munk = - v_rel x P_A = [-v_rel * m_add_z * w_rel, u_rel * m_add_z * w_rel, 0]
+            # Coupled passively inside generalized angular acceleration (Euler's equations).
+            # Smoothly rolled off post-stall where potential flow suction breaks down.
+            w_stall_val = float(result.get("w_stall", 0.0)) if isinstance(result, dict) else 0.0
+            munk_factor = max(1.0 - w_stall_val, 0.0)
+            u_rel = float(body_relative[0])
+            v_rel = float(body_relative[1])
+            w_rel = float(body_relative[2])
+            m_munk_x = -v_rel * m_add_z * w_rel * munk_factor
+            m_munk_y = u_rel * m_add_z * w_rel * munk_factor
+            munk_moment = np.array([m_munk_x, m_munk_y, 0.0], dtype=np.float64)
+            angular_acceleration = angular_acceleration_body(eff_inertia, omega, moment_body + munk_moment)
 
         else:
             force_world = body_to_world(quaternion, force_body) + self._mass * gravity_world
