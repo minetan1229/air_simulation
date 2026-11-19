@@ -18,7 +18,7 @@ def main():
         print("Error:", err)
         return
     issues = json.loads(out)
-    
+
     fake_commits = []
     no_commit = []
     resolved_real = []
@@ -28,11 +28,11 @@ def main():
         title = iss["title"]
         comments = iss.get("comments", [])
         body = iss.get("body", "")
-        
+
         shas = []
         for c in comments:
             shas.extend(re.findall(r"\b([0-9a-f]{7,40})\b", c.get("body", "")))
-        
+
         real_shas = []
         fake_shas = []
         for s in set(shas):
@@ -41,7 +41,7 @@ def main():
                 real_shas.append(s)
             else:
                 fake_shas.append(s)
-                
+
         if fake_shas and not real_shas:
             fake_commits.append((num, title, fake_shas))
         elif not shas:
