@@ -73,3 +73,6 @@ tmp/
 *.tmp
 *.bak
 site/
+
+
+/slide/
