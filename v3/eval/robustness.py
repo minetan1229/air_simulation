@@ -120,41 +120,53 @@ class RobustnessEvaluator:
         path = Path(output_path)
         path.parent.mkdir(parents=True, exist_ok=True)
 
-        geom = candidate.geometry
-        span = geom.wingspan_m if geom else 0.18
-        chord = geom.chord_m if geom else 0.12
-        keel = geom.keel_height_m if geom else 0.012
+        positions: List[float] = []
+        indices: List[int] = []
 
-        # Generate clean 3D origami aircraft mesh vertices and faces
-        half_span = 0.5 * span
-        vertices = [
-            # Nose
-            (0.0, chord, 0.0),
-            # Wing roots
-            (-0.01, 0.0, 0.0),
-            (0.01, 0.0, 0.0),
-            # Wing tips
-            (-half_span, 0.02, 0.01),
-            (half_span, 0.02, 0.01),
-            # Keel bottom
-            (0.0, 0.04, -keel),
-        ]
-
-        faces = [
-            # Left wing triangle
-            (1, 4, 2),
-            # Right wing triangle
-            (1, 3, 5),
-            # Keel left
-            (1, 2, 6),
-            # Keel right
-            (1, 6, 3),
-        ]
+        # Attempt to extract actual folded 3D mesh from raw_genome
+        if candidate.raw_genome is not None:
+            try:
+                from physics.origami_genome import step_meshes
+                meshes = step_meshes(candidate.raw_genome)
+                if meshes:
+                    final_mesh = meshes[-1]
+                    positions = list(final_mesh.get("positions", []))
+                    indices = list(final_mesh.get("indices", []))
+            except Exception:
+                pass
 
         with open(path, "w", encoding="utf-8") as f:
             f.write(f"# Wavefront OBJ file for {candidate.candidate_id}\n")
             f.write(f"# Step count: {candidate.step_count}\n")
-            for vx, vy, vz in vertices:
-                f.write(f"v {vx:.5f} {vy:.5f} {vz:.5f}\n")
-            for f1, f2, f3 in faces:
-                f.write(f"f {f1} {f2} {f3}\n")
+
+            if positions and indices and len(positions) >= 9 and len(indices) >= 3:
+                # Real 3D origami vertex mesh
+                for i in range(0, len(positions), 3):
+                    f.write(f"v {positions[i]:.5f} {positions[i+1]:.5f} {positions[i+2]:.5f}\n")
+                for i in range(0, len(indices), 3):
+                    f.write(f"f {indices[i]+1} {indices[i+1]+1} {indices[i+2]+1}\n")
+            else:
+                # Fallback clean triangle mesh if mesh generation unavailable
+                geom = candidate.geometry
+                span = geom.wingspan_m if geom else 0.18
+                chord = geom.chord_m if geom else 0.12
+                keel = geom.keel_height_m if geom else 0.012
+                half_span = 0.5 * span
+                vertices = [
+                    (0.0, chord, 0.0),
+                    (-0.01, 0.0, 0.0),
+                    (0.01, 0.0, 0.0),
+                    (-half_span, 0.02, 0.01),
+                    (half_span, 0.02, 0.01),
+                    (0.0, 0.04, -keel),
+                ]
+                faces = [
+                    (1, 4, 2),
+                    (1, 3, 5),
+                    (1, 2, 6),
+                    (1, 6, 3),
+                ]
+                for vx, vy, vz in vertices:
+                    f.write(f"v {vx:.5f} {vy:.5f} {vz:.5f}\n")
+                for f1, f2, f3 in faces:
+                    f.write(f"f {f1} {f2} {f3}\n")

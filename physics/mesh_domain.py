@@ -93,6 +93,7 @@ __all__ = [
     "planform_metrics",
     "build_panels",
     "panel_aerodynamics",
+    "extract_panel_aerodynamic_rom",
     "paper_mass_from_mesh",
     "mesh_hash_of",
     "mesh_metric_values",
@@ -1563,6 +1564,89 @@ def panel_aerodynamics(
         "reference_chord_m": float(chord_extent),
         "reference_cg_m": (float(reference_cg[0]), float(reference_cg[1]), float(reference_cg[2])),
         "prandt_glauert": float(prandt_glauert),
+    }
+
+
+def extract_panel_aerodynamic_rom(
+    panels: Sequence[Any],
+    chord_m: float,
+    area_m2: float,
+    cg_m: Tuple[float, float, float] = (0.0, 0.0, 0.0),
+    q_pa: float = 50.0,
+) -> Dict[str, float]:
+    r"""Extract reduced-order aerodynamic derivatives (ROM) from 3D origami panels.
+
+    Evaluates :func:`panel_aerodynamics` across representative small angles of attack
+    :math:`\alpha \in [-4^\circ, 0^\circ, 4^\circ, 8^\circ]` to identify linear aerodynamic
+    parameters reflecting true 3D fold geometry (camber, twist, dihedral) without runtime
+    per-step overhead:
+    - ``cL0``: zero-alpha lift coefficient
+    - ``cl_alpha``: lift curve slope per radian
+    - ``cm0``: zero-alpha pitching moment coefficient
+    - ``cm_alpha``: pitching moment slope per radian
+    - ``cd0``: profile / parasitic drag coefficient at zero lift
+    - ``x_ac_frac``: aerodynamic center location as fraction of chord (:math:`x_{ac} / c`)
+    """
+    if not panels or area_m2 <= 0.0 or chord_m <= 0.0:
+        return {
+            "cL0": 0.0,
+            "cl_alpha": float(2.0 * math.pi),
+            "cm0": 0.0,
+            "cm_alpha": -0.5,
+            "cd0": float(PANEL_PROFILE_DRAG_CD),
+            "x_ac_frac": 0.25,
+        }
+
+    alphas_deg = [-4.0, 0.0, 4.0, 8.0]
+    cl_list = []
+    cm_list = []
+    cd_list = []
+
+    for a in alphas_deg:
+        res = panel_aerodynamics(
+            panels=panels,
+            alpha_deg=a,
+            dynamic_pressure_pa=q_pa,
+            cg_m=cg_m,
+        )
+        l_n = res["total_lift_n"]
+        d_n = res["total_drag_n"]
+        m_nm = res["total_moment_nm"]
+
+        denom_l = q_pa * area_m2
+        denom_m = q_pa * area_m2 * chord_m
+
+        cl = l_n / denom_l if denom_l > 1e-12 else 0.0
+        cd = d_n / denom_l if denom_l > 1e-12 else 0.0
+        cm = m_nm / denom_m if denom_m > 1e-12 else 0.0
+
+        cl_list.append(cl)
+        cm_list.append(cm)
+        cd_list.append(cd)
+
+    # Linear least squares regression over alpha (rad)
+    alphas_rad = np.radians(np.asarray(alphas_deg, dtype=float))
+    cl_arr = np.asarray(cl_list, dtype=float)
+    cm_arr = np.asarray(cm_list, dtype=float)
+
+    cl_alpha, cl0 = np.polyfit(alphas_rad, cl_arr, deg=1)
+    cm_alpha, cm0 = np.polyfit(alphas_rad, cm_arr, deg=1)
+
+    # Aerodynamic center: x_ac = x_cg - (dCm/dalpha) / (dCL/dalpha) * c
+    if abs(cl_alpha) > 1e-4:
+        x_ac_frac = (cg_m[0] / chord_m) - (cm_alpha / cl_alpha)
+    else:
+        x_ac_frac = 0.25
+
+    cd0 = float(np.mean(cd_list))
+
+    return {
+        "cL0": float(cl0),
+        "cl_alpha": float(cl_alpha),
+        "cm0": float(cm0),
+        "cm_alpha": float(cm_alpha),
+        "cd0": float(cd0),
+        "x_ac_frac": float(x_ac_frac),
     }
 
 

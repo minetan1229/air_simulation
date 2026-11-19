@@ -18,6 +18,8 @@ import time
 from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
 
+import yaml
+
 from v3.eval.robustness import RobustnessEvaluator
 from v3.origami.adapter import OrigamiAdapter
 from v3.physics.benchmark import DeterministicFlightBenchmark
@@ -27,44 +29,13 @@ from v3.trim.nelder_mead import NelderMeadTrimOptimizer
 
 
 def _load_yaml_config(path_str: str) -> Dict[str, Any]:
-    """Lightweight subset YAML parser avoiding external dependencies."""
+    """Load configuration YAML file using PyYAML."""
     p = Path(path_str)
     if not p.exists():
         return {}
-    res: Dict[str, Any] = {}
-    current_section = res
     with open(p, "r", encoding="utf-8") as f:
-        for line in f:
-            line = line.split("#", 1)[0].strip()
-            if not line:
-                continue
-            if ":" in line:
-                parts = line.split(":", 1)
-                k = parts[0].strip()
-                v = parts[1].strip()
-                if not v:
-                    current_section = {}
-                    res[k] = current_section
-                else:
-                    if v.startswith("[") and v.endswith("]"):
-                        items = [x.strip() for x in v[1:-1].split(",") if x.strip()]
-                        parsed_list: Any = []
-                        for itm in items:
-                            try:
-                                parsed_list.append(float(itm) if "." in itm else int(itm))
-                            except ValueError:
-                                parsed_list.append(itm)
-                        current_section[k] = parsed_list
-                    elif v.lower() == "true":
-                        current_section[k] = True
-                    elif v.lower() == "false":
-                        current_section[k] = False
-                    else:
-                        try:
-                            current_section[k] = float(v) if "." in v else int(v)
-                        except ValueError:
-                            current_section[k] = v.strip('"').strip("'")
-    return res
+        data = yaml.safe_load(f)
+        return data if isinstance(data, dict) else {}
 
 
 def run_pipeline(
@@ -74,6 +45,12 @@ def run_pipeline(
     top_k: int = 3,
     trim_iterations: int = 15,
     grid_bins: Tuple[int, int, int] = (10, 10, 10),
+    grid_ranges: Tuple[Tuple[float, float], Tuple[float, float], Tuple[float, float]] = (
+        (1.2, 6.5),
+        (0.0, 1.0),
+        (1.2, 5.5),
+    ),
+    benchmark_duration_s: float = 6.0,
     bootstrap_count: int = 5,
     mcts_iterations: int = 30,
     elevon_bounds: Tuple[float, float] = (-4.0, 8.0),
@@ -90,14 +67,16 @@ def run_pipeline(
     print(f"  Random Seed           : {seed}")
     print(f"  Search Iterations     : {iterations}")
     print(f"  Grid Bins             : {grid_bins} ({grid_bins[0]*grid_bins[1]*grid_bins[2]} niches)")
+    print(f"  Grid Ranges           : {grid_ranges}")
+    print(f"  Benchmark Duration    : {benchmark_duration_s}s")
     print(f"  Trim Optimization     : {trim_iterations} iterations")
     print(f"  Output Directory      : {out_path.resolve()}")
     print("=" * 70)
 
     # Initialize subsystems
     adapter = OrigamiAdapter()
-    benchmark = DeterministicFlightBenchmark(duration_s=6.0)
-    grid = MAPElitesGridArchive(bins=grid_bins)
+    benchmark = DeterministicFlightBenchmark(duration_s=benchmark_duration_s)
+    grid = MAPElitesGridArchive(bins=grid_bins, ranges=grid_ranges)
     engine = MAPElitesEngine(archive=grid, adapter=adapter, benchmark=benchmark, seed=seed)
     trim_optimizer = NelderMeadTrimOptimizer(
         adapter=adapter,
@@ -106,7 +85,7 @@ def run_pipeline(
         elevon_bounds=elevon_bounds,
         dihedral_bounds=dihedral_bounds,
     )
-    evaluator = RobustnessEvaluator(duration_s=6.0)
+    evaluator = RobustnessEvaluator(duration_s=benchmark_duration_s)
 
     # Stage 1: MCTS Bootstrap
     print("\n[Stage 1] Bootstrapping 20-step origami skeletons with MCTS...")
@@ -189,7 +168,7 @@ def main() -> None:
     parser.add_argument("--seed", type=int, default=None, help="Random seed")
     parser.add_argument("--output-dir", type=str, default=None, help="Directory to export outputs")
     parser.add_argument("--top-k", type=int, default=None, help="Number of elite candidates to trim/export")
-    parser.add_argument("--trim-iter", type=int, default=15, help="Nelder-Mead trim iterations")
+    parser.add_argument("--trim-iter", type=int, default=None, help="Nelder-Mead trim iterations")
 
     args = parser.parse_args()
 
@@ -197,6 +176,7 @@ def main() -> None:
     search_cfg = cfg.get("search", {})
     grid_cfg = cfg.get("grid", {})
     trim_cfg = cfg.get("trim", {})
+    bench_cfg = cfg.get("benchmark", {})
     eval_cfg = cfg.get("evaluation", {})
 
     iters = args.iterations or int(search_cfg.get("map_elites_iterations", 50))
@@ -206,6 +186,17 @@ def main() -> None:
 
     raw_bins = grid_cfg.get("bins", [10, 10, 10])
     grid_bins = (int(raw_bins[0]), int(raw_bins[1]), int(raw_bins[2])) if len(raw_bins) >= 3 else (10, 10, 10)
+
+    wl_range = grid_cfg.get("wing_loading_range", [1.2, 6.5])
+    st_range = grid_cfg.get("stability_range", [0.0, 1.0])
+    ar_range = grid_cfg.get("aspect_ratio_range", [1.2, 5.5])
+    grid_ranges = (
+        (float(wl_range[0]), float(wl_range[1])),
+        (float(st_range[0]), float(st_range[1])),
+        (float(ar_range[0]), float(ar_range[1])),
+    )
+
+    bench_duration = float(bench_cfg.get("duration_s", 6.0))
     boot_count = int(search_cfg.get("bootstrap_count", 5))
     mcts_iters = int(search_cfg.get("mcts_iterations", 30))
 
@@ -214,7 +205,7 @@ def main() -> None:
     e_bounds = (float(raw_e_bounds[0]), float(raw_e_bounds[1])) if len(raw_e_bounds) >= 2 else (-4.0, 8.0)
     d_bounds = (float(raw_d_bounds[0]), float(raw_d_bounds[1])) if len(raw_d_bounds) >= 2 else (0.0, 8.0)
 
-    trim_iters = args.trim_iter if args.trim_iter != 15 else int(trim_cfg.get("max_iterations", 15))
+    trim_iters = args.trim_iter if args.trim_iter is not None else int(trim_cfg.get("max_iterations", 15))
 
     run_pipeline(
         iterations=iters,
@@ -223,6 +214,8 @@ def main() -> None:
         top_k=top_k,
         trim_iterations=trim_iters,
         grid_bins=grid_bins,
+        grid_ranges=grid_ranges,
+        benchmark_duration_s=bench_duration,
         bootstrap_count=boot_count,
         mcts_iterations=mcts_iters,
         elevon_bounds=e_bounds,

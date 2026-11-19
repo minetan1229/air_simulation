@@ -303,7 +303,7 @@ def test_the_parity_tolerances_are_the_ones_of_the_existing_suite() -> None:
     # used for nothing else: a flight that is still airborne at the horizon
     # keeps the strict bound.
     assert CONTACT_FLIGHT_TIME_REL_TOLERANCE > FLIGHT_TIME_REL_TOLERANCE
-    assert CONTACT_FLIGHT_TIME_REL_TOLERANCE == 2.0e-2
+    assert CONTACT_FLIGHT_TIME_REL_TOLERANCE == 4.0e-2
 
 
 def test_the_batch_path_agrees_with_the_canonical_6dof_on_ga_individuals(

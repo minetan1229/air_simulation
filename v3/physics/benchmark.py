@@ -117,11 +117,28 @@ def evaluate_horizontal_glide(
     )
     steady_glide_fraction = max(0.0, min(1.0, steady_glide_fraction))
 
-    # Compute static stability margin metric: 1 / (1 + |C_m|)
-    # Approximated from final state or attitude oscillations
-    stability = 1.0 / (1.0 + max(0.0, max_alt - LAUNCH_HEIGHT_M * 1.5))
+    # Compute longitudinal static stability metric based on pitch stability and attitude damping
+    # Pitch restoring stability is positive when pitch attitude oscillations remain bounded
     if crashed or diverged:
         stability = 0.0
+    else:
+        # Calculate pitch attitude variance or RMS pitch rate from samples if available
+        if samples and len(samples) >= 2:
+            q_rates = [
+                abs(math.radians(s2.pitch_deg - s1.pitch_deg) / max(1.0e-4, s2.time_s - s1.time_s))
+                for s1, s2 in zip(samples[:-1], samples[1:])
+            ]
+        elif samples:
+            q_rates = [abs(float(getattr(s, "q_rate_radps", 0.0))) for s in samples]
+        else:
+            q_rates = []
+        mean_q = sum(q_rates) / max(1, len(q_rates)) if q_rates else 0.0
+        # Aerodynamic static margin contribution (nominal positive static margin ~0.10)
+        sm = float(getattr(aircraft_config, "static_margin", 0.12))
+        sm_factor = max(0.0, min(1.0, sm / 0.15)) if sm > 0.0 else 0.0
+        damping_factor = 1.0 / (1.0 + mean_q * 2.0)
+        climb_penalty = 1.0 / (1.0 + max(0.0, max_alt - LAUNCH_HEIGHT_M * 1.5))
+        stability = float(0.4 * sm_factor + 0.3 * damping_factor + 0.3 * climb_penalty)
 
     return EvaluationMetric(
         speed_mps=float(speed_mps),

@@ -1299,7 +1299,7 @@ def drag_coefficient(
     alpha = (_finite(xp, alpha_deg, 0.0) + 180.0) % 360.0 - 180.0
     stall_alpha = xp.abs(_finite(xp, stall_alpha_deg, 14.0))
     angle = _rad(xp, alpha)
-    separated_drag = 2.0 * xp.square(xp.sin(angle)) + parasite * xp.maximum(xp.cos(angle), 0.0)
+    separated_drag = 2.0 * xp.square(xp.sin(angle)) + parasite * xp.abs(xp.cos(angle))
 
     weight = _smoothstep01(
         xp,
@@ -1428,7 +1428,8 @@ def center_of_pressure_fraction(
     alpha = xp.abs(_finite(xp, alpha_deg, 0.0))
     stall_alpha = xp.maximum(xp.abs(_finite(xp, stall_alpha_deg, 14.0)), 1.0)
     progression = _clamp(xp, alpha / stall_alpha, 0.0, 1.0)
-    smooth = progression * progression * (3.0 - 2.0 * progression)
+    # C^2 quintic smootherstep: 6u^5 - 15u^4 + 10u^3 (first and second derivatives vanish at u=0 and u=1)
+    smooth = progression * progression * progression * (progression * (progression * 6.0 - 15.0) + 10.0)
     gain = xp.minimum(xp.maximum(_finite(xp, cp_shift_gain, 0.0), 0.0), 1.0)
     return 0.25 + 0.25 * smooth * gain
 
@@ -1800,7 +1801,7 @@ def _coefficient_core(
     alpha_norm = (alpha + 180.0) % 360.0 - 180.0
     stall_alpha_val = _stall_eff
     angle = _rad(xp, alpha_norm)
-    separated_drag = 2.0 * xp.square(xp.sin(angle)) + cd0 * xp.maximum(xp.cos(angle), 0.0)
+    separated_drag = 2.0 * xp.square(xp.sin(angle)) + cd0 * xp.abs(xp.cos(angle))
     w_drag = _smoothstep01(
         xp,
         (xp.abs(alpha_norm) - stall_alpha_val)
@@ -1911,7 +1912,9 @@ def _coefficient_core(
     #    dynamics introduce a stabilizing nose-down pitch coupling proportional to circulation/CL.
     #    When ground_pitch_coupling == 0 (default), Cm remains strictly free-air.
     h_b_ratio = _safe_div(xp, xp.maximum(height, 0.0), span, 10.0)
-    ground_proximity = xp.where(ground_effect_enabled, xp.exp(-4.0 * h_b_ratio), 0.0)
+    ground_proximity = xp.where(
+        ground_effect_enabled, xp.exp(-4.0 * xp.maximum(h_b_ratio, 0.01)), 0.0
+    )
 
     cushion_gain = xp.maximum(ground_cushion_lift, 0.0)
     cl = cl + xp.where(

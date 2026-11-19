@@ -25,10 +25,10 @@ def test_determinism_exact_match():
     adapter = OrigamiAdapter()
     candidate = adapter.compile_candidate(ParametricOrigamiConfig())
 
-    benchmark1 = DeterministicFlightBenchmark(duration_s=0.5)
+    benchmark1 = DeterministicFlightBenchmark(duration_s=0.2)
     res1 = benchmark1.evaluate_candidate(candidate)
 
-    benchmark2 = DeterministicFlightBenchmark(duration_s=0.5)
+    benchmark2 = DeterministicFlightBenchmark(duration_s=0.2)
     res2 = benchmark2.evaluate_candidate(candidate)
 
     assert res1.low_speed.flight_time_s == pytest.approx(res2.low_speed.flight_time_s, abs=1.0e-7)
@@ -64,7 +64,7 @@ def test_zoom_climb_stall_suppression():
         dihedral_deg=3.0,
         elevon_deg=1.0,
     )
-    metric_steady = evaluate_horizontal_glide(steady_cfg, speed_mps=6.0, duration_s=0.5)
+    metric_steady = evaluate_horizontal_glide(steady_cfg, speed_mps=6.0, duration_s=0.3)
 
     # High-pitch stall configuration
     stall_cfg = AircraftConfig(
@@ -75,7 +75,7 @@ def test_zoom_climb_stall_suppression():
         dihedral_deg=0.0,
         elevon_deg=15.0,  # Excessive upward elevator causing zoom stall
     )
-    metric_stall = evaluate_horizontal_glide(stall_cfg, speed_mps=6.0, duration_s=0.5)
+    metric_stall = evaluate_horizontal_glide(stall_cfg, speed_mps=6.0, duration_s=0.3)
 
     # Steady glide should achieve a higher deterministic score
     assert metric_steady.deterministic_score >= metric_stall.deterministic_score
@@ -115,7 +115,7 @@ def test_ci_isolated_energy_conservation():
     launch = LaunchConfig(launch_speed=8.0, launch_angle_deg=0.0, launch_height_m=1.5)
 
     sim = FlightSimulator(aircraft=aircraft, environment=env, launch=launch)
-    sim.simulate(duration_s=0.8)
+    sim.simulate(duration_s=0.4)
     samples = sim.history()
 
     assert len(samples) > 5

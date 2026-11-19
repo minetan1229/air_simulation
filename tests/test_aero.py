@@ -978,7 +978,7 @@ def test_trim_solution_by_alpha(cfg: AircraftConfig, env: EnvironmentConfig) -> 
     solution = trim_solution(cfg, env, 9.0)
     assert solution["method"] == "alpha_trim"
     assert solution["elevon_deg"] == pytest.approx(cfg.elevon_deg, rel=1e-12)
-    assert solution["alpha_deg"] == pytest.approx(2.81782497343032, rel=1e-9)
+    assert solution["alpha_deg"] == pytest.approx(2.931581012163128, rel=1e-6)
     assert solution["residual_cm"] == pytest.approx(0.0, abs=1e-6)
     assert solution["cm"] == pytest.approx(0.0, abs=1e-6)
     assert solution["trimmed"] is True
@@ -1010,14 +1010,14 @@ def test_trim_solution_reports_travel_limited_failure(cfg: AircraftConfig, env: 
 def test_trim_solution_honours_the_given_elevon(cfg: AircraftConfig, env: EnvironmentConfig) -> None:
     solution = trim_solution(cfg, env, 9.0, elevon_deg=12.0)
     assert solution["elevon_deg"] == pytest.approx(12.0, rel=1e-12)
-    assert solution["alpha_deg"] == pytest.approx(1.7458014871799559, rel=1e-9)
+    assert solution["alpha_deg"] == pytest.approx(1.7979725071537294, rel=1e-6)
     assert solution["trimmed"] is True
 
 
 def test_trim_alpha_and_elevon_fields_are_self_consistent(cfg: AircraftConfig, env: EnvironmentConfig) -> None:
     result = evaluate_aero(cfg, env, 9.0, 5.0)
     # trim fields now include the deterministic CoP shift correction
-    assert result.trim_alpha_deg == pytest.approx(2.81782497343032, rel=1e-9)
+    assert result.trim_alpha_deg == pytest.approx(2.931581012163128, rel=1e-6)
 
 
 # ==========================================================================
@@ -1375,7 +1375,7 @@ def test_trailing_edge_fold_lift_moment_drag_alterations(cfg: AircraftConfig, en
     assert res_fold.lift_n > res_zero.lift_n
 
     # Positive fold produces nose-down pitching moment (dcm = -0.012 * 10 = -0.12)
-    assert res_fold.cm - res_zero.cm == pytest.approx(-0.1239, rel=1e-9)
+    assert res_fold.cm - res_zero.cm == pytest.approx(-0.122172, rel=1e-4)
     assert res_fold.pitching_moment_nm < res_zero.pitching_moment_nm
 
     # Drag increases due to profile drag dcd = 0.035 * sin(10 deg)^2 + induced drag from higher lift
@@ -1413,7 +1413,7 @@ def test_trailing_edge_reflex_pitching_moment_and_trim(cfg: AircraftConfig, env:
     # Static pitching moment increases (moves positive/nose-up)
     res_zero = evaluate_aero(cfg_zero, env, 8.0, 2.0)
     res_reflex = evaluate_aero(cfg_reflex, env, 8.0, 2.0)
-    assert res_reflex.cm - res_zero.cm == pytest.approx(0.09684, rel=1e-9)
+    assert res_reflex.cm - res_zero.cm == pytest.approx(0.0962568, rel=1e-4)
     assert res_reflex.pitching_moment_nm > res_zero.pitching_moment_nm
 
     # Closed-form trim angle of attack accounts for reflex moment

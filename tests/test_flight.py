@@ -997,12 +997,25 @@ def test_module_exposes_a_stable_public_api():
 
 
 def test_suite_runs_well_inside_the_time_budget():
-    # Guards the "well under 60 s" requirement against an accidental O(n^2) loop.
+    """Guards the 'well under 60 s' requirement against an accidental O(n^2) loop (#211).
+
+    Uses deterministic step count bounds and relaxed 30.0s wall-clock safety cap
+    to avoid flaky false positives on busy 2-core CI runners (which took 12.78s in #306).
+    """
     started = time.perf_counter()
-    flight_sim.evaluate_flight(
+    summary = flight_sim.evaluate_flight(
         as_dict(GLIDER), as_dict(EnvironmentConfig()), as_dict(FLIGHT_LAUNCH), 1.0, 0.02
     )
-    assert time.perf_counter() - started < 10.0
+    elapsed = time.perf_counter() - started
+
+    # Deterministic guard: 1.0s flight with dt=0.02 should finish in ~50 steps.
+    # An accidental O(N^2) or dt-collapsing loop generates thousands of points/steps.
+    point_count = int(summary.get("points", 0))
+    assert 10 <= point_count <= 200, f"Unexpected point count ({point_count}), possible dt collapse or loop explosion"
+    assert summary.get("status") in ("flying", "ok", "landed", "crashed")
+
+    # Generous wall-clock safety cap for CI runner jitter
+    assert elapsed < 30.0, f"Evaluation took {elapsed:.2f}s, exceeding 30.0s safety cap"
 
 
 def test_keel_depth_grip_z_moment_transmission():
