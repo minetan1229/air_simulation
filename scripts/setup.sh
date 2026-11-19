@@ -65,11 +65,14 @@ spec = importlib.util.find_spec('cupy')
 if spec is None:
     print('[WARN] cupy is not installed; running in CPU-only mode. CUDA acceleration is disabled.')
     raise SystemExit(0)
-import cupy as cp
-dev = cp.cuda.runtime.getDevice()
-props = cp.cuda.runtime.getDeviceProperties(dev)
-name = props['name'].decode('utf-8') if isinstance(props['name'], bytes) else str(props['name'])
-print(f'[SUCCESS] GPU Device {dev} detected: {name}')
-"
+try:
+    import cupy as cp
+    dev = cp.cuda.runtime.getDevice()
+    props = cp.cuda.runtime.getDeviceProperties(dev)
+    name = props['name'].decode('utf-8') if isinstance(props['name'], bytes) else str(props['name'])
+    print(f'[SUCCESS] GPU Device {dev} detected: {name}')
+except Exception as e:
+    print(f'[WARN] cupy is present but CUDA runtime/device check failed ({e}); falling back to CPU mode.')
+" || true
 
 echo "[SETUP] Environment setup complete."

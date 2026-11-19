@@ -29,7 +29,7 @@ def main() -> int:
     cases: List[Dict[str, Any]] = json.loads(raw.decode("utf-8"))
 
     # Make repo root importable (worker is deployed as tools/remote_evaluate_worker.py)
-    root = Path(__file__).resolve().parents[2]
+    root = Path(__file__).resolve().parent.parent
     if str(root) not in sys.path:
         sys.path.insert(0, str(root))
 
