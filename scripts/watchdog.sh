@@ -39,7 +39,20 @@ if [ ! -f "$PID_FILE" ]; then
 else
     SIM_PID=$(cat "$PID_FILE")
     # Verify if PID is running
-    if ! "$PY_CMD" -c "import ctypes, sys; h=ctypes.windll.kernel32.OpenProcess(0x0400, False, int(sys.argv[1])); sys.exit(0 if h else 1)" "$SIM_PID" 2>/dev/null; then
+    if ! "$PY_CMD" -c "
+import sys, os
+pid = int(sys.argv[1])
+if os.name == 'nt':
+    import ctypes
+    h = ctypes.windll.kernel32.OpenProcess(0x0400, False, pid)
+    sys.exit(0 if h else 1)
+else:
+    try:
+        os.kill(pid, 0)
+        sys.exit(0)
+    except OSError:
+        sys.exit(1)
+" "$SIM_PID" 2>/dev/null; then
         START_SIM=true
     fi
 fi
