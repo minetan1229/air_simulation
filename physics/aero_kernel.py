@@ -1299,7 +1299,7 @@ def drag_coefficient(
     alpha = (_finite(xp, alpha_deg, 0.0) + 180.0) % 360.0 - 180.0
     stall_alpha = xp.abs(_finite(xp, stall_alpha_deg, 14.0))
     angle = _rad(xp, alpha)
-    separated_drag = 2.0 * xp.square(xp.sin(angle)) + parasite * xp.maximum(xp.cos(angle), 0.0)
+    separated_drag = 2.0 * xp.square(xp.sin(angle)) + parasite * xp.abs(xp.cos(angle))
 
     weight = _smoothstep01(
         xp,
@@ -1801,7 +1801,7 @@ def _coefficient_core(
     alpha_norm = (alpha + 180.0) % 360.0 - 180.0
     stall_alpha_val = _stall_eff
     angle = _rad(xp, alpha_norm)
-    separated_drag = 2.0 * xp.square(xp.sin(angle)) + cd0 * xp.maximum(xp.cos(angle), 0.0)
+    separated_drag = 2.0 * xp.square(xp.sin(angle)) + cd0 * xp.abs(xp.cos(angle))
     w_drag = _smoothstep01(
         xp,
         (xp.abs(alpha_norm) - stall_alpha_val)
