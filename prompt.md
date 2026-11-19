@@ -1,254 +1,258 @@
-# 3D Paper Airplane Simulator — 実行プロンプト v4 (高精度版)
+# 3D Paper Airplane Simulator — Execution Prompt v4 (High Precision)
 
-あなたは航空工学・流体力学・数値解析・GPU プログラミング・フルスタック開発に精通したシニアエンジニア兼プロジェクトマネージャーです。
-本プロジェクトの仕様書 `agents.md`（AGENTS.md 相当）の全規則に従い、**1 セッション内で**省略なしに動くコードを設計・実装・検証してください。
-
----
-
-## 0. 本版で追加された必須要件（v3 からの差分）
-
-| # | 追加要件 | 実装場所 |
-|---|---------|---------|
-| A | **全物理パラメータの外部可変化**（空気密度・粘性・重力・抗力倍率・乱気流など UI/API から自由に変更） | `physics/atmosphere_domain.py`, `physics/config_schema.py` |
-| B | **最適化エンジン**（機体形状・折り畳み・トリム・質量に対する最適解探索、並列評価、Pareto front） | `physics/optimizer_domain.py` |
-| C | **3D モデルインポート**（glTF/GLB/OBJ/STL から面積・スパ・アスペクト比・重心・慣性テンソルを自動算出） | `physics/mesh_domain.py`, `static/js/model_importer.js` |
-| D | **完了予定時刻（ETA）表示**（ジョブ単位の進捗・残時間・推定完了時刻をサーバー側で管理し UI に表示） | `physics/job_manager.py`, `static/js/eta_display.js` |
-| E | **サブエージェントによる並列実装**（分担表に従い、ファイル衝突を避けて並列実行） | 全工程 |
-
-**上記 A〜E は省略・後回し・疑似実装を一切許可しない。全ステップで同時に完成させる。**
+You are a senior engineer and project manager proficient in aeronautical engineering, fluid dynamics, numerical analysis, GPU programming, and full-stack development. Following all rules of this project's specification `agents.md` (equivalent to AGENTS.md), **design, implement, and verify fully working code without omissions within 1 session**.
 
 ---
 
-## 1. 厳格な実行原則（違反禁止）
+## 0. Mandatory Requirements Added in This Version (Diff from v3)
 
-1. **Zero-Placeholder Policy**
-   - `...` による省略、`TODO` / `FIXME`、未実装の空関数、`pass` のみの本体、スタブ API を一切書かない。
-   - 物理式・GPU シェーダー・並列処理・最適化アルゴリズム・進捗管理・DOM 操作・UI イベントまで 100% 実行可能なコードとする。
-2. **Contract-First（依存関係の固定）**
-   - 全エージェントが共有するデータ構造（`physics/config_schema.py` の dataclass / JSON スキーマ）を**最初にあなたが 1 人で確定**させる。以後の全実装はこの型に厳密に従う。型の変更による他エージェントの破綻を防ぐ。
-3. **Small-Step & Verification**
-   - 1 モジュールごとに実行して結果を確認してから次へ進む。最低でも以下を毎回実行し、**実測出力**を報告する。
-     - `python -m pytest tests -q`（物理・最適化・メッシュの数値検証）
-     - `python -m compileall physics app.py`（構文検証）
-     - `python smoke_test.py`（API 導通 + 最適化ジョブ + ETA 取得 + メッシュ解析の通し確認）
-4. **No Silent Fallback**
-   - GPU（CuPy / torch CUDA）が無い環境では NumPy にフォールバックして**正常動作すること**をテストで証明する。フォールバック時は応答に `backend: "numpy"` を明示する。
-5. **Git Protocol**
-   - 検証通過後のみコミット。形式は `feat(aero): ...` / `feat(optimizer): ...` / `feat(mesh): ...` / `feat(ui): ...` / `fix(<scope>): ...`。
-   - `.gitignore` に `__pycache__/`, `*.pyc`, `.venv/`, `node_modules/`, `*.glb`, `*.gltf`, `*.stl`, `*.obj`, `runs/`, `jobs/` を含める。
-6. **物理的妥当性（精度の核心）**
-   - 解析解が存在する領域（線形揚力 $C_L = C_{L\alpha}\alpha$、失速前の誘導抗力 $C_{D0} + C_L^2/(\pi e AR)$、レイノルズ数依存、ISA 大気、面積・重心・慣性テンソルの幾何計算）は **pytest で解析解と 1e-6〜1e-3 の相対誤差**を検証する。検証できない部分は「検証済み / 未検証」を明示する。
+| # | Added Requirement | Implementation Location |
+|---|-------------------|------------------------|
+| A | **All Physics Parameters Externally Variable** (air density, viscosity, gravity, drag multiplier, turbulence, etc. freely changeable from UI/API) | `physics/atmosphere_domain.py`, `physics/config_schema.py` |
+| B | **Optimization Engine** (optimal solution search for aircraft geometry, folding, trim, mass; parallel evaluation, Pareto front) | `physics/optimizer_domain.py` |
+| C | **3D Model Import** (auto-compute area, span, aspect ratio, CG, inertia tensor from glTF/GLB/OBJ/STL) | `physics/mesh_domain.py`, `static/js/model_importer.js` |
+| D | **ETA Display** (server-side management of per-job progress, remaining time, estimated completion; display on UI) | `physics/job_manager.py`, `static/js/eta_display.js` |
+| E | **Parallel Implementation via Subagents** (parallel execution per assignment table, avoiding file conflicts) | All phases |
+
+**Above A–E: No omissions, no deferrals, no pseudo-implementation. All steps completed simultaneously.**
 
 ---
 
-## 2. 物理モデルの高精度化要件（省略不可の式）
+## 1. Strict Execution Principles (Violations Prohibited)
 
-### 2.1 大気・流体パラメータ（要件 A：全可変）
-- **ISA 標準大気**: 対流圏で $T = T_0 - L h$、$p = p_0 (T/T_0)^{g/(L R)}$、$\rho = p/(R T)$。
-- **局所大気の上書き**: `temperature_K`, `pressure_Pa`, `humidity_rel` から密度を計算（湿潤空気の混合比による補正、$R_{air}=287.05$, $R_{v}=461.5$）。
-- **動粘性**: Sutherland 式 $\mu = \mu_0 (T/T_0)^{1.5} (T_0+S)/(T+S)$、$\nu = \mu/\rho$。
-- **レイノルズ数**: $Re = V c / \nu$ を毎ステップ算出。
-- **抗力などの環境スケール**（UI でスライダー化）:
-  - `drag_scale`（0.0〜5.0, 既定 1.0）: 全抗力係数の乗数
-  - `gust_intensity`（0.0〜1.0）、`thermal_strength`（m/s）、`wind_speed`（m/s）、`wind_direction_deg`（0〜360）
-  - `gravity`（m/s², 既定 9.80665）、`ground_friction`（0.0〜2.0）
-  - `ground_effect_enabled`、`compressibility_enabled`（$M = V/a$ で Prandtl-Glauert 補正）
-- すべて `POST /api/v1/environment/atmosphere` で即時変更でき、**UI 変更 → サーバー → 次のステップ計算に反映**されることをテストで証明する。
+### 1. Zero-Placeholder Policy
+- No omissions via `...`, `TODO` / `FIXME`, unimplemented empty functions, `pass`-only bodies, stub APIs.
+- Physics formulas, GPU shaders, parallel processing, optimization algorithms, progress management, DOM manipulation, UI events — all 100% executable code.
 
-### 2.2 空力翼型（要件 A の機体側）
-- 線形域: $C_L = C_{L0} + C_{L\alpha}\,\alpha$
-- 失速: Viterna 相当の非線形遷移（sigmoid 型で $C_{L,\max}$ から滑らかに低下させ、post-stall では $C_L$ を線形減少させる）。
-- 抗力: $C_D = C_{D0} + C_L^2/(\pi e AR)$、$C_{D0} = f(Re)$（Re が小さいほど増加）。
-- **抗力極線（Drag Polar）の API 公開**: $C_{D,\min}$ と $\alpha_{L/D,max}$ を数値的に求めて返す。
-- 三角翼（テーパ比 $\lambda$）の空力諸元: $AR = b^2/S$、$c_{mac}$、$C_{L\alpha} = 2\pi AR \big/ \big(2 + \sqrt{AR^2(1+\lambda) + \tfrac{4}{\pi} AR}\big)$。
-- 総揚力 $L = \tfrac12 \rho V^2 S C_L$、抗力 $D = \tfrac12 \rho V^2 S C_D$、ピッチングモーメント $M = q S c C_m$。
-- **Trim / Elevon**: 後縁折り角 $\delta$ が $\Delta C_m$、$\Delta C_L$、$\Delta\alpha_{trim}$ を与える。
-- **数値積分検証**: 揚力係数を $\alpha$ で数値積分した翼の循環 $\Gamma = 2 q S C_L/(\rho V)$ と、1 枚板の Helmbold 極値を比較するテストを pytest に含める。
+### 2. Contract-First (Dependency Fixation)
+- You alone **first finalize** the data structures shared by all agents (`physics/config_schema.py` dataclasses / JSON schemas). All subsequent implementations must strictly follow these types. Prevent other agents from breaking due to type changes.
 
-### 2.3 6DoF 積分（高精度）
-- 状態: 位置 $\mathbf{r}$、速度 $\mathbf{v}$（機体座標系と慣性座標系の変換を明示）、姿勢四元数 $\mathbf{q}$、角速度 $\boldsymbol{\omega}$。
-- 力: 空力（揚力・抗力・ピッチング / ヨーイング / ロールモーメント）、重力、姿勢安定化の復元トルク。
-- **RK4 積分 + Adaptive Sub-stepping**: $\Delta t$ を局所誤差推定（角速度と流速に基づく制限条件）と CFL 風条件から可変に決め、$\Delta t \in [10^{-5}, 2\times10^{-2}]$ s にクランプ。数値発散検出（NaN / Inf / 速度上限超過）で前ステップへロールバック。
-- **慣性結合**: $I\dot{\omega} = M - \omega \times I\omega$。慣性テンソルは 3D メッシュから自動算出。
-- 検証: 抗力なしの自由落下で $h(t) = h_0 - \tfrac12 g t^2$、抗力 0 時に全エネルギー変化 < 1e-6。
+### 3. Small-Step & Verification
+- Execute one module at a time, verify results, then proceed. At minimum, run the following every time and **report actual measured output**:
+  - `python -m pytest tests -q` (physics, optimization, mesh numerical verification)
+  - `python -m compileall physics app.py` (syntax verification)
+  - `python smoke_test.py` (end-to-end: API connectivity + optimization job + ETA retrieval + mesh analysis)
 
-### 2.4 風場
-- 3D ベクトル場: 平均風 + Simplex 風乱流 + 熱上昇気流（Plume 式）+ 地面境界層プロファイル（対数則 $\bar{u}/u_* = (1/\kappa)\ln(z/z_0)$）。
-- **GPU 実行**: CuPy / torch によるグリッド一括計算、非対応時は NumPy。応答に `backend` フィールドで明示。
+### 4. No Silent Fallback
+- In environments without GPU (CuPy / torch CUDA), must prove normal operation via NumPy fallback in tests. On fallback, explicitly indicate `backend: "numpy"` in response.
+
+### 5. Git Protocol
+- Commit only after verification passes. Format: `feat(aero): ...` / `feat(optimizer): ...` / `feat(mesh): ...` / `feat(ui): ...` / `fix(<scope>): ...`.
+- Include in `.gitignore`: `__pycache__/`, `*.pyc`, `.venv/`, `node_modules/`, `*.glb`, `*.gltf`, `*.stl`, `*.obj`, `runs/`, `jobs/`.
+
+### 6. Physical Validity (Core of Precision)
+- For domains with analytical solutions (linear lift $C_L = C_{L\alpha}\alpha$, pre-stall induced drag $C_{D0} + C_L^2/(\pi e AR)$, Reynolds dependence, ISA atmosphere, geometric computation of area/CG/inertia tensor), **pytest must verify against analytical solutions with relative error 1e-6 to 1e-3**. Unverifiable parts must be explicitly labeled "verified / unverified".
 
 ---
 
-## 3. 最適化エンジン（要件 B：最適解探索）
+## 2. High-Precision Physics Model Requirements (Formulas That Cannot Be Omitted)
 
-### 3.1 目的関数（複数同時対応、UI で重み設定）
-- `max_distance` 水平飛行距離最大化
-- `max_flight_time` 滞空時間最大化
-- `max_ld_ratio` 最大 $L/D$
-- `min_max_stress` 翼面最大応力最小化（構造安全）
-- `max_stall_margin` 失速マージン最大化
-- `min_launch_speed` 必要発射初速最小化
-- `max_stability` 静的安定性最大化（中立点位置の最適化）
+### 2.1 Atmosphere & Fluid Parameters (Requirement A: All Variable)
+- **ISA Standard Atmosphere**: Troposphere $T = T_0 - L h$, $p = p_0 (T/T_0)^{g/(L R)}$, $\rho = p/(R T)$.
+- **Local Atmosphere Override**: Compute density from `temperature_K`, `pressure_Pa`, `humidity_rel` (humid air mixing ratio correction, $R_{air}=287.05$, $R_{v}=461.5$).
+- **Dynamic Viscosity**: Sutherland formula $\mu = \mu_0 (T/T_0)^{1.5} (T_0+S)/(T+S)$, $\nu = \mu/\rho$.
+- **Reynolds Number**: $Re = V c / \nu$ computed every step.
+- **Environment Scales for Drag etc. (UI Sliders)**:
+  - `drag_scale` (0.0–5.0, default 1.0): multiplier for all drag coefficients
+  - `gust_intensity` (0.0–1.0), `thermal_strength` (m/s), `wind_speed` (m/s), `wind_direction_deg` (0–360)
+  - `gravity` (m/s², default 9.80665), `ground_friction` (0.0–2.0)
+  - `ground_effect_enabled`, `compressibility_enabled` (Prandtl-Glauert correction at $M = V/a$)
+- All must be immediately changeable via `POST /api/v1/environment/atmosphere`, and **test must prove UI change → server → reflected in next step calculation**.
 
-### 3.2 探索アルゴリズム（すべて実装、選択可能）
-- **Coarse Grid Sweep**: 離散グリッド全評価（並列）。
-- **Nelder-Mead**（scipy）: 単一目的・低評価回数向け。
-- **Differential Evolution**（`scipy.optimize.differential_evolution`）: 単一目的・既定エンジン。
-- **NSGA-II**: 自前実装（非支配ソート + クラウディング距離 + SBX 交叉 / 多項式変異）→ **Pareto front** を出力。多目的（例: 距離と応力のトレードオフ）。
-- **Surrogate 高速化**: 評価済みサンプルで $k$-NN / RBF 近似モデルを fit し、期待改善量 EI で次の評価点を選ぶ（評価回数の削減）。
+### 2.2 Airfoil Aerodynamics (Requirement A: Aircraft Side)
+- Linear regime: $C_L = C_{L0} + C_{L\alpha}\,\alpha$
+- Stall: Viterna-equivalent nonlinear transition (sigmoid type, smooth descent from $C_{L,\max}$, post-stall $C_L$ linear decrease).
+- Drag: $C_D = C_{D0} + C_L^2/(\pi e AR)$, $C_{D0} = f(Re)$ (increases as Re decreases).
+- **Drag Polar API Exposure**: Numerically find and return $C_{D,\min}$ and $\alpha_{L/D,\max}$.
+- Delta wing (taper ratio $\lambda$) aero properties: $AR = b^2/S$, $c_{mac}$, $C_{L\alpha} = 2\pi AR \big/ \big(2 + \sqrt{AR^2(1+\lambda) + \tfrac{4}{\pi} AR}\big)$.
+- Total lift $L = \tfrac12 \rho V^2 S C_L$, drag $D = \tfrac12 \rho V^2 S C_D$, pitching moment $M = q S c C_m$.
+- **Trim / Elevon**: Trailing-edge fold angle $\delta$ provides $\Delta C_m$, $\Delta C_L$, $\Delta\alpha_{trim}$.
+- **Numerical Integration Verification**: Include pytest test comparing wing circulation $\Gamma = 2 q S C_L/(\rho V)$ from numerical integration of lift coefficient over $\alpha$ vs Helmbold single-plate extreme value.
 
-### 3.3 探索対象の設計変数
-- 形状: 翼幅 $b$、翼面積 $S$、テーパ比 $\lambda$、$AR$、二面角、ダート型 / グライダー型の形状フラグ
-- 折り畳み: 前縁 / 後縁 / 翼端 / 中央の折り角（4 変数）、Elevon 角
-- 材料: 坪量 (g/m²)、紙剛性、質量
-- 射出: 発射角、ロール角、初速
+### 2.3 6DoF Integration (High Precision)
+- State: Position $\mathbf{r}$, velocity $\mathbf{v}$ (explicit body↔inertial frame conversion), attitude quaternion $\mathbf{q}$, angular velocity $\boldsymbol{\omega}$.
+- Forces: Aerodynamic (lift, drag, pitching/yawing/rolling moments), gravity, attitude-stabilizing restoring torque.
+- **RK4 Integration + Adaptive Sub-stepping**: $\Delta t$ variably determined from local error estimation (angular velocity & airspeed based limits) and CFL wind condition, clamped to $\Delta t \in [10^{-5}, 2\times10^{-2}]$ s. Rollback to previous step on numerical divergence detection (NaN / Inf / speed limit exceeded).
+- **Inertia Coupling**: $I\dot{\omega} = M - \omega \times I\omega$. Inertia tensor auto-computed from 3D mesh.
+- Verification: Free fall without drag matches $h(t) = h_0 - \tfrac12 g t^2$; drag=0 yields total energy change < 1e-6.
 
-### 3.4 実行機構と ETA（要件 D と統合）
-- ジョブは `physics/job_manager.py` の `JobManager`（スレッドセーフ、`threading.RLock` + `dict`）で管理。
-- 各ジョブのフィールド: `job_id`（UUID4）、`status`（`queued|running|completed|failed|cancelled`）、`progress`（0.0〜1.0）、`evaluated_count`、`total_evaluations`、`started_at`（ISO8601）、`updated_at`、`eta_seconds`、`estimated_completion`（ISO8601）、`backend`（`multiprocessing|threading|serial`）、`elapsed_seconds`、`evals_per_second`。
-- **ETA 計算式**（実装必須）:
+### 2.4 Wind Field
+- 3D vector field: Mean wind + Simplex turbulence + Thermal updrafts (Plume formula) + Ground boundary layer profile (log law $\bar{u}/u_* = (1/\kappa)\ln(z/z_0)$).
+- **GPU Execution**: CuPy / torch grid batch computation; NumPy fallback when unavailable. Explicitly indicate via `backend` field in response.
+
+---
+
+## 3. Optimization Engine (Requirement B: Optimal Solution Search)
+
+### 3.1 Objective Functions (Multiple Simultaneous, UI Weight Setting)
+- `max_distance` Maximize horizontal flight distance
+- `max_flight_time` Maximize flight time
+- `max_ld_ratio` Maximize $L/D$
+- `min_max_stress` Minimize wing surface max stress (structural safety)
+- `max_stall_margin` Maximize stall margin
+- `min_launch_speed` Minimize required launch speed
+- `max_stability` Maximize static stability (neutral point optimization)
+
+### 3.2 Search Algorithms (All Implemented, Selectable)
+- **Coarse Grid Sweep**: Full evaluation of discrete grid (parallel).
+- **Nelder-Mead** (scipy): Single objective, low evaluation count.
+- **Differential Evolution** (`scipy.optimize.differential_evolution`): Single objective, default engine.
+- **NSGA-II**: Custom implementation (non-dominated sorting + crowding distance + SBX crossover / polynomial mutation) → outputs **Pareto front**. Multi-objective (e.g., distance vs stress trade-off).
+- **Surrogate Acceleration**: Fit $k$-NN / RBF approximation model on evaluated samples, select next evaluation point via expected improvement EI (reduce evaluation count).
+
+### 3.3 Design Variables for Search
+- Geometry: Wingspan $b$, wing area $S$, taper ratio $\lambda$, $AR$, dihedral, dart/glider shape flag
+- Folding: Leading-edge / trailing-edge / wingtip / center fold angles (4 variables), elevon angle
+- Material: Areal density (g/m²), paper stiffness, mass
+- Launch: Launch angle, roll angle, initial velocity
+
+### 3.4 Execution Mechanism & ETA (Integrated with Requirement D)
+- Jobs managed by `JobManager` in `physics/job_manager.py` (thread-safe, `threading.RLock` + `dict`).
+- Per-job fields: `job_id` (UUID4), `status` (`queued|running|completed|failed|cancelled`), `progress` (0.0–1.0), `evaluated_count`, `total_evaluations`, `started_at` (ISO8601), `updated_at`, `eta_seconds`, `estimated_completion` (ISO8601), `backend` (`multiprocessing|threading|serial`), `elapsed_seconds`, `evals_per_second`.
+- **ETA Formula (Mandatory Implementation)**:
   - $\overline{t_{eval}} = \dfrac{\text{elapsed\_seconds}}{\max(\text{evaluated\_count}, 1)}$
   - $\text{eta\_seconds} = (\text{total\_evaluations} - \text{evaluated\_count}) \cdot \overline{t_{eval}}$
-  - $\text{evals\_per\_second} = 1 / \overline{t_{eval}}$、$\text{estimated\_completion} = \text{now} + \text{eta\_seconds}$
-- `evals_per_second` は指数移動平均（$\alpha = 0.3$）で平滑化し、開始直後の過大評価を防ぐ。進捗は 0.5 秒間隔で更新。
-- `POST /api/v1/optimizer/run` は**即座に** `job_id` を返す（ブロッキング禁止）、`GET /api/v1/optimizer/status/<job_id>` で進捗 / ETA を取得、`POST /api/v1/optimizer/cancel/<job_id>` で中断、`GET /api/v1/optimizer/result/<job_id>` で Pareto front・最適パラメータ・目的関数値を JSON / CSV で取得。
-- 最適化は `multiprocessing.Pool`（Windows の `spawn` 対策で評価関数はモジュールレベルに置く）で並列評価し、`parallel_engine.py` と共通の worker 設定を使う。
+  - $\text{evals\_per\_second} = 1 / \overline{t_{eval}}$, $\text{estimated\_completion} = \text{now} + \text{eta\_seconds}$
+- `evals_per_second` smoothed via exponential moving average ($\alpha = 0.3$) to prevent overestimation at start. Progress updated at 0.5s intervals.
+- `POST /api/v1/optimizer/run` **immediately** returns `job_id` (non-blocking); `GET /api/v1/optimizer/status/<job_id>` retrieves progress/ETA; `POST /api/v1/optimizer/cancel/<job_id>` cancels; `GET /api/v1/optimizer/result/<job_id>` retrieves Pareto front, optimal params, objective values as JSON/CSV.
+- Optimization uses `multiprocessing.Pool` for parallel evaluation (Windows `spawn` compatible: evaluation function at module level), shares worker config with `parallel_engine.py`.
 
 ---
 
-## 4. 3D モデルインポート（要件 C）
+## 4. 3D Model Import (Requirement C)
 
-### 4.1 対応形式と読込経路
-- **glTF 2.0 / GLB**（`GLTFLoader`）、**OBJ**（`OBJLoader`）、**STL**（`STLLoader`、バイナリ / ASCII 両対応）。
-- 読込方法: ブラウザのファイル選択、ドラッグ＆ドロップ、URL 指定の 3 通り。いずれも同一パイプラインに流す。
+### 4.1 Supported Formats & Load Paths
+- **glTF 2.0 / GLB** (`GLTFLoader`), **OBJ** (`OBJLoader`), **STL** (`STLLoader`, binary/ASCII both).
+- Load methods: Browser file select, drag & drop, URL specification — all 3 routes feed same pipeline.
 
-### 4.2 物理量の自動抽出（`physics/mesh_domain.py`）
-- 読み込んだジオメトリから次を**完全自動**で算出する（`trimesh` 依存を許容、無い場合は純 NumPy 実装にフォールバック）。
-  - 全頂点座標から表面積 $S$、翼面積、スパン $b$、平均翼弦 $\bar{c} = S/b$、テーパ比 $\lambda$
-  - アスペクト比 $AR = b^2/S$
-  - 重心 $x_{cg}$（体積中心 / 面積中心を `cg_mode` で切替）
-  - 慣性テンソル $\mathbf{I}$（四面体積分）、質量 $m = \rho_{paper} \cdot \text{gsm} \cdot S_{sheet}$
-  - 空力パネル分割: $N_x \times N_y$ パネル、**パネル法線・面積・空力ラムダ**（局所 $\alpha$ ごとの $C_L$ と、局所洗出しによる回転揚力 $C_{L,\mathrm{rot}}$ を含む静的パネル法）
-- **単位補正**: mm / cm / m を指定して正規化（`scale_hint`）。
-- **手動上書き UI**: 自動算出値を上書き可能（`override` フラグ）。
+### 4.2 Auto Physical Property Extraction (`physics/mesh_domain.py`)
+- Fully auto-compute from loaded geometry (`trimesh` dependency allowed; fallback to pure NumPy if absent):
+  - Surface area $S$, wing area, span $b$, mean chord $\bar{c} = S/b$, taper ratio $\lambda$ from all vertex coordinates
+  - Aspect ratio $AR = b^2/S$
+  - CG $x_{cg}$ (volume centroid / area centroid switchable via `cg_mode`)
+  - Inertia tensor $\mathbf{I}$ (tetrahedral integration), mass $m = \rho_{paper} \cdot \text{gsm} \cdot S_{sheet}$
+  - Aero panel division: $N_x \times N_y$ panels, **panel normals, areas, aero lambdas** (static panel method including local $C_L$ per local $\alpha$ and local washout-induced rotational lift $C_{L,\mathrm{rot}}$)
+- **Unit Correction**: Normalize mm/cm/m via `scale_hint`.
+- **Manual Override UI**: Auto-computed values overridable (`override` flag).
 
-### 4.3 モデル管理
-- 取込済みモデルをサーバー側でキャッシュ（`models/` 配下、UUID 命名）。`GET /api/v1/mesh/models` で一覧、`POST /api/v1/mesh/select` で選択、`GET /api/v1/mesh/metrics/<model_id>` で物理量を取得。
-- 3D ビューアには選択モデルのメッシュを反映し、応力ヒートマップは頂点属性として動的更新する。
-- モデルごとに最適化を実行し、**モデル単位の Pareto front** を比較できる。
-
----
-
-## 5. サブエージェント並列実装（要件 E）
-
-**あなたの役割は「実装者」ではなく「オーケストレーター兼統合者」**。以下の方針で `Task` ツールによりサブエージェントを起動する。
-
-### 5.1 実装順序
-1. **Phase 0（自分で実施）**: `physics/config_schema.py` の全 dataclass / JSON スキーマ、`physics/geometry_utils.py`（四元数・Euler 変換・外積）、ディレクトリ構成、`requirements.txt`、`.gitignore` を確定してコミット。ここが全エージェントの依存の要。
-2. **Phase 1（並列）**: 独立モジュールを各サブエージェントへ同時に委譲する。
-3. **Phase 2（自分の担当）**: `app.py`（全 API 統合）、UI 統合、統合テスト、Git 操作。
-4. **Phase 3（並列・仕上げ）**: 各サブエージェントへ担当モジュールの pytest 強化・数値検証を、返答（`task_id` を指定した再開）として依頼する。
-
-### 5.2 Phase 1 サブエージェント分担表（ファイル排他・競合なし）
-
-| エージェント | 担当ファイル | 必須実装内容 |
-|-----------|------------|------------|
-| `aero-physics` | `physics/aero_domain.py`, `tests/test_aero.py` | §2.2 の翼型・失速・Drag Polar・Trim / 誘導抗力・Re 補正 |
-| `atmosphere-fluid` | `physics/atmosphere_domain.py`, `physics/wind_domain.py`, `tests/test_atmo_wind.py` | §2.1 の ISA・Sutherland・風場・境界層・熱上昇・GPU（CuPy / torch）+ NumPy フォールバック |
-| `structural-stress` | `physics/stress_domain.py`, `tests/test_stress.py` | 動圧・G フォース・翼根曲げモーメント・頂点応力場（0〜1 正規化ヒートマップ） |
-| `mesh-3d` | `physics/mesh_domain.py`, `tests/test_mesh.py` | §4 の glTF / OBJ / STL 解析・面積 / 重心 / 慣性 / AR 算出・パネル法・モデルキャッシュ |
-| `flight-dynamics` | `physics/flight_sim.py`, `tests/test_flight.py` | §2.3 の 6DoF RK4・四元数・adaptive sub-stepping・リングバッファ・発射 / 着地判定 |
-| `parallel-optimizer` | `physics/parallel_engine.py`, `physics/optimizer_domain.py`, `tests/test_optimizer.py` | §3 の Nelder-Mead / DE / NSGA-II / Surrogate / Pareto 並列評価 |
-| `job-eta-storage` | `physics/job_manager.py`, `physics/storage_domain.py`, `tests/test_jobs.py` | §3.4 の JobManager・ETA 式・進捗管理・JSON / CSV エクスポート |
-| `ui-gpu-viz` | `templates/index.html`, `static/css/*.css`, `static/js/*.js` | §6 の Google Clean UI・Three.js シェーダー・GPGPU 風粒子・時間軸・最適化パネル・ETA 表示・3D モデルローダー |
-
-### 5.3 サブエージェントへの委譲指示に必ず含める内容
-- 担当ファイルのみを変更すること（他ファイルの改変は禁止）。
-- `physics/config_schema.py` で定義された dataclass / 関数シグネチャから逸脱しないこと（逸脱が必要な場合は報告して返答を待つ）。
-- Zero-Placeholder を厳守し、全関数に実処理を入れること。
-- `pytest tests/test_<module>.py -q` が全て PASS することを確認し、**実際の pytest 出力**を報告すること。
-- GPU など実行できない環境依存処理は `backend` フォールバックで代替し、NumPy パスがテストで PASS することを確認すること。
-
-### 5.4 Phase 2 自分の担当
-- `app.py`: 全 REST エンドポイント（§7 参照）を `config_schema.py` に従って統合。
-- 統合テスト `smoke_test.py`: 全 API を一連で叩き、最適化ジョブ投入 → 進捗取得 → ETA 取得 → 結果取得 → CSV 出力、3D モデル投入 → 物理量取得、まで通しで確認。
-- 最終 `pytest tests -q` による Green 確認とコミット。
+### 4.3 Model Management
+- Imported models server-cached (`models/`, UUID naming). `GET /api/v1/mesh/models` list, `POST /api/v1/mesh/select` select, `GET /api/v1/mesh/metrics/<model_id>` retrieve physical properties.
+- 3D viewer reflects selected model mesh; stress heatmap dynamically updated as vertex attributes.
+- Run optimization per model, **compare per-model Pareto fronts**.
 
 ---
 
-## 6. UI/UX 詳細（要件 A/B/C/D の反映先）
+## 5. Subagent Parallel Implementation (Requirement E)
 
-- **カラーパレット**: 背景 `#F8F9FA` / カード `#FFFFFF` / Accent `#1A73E8` / 正常 `#34A853` / 高負荷 `#FBBC04` / 破断 `#EA4335`。角丸 8px、薄い影、Roboto / Google Sans 系フォント。
+**Your role is "Orchestrator & Integrator", not "Implementer"**. Launch subagents via `Task` tool per below policy.
+
+### 5.1 Implementation Order
+1. **Phase 0 (You)**: Finalize `physics/config_schema.py` all dataclasses / JSON schemas, `physics/geometry_utils.py` (quaternion, Euler conversion, cross product), directory structure, `requirements.txt`, `.gitignore`. Commit — this is the dependency root for all agents.
+2. **Phase 1 (Parallel)**: Delegate independent modules to subagents simultaneously.
+3. **Phase 2 (You)**: `app.py` (all API integration), UI integration, integration tests, Git operations.
+4. **Phase 3 (Parallel, Polish)**: Request each subagent (via `task_id` resumption) to strengthen pytest and numerical verification for their modules.
+
+### 5.2 Phase 1 Subagent Assignment Table (File-Exclusive, No Conflicts)
+
+| Agent | Responsible Files | Mandatory Implementation |
+|-------|------------------|-------------------------|
+| `aero-physics` | `physics/aero_domain.py`, `tests/test_aero.py` | §2.2 airfoil, stall, Drag Polar, Trim, induced drag, Re correction |
+| `atmosphere-fluid` | `physics/atmosphere_domain.py`, `physics/wind_domain.py`, `tests/test_atmo_wind.py` | §2.1 ISA, Sutherland, wind field, boundary layer, thermal, GPU (CuPy/torch) + NumPy fallback |
+| `structural-stress` | `physics/stress_domain.py`, `tests/test_stress.py` | Dynamic pressure, G-force, wing root bending moment, vertex stress field (0–1 normalized heatmap) |
+| `mesh-3d` | `physics/mesh_domain.py`, `tests/test_mesh.py` | §4 glTF/OBJ/STL analysis, area/CG/inertia/AR computation, panel method, model cache |
+| `flight-dynamics` | `physics/flight_sim.py`, `tests/test_flight.py` | §2.3 6DoF RK4, quaternion, adaptive sub-stepping, ring buffer, launch/landing judgment |
+| `parallel-optimizer` | `physics/parallel_engine.py`, `physics/optimizer_domain.py`, `tests/test_optimizer.py` | §3 Nelder-Mead/DE/NSGA-II/Surrogate/Pareto parallel evaluation |
+| `job-eta-storage` | `physics/job_manager.py`, `physics/storage_domain.py`, `tests/test_jobs.py` | §3.4 JobManager, ETA formula, progress management, JSON/CSV export |
+| `ui-gpu-viz` | `templates/index.html`, `static/css/*.css`, `static/js/*.js` | §6 Google Clean UI, Three.js shaders, GPGPU wind particles, timeline, optimization panel, ETA display, 3D model loader |
+
+### 5.3 Mandatory Instructions for Subagent Delegation
+- Modify **only** assigned files (changes to other files prohibited).
+- Do not deviate from dataclasses / function signatures defined in `physics/config_schema.py` (if deviation needed, report and await response).
+- Strictly observe Zero-Placeholder: all functions must contain actual processing.
+- Confirm `pytest tests/test_<module>.py -q` all PASS, and **report actual pytest output**.
+- For environment-dependent operations (GPU etc.) use `backend` fallback; confirm NumPy path PASS in tests.
+
+### 5.4 Phase 2 Your Responsibilities
+- `app.py`: Integrate all REST endpoints (§7) per `config_schema.py`.
+- Integration test `smoke_test.py`: Chain all APIs, verify optimization job submission → progress → ETA → result → CSV output, 3D model import → physical property retrieval.
+- Final `pytest tests -q` Green confirmation and commit.
+
+---
+
+## 6. UI/UX Details (Reflection of Requirements A/B/C/D)
+
+- **Color Palette**: Background `#F8F9FA` / Card `#FFFFFF` / Accent `#1A73E8` / Normal `#34A853` / High Load `#FBBC04` / Failure `#EA4335`. Rounded 8px, subtle shadow, Roboto / Google Sans fonts.
 - **Header Bar**:
-  - タイトル、Google Blue ロゴ、風洞モードトグル、3D モデル読込ボタン、`JSON 保存` / `JSON 読込` / `CSV 出力` ボタン。
-  - **右端に「完了予定時刻」ウィジェット**: 実行中ジョブの `estimated_completion` を `HH:MM:SS` で常時表示し、残り時間（`mm:ss`）とプログレスバー、ジョブ名（例: `Differential Evolution / 評価 312/1000`）を併記。完了時は `完了 14:32:05` と表示。
+  - Title, Google Blue logo, wind tunnel toggle, 3D model load button, `JSON Save` / `JSON Load` / `CSV Export` buttons.
+  - **Rightmost "ETA Widget"**: Display running job's `estimated_completion` as `HH:MM:SS`, remaining time (`mm:ss`), progress bar, job name (e.g., `Differential Evolution / Eval 312/1000`). On completion show `Completed 14:32:05`.
 - **Left Panel**:
-  - 機体セクション: 質量、坪量、剛性、翼幅、翼面積、テーパ比、二面角、前縁 / 後縁 / 翼端 / 中央の折り角、Elevon 角。**すべて数値入力とスライダーの併用**（既定値表示付き）。
-  - 環境セクション（要件 A）: 気温 [`°C` / `K`]、気圧 [`Pa` / `hPa`]、湿度 [`%`]、風速、風向、乱気流強度、熱上昇強度、重力、地面摩擦、Drag Scale、地面効果 ON / OFF、圧縮性補正 ON / OFF。変更は即座にサーバーへ送信され次のステップに反映される。
-  - 3D モデルセクション: 形式 / ファイル / URL 選択、モデル一覧、単位・スケールヒント、CG 算出モード（体積 / 面積）、算出物理量（$S$, $b$, $c$, $AR$, $\lambda$, $x_{cg}$, 質量, $\mathbf{I}$）と、各値の「自動 / 手動上書き」トグル。
+  - Aircraft section: Mass, areal density, stiffness, wingspan, wing area, taper ratio, dihedral, leading/trailing/wingtip/center fold angles, elevon angle. **All numeric input + slider combined** (with default display).
+  - Environment section (Req A): Temperature [`°C`/`K`], Pressure [`Pa`/`hPa`], Humidity [`%`], wind speed, wind direction, turbulence intensity, thermal strength, gravity, ground friction, Drag Scale, Ground Effect ON/OFF, Compressibility ON/OFF. Changes immediately sent to server, reflected in next step.
+  - 3D Model section: Format/file/URL select, model list, unit/scale hint, CG computation mode (volume/area), computed physical properties ($S$, $b$, $c$, $AR$, $\lambda$, $x_{cg}$, mass, $\mathbf{I}$) with per-value "auto/manual override" toggles.
 - **Right Overlay**:
-  - 飛行ステータス: 高度、速度、迎角 $\alpha$、-slip 角 $\beta$、ロール / ピッチ / ヨー、$L/D$、G フォース、最大応力、状態（正常 / 高負荷 / 破断を色分け）。
-  - Chart.js グラフ: 高度・速度・迎角・応力のリアルタイム折れ線。
-  - **最適化パネル**: 目的関数チェックボックス（§3.1）、重みスライダー、探索アルゴリズム選択（Grid / Nelder-Mead / DE / NSGA-II / Surrogate）、評価回数、並列プロセス数、`実行` / `中断` ボタン、**進捗バーと ETA 表示**、結果の Pareto フロント散布図（Chart.js scatter）、最適パラメータのテーブル、`この設定を読み込む` ボタン。
-- **Bottom Time Control Dock**: 再生 / 一時停止、倍速（0.25x / 0.5x / 1x / 2x / 5x / 10x）、コマ送り（前 / 後）、タイムラインシーク。
-- **Wind Tunnel Mode**: トグル ON で風速を固定し、機体を風洞内に固定して空力係数のみ計測するモード。
+  - Flight status: Altitude, speed, AoA $\alpha$, sideslip $\beta$, roll/pitch/yaw, $L/D$, G-force, max stress, state (normal/high load/failure color-coded).
+  - Chart.js graphs: Real-time line charts of altitude, speed, AoA, stress.
+  - **Optimization Panel**: Objective checkboxes (§3.1), weight sliders, search algorithm select (Grid/Nelder-Mead/DE/NSGA-II/Surrogate), evaluation count, parallel processes, `Run`/`Cancel` buttons, **progress bar & ETA display**, Pareto front scatter plot (Chart.js scatter), optimal params table, `Load This Config` button.
+- **Bottom Time Control Dock**: Play/pause, speed (0.25x/0.5x/1x/2x/5x/10x), frame step (forward/back), timeline seek.
+- **Wind Tunnel Mode**: Toggle ON to fix wind speed, fix aircraft in wind tunnel, measure only aero coefficients.
 
 ---
 
-## 7. REST API 一覧（要件 A/B/C/D を反映した確定仕様）
+## 7. REST API List (Confirmed Spec Reflecting Requirements A/B/C/D)
 
-| メソッド | エンドポイント | 内容 |
-|---------|--------------|------|
-| POST | `/api/v1/aerodynamics/calculate` | $C_L$, $C_D$, $L$, $D$, $C_m$, $L/D$, $C_{D,\min}$, $\alpha_{L/D,\max}$、stall 判定 |
-| POST | `/api/v1/aerodynamics/polar` | $\alpha$ スイープによる Drag Polar 曲線 |
-| POST | `/api/v1/environment/atmosphere` | 環境パラメータ設定 + 密度・動粘性・音速を即時返却 |
-| GET | `/api/v1/environment/current` | 現在の環境パラメータを取得 |
-| POST | `/api/v1/wind/field` | 3D 風速場（GPU / NumPy、`backend` を明示） |
-| POST | `/api/v1/stress/analysis` | 頂点応力場 + 翼根曲げモーメント + G フォース |
-| POST | `/api/v1/simulation/step` | 6DoF 1 ステップ（可変 $\Delta t$、adaptive） |
-| POST | `/api/v1/simulation/reset` | シミュレーション初期化 |
-| POST | `/api/v1/simulation/batch` | 並列マルチシミュレーション（`multiprocessing`） |
-| POST | `/api/v1/mesh/import` | glTF / GLB / OBJ / STL 取込 → `model_id` + 物理量 |
-| GET | `/api/v1/mesh/models` | 取込済みモデル一覧 |
-| POST | `/api/v1/mesh/select` | 使用モデル選択 |
-| GET | `/api/v1/mesh/metrics/<model_id>` | 面積・重心・慣性・AR 等の取得 |
-| POST | `/api/v1/optimizer/run` | 最適化開始 → 即 `job_id` 返却（非ブロッキング） |
-| GET | `/api/v1/optimizer/status/<job_id>` | 進捗・ETA・推定完了時刻 |
-| POST | `/api/v1/optimizer/cancel/<job_id>` | 最適化中断 |
-| GET | `/api/v1/optimizer/result/<job_id>` | Pareto front・最適パラメータ（JSON / CSV） |
-| GET | `/api/v1/jobs` | 全ジョブ一覧（状態・ETA） |
-| POST | `/api/v1/data/export` | 飛行ログ / 最適化結果を CSV / JSON 出力 |
-| POST | `/api/v1/data/import` | 設定・プリセット読込 |
+| Method | Endpoint | Content |
+|--------|----------|---------|
+| POST | `/api/v1/aerodynamics/calculate` | $C_L$, $C_D$, $L$, $D$, $C_m$, $L/D$, $C_{D,\min}$, $\alpha_{L/D,\max}$, stall judgment |
+| POST | `/api/v1/aerodynamics/polar` | Drag Polar curve via $\alpha$ sweep |
+| POST | `/api/v1/environment/atmosphere` | Set env params + immediate return density, kinematic viscosity, speed of sound |
+| GET | `/api/v1/environment/current` | Get current env params |
+| POST | `/api/v1/wind/field` | 3D wind field (GPU/NumPy, `backend` explicit) |
+| POST | `/api/v1/stress/analysis` | Vertex stress field + wing root bending moment + G-force |
+| POST | `/api/v1/simulation/step` | 6DoF 1-step (variable $\Delta t$, adaptive) |
+| POST | `/api/v1/simulation/reset` | Simulation initialization |
+| POST | `/api/v1/simulation/batch` | Parallel multi-simulation (`multiprocessing`) |
+| POST | `/api/v1/mesh/import` | glTF/GLB/OBJ/STL import → `model_id` + physical properties |
+| GET | `/api/v1/mesh/models` | Imported model list |
+| POST | `/api/v1/mesh/select` | Select active model |
+| GET | `/api/v1/mesh/metrics/<model_id>` | Get area, CG, inertia, AR, etc. |
+| POST | `/api/v1/optimizer/run` | Start optimization → immediate `job_id` return (non-blocking) |
+| GET | `/api/v1/optimizer/status/<job_id>` | Progress, ETA, estimated completion |
+| POST | `/api/v1/optimizer/cancel/<job_id>` | Cancel optimization |
+| GET | `/api/v1/optimizer/result/<job_id>` | Pareto front, optimal params (JSON/CSV) |
+| GET | `/api/v1/jobs` | All jobs list (status, ETA) |
+| POST | `/api/v1/data/export` | Export flight log / optimization results CSV/JSON |
+| POST | `/api/v1/data/import` | Load settings / presets |
 
-全エンドポイントは不正入力に対して 400 と明確なエラーメッセージを返し、500 時はトレースをログに残す。
-
----
-
-## 8. 実行手順（この順で進めること）
-
-1. **Phase 0**: 契約定義（`config_schema.py`, `geometry_utils.py`, `requirements.txt`, `.gitignore`）を作成し `python -m compileall` で検証、コミット。
-2. **Phase 1**: §5.2 の表に従って 8 つのサブエージェントを `Task` ツールで**同時に**起動。担当ファイルは排他であり競合しない。各エージェントの完了報告に実 pytest 出力と実装サマリが含まれることを確認。
-3. **Phase 2**: 各サブエージェントの成果物が `config_schema.py` の契約から逸脱していないかを突合検証（`grep` で import と関数シグネチャの整合性を確認）。問題があれば該当エージェントに修正依頼。
-4. **Phase 3**: `app.py`（全 API）+ `templates/index.html` + `static/**`（Google Clean UI、GPU シェーダー、GPGPU 風粒子、Time Control、最適化パネル、ETA 表示、3D ローダー）を統合。
-5. **Phase 4**: `smoke_test.py` で通し確認（API 連鎖、最適化ジョブの投入 → 進捗 → ETA → 結果、3D モデル取込 → 物理量取得、CSV 出力）。
-6. **Phase 5**: `python -m pytest tests -q` が全 GREEN になるまで修正。Google Clean デザイン・レスポンシブ対応・アニメーション性能を確認。
-7. **Phase 6**: `git status` を確認し、検証通過分のみコミット。
-8. **最終報告**: 実装ファイル一覧、pytest 実出力、API 一覧、UI 構成の説明、既知の制約を報告。
-9. **物理調査・改善提案**: 物理関連の調査時は、現行モデルの改善余地と現実的な高忠実度化オプション（コスト付き）を積極的に調査・提案せよ。
-
-**各ステップの最後で「実行コマンド → 実出力 → 次のステップ」の形で報告し、検証できない箇所があれば修正してから進む。**
+All endpoints return 400 with clear error message on invalid input; on 500, trace logged.
 
 ---
 
-## 9. 絶対遵守の最終確認
+## 8. Execution Procedure (Follow This Order)
 
-- [ ] §0 の A〜E がすべて実装済み（省略・疑似なし）
-- [ ] `physics/optimizer_domain.py` に Nelder-Mead / DE / NSGA-II / Surrogate がすべて実在
-- [ ] `physics/job_manager.py` に ETA 計算式が実在し、UI に `estimated_completion` が表示される
-- [ ] `physics/mesh_domain.py` が glTF / GLB / OBJ / STL に対応し、$S$, $b$, $c$, $AR$, $\lambda$, $x_{cg}$, $\mathbf{I}$ を自動算出
-- [ ] 環境パラメータ（密度・粘性・重力・drag_scale 等）が UI から API 経由で変更可能
-- [ ] `config_schema.py` の全 dataclass による型安全性
-- [ ] `pytest tests -q` が全 PASS（解析解との比較テスト込み）
-- [ ] `smoke_test.py` が全チェーン成功
-- [ ] 3D ビューア（Three.js シェーダー + GPGPU 風粒子）が動作
-- [ ] Google Clean デザイン準拠
-- [ ] Zero-Placeholder 違反ゼロ
+1. **Phase 0**: Create contract definitions (`config_schema.py`, `geometry_utils.py`, `requirements.txt`, `.gitignore`), verify with `python -m compileall`, commit.
+2. **Phase 1**: Launch 8 subagents **simultaneously** via `Task` tool per §5.2 table. Files are exclusive, no conflicts. Verify each agent's completion report includes actual pytest output and implementation summary.
+3. **Phase 2**: Cross-check each subagent's deliverables against `config_schema.py` contract (verify import & function signature consistency via `grep`). Request fixes from relevant agent if issues.
+4. **Phase 3**: Integrate `app.py` (all APIs) + `templates/index.html` + `static/**` (Google Clean UI, GPU shaders, GPGPU wind particles, Time Control, Optimization Panel, ETA Display, 3D Loader).
+5. **Phase 4**: `smoke_test.py` full chain verification (API chain, optimization job submit → progress → ETA → result, 3D model import → physical properties, CSV export).
+6. **Phase 5**: `python -m pytest tests -q` all GREEN. Verify Google Clean design, responsive, animation performance.
+7. **Phase 6**: `git status` check, commit only verified changes.
+8. **Final Report**: Implementation file list, actual pytest output, API list, UI structure description, known constraints.
+9. **Physics Investigation & Improvement Proposals**: When investigating physics, actively research current model improvement room and realistic high-fidelity options (with compute cost) and propose.
+
+**At end of each step, report in format: "Execution command → Actual output → Next step". Fix unverifiable parts before proceeding.**
+
+---
+
+## 9. Final Absolute Compliance Checklist
+
+- [ ] §0 A–E all implemented (no omissions, no pseudo)
+- [ ] `physics/optimizer_domain.py` has Nelder-Mead / DE / NSGA-II / Surrogate all present
+- [ ] `physics/job_manager.py` has ETA formula implemented, UI shows `estimated_completion`
+- [ ] `physics/mesh_domain.py` handles glTF/GLB/OBJ/STL, auto-computes $S$, $b$, $c$, $AR$, $\lambda$, $x_{cg}$, $\mathbf{I}$
+- [ ] Environment params (density, viscosity, gravity, drag_scale, etc.) changeable from UI via API
+- [ ] `config_schema.py` all dataclasses provide type safety
+- [ ] `pytest tests -q` all PASS (incl. analytical solution comparison tests)
+- [ ] `smoke_test.py` all chains succeed
+- [ ] 3D viewer (Three.js shaders + GPGPU wind particles) operates
+- [ ] Google Clean design compliance
+- [ ] Zero-Placeholder violations: zero

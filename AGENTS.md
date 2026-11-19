@@ -1,99 +1,103 @@
-# Agent Core Protocol（常駐コア + 参照索引）
+# Agent Core Protocol (Resident Core + Reference Index)
 <!--
-正本: 本規約=常駐最小 / .agents/Knowledge.md=過去知見 / .agents/Project.md=現在地・LoopState / .agents/skills/*=定型手順 / docs/SPECIFICATION.md=詳細仕様
-常駐は本ファイルのみ。詳細・手順・過去知見は .agents/ から遅延オンデマンド参照（全文読込禁止）。
+Canonical: This Protocol = Resident Minimum / .agents/Knowledge.md = Past Knowledge / .agents/Project.md = Current State & LoopState / .agents/skills/* = Standard Procedures / docs/SPECIFICATION.md = Detailed Specifications
+Only this file is resident. Details, procedures, and past knowledge are referenced on-demand from .agents/ (full reading prohibited).
 -->
 
-## 0. 参照マップ（.agents 連携ハブ）
-| 目的 | 参照先（正本） | 読み方・連携トリガー |
+## 0. Reference Map (.agents Coordination Hub)
+| Purpose | Reference (Canonical) | Reading Method & Trigger |
 |---|---|---|
-| 現在地・ゴール・Loop State | `.agents/Project.md` | §1〜§3（毎ループPhase 1で確認・Phase 5で更新） |
-| 過去知見・既知不具合・回避策 | `.agents/Knowledge.md` | キーワードgrep抽出（全文読込禁止・確定事実追記） |
-| 段階的検証 & CI/CD 手順 | `.agents/skills/verify-and-test.md` | Phase 4, 6 実行時（テスト順序・Git・CI確認） |
-| Discord Webhook 通知 | `.agents/skills/notify-webhook.md` | フェーズ開始/完了/警告時（カラー・レポート連携） |
-| サブエージェント役割分担 | `.agents/skills/subagent-delegation.md` | 並列作業・委譲時（Tier分離・担当境界表） |
-| Discord×Agent ルーティング | `.agents/skills/discord-bridge-routing.md` | 429継続・フォールバック・監視報告の正本 |
-| 常駐プロセスの使用中判定と回収 | `.agents/skills/process-hygiene.md` | メモリ圧迫・残存タスク確認時（`tools/process_hygiene.py`） |
-| コンテキスト圧縮・状態引き継ぎ | `.agents/skills/loop-handover.md` | コンテキスト肥大・セッション終了時 |
-| 詳細物理・API・アーキテクチャ | `docs/SPECIFICATION.md` | 実装・設計変更時（該当章のみ抽出） |
-| ツール・タスク別スキル / MCP | `skill/README.md` / `.kilo/kilo.jsonc` | 該当スキル利用時 / MCP利用時 |
+| Current State, Goal, Loop State | `.agents/Project.md` | §1–§3 (Check each loop Phase 1, update Phase 5) |
+| Past Knowledge, Known Issues, Workarounds | `.agents/Knowledge.md` | Keyword grep extraction (full reading prohibited; append confirmed facts) |
+| Staged Verification & CI/CD Procedures | `.agents/skills/verify-and-test.md` | Phase 4, 6 execution (test order, Git, CI verification) |
+| Discord Webhook Notifications | `.agents/skills/notify-webhook.md` | Phase start/complete/warning (color, report linkage) |
+| Subagent Role Division | `.agents/skills/subagent-delegation.md` | Parallel work, delegation (Tier separation, responsibility boundary table) |
+| Discord×Agent Routing | `.agents/skills/discord-bridge-routing.md` | 429 persistence, fallback, monitoring reporting (canonical) |
+| Resident Process Usage Detection & Cleanup | `.agents/skills/process-hygiene.md` | Memory pressure, residual task check (`tools/process_hygiene.py`) |
+| Context Compression & State Handover | `.agents/skills/loop-handover.md` | Context bloat, session end |
+| Detailed Physics, API, Architecture | `docs/SPECIFICATION.md` | Implementation, design changes (relevant sections only) |
+| Tool/Task-Specific Skills / MCP | `skill/README.md` / `.kilo/kilo.jsonc` | When using relevant skill / MCP |
 
 ---
 
-## 1. Core Protocol（自律ループ連携）
-- **1.1 コンテキスト最小化**: 常駐は本ファイルのみ。`.agents/` 配下は必要時のみ部分抽出。ログ/ソースの全文出力禁止。`memory` MCPは検索索引（長文二重保管禁止）。
-- **1.2 テキサスの狙撃兵の誤謬排除**: 事前に仮説と反証可能な合否基準を明文化。後付け変更や偶然動作での完了認定を禁止。不一致時は仮説棄却・因果特定。値は物理的な値を使用し、意図的に調整された値（報酬ハッキング用の据置き定数）にしない。
-- **1.4 規約統治**: ユーザー明示指示・監査合意なき本ファイル改変禁止。仕様は `docs/SPECIFICATION.md`、知見は `.agents/Knowledge.md` に集約。
-- **1.5 エージェント体制（サブエージェント上限4）**: メインエージェント1つに対し**稼働するサブエージェントは最大4つ**。內訳は次のとおりで、超過時は委譲しない（既存枠の完了待つかメインへ統合）。
-  1. **必須1枠 = 監視（Monitor）エージェント**: システム稼働状態・APIレスポンス・エラー状況・レートリミットを常時監視し、異常・問題を検知したときは**即座にメインエージェントへ報告・アラート**（Discord Webhook＋応答チャンネル）。実務を兼務せず常に1枠を保持する。
-  2. **残り最大3枠 = 実務エージェント**: 実装・検索・Discord応答など担当領域を排他的に分担（境界表は `.agents/skills/subagent-delegation.md`）。
-- **1.6 Discord×Agent ルーティング**: 主エージェントは Antigravity。APIエラー・タイムアウト・残りレート0・429の継続失敗のいずれかで**Kilo Code（既定無料モデル）へ自動フォールバック**し、処理を中断しない。429はバックオフ後に`continue`で自動継続する。監視エージェントが切替を報告する（正本: `.agents/skills/discord-bridge-routing.md`）。
+## 1. Core Protocol (Autonomous Loop Coordination)
+- **1.1 Context Minimization**: Only this file is resident. `.agents/` subdirectories are extracted partially only when needed. Full log/source output prohibited. `memory` MCP is a search index (no long-text double storage).
+- **1.2 Texas Sharpshooter Fallacy Prevention**: Explicitly declare hypotheses and falsifiable acceptance criteria in advance. Post-hoc changes and acceptance of accidental behavior as complete are prohibited. On mismatch, reject hypothesis and identify causality. Use physical values, not intentionally tuned constants (reward hacking placeholders).
+- **1.4 Protocol Governance**: Modification of this file without explicit user instruction or audit consent is prohibited. Specifications go to `docs/SPECIFICATION.md`, knowledge to `.agents/Knowledge.md`.
+- **1.5 Agent Structure (Subagent Cap 4)**: Maximum **4 active subagents** per main agent. Breakdown as follows; exceeding this cap prohibits delegation (wait for existing slot completion or merge into main).
+  1. **Mandatory 1 Slot = Monitor Agent**: Continuously monitors system status, API responses, error states, rate limits; **immediately reports/alerts main agent** (Discord Webhook + response channel) upon anomaly detection. Does not perform operational work; always holds 1 slot.
+  2. **Remaining Max 3 Slots = Operational Agents**: Implementation, search, Discord response, etc., with exclusive responsibility domains (boundary table in `.agents/skills/subagent-delegation.md`).
+- **1.6 Discord×Agent Routing**: Primary agent is Antigravity. On API error, timeout, zero remaining rate, or persistent 429 failure, **automatically fall back to Kilo Code (default free model)** without interrupting processing. 429 triggers backoff then `continue` for automatic resumption. Monitor agent reports the switch (canonical: `.agents/skills/discord-bridge-routing.md`).
 
 ---
 
-## 2. Guardrails（常駐制約）
-- **Strict Rules**: ユーザー明示許可なきファイル削除禁止。事前仮説・合否基準なしの変更/実行禁止。偶然動作での完了禁止。ファイル/ログの全文読込・出力禁止。
-- **Plan & Todo 先行の原則（必須）**: いかなる作業・コード変更・調査・検証も、着手前に**必ず Plan（方針・全体像）と Todo リスト（細分化された具体的タスク）を策定・明示してから実行**すること。Todo を経ない即興的な変更や手順飛ばしを禁止する。
-- **Issue 完了・クローズ厳格条件（形式的完了・未解決クローズの厳禁）**:
-  1. *テスト追加のみでの完了禁止*: 物理モデル・数値アルゴリズムの未実装や欠陥に対し、現状挙動をアサートするテストを追加しただけで Issue を完了（Completed）にしてはならない。
-  2. *ドキュメント明記のみでの完了禁止*: 「制約として仕様書・レポートに追記した」「未実装であることを明記した」ことのみを理由に Issue をクローズしてはならない（制約の明記は「現状記録」であり「問題の解決」ではない）。
-  3. *未着手課題への重複集約禁止*: 統合先・重複先とされる Issue が未解決・未着手（Open）の場合、課題を未着手のまま閉じるのではなく、統合先 Issue との親子関係（sub-issue/blocked-by）を明示するか、実質的解決がマージされるまでクローズしてはならない。
-  4. *クローズ合否照合*: Issue 本文に記載された「完了条件」「調査・対応」の全項目が物理的・工学的に満たされ、独立参照解または実測値との比較が成立していること。
+## 2. Guardrails (Resident Constraints)
+- **Strict Rules**: File deletion without explicit user permission prohibited. Changes/execution without prior hypothesis and acceptance criteria prohibited. Acceptance of accidental behavior as complete prohibited. Full file/log reading/output prohibited.
+- **Plan & Todo First (Mandatory)**: Any work, code change, investigation, or verification must **always have a Plan (policy/overview) and Todo list (granular concrete tasks) established and declared before execution**. Impromptu changes or skipping steps without Todo are prohibited.
+- **Strict Issue Completion/Close Conditions (Formal Completion & Unresolved Close Prohibited)**:
+  1. *Completion by Test Addition Only Prohibited*: For unimplemented or defective physics models/numerical algorithms, adding tests that merely assert current behavior must not mark the Issue as Completed.
+  2. *Completion by Documentation Only Prohibited*: Closing an Issue solely because "constraints were documented in spec/report" or "unimplemented status was noted" is prohibited (documenting constraints is "current state recording," not "problem resolution").
+  3. *Aggregation to Unstarted Issues Prohibited*: If the target Issue for consolidation/duplication is unresolved/unstarted (Open), do not close the issue while unstarted; instead, establish parent-child relationship (sub-issue/blocked-by) with the consolidation target, or keep open until substantive resolution is merged.
+  4. *Close Acceptance Verification*: All "completion conditions" and "investigation/actions" items in the Issue body must be physically/engineeringly satisfied, with independent reference solution or measured value comparison established.
 - **Governance**:
-  - *Zero-Placeholder*: `TODO`・`...`・空関数等の省略完全禁止。実動コードのみ記述。
-  - *Single Committer*: サブエージェント委譲時もリポジトリ変更・コミットは親に一元化（`.agents/skills/subagent-delegation.md`）。
-  - *Subagent Cap*: 稼働サブエージェントは最大4（監視1必須・実務3）。上限超過の委譲は拒否する。
-  - *Branch Isolation*: `genetic-project` 開発フェーズ（自律進化研究システム構築中）では `master`/`main` へのコミット・マージ・チェリーピック・PR作成を**厳禁**。`tools/branch_guard.py` が保護ブランチ実行を停止し、テストスイート（`conftest.py`）/ `app.py` / `scripts/smoke_test.py` に組み込み済み（`PAPER_AIRCRAFT_BRANCH_GUARD=warn|off` で緩和可）。
-  - *Mission Branch Mandatory*: **すべてのミッションは開始前に専用ブランチを作成し、そのブランチ上で取り組むこと**。着手時に `mission/<slug>`（Issue番号がある場合は `mission/<slug>-<issue番号>`）を切り替え、ブランチ作成なしの作業・`master`/`main` への直接コミットを禁止。ミッション完了時のみマージする。
-  - *Git & Discord*: ブランチ運用、フェーズ毎通知（`.agents/skills/notify-webhook.md`）。
-- **Critical Traps（詳細・回避策は `.agents/Knowledge.md` 参照）**:
-  - *CI Runner / 文字コード*: Actions の run は `defaults: run: shell: bash` 必須。PowerShell の `Get/Set-Content` でのUTF-8破壊禁止（Python/専用ツールで編集）。
-  - *座標系・風高度・境界接地*: 風場(+z上向き)⇔世界NED(+z下向き)の符号変換（$w_{NED}=-w_{wind}$）。風は地表面からの高度（`z_up=-z_ned`）でサンプル（6DoF参照経路とGPUバッチ経路は同一規約）。水平100km制限・地中即死(`min_alt<-0.05`)・CCD補間・翼端散逸上限。
-  - *評価status / GA既定値*: 失敗した評価を`timeout`/`crashed`等へ**リラベル**しない（パレート前線・incumbentへの混入＝報酬ハッキング経路）。試行回数・目的関数の既定値は`physics/ga_config.py`へ集約し、探索ロジックにハードコードしない。
-  - *429 / フォールバック*: レート制限を失敗扱いせず、バックオフ＋`continue`で自動継続。Antigravity不可時はKilo Code(無料)へ自動切替し、監視エージェントが報告する（正本: `.agents/skills/discord-bridge-routing.md`）。
-  - *既知の物理乖離*: `PHYSICS_PAPER_CONFORMANCE_AUDIT.md` §0.0（P0〜P3は完了）と `no-finish.md` が正本。
+  - *Zero-Placeholder*: `TODO`, `...`, empty functions, etc., completely prohibited. Only working code.
+  - *Single Committer*: Even when delegating to subagents, repository changes and commits are centralized to parent (`.agents/skills/subagent-delegation.md`).
+  - *Subagent Cap*: Active subagents max 4 (1 monitor mandatory, 3 operational). Delegation exceeding cap is rejected.
+  - *Branch Isolation*: During `genetic-project` development phase (autonomous evolution research system under construction), commits, merges, cherry-picks, and PR creation to `master`/`main` are **strictly prohibited**. `tools/branch_guard.py` blocks protected branch execution, integrated into test suite (`conftest.py`), `app.py`, and `scripts/smoke_test.py` (relaxable via `PAPER_AIRCRAFT_BRANCH_GUARD=warn|off`).
+  - *Mission Branch Mandatory*: **All missions must create a dedicated branch before starting and work on that branch**. At start, switch to `mission/<slug>` (or `mission/<slug>-<issue-number>` if issue number exists); working without branch creation and direct commits to `master`/`main` are prohibited. Merge only upon mission completion.
+  - *Git & Discord*: Branch operations, per-phase notifications (`.agents/skills/notify-webhook.md`).
+- **Critical Traps (Details & Workarounds in `.agents/Knowledge.md`)**:
+  - *CI Runner / Encoding*: Actions `run` must use `defaults: run: shell: bash`. UTF-8 corruption via PowerShell `Get/Set-Content` prohibited (edit via Python/dedicated tools).
+  - *Coordinate System, Wind Altitude, Boundary Grounding*: Wind field (+z up) ⇔ World NED (+z down) sign conversion ($w_{NED}=-w_{wind}$). Wind sampled at height from ground surface (`z_up=-z_ned`) (6DoF reference path and GPU batch path use same convention). Horizontal 100km limit, instant death underground (`min_alt<-0.05`), CCD interpolation, wingtip dissipation cap.
+  - *Evaluation Status / GA Defaults*: Do **not relabel** failed evaluations to `timeout`/`crashed` etc. (contamination of Pareto frontier and incumbent = reward hacking path). Trial counts and objective function defaults consolidated in `physics/ga_config.py`, not hardcoded in search logic.
+  - *429 / Fallback*: Rate limits not treated as failures; automatic continuation via backoff + `continue`. On Antigravity unavailability, auto-switch to Kilo Code (free); monitor agent reports (canonical: `.agents/skills/discord-bridge-routing.md`).
+  - *Known Physics Deviations*: `PHYSICS_PAPER_CONFORMANCE_AUDIT.md` §0.0 (P0–P3 complete) and `no-finish.md` are canonical.
 
 ---
 
-## 3. Autonomous Execution Loop (自律実行ループ)
-1. *Plan & Todo (Observe)*: 現状分析と課題・ゴールを整理し、**必ず Plan（方針・全体像）と Todo リスト（細分化された実行ステップ）を策定・明示**する。`.agents/Project.md` の Loop State 確認。残タスク無ければPhase 6へ。あれば最小サブタスク定義。
-2. *Hypothesize*: 事前仮説・合否基準を宣言。
-3. *Execute*: Todo に従って最小変更・検証を1つずつ実行（不可逆操作は先行記録、単一コミッター原則）。進捗に応じて Todo を消化・更新。
-4. *Verify*: 合否照合（`.agents/skills/verify-and-test.md`）。不一致時はロールバックしPhase 2へ（上限3回）。
-5. *Distill & Loop*: 確定事実は `.agents/Knowledge.md`、現在地は `.agents/Project.md` へ記録。残りの Todo を見直し、肥大時は `.agents/skills/loop-handover.md` 実行。
-6. *Finalize & Terminate*: Todo 完遂確認 → ローカル全通過 → 対象ブランチへマージ&push（既定は master。`genetic-project` フェーズは §2 ブランチ隔離に従い master 宛の操作を禁止）→ CI完了確認 → Issue確認クローズ後HALT。
+## 3. Autonomous Execution Loop
+1. *Plan & Todo (Observe)*: Analyze current state, organize issues and goals, **always establish and declare a Plan (policy/overview) and Todo list (granular execution steps)**. Check `.agents/Project.md` Loop State. If no remaining tasks, proceed to Phase 6; otherwise define minimal subtasks.
+2. *Hypothesize*: Declare prior hypothesis and acceptance criteria.
+3. *Execute*: Execute minimal changes and verification one by one per Todo (irreversible operations pre-recorded, single committer principle). Digest and update Todo as progress occurs.
+4. *Verify*: Acceptance verification (`.agents/skills/verify-and-test.md`). On mismatch, rollback to Phase 2 (max 3 retries).
+5. *Distill & Loop*: Confirmed facts to `.agents/Knowledge.md`, current state to `.agents/Project.md`. Review remaining Todos; if bloated, execute `.agents/skills/loop-handover.md`.
+6. *Finalize & Terminate*: Todo completion confirmed → all local checks pass → merge & push to target branch (default master; `genetic-project` phase follows §2 branch isolation, prohibiting operations targeting master) → CI pass confirmed → Issue verified closed → HALT.
 
-## 3.1 Proactive Improvement Proposal (積極的提案ルール)
-- 現行の係数ベース準定常モデルの枠内で、数値安定性・一貫性の修正を優先しつつ、LSBヒステリシスの簡易追加・付加質量の回転項・動的減衰の強化・実験校正の導入など、現実の紙飛行機挙動に近づけるための改善案を積極的に提案せよ。
-- 大きなアーキテクチャ変更（フルCFD・フルFSI・非定常RANSなど）は計算コストを明示した上で「オプション」として提案し、ユーザーが選択できるようにせよ。
-- 「より現実に近づける」「最高の現実的構成」などの観点で、多忠実度アプローチ（最適化は現行モデル、最終確認のみ高忠実度）を標準的な提案候補として含めよ。
+## 3.1 Proactive Improvement Proposal
+- Within the current coefficient-based quasi-steady model framework, prioritize numerical stability and consistency fixes while actively proposing improvements to approach real paper airplane behavior: simple LSB hysteresis addition, rotational term for added mass, dynamic damping enhancement, experimental calibration introduction.
+- Major architecture changes (full CFD, full FSI, unsteady RANS, etc.) must be proposed as "options" with explicit computational cost, allowing user choice.
+- From the perspective of "more realistic" and "best realistic configuration," include multi-fidelity approaches (optimization with current model, final verification only with high fidelity) as standard proposal candidates.
 
 ---
 
-## 4. コマンド早見（常駐）
-| 目的 | コマンド / 手順正本 |
+## 4. Command Quick Reference (Resident)
+| Purpose | Command / Procedure Canonical |
 |---|---|
-| 構文 / 静的解析・型 | `python -m compileall physics api tools app.py scripts/smoke_test.py` / `ruff check .` / `mypy physics api app.py scripts/smoke_test.py` |
-| 単体・監査 / E2E | `python -m pytest tests -q` / `python scripts/smoke_test.py`（詳細: `.agents/skills/verify-and-test.md`） |
-| Discord通知 | `python tools/notify_discord.py <status> "<title>" "<summary>"`（詳細: `.agents/skills/notify-webhook.md`） |
-| Discordブリッジ / クォータ / 監視 | `python tools/discord_bridge.py` / 応答チャンネル `!quota` `!monitor` `!backend` `!model`（正本: `.agents/skills/discord-bridge-routing.md`） |
-| MCP確認 / 呼出 | `python tools/verify_mcp_servers.py` / `python tools/mcp_call.py <server> <tool> --arg k=v` |
-| CI点検 / Issue | `python tools/check_runs.py` / `python tools/check_issues.py` / `close_resolved_issue.py` |
-| 常駐プロセス回収 / UI検証 | `python tools/process_hygiene.py --list` / `--apply`（判定基準: `.agents/skills/process-hygiene.md`）/ `python tools/capture_ui.py`（実ブラウザはplaywright MCP） |
+| Syntax / Static Analysis / Type | `python -m compileall physics api tools app.py scripts/smoke_test.py` / `ruff check .` / `mypy physics api app.py scripts/smoke_test.py` |
+| Unit / Audit / E2E | `python -m pytest tests -q` / `python scripts/smoke_test.py` (details: `.agents/skills/verify-and-test.md`) |
+| Discord Notification | `python tools/notify_discord.py <status> "<title>" "<summary>"` (details: `.agents/skills/notify-webhook.md`) |
+| Discord Bridge / Quota / Monitoring | `python tools/discord_bridge.py` / Response channel `!quota` `!monitor` `!backend` `!model` (canonical: `.agents/skills/discord-bridge-routing.md`) |
+| MCP Check / Call | `python tools/verify_mcp_servers.py` / `python tools/mcp_call.py <server> <tool> --arg k=v` |
+| CI Check / Issue | `python tools/check_runs.py` / `python tools/check_issues.py` / `close_resolved_issue.py` |
+| Resident Process Cleanup / UI Verification | `python tools/process_hygiene.py --list` / `--apply` (criteria: `.agents/skills/process-hygiene.md`) / `python tools/capture_ui.py` (real browser via playwright MCP) |
 
 ---
 
-## 5. 正本維持規約（.agents 同期ルール）
-- **配置**: 過去確定事実→`.agents/Knowledge.md` / 現在地・進捗→`.agents/Project.md` / 定型手順→`.agents/skills/` / 詳細仕様→`docs/SPECIFICATION.md`。
-- **行数上限**: 本ファイル 100行目安 / `Knowledge.md` 80行以内 / `Project.md` 40行以内。`.agents/` や `docs/` に正本がある内容（手順・役割分担表・詳細知見・物理定数・ルーティング規則）は本ファイルに直書きせず、参照リンクに留める。
+## 5. Canonical Maintenance Rules (.agents Sync Rules)
+- **Placement**: Confirmed past facts → `.agents/Knowledge.md` / Current state & progress → `.agents/Project.md` / Standard procedures → `.agents/skills/` / Detailed specifications → `docs/SPECIFICATION.md`.
+- **Line Limits**: This file ~100 lines / `Knowledge.md` ≤80 lines / `Project.md` ≤40 lines. Content with canonical sources in `.agents/` or `docs/` (procedures, role division tables, detailed knowledge, physical constants, routing rules) must not be written directly here; keep as reference links.
 
 ---
 
-## 6. MCP 使い分け（基盤: `.kilo/kilo.jsonc`）
-1. `context7`: ライブラリ/外部API実装前の最新一次仕様取得。 2. `sequential-thinking`: 6DoF数値破綻・接地散逸・姿勢発散等の多段推論。 3. `fetch`: 論文・外部技術Markdown取得（内部IP遮断/robots.txt準拠）。 4. `memory`: セッション跨ぎ知識の検索索引（正本は `.agents/Knowledge.md`、長文二重保管禁止）。 5. `playwright`: UI/Three.jsの実ブラウザ描画・コンソールエラー検証。
-※定型処理（ファイル編集、pytest等）にMCPを浪費しないこと。失敗時は `tools/verify_mcp_servers.py`。
+## 6. MCP Usage Guide (Foundation: `.kilo/kilo.jsonc`)
+1. `context7`: Latest primary spec retrieval before library/external API implementation.
+2. `sequential-thinking`: Multi-step reasoning for 6DoF numerical breakdown, grounding dissipation, attitude divergence.
+3. `fetch`: Paper and external technical Markdown retrieval (internal IP blocking, robots.txt compliance).
+4. `memory`: Cross-session knowledge search index (canonical is `.agents/Knowledge.md`; no long-text double storage).
+5. `playwright`: UI/Three.js real-browser rendering and console error verification.
+※ Do not waste MCP on routine processing (file editing, pytest, etc.). On failure, use `tools/verify_mcp_servers.py`.
 
 ---
 
-## 8. 物理調査・高忠実度化プロトコル
-9. 物理関連の調査時は、現行モデルの改善余地と現実的な高忠実度化オプション（コスト付き）を積極的に調査・提案せよ。
+## 8. Physics Investigation & High-Fidelity Protocol
+9. When investigating physics, actively research and propose both improvement room in current model and realistic high-fidelity options (with cost).

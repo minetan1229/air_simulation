@@ -1,53 +1,52 @@
-# コントリビューションガイド (Contributing)
+# Contributing Guide
 
-本プロジェクトは「**プロフェッショナルなエンジニアリング製品**」水準を目標に、物理的厳密性と再現性を最優先としています。
-コントリビューション前に以下の原則と手順をご確認ください。
-
----
-
-## 1. コミットメント（提案で同意いただく事項）
-
-1. **Zero-Placeholder Policy**: `TODO`・空関数・ダミープレースホルダーは禁止。すべての関数・数式・APIは 100% 実動するコードとして実装してください。
-2. **単一実装原則**: 同じ物理式は `physics/aero_kernel.py` の **canonical 関数 1 箇所**にのみ存在します。スカラー経路（`aero_domain.py`）と GPU バッチ経路（`gpu_dynamics.py`）は同一関数を呼ぶこと。重複定義は CI のパリティ検査で検出されます。
-3. **物理的誠実さ（テキサスの狙撃兵の誤謬排除）**: 事前に仮説と反証可能な合否基準を明文化してください。偶然動作での完了認定・報酬ハッキング用の据え置き定数（意図的調整値）の導入は禁止です。
-4. **安全なフォールバック**: GPU（CUDA / CuPy / PyTorch）が無い環境でも例外停止せず、NumPy / `multiprocessing` へ透過的にフォールバックしてください。返却スキーマ（`landed`, `crashed`, `status`, `horizontal_range_m` 等）は GPU 経路と CPU 経路で等価に維持してください。
-5. **ブランチ隔離**: `genetic-project` フェーズでは `master` / `main` への直接コミット・マージ・チェリーピック・PR 作成を禁止します（`tools/branch_guard.py`）。すべてのミッションは `mission/<slug>` ブランチで実施し、完了時のみマージしてください。
+This project targets "professional engineering product" standards, prioritizing physical rigor and reproducibility. Please review the following principles and procedures before contributing.
 
 ---
 
-## 2. Issue の起票
+## 1. Commitments (Agreed Upon by Proposal)
 
-### 2.1 バグ報告 (Bug Report)
-
-以下の項目をすべて記載してください:
-
-- **環境**: OS / Python バージョン / GPU 有無（`curl /api/v1/system/gpu` の結果）
-- **再現手順**: 最小再現ペイロード（`aircraft` / `environment` / `launch` JSON）
-- **期待する挙動** vs **実際の挙動**（数値の乖離は相対誤差で示す）
-- **関連**: `GET /api/v1/meta/physics-references` の該当 `id`（例: `helmbold_1942`）
-
-### 2.2 機能リクエスト (Feature Request)
-
-- 動機とユースケース、代替案との差分、物理モデルへの影響範囲を明記してください。
-
-### 2.3 物理モデル提案 (Physics Model Proposal)
-
-- **式**（LaTeX）、**出典**（論文・NASA TN 等）、**正本モジュール**候補、**適用限界**（Re / AR / Mach 範囲）、**検証テスト**（閉形式 or 実測値との比較）を必須で記載してください。
-- 出典のない係数を新たに作らないこと。実装できない値は据え置き理由と再オープン条件を `docs/PHYSICS_MODELS.md` に記録してください。
+1. **Zero-Placeholder Policy**: `TODO`, empty functions, and dummy placeholders are prohibited. All functions, formulas, and APIs must be implemented as 100% working code.
+2. **Single Implementation Principle**: The same physics formula exists only in **one canonical function** in `physics/aero_kernel.py`. The scalar path (`aero_domain.py`) and GPU batch path (`gpu_dynamics.py`) must call the same function. Duplicate definitions are detected by CI parity checks.
+3. **Physical Integrity (Texas Sharpshooter Fallacy Prevention)**: Explicitly declare hypotheses and falsifiable acceptance criteria in advance. Accepting accidental behavior as complete and introducing hardcoded constants for reward hacking (intentionally tuned values) are prohibited.
+4. **Safe Fallback**: Even in environments without GPU (CUDA / CuPy / PyTorch), the system must not halt with exceptions but must transparently fall back to NumPy / `multiprocessing`. The response schema (`landed`, `crashed`, `status`, `horizontal_range_m`, etc.) must be maintained equivalently between GPU and CPU paths.
+5. **Branch Isolation**: During the `genetic-project` phase, direct commits, merges, cherry-picks, and PR creation to `master` / `main` are prohibited (enforced by `tools/branch_guard.py`). All missions must be conducted on `mission/<slug>` branches and merged only upon completion.
 
 ---
 
-## 3. Pull Request 手順
+## 2. Issue Filing
 
-1. **ブランチ**: `mission/<slug>`（Issue 番号がある場合は `mission/<slug>-<issue番号>`）を作成して作業してください。
-2. **Plan & Todo 先行**: 着手前に Plan（方針・全体像）と Todo リスト（細分化した具体的タスク）を策定・明示してください。
-3. **コミットメッセージ規約**:
-   - `feat(scope): ...` 新機能
-   - `fix(scope): ...` バグ修正
-   - `refactor(scope): ...` リファクタリング（機能変更なし）
-   - `test(scope): ...` テスト追加・修正
-   - `docs(scope): ...` ドキュメント整備
-4. **検証（必須）**:
+### 2.1 Bug Report
+
+Please include all of the following:
+
+- **Environment**: OS / Python version / GPU availability (result of `curl /api/v1/system/gpu`)
+- **Reproduction Steps**: Minimal reproduction payload (`aircraft` / `environment` / `launch` JSON)
+- **Expected vs Actual Behavior** (numerical discrepancies shown as relative error)
+- **Related**: Relevant `id` from `GET /api/v1/meta/physics-references` (e.g., `helmbold_1942`)
+
+### 2.2 Feature Request
+
+- Clearly state the motivation, use cases, differences from alternatives, and impact scope on the physics model.
+
+### 2.3 Physics Model Proposal
+
+- **Formula** (LaTeX), **Source** (paper, NASA TN, etc.), **Canonical Module** candidate, **Applicable Limits** (Re / AR / Mach range), and **Verification Tests** (closed-form or comparison with measured values) are mandatory.
+- Do not create new coefficients without sources. For values that cannot be implemented, record the reason for deferral and re-opening conditions in `docs/PHYSICS_MODELS.md`.
+
+---
+
+## 3. Pull Request Procedure
+
+1. **Branch**: Create and work on `mission/<slug>` (or `mission/<slug>-<issue-number>` if an issue number exists).
+2. **Plan & Todo First**: Before starting, establish and declare a Plan (policy and overview) and a Todo list (granular, concrete tasks).
+3. **Commit Message Convention**:
+   - `feat(scope): ...` New feature
+   - `fix(scope): ...` Bug fix
+   - `refactor(scope): ...` Refactoring (no functional change)
+   - `test(scope): ...` Test addition/modification
+   - `docs(scope): ...` Documentation improvement
+4. **Verification (Mandatory)**:
    ```powershell
    python -m compileall physics api tools app.py scripts/smoke_test.py
    ruff check .
@@ -55,43 +54,43 @@
    python -m pytest tests -q
    python scripts/smoke_test.py
    ```
-5. **PR テンプレート**: 変更内容・検証結果・検証と妥当性（V&V）への影響・スクリーンショット（UI 変更時）を記載してください。
+5. **PR Template**: Include changes, verification results, V&V impact, and screenshots (for UI changes).
 
 ---
 
-## 4. コード規約
+## 4. Code Conventions
 
-- **型アノテーション**: 公開 API（`physics/*`、`api/*`）には型アノテーションを付けてください（`mypy --config-file mypy.ini`）。
-- **行列演算**: 血統的な物理量（質量・慣性テンソル等）は `physics/geometry_utils.py` を使用し、行列の主要値への置換を行わないでください。
-- **座標系の規約（Critical Traps）**:
-  - 風場（+z 上向き）⇔ 世界 NED（+z 下向き）の符号変換: $w_{\text{NED}} = -w_{\text{wind}}$（`flight_sim.py::wind_vector` が正本）。
-  - 風は地表面からの高度（`z_up = -z_ned`）でサンプルすること（6DoF 経路と GPU バッチ経路は同一規約）。
-
----
-
-## 5. テスト戦略
-
-- 解析解が存在する領域（ISA 大気・誘導抗力・Sutherland 粘性・メッシュ幾何特性）は相対誤差 $10^{-6} \sim 10^{-3}$ の厳格な数値テストを実施してください。
-- GPU / CPU 経路間の**パリティ**はビット同一か、物理的許容誤差内であることを検証してください（例: `tools/check_aero_kernel_parity.py`）。
-- 新しい物理モデルは**独立参照解**（閉形式・風洞試験値）との比較テストを同梱してください。
+- **Type Annotations**: Public APIs (`physics/*`, `api/*`) must have type annotations (`mypy --config-file mypy.ini`).
+- **Matrix Operations**: Fundamental physical quantities (mass, inertia tensor, etc.) must use `physics/geometry_utils.py`; do not replace matrices with principal values.
+- **Coordinate System Conventions (Critical Traps)**:
+  - Wind field (+z up) ⇔ World NED (+z down) sign conversion: $w_{\text{NED}} = -w_{\text{wind}}$ (`flight_sim.py::wind_vector` is canonical).
+  - Wind is sampled at height from ground surface (`z_up = -z_ned`) (both 6DoF path and GPU batch path use the same convention).
 
 ---
 
-## 6. Discord / 外部通知
+## 5. Test Strategy
+
+- For domains with analytical solutions (ISA atmosphere, induced drag, Sutherland viscosity, mesh geometric properties), perform strict numerical tests with relative error $10^{-6} \sim 10^{-3}$.
+- Verify **parity** between GPU/CPU paths is bit-identical or within physical tolerance (e.g., `tools/check_aero_kernel_parity.py`).
+- New physics models must include comparison tests against **independent reference solutions** (closed-form or wind tunnel data).
+
+---
+
+## 6. Discord / External Notifications
 
 ```powershell
 python tools/notify_discord.py <start|subagent|end|fail|warning|question> "<title>" "<summary>"
 ```
 
-詳細は [docs/discord-bridge.md](./docs/discord-bridge.md) を参照してください。
+See [docs/discord-bridge.md](./docs/discord-bridge.md) for details.
 
 ---
 
-## 7. 関連ドキュメント
+## 7. Related Documents
 
-- [docs/development.md](./docs/development.md) 開発・テスト詳細
-- [docs/PHYSICS_MODELS.md](./docs/PHYSICS_MODELS.md) 物理モデルの正本
-- [docs/VALIDATION.md](./docs/VALIDATION.md) 検証と妥当性確認（V&V）
-- [SECURITY.md](./SECURITY.md) セキュリティポリシー
-- [CODE_OF_CONDUCT.md](./CODE_OF_CONDUCT.md) 行動規範
-- [CITATION.cff](./CITATION.cff) 学術引用
+- [docs/development.md](./docs/development.md) Development & Testing Details
+- [docs/PHYSICS_MODELS.md](./docs/PHYSICS_MODELS.md) Physics Models Canonical Reference
+- [docs/VALIDATION.md](./docs/VALIDATION.md) Verification and Validation (V&V)
+- [SECURITY.md](./SECURITY.md) Security Policy
+- [CODE_OF_CONDUCT.md](./CODE_OF_CONDUCT.md) Code of Conduct
+- [CITATION.cff](./CITATION.cff) Academic Citation

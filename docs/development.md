@@ -1,49 +1,49 @@
-# 開発・テスト・コントリビューションガイド (Development & Testing)
+# Development & Testing Guide
 
-本ドキュメントでは、コードベースの保守・開発ワークフロー、単体テスト・総合スモークテストの実行手順、およびコーディング規約について説明します。
-
----
-
-## 1. 開発原則 (Core Principles)
-
-本プロジェクトでは以下の厳格な開発方針を適用しています：
-
-1. **Zero-Placeholder Policy (省略・空実装の禁止)**:
-   `TODO`、`pass`、未実装の空関数、ダミープレースホルダーは一切禁止です。すべての関数・数式・APIは100%実動するコードとして実装します。
-2. **Small-Step & Verification Protocol (段階的検証)**:
-   コードの改修後は必ずローカル環境で構文チェック・単体テスト（`pytest`）を実施し、検証通過を確認してから次の作業に進みます。
-3. **安全なフォールバック設計**:
-   GPU（CUDA / CuPy / PyTorch）が利用できない環境であっても、例外停止することなくNumPy等のCPU実装へ透過的にフォールバックする構成を維持します。
+This document describes the codebase maintenance and development workflow, unit test and comprehensive smoke test execution procedures, and coding conventions.
 
 ---
 
-## 2. テストの実行
+## 1. Core Development Principles
 
-### 2.1 構文チェック
-Python のバイトコードコンパイルによる構文検証：
+This project applies the following strict development policies:
+
+1. **Zero-Placeholder Policy (No Stubs/Empty Implementations)**:
+   `TODO`, `pass`, unimplemented empty functions, and dummy placeholders are completely prohibited. All functions, formulas, and APIs must be implemented as 100% working code.
+2. **Small-Step & Verification Protocol (Staged Verification)**:
+   After any code modification, syntax checks and unit tests (`pytest`) must be executed in the local environment, and verification must pass before proceeding to the next task.
+3. **Safe Fallback Design**:
+   Even in environments where GPU (CUDA / CuPy / PyTorch) is unavailable, the system must maintain a configuration that transparently falls back to CPU implementations (e.g., NumPy) without halting with exceptions.
+
+---
+
+## 2. Test Execution
+
+### 2.1 Syntax Check
+Syntax validation via Python bytecode compilation:
 
 ```powershell
 python -m compileall physics app.py
 ```
 
-### 2.2 単体テスト (pytest)
-各物理モジュール（空力、大気、風場、応力、6DoF運動、メッシュ解析、最適化、ジョブ管理）の数値検証を行います。
+### 2.2 Unit Tests (pytest)
+Numerical verification for each physics module (aerodynamics, atmosphere, wind field, stress, 6DoF motion, mesh analysis, optimization, job management).
 
 ```powershell
-# クイック実行
+# Quick run
 python -m pytest tests -q
 
-# 特定のドメインテストのみを実行する場合
+# Run specific domain tests
 python -m pytest tests/test_aero.py -q
 python -m pytest tests/test_mesh.py -q
 python -m pytest tests/test_jobs.py -q
 ```
 
 > [!NOTE]
-> 解析解が存在する領域（ISA大気、誘導抗力、Sutherland粘性、メッシュ幾何特性）については、相対誤差 $10^{-6} \sim 10^{-3}$ の厳格な数値テストを実施しています。
+> For domains with analytical solutions (ISA atmosphere, induced drag, Sutherland viscosity, mesh geometric properties), strict numerical tests with relative error $10^{-6} \sim 10^{-3}$ are performed.
 
-### 2.3 統合スモークテスト
-Flask API 疎通、最適化ジョブ実行とETA算出、および3Dモデル自動解析パイプラインを一括検証します：
+### 2.3 Integrated Smoke Test
+Verifies Flask API connectivity, optimization job execution with ETA calculation, and 3D model automatic analysis pipeline:
 
 ```powershell
 python smoke_test.py
@@ -51,39 +51,39 @@ python smoke_test.py
 
 ---
 
-## 3. Git 運用規約
+## 3. Git Conventions
 
-コミットメッセージは以下のプレフィックス規約に準拠します：
+Commit messages follow the prefix convention below:
 
-- `feat(scope): ...` : 新機能の追加
-- `fix(scope): ...` : バグ修正
-- `refactor(scope): ...` : リファクタリング（機能変更なし）
-- `test(scope): ...` : テストの追加・修正
-- `docs(scope): ...` : ドキュメントの整備・修正
+- `feat(scope): ...` : New feature addition
+- `fix(scope): ...` : Bug fix
+- `refactor(scope): ...` : Refactoring (no functional change)
+- `test(scope): ...` : Test addition/modification
+- `docs(scope): ...` : Documentation improvement/fix
 
 ---
 
-## 4. Discord Webhook 通知スクリプト
+## 4. Discord Webhook Notification Script
 
-作業ステータス（開始、サブエージェント稼働、完了、失敗、警告等）を Discord に通知するためのスクリプトが用意されています：
+A script is provided to notify Discord of work status (start, subagent active, complete, fail, warning, etc.):
 
 ```powershell
-# 使用法
+# Usage
 python tools/notify_discord.py <start|subagent|end|fail|warning|question> <title> <summary> [extra_info]
 
-# 例: 完了通知
-python tools/notify_discord.py end "リファクタリング完了" "ドキュメント分割およびリンク検証がすべて正常に完了しました。"
+# Example: Completion notification
+python tools/notify_discord.py end "Refactoring Complete" "Documentation split and link verification all passed successfully."
 ```
 
 ---
 
-## 5. 関連ドキュメント
+## 5. Related Documents
 
-- [クイックスタート (docs/getting-started.md)](./getting-started.md)
-- [システムアーキテクチャ (docs/architecture.md)](./architecture.md)
-- [REST API 仕様書 (docs/api.md)](./api.md)
-- [トラブルシューティング (docs/troubleshooting.md)](./troubleshooting.md)
+- [Quick Start (docs/getting-started.md)](./getting-started.md)
+- [System Architecture (docs/architecture.md)](./architecture.md)
+- [REST API Specifications (docs/api.md)](./api.md)
+- [Troubleshooting (docs/troubleshooting.md)](./troubleshooting.md)
 
 ---
 
-[README に戻る](../README.md)
+[Back to README](../README.md)

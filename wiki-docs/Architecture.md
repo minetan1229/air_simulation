@@ -1,137 +1,137 @@
-# アーキテクチャ設計 (Architecture)
+# Architecture Design
 
-本シミュレーターは、ドメイン駆動設計（DDD）の思想に基づき、物理モデル・風場・構造解析・飛行力学・最適化の責務をモジュール分割した Flask REST API バックエンドと、WebGL / Three.js を用いた高パフォーマンスなフロントエンドで構成されています。
+This simulator is built on Domain-Driven Design (DDD) principles, with responsibilities for physics models, wind fields, structural analysis, flight dynamics, and optimization split into modules. It consists of a Flask REST API backend and a high-performance WebGL / Three.js frontend.
 
 ---
 
-## 1. システム全体データフロー
+## 1. System-Wide Data Flow
 
-ユーザーが計器コンソールでパラメータを操作、または再生ボタンを押下した際のリクエスト・演算・レンダリングの流れです。
+Flow of requests, computation, and rendering when user manipulates parameters on the instrument console or presses play:
 
 ```mermaid
 flowchart TD
-    subgraph Frontend["フロントエンド (Three.js / WebGL / Browser)"]
-        UI["Google Clean UI コンソール<br/>(パラメータ入力 / 時間軸シーク)"]
-        Renderer["3D Viewport レンダラー<br/>(Three.js / Custom Shaders)"]
-        Stream["60FPS アニメーションループ<br/>(適応補間 / リングバッファ)"]
+    subgraph Frontend["Frontend (Three.js / WebGL / Browser)"]
+        UI["Google Clean UI Console<br/>(Parameter Input / Timeline Seek)"]
+        Renderer["3D Viewport Renderer<br/>(Three.js / Custom Shaders)"]
+        Stream["60FPS Animation Loop<br/>(Adaptive Interpolation / Ring Buffer)"]
     end
 
-    subgraph Backend["バックエンド (Flask REST API: app.py)"]
-        API["REST API エンドポイント群<br/>(/api/v1/...)"]
-        JobMgr["ジョブ管理 (JobManager)<br/>(非同期スレッド / ETA計算)"]
+    subgraph Backend["Backend (Flask REST API: app.py)"]
+        API["REST API Endpoints<br/>(/api/v1/...)"]
+        JobMgr["Job Management (JobManager)<br/>(Async Threads / ETA Calculation)"]
     end
 
-    subgraph PhysicsCore["物理演算エンジン (physics/)"]
-        Atmo["大気環境 (atmosphere_domain)<br/>ISA / Sutherland / 密度"]
-        Aero["空力ドメイン (aero_domain)<br/>Viterna失速 / トリム / 地面効果"]
-        Wind["風場ドメイン (wind_domain)<br/>3D乱流 / GPU-CuPy / NumPy"]
-        Stress["構造応力 (stress_domain)<br/>動圧 / Gフォース / 翼根曲げ"]
-        Flight["6DoFフライト (flight_sim)<br/>RK4数値積分 / 四元数姿勢"]
-        Mesh["3Dメッシュ解析 (mesh_domain)<br/>STL/OBJ/GLB / パネル法"]
-        Opt["最適化エンジン (optimizer_domain)<br/>NSGA-II / DE / Nelder-Mead"]
+    subgraph PhysicsCore["Physics Computation Engine (physics/)"]
+        Atmo["Atmosphere (atmosphere_domain)<br/>ISA / Sutherland / Density"]
+        Aero["Aero Domain (aero_domain)<br/>Viterna Stall / Trim / Ground Effect"]
+        Wind["Wind Domain (wind_domain)<br/>3D Turbulence / GPU-CuPy / NumPy"]
+        Stress["Structural Stress (stress_domain)<br/>Dynamic Pressure / G-Force / Wing Root Bending"]
+        Flight["6DoF Flight (flight_sim)<br/>RK4 Integration / Quaternion Attitude"]
+        Mesh["3D Mesh Analysis (mesh_domain)<br/>STL/OBJ/GLB / Panel Method"]
+        Opt["Optimization Engine (optimizer_domain)<br/>NSGA-II / DE / Nelder-Mead"]
     end
 
-    UI -->|パラメータ変更 / ステップ実行| API
+    UI -->|Parameter Change / Step Execute| API
     API --> Atmo & Aero & Wind & Stress
     API --> Flight
-    Flight -->|局所気流・動圧| Aero
-    Flight -->|風速ベクトル| Wind
-    Flight -->|加速度・荷重| Stress
+    Flight -->|Local Airflow / Dynamic Pressure| Aero
+    Flight -->|Wind Velocity Vector| Wind
+    Flight -->|Acceleration / Load| Stress
     API --> JobMgr
     JobMgr --> Opt
     API --> Mesh
 
-    Flight -->|6DoF軌跡・姿勢・テレメトリ| API
-    API -->|JSONレスポンス| Stream
+    Flight -->|6DoF Trajectory / Attitude / Telemetry| API
+    API -->|JSON Response| Stream
     Stream --> Renderer
     Renderer --> UI
 ```
 
 ---
 
-## 2. ディレクトリ構成の解説
+## 2. Directory Structure Explanation
 
 ```text
 paper_airplanes/simulation/v3/
-├── app.py                      # Flask REST API エントリポイント (全20種のエンドポイント統合)
-├── requirements.txt            # 必須・任意パッケージ依存関係定義
-├── smoke_test.py               # E2E・API疎通・物理演算・最適化検証用テストスクリプト
-├── conftest.py / pytest.ini    # pytest 設定ファイル
-├── ruff.toml / mypy.ini        # 静的解析・型検査設定
-├── .env.example                # 環境変数テンプレート
-├── physics/                    # 物理演算コアライブラリ (ドメイン別)
+├── app.py                      # Flask REST API entry point (integrates 20 endpoints)
+├── requirements.txt            # Required & optional package dependencies
+├── smoke_test.py               # E2E, API connectivity, physics, optimization verification script
+├── conftest.py / pytest.ini    # pytest configuration
+├── ruff.toml / mypy.ini        # Static analysis & type checking config
+├── .env.example                # Environment variable template
+├── physics/                    # Physics computation core library (per domain)
 │   ├── __init__.py
-│   ├── config_schema.py        # 物理パラメータの dataclass 定義・バリデーション
-│   ├── geometry_utils.py       # 四元数・オイラー角・座標変換ユーティリティ
-│   ├── aero_domain.py          # 揚力・抗力・失速遷移・トリム・空力弾性モーフィング
-│   ├── atmosphere_domain.py    # ISA標準大気・Sutherland動粘性・局所大気圧計算
-│   ├── wind_domain.py          # 3D風場・Simplex/Perlin乱流・GPU (CuPy) / CPU並列
-│   ├── stress_domain.py        # 動圧・Gフォース・翼根曲げモーメント・頂点応力分布
-│   ├── flight_sim.py           # 6自由度 RK4 積分・適応サブステップ・リングバッファ
-│   ├── mesh_domain.py          # STL/OBJ/GLBインポート・重心/慣性テンソル算出・パネル法
-│   ├── optimizer_domain.py     # NSGA-II・差分進化・Nelder-Mead・Surrogate 最適化
-│   ├── parallel_engine.py      # マルチプロセッシング・パラメータスイープ実行基盤
-│   ├── job_manager.py          # 長時間最適化ジョブ管理・進捗率・ETA平滑化
-│   └── storage_domain.py       # CSV / JSON テレメトリ出力・設定シリアライズ
-├── static/                     # クライアントサイド Three.js & UI スクリプト
-│   ├── css/console.css         # Google Clean スタイルシート
+│   ├── config_schema.py        # Physics parameter dataclass definitions & validation
+│   ├── geometry_utils.py       # Quaternion, Euler angle, coordinate transform utilities
+│   ├── aero_domain.py          # Lift, drag, stall transition, trim, aeroelastic morphing
+│   ├── atmosphere_domain.py    # ISA standard atmosphere, Sutherland viscosity, local atmosphere
+│   ├── wind_domain.py          # 3D wind field, Simplex/Perlin turbulence, GPU (CuPy) / CPU parallel
+│   ├── stress_domain.py        # Dynamic pressure, G-force, wing root bending, vertex stress dist.
+│   ├── flight_sim.py           # 6DoF RK4 integration, adaptive sub-step, ring buffer
+│   ├── mesh_domain.py          # STL/OBJ/GLB import, CG/inertia tensor, panel method
+│   ├── optimizer_domain.py     # NSGA-II, Differential Evolution, Nelder-Mead, Surrogate
+│   ├── parallel_engine.py      # Multiprocessing, parameter sweep execution foundation
+│   ├── job_manager.py          # Long-running optimization job mgmt, progress, ETA smoothing
+│   └── storage_domain.py       # CSV/JSON telemetry output, config serialization
+├── static/                     # Client-side Three.js & UI scripts
+│   ├── css/console.css         # Google Clean stylesheet
 │   └── js/
-│       ├── app.js              # フロントエンド統合エントリ
-│       ├── api.js              # Flask API 通信ラッパー
-│       ├── viewport.js         # Three.js シーン・カメラ・レンダラー制御
-│       ├── airframe.js         # 機体 3D モデル描画・応力ヒートマップシェーダー
-│       ├── flowfield.js        # GPGPU / InstancedMesh 風流線パーティクル
-│       ├── transport.js        # 再生・一時停止・巻き戻しシーク制御
-│       ├── telemetry.js        # 計器・HUD・リアルタイムグラフ表示
-│       ├── panels.js           # パラメータ調整 UI パネル制御
-│       ├── optimizer.js        # 最適化ジョブ設定・リアルタイム ETA 表示
-│       ├── meshpanel.js        # 3Dモデルファイルドラッグ＆ドロップ取込
-│       └── datapanel.js        # CSV/JSON エクスポート・インポート
+│       ├── app.js              # Frontend integration entry
+│       ├── api.js              # Flask API communication wrapper
+│       ├── viewport.js         # Three.js scene, camera, renderer control
+│       ├── airframe.js         # Aircraft 3D model rendering, stress heatmap shaders
+│       ├── flowfield.js        # GPGPU / InstancedMesh wind streamline particles
+│       ├── transport.js        # Play/pause/rewind seek control
+│       ├── telemetry.js        # Instruments, HUD, real-time graph display
+│       ├── panels.js           # Parameter adjustment UI panel control
+│       ├── optimizer.js        # Optimization job config, real-time ETA display
+│       ├── meshpanel.js        # 3D model file drag & drop import
+│       └── datapanel.js        # CSV/JSON export/import
 ├── templates/
-│   └── index.html              # 計器コンソール HTML テンプレート
-├── tests/                      # pytest ユニットテスト群 (700+ テストケース)
-│   ├── test_aero.py            # 空力・失速・Drag Polar 検証
-│   ├── test_atmo_wind.py       # 大気・粘性・風場・GPUフォールバック検証
-│   ├── test_stress.py          # 動圧・翼根応力計算検証
-│   ├── test_mesh.py            # 3Dモデル幾何抽出・パネル法検証
-│   ├── test_flight.py          # 6DoF RK4・四元数・エネルギー保存検証
-│   ├── test_optimizer.py       # 最適化アルゴリズム・パレート解検証
-│   └── test_jobs.py            # ジョブマネージャー・ETA 計算式検証
-└── models/                     # アップロードされた 3D モデルキャッシュ (キャッシュ用)
+│   └── index.html              # Instrument console HTML template
+├── tests/                      # pytest unit test suite (700+ test cases)
+│   ├── test_aero.py            # Aero, stall, Drag Polar verification
+│   ├── test_atmo_wind.py       # Atmosphere, viscosity, wind, GPU fallback verification
+│   ├── test_stress.py          # Dynamic pressure, wing root stress verification
+│   ├── test_mesh.py            # 3D model geometry extraction, panel method verification
+│   ├── test_flight.py          # 6DoF RK4, quaternion, energy conservation verification
+│   ├── test_optimizer.py       # Optimization algorithms, Pareto solution verification
+│   └── test_jobs.py            # Job manager, ETA calculation verification
+└── models/                     # Uploaded 3D model cache (for caching)
 ```
 
 ---
 
-## 3. 技術スタック一覧
+## 3. Technology Stack
 
-### バックエンド (Backend)
-- **言語**: Python 3.10+
-- **Web フレームワーク**: Flask 3.1+ (RESTful API 設計)
-- **数値計算 & 物理演算**:
-  - `numpy`: ベクトル演算、配列処理、行列計算
-  - `scipy`: 空間補間（RBF）、Nelder-Mead、Differential Evolution
-- **3D 幾何解析 (Mesh)**:
-  - `trimesh` (任意): 高度なメッシュ解析。非導入時は純 NumPy 実装への自動フォールバックが機能
-- **GPU アクセラレーション**:
-  - `cupy` / `torch` (任意): 3D 風場グリッドのベクトル計算を CUDA GPU へオフロード (非搭載環境は CPU/NumPy へ自動フォールバック)
+### Backend
+- **Language**: Python 3.10+
+- **Web Framework**: Flask 3.1+ (RESTful API design)
+- **Numerical Computation & Physics**:
+  - `numpy`: Vector ops, array processing, matrix computation
+  - `scipy`: Spatial interpolation (RBF), Nelder-Mead, Differential Evolution
+- **3D Geometry Analysis (Mesh)**:
+  - `trimesh` (optional): Advanced mesh analysis. Auto-fallback to pure NumPy implementation if not installed.
+- **GPU Acceleration**:
+  - `cupy` / `torch` (optional): Offload 3D wind field grid vector computation to CUDA GPU (auto-fallback to CPU/NumPy if unavailable)
 
-### フロントエンド (Frontend)
-- **3D レンダリング**: Three.js (WebGL 2.0)
-  - Custom GLSL Shaders: 頂点ごとの動的応力ヒートマップ変形
-  - InstancedMesh / Particle System: 数万〜数十万点の風流線パーティクルリアルタイム描画
-- **UI デザイン**: Google Clean / Material Design スタイル
-  - 白基調 (`#F8F9FA` / `#FFFFFF`)、角丸カード型浮遊パネル、Google Blue (`#1A73E8`)
-- **グラフ・計器**: Chart.js によるリアルタイムテレメトリグラフ表示
+### Frontend
+- **3D Rendering**: Three.js (WebGL 2.0)
+  - Custom GLSL Shaders: Per-vertex dynamic stress heatmap deformation
+  - InstancedMesh / Particle System: Tens to hundreds of thousands of wind streamline particles real-time
+- **UI Design**: Google Clean / Material Design Style
+  - White base (`#F8F9FA` / `#FFFFFF`), rounded floating card panels, Google Blue (`#1A73E8`)
+- **Graphs & Instruments**: Chart.js real-time telemetry graphs
 
-### 開発・品質保証ツール (DevOps & Testing)
-- **テストフレームワーク**: `pytest` (700+ テストケース)
-- **コードリンター & フォーマッター**: `ruff`
-- **静的型検査**: `mypy` (厳格な型アノテーション検査)
-- **CI/CD**: GitHub Actions (Ubuntu 24.04 / Python 3.11 環境での自動テスト・静的解析)
+### DevOps & Testing
+- **Test Framework**: `pytest` (700+ test cases)
+- **Code Linter & Formatter**: `ruff`
+- **Static Type Checking**: `mypy` (strict type annotation checking)
+- **CI/CD**: GitHub Actions (Ubuntu 24.04 / Python 3.11 auto-test & static analysis)
 
 ---
 
-## 4. 物理モジュール間の関係性
+## 4. Physics Module Relationships
 
 ```mermaid
 classDiagram
@@ -168,10 +168,10 @@ classDiagram
     ConfigSchema <-- AtmosphereDomain
     ConfigSchema <-- AeroDomain
     ConfigSchema <-- WindDomain
-    AtmosphereDomain --> AeroDomain : 動圧 q, Re
-    WindDomain --> FlightSim : 相対風速
-    AeroDomain --> FlightSim : 揚力 L, 抗力 D, モーメント M
-    FlightSim --> StressDomain : 荷重倍数 nz, 動圧 q
+    AtmosphereDomain --> AeroDomain : Dynamic Pressure q, Re
+    WindDomain --> FlightSim : Relative Wind Velocity
+    AeroDomain --> FlightSim : Lift L, Drag D, Moment M
+    FlightSim --> StressDomain : Load Factor nz, Dynamic Pressure q
 ```
 
-次ページ: [[開発・運用ガイド|Development-Guide]]
+Next: [[Development & Operations Guide|Development-Guide]]

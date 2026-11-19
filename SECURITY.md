@@ -1,54 +1,54 @@
-# セキュリティポリシー (Security Policy)
+# Security Policy
 
-## サポートバージョン
+## Supported Versions
 
-| バージョン | サポート状況 |
+| Version | Support Status |
 |---|---|
-| 3.0.0 (現行) | ✅ セキュリティアップデートを提供 |
-| それ以前 | ❌ サポート終了 |
+| 3.0.0 (Current) | ✅ Security updates provided |
+| Earlier | ❌ End of life |
 
-## 脆弱性の報告
+## Reporting Vulnerabilities
 
-セキュリティ上の脆弱性を発見した場合は、**公開前に** 以下のいずれかの方法でご連絡ください:
+If you discover a security vulnerability, please report it **before public disclosure** via one of the following methods:
 
-1. **GitHub Private Security Advisory**（推奨）: リポジトリの「Security」タブから非公開で報告してください。
-2. **Issue での非公開報告が難しい場合**: 公開 Issue は避けてください。メンテナーへ直接ご連絡ください。
+1. **GitHub Private Security Advisory** (Recommended): Report privately via the repository's "Security" tab.
+2. **If private Issue reporting is difficult**: Avoid public Issues. Contact maintainers directly.
 
-報告時に含めてほしい情報:
+Information to include in the report:
 
-- 脆弱性の種別（例: 認証バイパス、インジェクション、認可不備）
-- 該当エンドポイント / コンポーネント
-- 再現手順（最小再現ペイロード）
-- 影響の想定範囲
-- （任意）修正案の提案
+- Vulnerability type (e.g., authentication bypass, injection, authorization flaw)
+- Affected endpoint / component
+- Reproduction steps (minimal reproduction payload)
+- Estimated impact scope
+- (Optional) Proposed fix
 
-## 対応プロセス
+## Response Process
 
-1. **受理**: 受領後 48 時間以内に確認の連絡をします。
-2. **調査**: 再現・影響範囲・優先度を評価します（重大度: Critical / High / Medium / Low）。
-3. **修正**: 修正パッチを作成し、テストします。
-4. **開示**: 修正がリリースされてから 90 日以内に、クレジット付きで開示します（Reporter の希望を尊重）。
+1. **Acknowledgment**: Confirm receipt within 48 hours.
+2. **Investigation**: Reproduce, assess impact scope & priority (Severity: Critical / High / Medium / Low).
+3. **Fix**: Create and test patch.
+4. **Disclosure**: Disclose with credit within 90 days of fix release (respecting reporter's preferences).
 
-## セキュリティの実装済み対策
+## Implemented Security Measures
 
-本ソフトウェアは以下の対策を実装しています:
+This software implements the following measures:
 
-- **認証・認可**: 環境変数 `API_KEY` が設定されている場合、Bearer Token / `X-API-Key` を要求します（`app.py` の `before_request`）。health check / UI は免除されます。
-- **セキュリティヘッダー**: CSP / X-Content-Type-Options / X-Frame-Options / Referrer-Policy（`app.py` の `after_request`）。
-- **CORS**: ローカル Origin および `ALLOWED_ORIGINS` のみ許可。
-- **入力検証**: 統合されたエラーハンドリング（`BadRequest` / `ValueError` / `OverflowError` / `ZeroDivisionError`）で、未検証入力による内部エラー露出を防止。
-- **依存関係監査**: CI で `pip-audit` と CodeQL を定期実行し、Dependabot で依存関係を監視。
-- **アップロード制限**: `MAX_CONTENT_LENGTH` = 64 MiB で過大ペイロードを拒否。
+- **Authentication & Authorization**: If `API_KEY` env var is set, Bearer Token / `X-API-Key` required (in `app.py` `before_request`). Health checks & UI exempted.
+- **Security Headers**: CSP / X-Content-Type-Options / X-Frame-Options / Referrer-Policy (`app.py` `after_request`).
+- **CORS**: Only local origins and `ALLOWED_ORIGINS` permitted.
+- **Input Validation**: Unified error handling (`BadRequest` / `ValueError` / `OverflowError` / `ZeroDivisionError`) prevents internal error exposure from unvalidated input.
+- **Dependency Auditing**: CI runs `pip-audit` and CodeQL regularly; Dependabot monitors dependencies.
+- **Upload Limits**: `MAX_CONTENT_LENGTH` = 64 MiB rejects oversized payloads.
 
-## 対象外
+## Out of Scope
 
-以下の行為はセキュリティ問題として扱われません:
+The following are not treated as security issues:
 
-- `--allow-protected-branch` オプションの通常使用
-- `POST /api/v1/system/force-gpu-render` の loopback 制限範囲内での実行
-- `GET /api/v1/meta/test-fault`（development / `TESTING=1` でのみ有効）
+- Normal use of `--allow-protected-branch` option
+- `POST /api/v1/system/force-gpu-render` execution within loopback restriction range
+- `GET /api/v1/meta/test-fault` (enabled only in development / `TESTING=1`)
 
-## 連絡先
+## Contact
 
 - GitHub Issues: https://github.com/minetan1229/air_simulation/issues
-- セキュリティタブ: https://github.com/minetan1229/air_simulation/security
+- Security Tab: https://github.com/minetan1229/air_simulation/security
