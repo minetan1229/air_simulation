@@ -121,6 +121,7 @@ def evaluate_horizontal_glide(
     # Pitch restoring stability is positive when pitch attitude oscillations remain bounded
     if crashed or diverged:
         stability = 0.0
+    else:
         # Calculate pitch attitude variance or RMS pitch rate from samples if available
         if samples and len(samples) >= 2:
             q_rates = [
