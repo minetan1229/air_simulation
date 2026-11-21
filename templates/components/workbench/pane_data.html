@@ -1,0 +1,30 @@
+      <!-- data -->
+      <div class="wb-pane" data-pane="data" role="tabpanel" hidden>
+        <div class="wb-col wb-col-1">
+          <h4 class="wb-h">プリセット<small>PRESETS</small></h4>
+          <div class="preset-list" id="preset-list"></div>
+          <div class="btn-row">
+            <button class="btn" id="preset-save" type="button">現在値を保存</button>
+            <button class="btn" id="preset-del" type="button" disabled>削除</button>
+          </div>
+        </div>
+        <div class="wb-col wb-col-2">
+          <h4 class="wb-h">書出<small>EXPORT</small></h4>
+          <div class="grid-2" id="export-opts"></div>
+          <div class="btn-row">
+            <button class="btn btn-primary" id="export-run" type="button">生成してダウンロード</button>
+          </div>
+          <pre class="preview" id="export-preview">—</pre>
+        </div>
+        <div class="wb-col wb-col-3">
+          <h4 class="wb-h">書込<small>IMPORT</small></h4>
+          <div class="drop" id="bundle-drop" tabindex="0" role="button">
+            <span class="drop-main">設定バンドルをドロップ</span>
+            <span class="drop-sub">または JSON を貼り付け</span>
+          </div>
+          <textarea class="paste" id="bundle-paste" spellcheck="false" placeholder='{"aircraft": {...}, "environment": {...}}'></textarea>
+          <div class="btn-row">
+            <button class="btn" id="bundle-apply" type="button">適用</button>
+          </div>
+        </div>
+      </div>

@@ -1,0 +1,134 @@
+      <!-- GA autonomous research -->
+      <div class="wb-pane" data-pane="research" role="tabpanel" hidden>
+        <div class="wb-col wb-col-1">
+          <h4 class="wb-h">研究設定<small>GA RESEARCH SETUP</small></h4>
+          <p class="ga-notice" id="ga-notice" hidden></p>
+          <div id="ga-params"></div>
+          <div class="field">
+            <div class="field-top"><span class="field-key">出力先ディレクトリ</span><span class="field-unit">OUTPUT DIR</span></div>
+            <input class="text" id="ga-output-dir" type="text" placeholder="未指定 (サーバー既定)" spellcheck="false">
+          </div>
+          <div class="btn-row">
+            <button class="btn btn-primary" id="ga-run" type="button">研究開始</button>
+            <button class="btn" id="ga-stop" type="button" disabled>停止</button>
+          </div>
+          <p class="ga-notice" id="ga-result-note"></p>
+          <p class="ga-notice" id="ga-budget-note"></p>
+          <p class="muted" id="ga-target-note" style="font-size:10.5px; margin:6px 0 0;">目標: ギネス記録 88.31 m (Dillon Ruble)</p>
+
+          <h4 class="wb-h" style="margin-top: 16px;">実行ステータス<small>RUN STATUS</small></h4>
+          <div class="ga-kv-list">
+            <div class="ga-kv"><span class="ga-kv-k">RUN ID</span><span class="ga-kv-v num" id="ga-run-id">—</span></div>
+            <div class="ga-kv"><span class="ga-kv-k">状態</span><span class="ga-kv-v" id="ga-run-status">待機中</span></div>
+            <div class="ga-kv"><span class="ga-kv-k">経過時間</span><span class="ga-kv-v num" id="ga-elapsed">0.0 s</span></div>
+            <div class="ga-kv"><span class="ga-kv-k">Tier</span><span class="ga-kv-v" id="ga-tier">—</span></div>
+            <div class="ga-kv"><span class="ga-kv-k">評価数</span><span class="ga-kv-v num" id="ga-evaluations">0</span></div>
+            <div class="ga-kv"><span class="ga-kv-k">世代</span><span class="ga-kv-v num" id="ga-generation">0 / 0</span></div>
+            <div class="ga-kv"><span class="ga-kv-k">最良適応度</span><span class="ga-kv-v num" id="ga-best">—</span></div>
+            <div class="ga-kv"><span class="ga-kv-k">目標</span><span class="ga-kv-v" id="ga-objective-value">—</span></div>
+          </div>
+
+          <h4 class="wb-h" style="margin-top: 16px;">チェックポイント / 再開<small>CHECKPOINT &amp; RESUME</small></h4>
+          <div class="btn-row">
+            <button class="btn btn-mini" id="ga-ckpt-refresh" type="button">チェックポイント一覧更新</button>
+            <button class="btn btn-mini" id="ga-ckpt-save" type="button">保存要求</button>
+          </div>
+          <div class="grid-2" style="margin-top: 6px;">
+            <div class="field">
+              <div class="field-top"><span class="field-key">上書き max_trials</span></div>
+              <input class="num-input" id="ga-resume-max-trials" type="number" min="1" step="1" placeholder="継承" style="width:100%;">
+            </div>
+            <div class="field">
+              <div class="field-top"><span class="field-key">上書き top_k</span></div>
+              <input class="num-input" id="ga-resume-top-k" type="number" min="1" step="1" placeholder="継承" style="width:100%;">
+            </div>
+            <div class="field">
+              <div class="field-top"><span class="field-key">上書き generations</span></div>
+              <input class="num-input" id="ga-resume-generations" type="number" min="1" step="1" placeholder="継承" style="width:100%;">
+            </div>
+          </div>
+          <div class="btn-row">
+            <button class="btn btn-primary btn-mini" id="ga-resume" type="button">再開 (Resume)</button>
+          </div>
+          <p class="ga-notice" id="ga-ckpt-notice"></p>
+          <div id="ga-ckpt-list"></div>
+        </div>
+
+        <div class="wb-col wb-col-2">
+          <h4 class="wb-h">折り方ビューア<small>FOLDING VIEWER</small></h4>
+          <div class="grid-2">
+            <div class="field">
+              <div class="field-top"><span class="field-key">表示する折り方</span><span class="field-unit">SOURCE</span></div>
+              <select class="select" id="ga-fold-source">
+                <option value="sample">サンプル折り方 (シード指定)</option>
+                <option value="ga" disabled>GA最良個体 (研究結果待ち)</option>
+              </select>
+            </div>
+            <div class="field">
+              <div class="field-top"><span class="field-key">遺伝子戦略</span><span class="field-unit">STRATEGY</span></div>
+              <select class="select" id="ga-fold-strategy">
+                <option value="families">折り族群 (families)</option>
+                <option value="free">完全無作為 (free)</option>
+              </select>
+            </div>
+            <div class="field">
+              <div class="field-top"><span class="field-key">シード</span></div>
+              <input class="num-input" id="ga-fold-seed" type="number" min="0" step="1" value="7" style="width:100%;">
+            </div>
+            <div class="field">
+              <div class="field-top"><span class="field-key">折り手数</span></div>
+              <input class="num-input" id="ga-fold-steps" type="number" min="1" max="64" step="1" value="8" style="width:100%;">
+            </div>
+          </div>
+          <div class="ga-step-row">
+            <button class="btn btn-mini" id="ga-fold-prev" type="button" title="前の折り工程">◀ 前</button>
+            <input type="range" id="ga-fold-slider" min="0" max="0" value="0" step="1" aria-label="折り工程ステップ">
+            <button class="btn btn-mini" id="ga-fold-next" type="button" title="次の折り工程">次 ▶</button>
+          </div>
+          <div class="ga-step-label" id="ga-fold-label">Step 0 — 展開紙 (flat sheet)</div>
+          <label class="switch ga-marker-switch">
+            <input type="checkbox" id="ga-marker-toggle" checked>
+            <span class="switch-box"></span>
+            <span class="switch-label">持ち手 (Keel) 領域と重心 (CG) を 3D 表示</span>
+          </label>
+          <p class="ga-notice" id="ga-fold-notice"></p>
+
+          <h4 class="wb-h">展開図<small>CREASE PATTERN</small></h4>
+          <p class="muted" style="font-size:10px; margin:0 0 4px;">赤実線 = 山折り / 青破線 = 谷折り (折り順番号と角度付き)</p>
+          <div class="ga-crease-host" id="ga-crease-panel"></div>
+
+          <h4 class="wb-h">折り手順<small>FOLDING RECIPE</small></h4>
+          <div class="ga-recipe-wrap">
+            <table class="ga-recipe-table">
+              <thead>
+                <tr><th>#</th><th>折り線 (mm)</th><th>種別</th><th>角度</th><th>パネル</th><th>指示</th></tr>
+              </thead>
+              <tbody id="ga-recipe-body"></tbody>
+            </table>
+          </div>
+          <div class="btn-row">
+            <button class="btn btn-mini" id="ga-export-json" type="button">JSON</button>
+            <button class="btn btn-mini" id="ga-export-md" type="button">Markdown</button>
+            <button class="btn btn-mini" id="ga-export-svg" type="button">SVG</button>
+          </div>
+
+          <h4 class="wb-h">最適な投げ方<small>OPTIMAL THROW</small></h4>
+          <div id="ga-throw-params"></div>
+          <h4 class="wb-h">評価統計<small>EVALUATION STATISTICS</small></h4>
+          <div id="ga-stats"></div>
+          <h4 class="wb-h">持ち手評価<small>GRIP REPORT</small></h4>
+          <div id="ga-grip-summary"></div>
+        </div>
+
+        <div class="wb-col wb-col-3">
+          <h4 class="wb-h">世代別適応度の推移<small>GENERATION TREND</small></h4>
+          <div class="chart-wrap">
+            <canvas id="ga-chart" role="img" aria-label="世代別適応度チャート"></canvas>
+            <p class="chart-empty" id="ga-chart-empty">未実行</p>
+          </div>
+          <h4 class="wb-h">島ごとの多様性<small>ISLAND DIVERSITY</small></h4>
+          <div id="ga-island-list"></div>
+          <h4 class="wb-h">研究ジャーナル<small>RESEARCH JOURNAL</small></h4>
+          <div class="ga-journal" id="ga-journal"></div>
+        </div>
+      </div>

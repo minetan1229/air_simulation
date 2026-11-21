@@ -1,0 +1,27 @@
+      <!-- mesh -->
+      <div class="wb-pane" data-pane="model" role="tabpanel" hidden>
+        <div class="wb-col wb-col-1">
+          <h4 class="wb-h">取込<small>IMPORT</small></h4>
+          <div class="drop" id="mesh-drop" tabindex="0" role="button">
+            <span class="drop-main">glTF / GLB / OBJ / STL をドロップ</span>
+            <span class="drop-sub">クリックでファイルを選択</span>
+          </div>
+          <input type="file" id="mesh-file" accept=".gltf,.glb,.obj,.stl" hidden>
+          <div class="field">
+            <label class="field-key" for="mesh-url">URL</label>
+            <input class="text" id="mesh-url" type="url" placeholder="https://…/plane.glb" spellcheck="false">
+          </div>
+          <div class="btn-row">
+            <button class="btn" id="mesh-fetch" type="button">URL から取込</button>
+          </div>
+          <div class="grid-2" id="mesh-opts"></div>
+        </div>
+        <div class="wb-col wb-col-2">
+          <h4 class="wb-h">ライブラリ<small>LIBRARY</small></h4>
+          <div class="model-list" id="mesh-list"><p class="chart-empty">未読込</p></div>
+        </div>
+        <div class="wb-col wb-col-3">
+          <h4 class="wb-h">算出物理量<small>DERIVED METRICS</small></h4>
+          <div class="metric-table" id="mesh-metrics"><p class="chart-empty">モデル未選択</p></div>
+        </div>
+      </div>

@@ -20,9 +20,10 @@ def test_p1_11_console_ui_css_invariants() -> None:
 
 
 def test_p1_11_templates_accessibility_attributes() -> None:
-    """Modals in templates/index.html must have role='dialog' or explicit aria-label/modal."""
-    index_html = Path("templates/index.html").read_text(encoding="utf-8")
+    """Modals in templates/index.html (and included components) must have role='dialog' or explicit aria-label/modal."""
+    templates_dir = Path("templates")
+    html_corpus = " ".join(f.read_text(encoding="utf-8") for f in templates_dir.glob("**/*.html"))
     # All modals must have role="dialog"
-    assert 'role="dialog"' in index_html
+    assert 'role="dialog"' in html_corpus
     # Canvas elements should have aria-label or accessible text fallback
-    assert 'aria-label=' in index_html
+    assert 'aria-label=' in html_corpus
