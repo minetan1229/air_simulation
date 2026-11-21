@@ -380,7 +380,12 @@ def _get_cached_pool(workers: int) -> Any:
         return _CACHED_POOL
     _release_cached_pool()
     context = multiprocessing.get_context("spawn")
-    pool = context.Pool(processes=workers, initializer=_pool_init, initargs=(-1,))
+    pool = context.Pool(
+        processes=workers,
+        initializer=_pool_init,
+        initargs=(-1,),
+        maxtasksperchild=50,
+    )
     _CACHED_POOL = pool
     _CACHED_POOL_WORKERS = workers
     log.info("spawn pool created with %d workers", workers)

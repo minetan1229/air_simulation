@@ -140,10 +140,15 @@ def api_error(
 # ---------------------------------------------------------------------------
 # Request parsing helpers
 # ---------------------------------------------------------------------------
-def body() -> Dict[str, Any]:
-    """Parse the JSON body, tolerating an absent or non-object payload."""
+MAX_BODY_BYTES: int = 10 * 1024 * 1024  # 10 MB
+
+
+def body(max_bytes: int = MAX_BODY_BYTES) -> Dict[str, Any]:
+    """Parse the JSON body, enforcing a size limit and object structure."""
     if not request.data:
         return {}
+    if len(request.data) > max_bytes:
+        raise BadRequest(f"request body exceeds maximum size of {max_bytes} bytes")
     try:
         payload = request.get_json(force=True, silent=False)
     except Exception as exc:
