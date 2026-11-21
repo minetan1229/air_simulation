@@ -645,6 +645,13 @@ def trim_alpha_from_elevon(cfg: AircraftConfig, elevon_deg: float, speed_mps: fl
     ``evaluate_coefficients`` (not ``evaluate_aero``) to avoid the recursive
     ``evaluate_aero -> trim_alpha_deg -> evaluate_aero`` cycle.
     """
+    elevon_val = float(elevon_deg)
+    speed_val = float(speed_mps)
+    cache_key = (round(elevon_val, 6), round(speed_val, 4), id(env) if env is not None else 0)
+    trim_cache = getattr(cfg, "_trim_cache", None)
+    if trim_cache is not None and cache_key in trim_cache:
+        return trim_cache[cache_key]
+
     if env is None:
         env = EnvironmentConfig()
     elevon = elevon_effects(elevon_deg, cfg)
@@ -664,8 +671,8 @@ def trim_alpha_from_elevon(cfg: AircraftConfig, elevon_deg: float, speed_mps: fl
     # Use env's ground effect settings for consistency with final evaluate_aero
     ground_height = 1.0
     density = 1.225
+    params = aero_kernel.params_from_config(trimmed_cfg, env)
     for _ in range(50):
-        params = aero_kernel.params_from_config(trimmed_cfg, env)
         coefficients = aero_kernel.evaluate_coefficients(
             _SCALAR,
             params,
@@ -687,7 +694,17 @@ def trim_alpha_from_elevon(cfg: AircraftConfig, elevon_deg: float, speed_mps: fl
         alpha = alpha + 0.7 * step
         if abs(step) < 1.0e-13:
             break
-    return float(alpha)
+    result_val = float(alpha)
+    if trim_cache is None:
+        trim_cache = {}
+        try:
+            object.__setattr__(cfg, "_trim_cache", trim_cache)
+        except Exception:
+            pass
+    if len(trim_cache) > 256:
+        trim_cache.clear()
+    trim_cache[cache_key] = result_val
+    return result_val
 
 
 def elevon_for_trim(cfg: AircraftConfig, alpha_deg: float) -> float:

@@ -3298,7 +3298,12 @@ class FlightSimulator:
         self._state = replace(previous, crashed=True, landed=False)
         return False
 
-    def step(self, dt: Optional[float] = None, substeps: Optional[int] = None) -> Dict[str, Any]:
+    def step(
+        self,
+        dt: Optional[float] = None,
+        substeps: Optional[int] = None,
+        build_packet: bool = True,
+    ) -> Dict[str, Any]:
         """Advance the flight by ``dt`` seconds of simulated time.
 
         The interval is split into at most ``settings.max_substeps`` adaptive RK4
@@ -3307,10 +3312,10 @@ class FlightSimulator:
         current telemetry unchanged with ``dt = 0``.
         """
         if self._state.landed or self._state.crashed:
-            return self._build_packet(self._diagnostics(), 0.0, 0)
+            return self._build_packet(self._diagnostics(), 0.0, 0) if build_packet else {}
         total = max(_finite(self.settings.dt_max, 2.0e-2), 0.0) if dt is None else max(_finite(dt), 0.0)
         if total <= 0.0:
-            return self._build_packet(self._diagnostics(), 0.0, 0)
+            return self._build_packet(self._diagnostics(), 0.0, 0) if build_packet else {}
         if bool(getattr(self.environment, "wind_tunnel_enabled", False)):
             alpha = float(getattr(self.environment, "wind_tunnel_alpha_deg", 4.0))
             beta = float(getattr(self.environment, "wind_tunnel_beta_deg", 0.0))
@@ -3366,7 +3371,7 @@ class FlightSimulator:
             core = self._compute_dynamics(y0, time_s)
             h = min(self._timestep_from(core, y0, time_s), remaining)
             previous_state = self._state
-            if not self._advance(h, y0, time_s, self._derivative(y0, time_s, core)):
+            if not self._advance(h, y0, time_s, self._derivative(y0, time_s, core), core0=core):
                 break
             self._state = self._apply_ground_contact(self._state, previous_state, dt=h)
             travelled += float(self._state.time_s) - time_s
@@ -3375,6 +3380,8 @@ class FlightSimulator:
             self._record_sample()
             if self._state.landed or self._state.crashed:
                 break
+        if not build_packet:
+            return {}
         return self._build_packet(self._diagnostics(), travelled, used)
 
     # -- history ----------------------------------------------------------
@@ -3525,7 +3532,7 @@ class FlightSimulator:
                     timed_out = True
                     break
                 remaining = total - float(self._state.time_s)
-                self.step(dt=min(chunk, remaining))
+                self.step(dt=min(chunk, remaining), build_packet=False)
                 calls += 1
         finally:
             self._record_enabled = previous_record

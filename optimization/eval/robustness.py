@@ -53,11 +53,16 @@ class RobustnessEvaluator:
             launch_angle_deg=0.0,
             launch_height_m=1.5,
         )
-        turb_sim = FlightSimulator(aircraft=aircraft, environment=turb_env, launch=turb_launch)
-        turb_sim.simulate(duration_s=self.duration_s)
-        turb_metrics = turb_sim.metrics()
-        dryden_hangtime = float(turb_metrics.get("flight_time_s", 0.0) or 0.0)
-        dryden_survived = not bool(turb_metrics.get("crashed", False) or turb_metrics.get("diverged", False))
+        # 1. Dryden Turbulence Test
+        try:
+            turb_sim = FlightSimulator(aircraft=aircraft, environment=turb_env, launch=turb_launch)
+            turb_sim.simulate(duration_s=self.duration_s)
+            turb_metrics = turb_sim.metrics()
+            dryden_hangtime = float(turb_metrics.get("flight_time_s", 0.0) or 0.0)
+            dryden_survived = not bool(turb_metrics.get("crashed", False) or turb_metrics.get("diverged", False))
+        except Exception:
+            dryden_hangtime = 0.0
+            dryden_survived = False
 
         # 2. Throw Jitter Test (+/- 5 deg roll & yaw perturbation)
         jitter_launch = LaunchConfig(
@@ -69,10 +74,13 @@ class RobustnessEvaluator:
             launch_height_m=1.5,
         )
         jitter_env = EnvironmentConfig(wind_speed=0.0, gust_intensity=0.0)
-        jitter_sim = FlightSimulator(aircraft=aircraft, environment=jitter_env, launch=jitter_launch)
-        jitter_sim.simulate(duration_s=self.duration_s)
-        jitter_metrics = jitter_sim.metrics()
-        jitter_survived = not bool(jitter_metrics.get("crashed", False) or jitter_metrics.get("diverged", False))
+        try:
+            jitter_sim = FlightSimulator(aircraft=aircraft, environment=jitter_env, launch=jitter_launch)
+            jitter_sim.simulate(duration_s=self.duration_s)
+            jitter_metrics = jitter_sim.metrics()
+            jitter_survived = not bool(jitter_metrics.get("crashed", False) or jitter_metrics.get("diverged", False))
+        except Exception:
+            jitter_survived = False
         jitter_score = 1.0 if jitter_survived else 0.2
 
         # 3. High-Pitch Launch Test (18 deg climb test)
@@ -81,12 +89,16 @@ class RobustnessEvaluator:
             launch_angle_deg=18.0,
             launch_height_m=1.5,
         )
-        climb_sim = FlightSimulator(aircraft=aircraft, environment=jitter_env, launch=climb_launch)
-        climb_sim.simulate(duration_s=self.duration_s)
-        climb_metrics = climb_sim.metrics()
-        stalled = bool(climb_metrics.get("stalled", False))
-        high_pitch_recovered = (not bool(climb_metrics.get("crashed", False))) and (not stalled)
-        recovery_rate = 1.0 if high_pitch_recovered else (0.5 if not bool(climb_metrics.get("crashed", False)) else 0.0)
+        try:
+            climb_sim = FlightSimulator(aircraft=aircraft, environment=jitter_env, launch=climb_launch)
+            climb_sim.simulate(duration_s=self.duration_s)
+            climb_metrics = climb_sim.metrics()
+            stalled = bool(climb_metrics.get("stalled", False))
+            crashed = bool(climb_metrics.get("crashed", False))
+            high_pitch_recovered = (not crashed) and (not stalled)
+            recovery_rate = 1.0 if high_pitch_recovered else (0.5 if not crashed else 0.0)
+        except Exception:
+            recovery_rate = 0.0
 
         overall = float(
             0.4 * (1.0 if dryden_survived else 0.2)

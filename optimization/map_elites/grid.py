@@ -51,8 +51,9 @@ class MAPElitesGridArchive:
 
         indices: List[int] = []
         for val, (low, high), num_bins in zip(vals, self.ranges, self.bins):
-            clamped = _clamp(val, low, high - 1.0e-5)
-            frac = (clamped - low) / (high - low)
+            span = max(1.0e-7, high - low)
+            clamped = _clamp(val, low, high - 1.0e-7)
+            frac = max(0.0, min(1.0 - 1.0e-7, (clamped - low) / span))
             idx = int(frac * num_bins)
             idx = max(0, min(num_bins - 1, idx))
             indices.append(idx)
@@ -78,10 +79,23 @@ class MAPElitesGridArchive:
         score = candidate.benchmark.composite_score
         bin_idx = self.get_bin_index(desc)
 
-        if bin_idx not in self.cells or score > self.cells[bin_idx][0]:
+        if bin_idx not in self.cells:
             self.cells[bin_idx] = (score, candidate)
             self.improved_evaluations += 1
             return True
+
+        current_score, current_cand = self.cells[bin_idx]
+        if score > current_score:
+            self.cells[bin_idx] = (score, candidate)
+            self.improved_evaluations += 1
+            return True
+        elif math.isclose(score, current_score, abs_tol=1e-5):
+            # Tie-break: prefer candidate with higher stability or lower mass
+            cand_m = candidate.geometry.mass_kg if candidate.geometry else 1.0
+            curr_m = current_cand.geometry.mass_kg if current_cand.geometry else 1.0
+            if cand_m < curr_m:
+                self.cells[bin_idx] = (score, candidate)
+                return True
 
         return False
 
