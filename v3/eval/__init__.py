@@ -1,5 +1,8 @@
-"""v3.eval: Stage 4 final real-world robustness evaluation and asset export."""
+"""Backward-compatibility re-export.
 
-from .robustness import RobustnessEvaluator
+The canonical module is :mod:`optimization.eval`.
+"""
+from optimization.eval import *  # noqa: F401,F403
+from optimization.eval.robustness import RobustnessEvaluator  # noqa: F401
 
 __all__ = ["RobustnessEvaluator"]

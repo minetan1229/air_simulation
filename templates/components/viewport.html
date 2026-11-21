@@ -1,0 +1,156 @@
+    <!-- ---------- viewport ---------- -->
+    <section class="viewport" aria-label="3D ビュー">
+      <canvas id="view-canvas" role="img" aria-label="3D 飛行ビューポート"></canvas>
+
+      <!-- Top-Right HUD Stack (表示切替ツールバー & 風洞HUDの自動縦フロー) -->
+      <div class="vp-overlay-stack vp-overlay-tr">
+        <div class="vp-toolbar" role="toolbar" aria-label="表示設定">
+          <button class="chip" id="tgl-wind" type="button" data-on="1" title="風流粒子 (F)">風流</button>
+          <button class="chip" id="tgl-track" type="button" data-on="1" title="飛行軌跡 (T)">軌跡</button>
+          <button class="chip" id="tgl-ghost" type="button" data-on="1" title="前回の軌跡 (G)">ゴースト</button>
+          <button class="chip" id="tgl-panels" type="button" title="空力パネル格子 (P)">パネル</button>
+          <button class="chip" id="tgl-grip" type="button" data-on="1" title="持ち手接触点 (M)">持ち手</button>
+          <button class="chip" id="tgl-follow" type="button" data-on="1" title="機体追従 (C)">追従</button>
+          <button class="chip" id="tgl-heat" type="button" data-on="1" title="応力ヒートマップ (H)">応力</button>
+          <span class="toolbar-sep" aria-hidden="true"></span>
+          <button class="chip active" id="cam-mode-mean" type="button" title="代表平均機を追従するカメラ (揺れなし)">平均機追従</button>
+          <button class="chip" id="cam-mode-lead" type="button" title="1位トップ機を追尾するカメラ">トップ機</button>
+          <button class="chip" id="cam-mode-fleet" type="button" title="100機全体を見渡す俯瞰カメラ">俯瞰</button>
+          <button class="chip" id="cam-mode-swarm" type="button" title="100機の群れを斜め上方から追うスウォームカメラ">スウォーム</button>
+          <button class="chip" id="cam-mode-fixed" type="button" title="固定視点 (追従オフ)">固定カメラ</button>
+          <button class="chip" id="btn-view-reset" type="button" title="視点を初期化 (V)">リセット</button>
+          <span class="toolbar-sep" aria-hidden="true"></span>
+          <button class="chip" id="tgl-ens-tracks" type="button" data-on="1" title="100機の軌跡表示・非表示切替">100機軌道</button>
+          <button class="chip active" id="tgl-ens-mean-only" type="button" data-mode="all" title="全軌道表示 ⇄ 平均機のみ表示切替">全機表示</button>
+        </div>
+
+        <div class="vp-hud vp-hud-tr" id="tunnel-hud" hidden style="min-width: 200px;">
+          <div class="hud-title">風洞実験室 / WIND TUNNEL</div>
+          <div class="hud-row"><span class="hud-key">動態</span><span class="hud-val" id="hud-tunnel-status" style="color:#1557b0;font-weight:600;">リアルタイム空力応答</span></div>
+          <div class="hud-row"><span class="hud-key">流線</span><span class="hud-val" style="color:#137333;font-size:11px;">煙線レイク・翼干渉・翼端渦 ON</span></div>
+          <div class="hud-row"><span class="hud-key">迎角 α</span><span class="hud-val num" id="hud-tunnel-aoa" style="font-weight:700;color:#1557b0;">4.0°</span></div>
+          <div class="hud-row"><span class="hud-key">風速 V</span><span class="hud-val num" id="hud-tunnel-speed" style="font-weight:700;">12.0 m/s</span></div>
+          <div class="hud-row"><span class="hud-key">C_L</span><span class="hud-val num" id="hud-cl">—</span></div>
+          <div class="hud-row"><span class="hud-key">C_D</span><span class="hud-val num" id="hud-cd">—</span></div>
+          <div class="hud-row"><span class="hud-key">L/D</span><span class="hud-val num" id="hud-ld">—</span></div>
+          <div class="hud-row"><span class="hud-key">C_m</span><span class="hud-val num" id="hud-cm">—</span></div>
+
+          <!-- インタラクティブ迎角・風速スライダー -->
+          <div style="margin-top:8px; border-top:1px solid rgba(0,0,0,0.08); padding-top:6px;">
+            <div style="display:flex; justify-content:space-between; align-items:center; font-size:10px; margin-bottom:2px;">
+              <span>迎角 (AoA) 調整</span>
+              <span id="tunnel-slider-aoa-val" class="num" style="font-weight:600; color:#1557b0;">4.0°</span>
+            </div>
+            <input type="range" id="tunnel-slider-aoa" min="-15" max="30" step="0.5" value="4" style="width:100%; height:4px; cursor:pointer;" title="迎角をリアルタイム調整">
+          </div>
+
+          <div style="margin-top:6px;">
+            <div style="display:flex; justify-content:space-between; align-items:center; font-size:10px; margin-bottom:2px;">
+              <span>風洞風速</span>
+              <span id="tunnel-slider-speed-val" class="num" style="font-weight:600;">12.0 m/s</span>
+            </div>
+            <input type="range" id="tunnel-slider-speed" min="0" max="30" step="0.5" value="12" style="width:100%; height:4px; cursor:pointer;" title="風速をリアルタイム調整">
+          </div>
+
+          <!-- クイック迎角テストプリセット -->
+          <div style="display:flex; flex-wrap:wrap; gap:3px; margin-top:8px;">
+            <button type="button" class="btn btn-mini tunnel-preset-btn" data-aoa="0" style="padding:1px 4px; font-size:9.5px;">高速 0°</button>
+            <button type="button" class="btn btn-mini tunnel-preset-btn" data-aoa="4" style="padding:1px 4px; font-size:9.5px; border-color:#1a73e8; color:#1557b0;">滑空 4°</button>
+            <button type="button" class="btn btn-mini tunnel-preset-btn" data-aoa="10" style="padding:1px 4px; font-size:9.5px;">高揚力 10°</button>
+            <button type="button" class="btn btn-mini tunnel-preset-btn" data-aoa="16" style="padding:1px 4px; font-size:9.5px; color:#c5221f;">臨界失速 16°</button>
+            <button type="button" class="btn btn-mini tunnel-preset-btn" data-aoa="24" style="padding:1px 4px; font-size:9.5px; color:#d93025;">深失速 24°</button>
+            <button type="button" class="btn btn-mini tunnel-preset-btn" data-aoa="-6" style="padding:1px 4px; font-size:9.5px;">逆迎角 -6°</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Left HUD Stack (テレメトリ & 翼面応力凡例の縦衝突防止スタック) -->
+      <div class="vp-overlay-stack vp-overlay-tl">
+        <!-- リアルタイム・フライトテレメトリカード (日本語テキスト表示) -->
+        <div class="vp-hud vp-hud-tl flight-telemetry-hud">
+          <div class="flight-telemetry-header">
+            <span class="flight-telemetry-title">飛行ステータス</span>
+            <span class="hud-phase-pill" id="f-hud-phase">待機中</span>
+          </div>
+
+          <div class="flight-telemetry-status-row">
+            <span id="status-dot" class="flight-status-dot"></span>
+            <span id="status-text">投擲待機中</span>
+          </div>
+
+          <div class="flight-telemetry-grid">
+            <div>
+              <div class="flight-telemetry-k">高度</div>
+              <div class="flight-telemetry-v"><span id="f-hud-alt" class="num">0.00</span> <small>m</small></div>
+              <div class="flight-telemetry-sub">最高: <span id="f-hud-alt-peak" class="num">0.00</span> m</div>
+            </div>
+            <div>
+              <div class="flight-telemetry-k">速度</div>
+              <div class="flight-telemetry-v"><span id="f-hud-spd" class="num">0.00</span> <small>m/s</small></div>
+              <div class="flight-telemetry-sub">最高: <span id="f-hud-spd-peak" class="num">0.00</span> m/s</div>
+            </div>
+            <div>
+              <div class="flight-telemetry-k">水平距離</div>
+              <div class="flight-telemetry-v" style="font-size: 11.5px; font-weight: 600;"><span id="f-hud-dist" class="num">0.00</span> <small>m</small></div>
+              <div class="flight-telemetry-sub-muted">時間: <span id="f-hud-time" class="num">0.00</span> s</div>
+            </div>
+            <div>
+              <div class="flight-telemetry-k">滑空比 / 迎角</div>
+              <div class="flight-telemetry-glide"><span id="f-hud-glide" class="num">—</span></div>
+              <div class="flight-telemetry-sub-muted">迎角: <span id="f-hud-aoa" class="num">0.0°</span></div>
+            </div>
+          </div>
+
+          <!-- 詳細力学データ (互換性用非表示コンテナ) -->
+          <div style="display:none;">
+            <span id="hud-alpha"></span><span id="hud-beta"></span><span id="hud-speed"></span>
+            <span id="hud-q"></span><span id="hud-ld-live"></span><span id="hud-glide-ratio"></span>
+            <span id="hud-flow"></span>
+          </div>
+        </div>
+
+        <div class="vp-hud vp-hud-bl">
+          <div class="heat-legend">
+            <span class="heat-title">翼面応力インデックス STRESS</span>
+            <div class="heat-bar"><canvas id="heat-ramp" width="180" height="10" role="img" aria-label="応力ヒートマップカラーランプ"></canvas></div>
+            <div class="heat-scale"><span>0.0</span><span>0.5</span><span>1.0</span></div>
+          </div>
+          <div class="flow-legend">
+            <span class="flow-backend" id="flow-backend">flow: —</span>
+            <span class="flow-count num" id="flow-count">—</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Viewport notices -->
+
+      <div class="vp-notice" id="vp-notice" hidden>
+        <strong>3D ビューを初期化できませんでした</strong>
+        <p id="vp-notice-msg"></p>
+        <p class="muted">設定・数値計算・最適化はそのまま利用できます。</p>
+      </div>
+
+      <!-- シミュレーションエラーバナー (致命エラー・タイムアウトの一括通知) -->
+      <div class="sim-error-banner" id="sim-error-banner" hidden>
+        <span class="sim-error-icon" id="sim-error-icon"></span>
+        <div class="sim-error-body">
+          <div class="sim-error-header">
+            <span class="sim-error-title" id="sim-error-title">シミュレーションエラー</span>
+            <span class="sim-error-badge" id="sim-error-badge"></span>
+          </div>
+          <div class="sim-error-message" id="sim-error-msg"></div>
+          <div class="sim-error-hint" id="sim-error-hint" hidden></div>
+        </div>
+        <button class="sim-error-close" id="sim-error-close" type="button" aria-label="エラーを閉じる">×</button>
+      </div>
+
+      <!-- スクリーンリーダー用の飛行ステータス読み上げ (視覚的には非表示) -->
+      <div id="vp-flight-status-announcer" role="status" aria-live="polite"
+           style="position:absolute; width:1px; height:1px; margin:-1px; padding:0; overflow:hidden; clip:rect(0 0 0 0); white-space:nowrap; border:0;"></div>
+
+      <!-- クイック投擲ドックは撤去済み。
+           発射はトップレール (btn-top-launch)、再生 / 最初へはトランスポートバー
+           (tp-play / tp-reset)、100機一括は btn-top-gpu-ensemble に一本化し、
+           投げ方パラメータは左レールの「投擲設定」だけを正とする。 -->
+
+    </section>

@@ -11,7 +11,7 @@ from typing import Any, Dict, Optional, Tuple
 from flask import Response, jsonify, request
 from werkzeug.exceptions import HTTPException
 
-from physics.config_schema import (
+from core.config_schema import (
     AircraftConfig,
     EnvironmentConfig,
     LaunchConfig,
@@ -20,7 +20,7 @@ from physics.config_schema import (
     from_dict,
 )
 from physics.atmosphere_domain import isa_pressure, isa_temperature
-from physics.error_domain import ERROR_LOGGER
+from core.error_domain import ERROR_LOGGER
 
 log = logging.getLogger("paper_airplane")
 
@@ -44,6 +44,45 @@ class NotFound(KeyError):
 # ---------------------------------------------------------------------------
 _DOMAINS: Dict[str, Any] = {}
 
+_DOMAIN_MAP: Dict[str, str] = {
+    # Layer 0: Core
+    "config_schema": "core.config_schema",
+    "geometry_utils": "core.geometry_utils",
+    "payload_contract": "core.payload_contract",
+    "error_domain": "core.error_domain",
+    "interfaces": "core.interfaces",
+    # Layer 1: Physics
+    "aero_domain": "physics.aero_domain",
+    "aero_kernel": "physics.aero_kernel",
+    "aeroelastic": "physics.aeroelastic",
+    "atmosphere_domain": "physics.atmosphere_domain",
+    "wind_domain": "physics.wind_domain",
+    "stress_domain": "physics.stress_domain",
+    "flight_sim": "physics.flight_sim",
+    "gpu_dynamics": "physics.gpu_dynamics",
+    "parallel_engine": "physics.parallel_engine",
+    "gravity_modifier": "physics.gravity_modifier",
+    "model_discrepancy": "physics.model_discrepancy",
+    "multifidelity": "physics.multifidelity",
+    "coefficient_audit": "physics.coefficient_audit",
+    # Layer 2: Geometry
+    "origami_domain": "geometry.origami_domain",
+    "origami_genome": "geometry.origami_genome",
+    "origami_geometry_audit": "geometry.origami_geometry_audit",
+    "mesh_domain": "geometry.mesh_domain",
+    # Layer 3: Optimization
+    "optimizer_domain": "optimization.optimizer_domain",
+    "ga_domain": "optimization.ga_domain",
+    "ga_config": "optimization.ga_config",
+    "ga_cma": "optimization.ga_cma",
+    "pareto_archive": "optimization.pareto_archive",
+    "auto_investigate": "optimization.auto_investigate",
+    # Layer 4: Infrastructure
+    "job_manager": "infrastructure.job_manager",
+    "storage_domain": "infrastructure.storage_domain",
+    "records_domain": "infrastructure.records_domain",
+}
+
 
 def domain(name: str) -> Any:
     """Import a domain module on first use so a missing optional dependency
@@ -51,11 +90,12 @@ def domain(name: str) -> Any:
     if name in _DOMAINS:
         return _DOMAINS[name]
 
+    fqn = _DOMAIN_MAP.get(name, f"physics.{name}")
     try:
-        module = importlib.import_module(f"physics.{name}")
+        module = importlib.import_module(fqn)
     except Exception as exc:  # pragma: no cover - surfaced as HTTP 503
-        log.error("domain '%s' unavailable: %s", name, exc)
-        raise ServiceUnavailable(f"physics domain '{name}' is unavailable: {exc}") from exc
+        log.error("domain '%s' (%s) unavailable: %s", name, fqn, exc)
+        raise ServiceUnavailable(f"domain '{name}' is unavailable: {exc}") from exc
     _DOMAINS[name] = module
     return module
 

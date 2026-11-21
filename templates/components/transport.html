@@ -1,0 +1,36 @@
+  <!-- ==================== transport ==================== -->
+  <footer class="transport">
+    <div class="tp-badge">
+      <svg class="ui-icon" viewBox="0 0 24 24" fill="#a8c7fa"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 14.5v-9l6 4.5-6 4.5z"/></svg>
+      <span class="tp-badge-text">再生プレイヤー</span>
+    </div>
+    <div class="tp-controls">
+      <button class="tp-btn" id="tp-reset" type="button" title="最初に戻る / 待機状態 (R)">
+        <svg class="ui-icon" viewBox="0 0 24 24" fill="currentColor"><path d="M12 5V1L7 6l5 5V7c3.31 0 6 2.69 6 6s-2.69 6-6 6-6-2.69-6-6H4c0 4.42 3.58 8 8 8s8-3.58 8-8-3.58-8-8-8z"/></svg><span class="tp-label">最初へ</span>
+      </button>
+      <button class="tp-btn" id="tp-prev" type="button" title="1 フレーム戻る (←)">
+        <svg class="ui-icon" viewBox="0 0 24 24" fill="currentColor"><path d="M6 6h2v12H6zm3.5 6 8.5 6V6z"/></svg><span class="tp-label">戻る</span>
+      </button>
+      <button class="tp-btn tp-play" id="tp-play" type="button" title="再生 / 一時停止 (Space)">
+        <svg class="ui-icon" id="tp-play-img" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg><span class="tp-label" id="tp-play-label">再生</span>
+      </button>
+      <button class="tp-btn" id="tp-next" type="button" title="1 フレーム進む (→)">
+        <svg class="ui-icon" viewBox="0 0 24 24" fill="currentColor"><path d="m6 18 8.5-6L6 6v12zM16 6v12h2V6h-2z"/></svg><span class="tp-label">進む</span>
+      </button>
+    </div>
+
+    <div class="tp-rate" role="group" aria-label="再生速度" id="tp-rate"></div>
+
+    <div class="tp-timeline">
+      <input type="range" id="tp-scrub" min="0" max="0" value="0" step="1" aria-label="タイムライン">
+      <div class="tp-frame"><span class="num" id="tp-frame">0</span><span class="muted">/</span><span class="num" id="tp-total">0</span><span class="muted">frame</span></div>
+    </div>
+
+    <div class="tp-meta">
+      <div class="tp-clock"><span class="num" id="tp-time">0.000</span><span class="muted">s</span></div>
+      <div class="tp-stat"><span class="muted">滞空</span><span class="num" id="tp-flight">0.00</span><span class="muted">s</span></div>
+      <div class="tp-stat"><span class="muted">距離</span><span class="num" id="tp-dist">0.00</span><span class="muted">m</span></div>
+      <div class="tp-stat"><span class="muted">滑空比</span><span class="num" id="tp-glide">—</span></div>
+    </div>
+  </footer>
+

@@ -1,7 +1,13 @@
-"""v3.physics: Core physics wrappers, deterministic horizontal benchmark, and properties extraction."""
+"""Backward-compatibility re-export.
 
-from .benchmark import DeterministicFlightBenchmark, evaluate_horizontal_glide
-from .properties import extract_airframe_geometry, compute_behavior_descriptor
+The canonical module is :mod:`physics.benchmark`.
+"""
+from physics.benchmark import (  # noqa: F401
+    DeterministicFlightBenchmark,
+    compute_behavior_descriptor,
+    evaluate_horizontal_glide,
+    extract_airframe_geometry,
+)
 
 __all__ = [
     "DeterministicFlightBenchmark",
