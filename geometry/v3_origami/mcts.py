@@ -112,6 +112,7 @@ class MCTSOrigamiGenerator:
                     nose=ParametricNoseSpec(
                         fold_count=min(6, base.nose.fold_count + 1),
                         taper_ratio=base.nose.taper_ratio,
+                        nose_length_ratio=base.nose.nose_length_ratio,
                     ),
                     keel=base.keel,
                     wing=base.wing,
@@ -123,6 +124,19 @@ class MCTSOrigamiGenerator:
                     nose=ParametricNoseSpec(
                         fold_count=base.nose.fold_count,
                         taper_ratio=max(0.45, base.nose.taper_ratio - 0.1),
+                        nose_length_ratio=base.nose.nose_length_ratio,
+                    ),
+                    keel=base.keel,
+                    wing=base.wing,
+                ),
+            ),
+            (
+                "nose_extended",
+                ParametricOrigamiConfig(
+                    nose=ParametricNoseSpec(
+                        fold_count=base.nose.fold_count,
+                        taper_ratio=base.nose.taper_ratio,
+                        nose_length_ratio=min(0.35, base.nose.nose_length_ratio + 0.04),
                     ),
                     keel=base.keel,
                     wing=base.wing,
@@ -130,12 +144,23 @@ class MCTSOrigamiGenerator:
             ),
             # Phase 2 Keel variations
             (
-                "keel_deeper",
+                "keel_deeper_locked",
                 ParametricOrigamiConfig(
                     nose=base.nose,
                     keel=ParametricKeelSpec(
                         keel_depth_ratio=min(0.14, base.keel.keel_depth_ratio + 0.02),
                         has_lock_fold=True,
+                    ),
+                    wing=base.wing,
+                ),
+            ),
+            (
+                "keel_unlocked",
+                ParametricOrigamiConfig(
+                    nose=base.nose,
+                    keel=ParametricKeelSpec(
+                        keel_depth_ratio=max(0.06, base.keel.keel_depth_ratio - 0.02),
+                        has_lock_fold=False,
                     ),
                     wing=base.wing,
                 ),
@@ -214,6 +239,7 @@ class MCTSOrigamiGenerator:
                 cand.config.nose.fold_count,
                 round(cand.config.nose.taper_ratio, 2),
                 round(cand.config.keel.keel_depth_ratio, 2),
+                cand.config.keel.has_lock_fold,
                 round(cand.config.wing.wingspan_ratio, 2),
             )
             if key not in seen_keys:

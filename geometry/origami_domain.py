@@ -779,20 +779,37 @@ def _convex_overlap(a: Sequence[Vec2], b: Sequence[Vec2]) -> bool:
     """Separating-axis overlap test for two convex polygons."""
     if len(a) < 3 or len(b) < 3:
         return False
+    # Fast AABB rejection test: if bounding boxes do not overlap, polygons cannot overlap
+    min_ax = min(p[0] for p in a)
+    max_ax = max(p[0] for p in a)
+    min_bx = min(p[0] for p in b)
+    max_bx = max(p[0] for p in b)
+    if max_ax < min_bx - 1e-9 or max_bx < min_ax - 1e-9:
+        return False
+
+    min_ay = min(p[1] for p in a)
+    max_ay = max(p[1] for p in a)
+    min_by = min(p[1] for p in b)
+    max_by = max(p[1] for p in b)
+    if max_ay < min_by - 1e-9 or max_by < min_ay - 1e-9:
+        return False
+
     for poly in (a, b):
         count = len(poly)
         for i in range(count):
             p0 = poly[i]
             p1 = poly[(i + 1) % count]
-            axis = (-(p1[1] - p0[1]), p1[0] - p0[0])
-            norm = math.hypot(axis[0], axis[1])
+            dx = -(p1[1] - p0[1])
+            dy = p1[0] - p0[0]
+            norm = math.hypot(dx, dy)
             if norm <= 1e-12:
                 continue
-            axis = (axis[0] / norm, axis[1] / norm)
-            a_lo = min(_dot2(p, axis) for p in a)
-            a_hi = max(_dot2(p, axis) for p in a)
-            b_lo = min(_dot2(p, axis) for p in b)
-            b_hi = max(_dot2(p, axis) for p in b)
+            ax0 = dx / norm
+            ax1 = dy / norm
+            a_lo = min(p[0] * ax0 + p[1] * ax1 for p in a)
+            a_hi = max(p[0] * ax0 + p[1] * ax1 for p in a)
+            b_lo = min(p[0] * ax0 + p[1] * ax1 for p in b)
+            b_hi = max(p[0] * ax0 + p[1] * ax1 for p in b)
             if a_hi < b_lo - 1e-9 or b_hi < a_lo - 1e-9:
                 return False
     return True

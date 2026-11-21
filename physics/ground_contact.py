@@ -54,12 +54,16 @@ def compute_ground_stations(
     mac = max((derived.get("mac_m", 0.08) if derived else 0.08), 1.0e-3)
     span = max((derived.get("wingspan_m", 0.20) if derived else 0.20), 1.0e-3)
     semispan = span * 0.5
+    keel_depth = max(
+        (derived.get("keel_height_m", GROUND_KEEL_DEPTH_M) if derived else GROUND_KEEL_DEPTH_M),
+        1.0e-3,
+    )
 
     # Key body stations relative to CG (x fwd, y right, z down)
     r_nose = np.array([0.5 * mac, 0.0, 0.0], dtype=np.float64)
     r_ltip = np.array([-0.3 * mac, -semispan, 0.0], dtype=np.float64)
     r_rtip = np.array([-0.3 * mac, semispan, 0.0], dtype=np.float64)
-    r_tail = np.array([-0.7 * mac, 0.0, GROUND_KEEL_DEPTH_M], dtype=np.float64)
+    r_tail = np.array([-0.7 * mac, 0.0, keel_depth], dtype=np.float64)
 
     q = quaternion
     z_nose = z_cg + float(body_to_world(q, r_nose)[2])

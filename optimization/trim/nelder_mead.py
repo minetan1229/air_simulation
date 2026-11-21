@@ -164,6 +164,8 @@ class NelderMeadTrimOptimizer:
         simplex.sort(key=lambda item: item[0])
         final_best_cost, final_v, final_cand = simplex[0]
         final_score = -final_best_cost
+        clamped_best_elevon = _clamp(final_v[0], self.elevon_bounds[0], self.elevon_bounds[1])
+        clamped_best_dihedral = _clamp(final_v[1], self.dihedral_bounds[0], self.dihedral_bounds[1])
 
         # Update candidate with optimized configuration if improved
         if final_score >= initial_score:
@@ -173,8 +175,8 @@ class NelderMeadTrimOptimizer:
 
         return TrimResult(
             candidate_id=candidate.candidate_id,
-            optimal_elevon_deg=final_v[0],
-            optimal_dihedral_deg=final_v[1],
+            optimal_elevon_deg=clamped_best_elevon,
+            optimal_dihedral_deg=clamped_best_dihedral,
             initial_score=initial_score,
             optimized_score=final_score,
             iterations=iterations,

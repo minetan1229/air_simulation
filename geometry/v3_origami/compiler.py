@@ -67,16 +67,23 @@ class ParametricOrigamiCompiler:
 
         nose_len = _clamp(float(nose_cfg.nose_length_ratio), 0.20, 0.35)
         taper = _clamp(float(nose_cfg.taper_ratio), 0.40, 0.85)
-        nose_v = 0.5 + (_HALF_LENGTH - _HALF_WIDTH) / SHEET_LENGTH_M
+        fold_count = int(_clamp(float(nose_cfg.fold_count), 3, 6))
+        has_lock = bool(keel_cfg.has_lock_fold)
 
-        crease_l = _corner_crease(nose_v)
+        # Baseline corner fold position modulated by nose length and taper
+        # Higher taper = wider nose base, lower taper = sharper/longer fold
+        nose_base_v = 0.5 + (_HALF_LENGTH - _HALF_WIDTH) / SHEET_LENGTH_M
+        eff_nose_v = _clamp(nose_base_v * (0.85 + 0.30 * nose_len), 0.50, 0.80)
+        taper_offset = (1.0 - taper) * 0.08
+
+        crease_l = _corner_crease(eff_nose_v)
         crease_r = _mirror_crease(crease_l)
         collar_l = _collar_crease(crease_l[0], crease_l[1])
         collar_r = _mirror_crease(collar_l)
 
         wing_angle = body_half + dihedral
-        wing_l_nose = wing_u - 0.05
-        wing_r_nose = 1.0 - wing_u + 0.05
+        wing_l_nose = _clamp(wing_u - 0.05 + taper_offset, 0.20, 0.45)
+        wing_r_nose = _clamp(1.0 - wing_u + 0.05 - taper_offset, 0.55, 0.80)
         elevon_v = 0.16
         trailing_v = 0.055
 
@@ -86,6 +93,34 @@ class ParametricOrigamiCompiler:
             Crease(key="corner_r", p0=crease_r[0], p1=crease_r[1], angle_deg=180.0, side=1, up=False, level=1, groups=("body_r",), set_group="flap_r"),
             Crease(key="collar_l", p0=collar_l[0], p1=collar_l[1], angle_deg=180.0, side=1, up=True, level=2, groups=("flap_l",), set_group="collar_l"),
             Crease(key="collar_r", p0=collar_r[0], p1=collar_r[1], angle_deg=180.0, side=1, up=False, level=2, groups=("flap_r",), set_group="collar_r"),
+        ]
+
+        # Additional nose folds based on fold_count specification (4 to 6 folds)
+        if fold_count >= 4:
+            tip_v = eff_nose_v + 0.05
+            creases.append(
+                Crease(key="nose_lock_l", p0=(0.40, tip_v), p1=(0.50, tip_v + 0.04), angle_deg=180.0, side=1, up=True, level=3, groups=("collar_l",), set_group="nose_tip_l")
+            )
+            creases.append(
+                Crease(key="nose_lock_r", p0=(0.60, tip_v), p1=(0.50, tip_v + 0.04), angle_deg=180.0, side=1, up=False, level=3, groups=("collar_r",), set_group="nose_tip_r")
+            )
+
+        if fold_count >= 5:
+            creases.append(
+                Crease(key="nose_reinforce_l", p0=(0.35, eff_nose_v * 0.9), p1=(0.48, eff_nose_v), angle_deg=120.0, side=1, up=True, level=2, groups=("flap_l",), set_group="nose_rf_l")
+            )
+            creases.append(
+                Crease(key="nose_reinforce_r", p0=(0.65, eff_nose_v * 0.9), p1=(0.52, eff_nose_v), angle_deg=120.0, side=1, up=False, level=2, groups=("flap_r",), set_group="nose_rf_r")
+            )
+
+        # Optional keel structural lock fold (Phase 2)
+        if has_lock:
+            creases.append(
+                Crease(key="keel_lock", p0=(0.50, 0.20), p1=(0.50, 0.45), angle_deg=180.0, side=0, up=True, level=1, groups=("body_l", "body_r"), set_group="keel_lock")
+            )
+
+        # Wings and control surfaces
+        wing_creases = [
             Crease(key="wing_l", p0=(wing_u, 0.0), p1=(wing_l_nose, 1.0), angle_deg=wing_angle, side=1, up=True, level=0, groups=("body_l",), set_group="wing_l"),
             Crease(key="wing_r", p0=(1.0 - wing_u, 0.0), p1=(wing_r_nose, 1.0), angle_deg=wing_angle, side=-1, up=True, level=0, groups=("body_r",), set_group="wing_r"),
             Crease(key="winglet_l", p0=(winglet_u, 0.0), p1=(winglet_u, 1.0), angle_deg=winglet_angle, side=1, up=True, level=0, groups=("wing_l",), set_group="winglet_l"),
@@ -95,6 +130,7 @@ class ParametricOrigamiCompiler:
             Crease(key="trailing_l", p0=(0.0, trailing_v), p1=(0.5, trailing_v), angle_deg=15.0, side=-1, up=False, level=0, groups=("elevon_l",), set_group="trailing_l"),
             Crease(key="trailing_r", p0=(0.5, trailing_v), p1=(1.0, trailing_v), angle_deg=15.0, side=-1, up=False, level=0, groups=("elevon_r",), set_group="trailing_r"),
         ]
+        creases.extend(wing_creases)
 
         g = genome_from_creases(creases, key="v3_origami")
         steps = list(g.steps)
