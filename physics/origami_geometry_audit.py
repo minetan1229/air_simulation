@@ -9,7 +9,5 @@ for _k, _v in _orig.__dict__.items():
     if not _k.startswith("__"):
         globals()[_k] = _v
 
-try:
-    from geometry.origami_geometry_audit import __all__ as __all__  # noqa: F401
-except ImportError:
-    pass
+if hasattr(_orig, "__all__"):
+    __all__ = getattr(_orig, "__all__")
