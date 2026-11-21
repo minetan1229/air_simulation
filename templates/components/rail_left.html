@@ -1,0 +1,137 @@
+    <!-- ---------- left rail : configuration ---------- -->
+    <aside class="rail rail-left" id="rail-left" aria-label="設定">
+      <div class="rail-head">
+        <span class="rail-title">設定</span>
+        <span class="rail-title-en">CONFIGURATION</span>
+        <button class="btn btn-mini" id="btn-config-reset" type="button" title="サーバの既定値に戻す">既定へ</button>
+      </div>
+      <div class="rail-body" id="rail-left-body">
+        <!-- 機体モデル統合選択 (標準・ギネス・3Dモデル) -->
+        <section class="group" data-group="model-select" open>
+          <button class="group-head" type="button" aria-expanded="true">
+            <span class="group-name"><svg class="ui-icon" viewBox="0 0 24 24" fill="currentColor"><path d="m13.13 22.19-1.63-3.83c1.57-.58 3.04-1.5 4.35-2.73l-2.72 6.56M5.64 12.5l-3.83-1.63 6.56-2.72c-1.23 1.31-2.15 2.78-2.73 4.35m8.58-8.58C12.9 5.24 11.23 7.31 9.77 9.77l4.46 4.46c2.46-1.46 4.53-3.13 5.85-4.45 1.54-1.54 2.42-3.15 2.58-4.24.03-.22-.05-.44-.22-.61-.17-.17-.39-.25-.61-.22-1.09.16-2.7 1.04-4.24 2.58M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2"/></svg> 機体モデル選択</span><span class="group-en">AIRFRAME MODEL</span>
+            <span class="group-chev" aria-hidden="true"></span>
+          </button>
+          <div class="group-body" data-host="model-select">
+            <div class="unified-model-box">
+              <label for="unified-aircraft-select" style="font-size:11px; font-weight:600; color:var(--ink-2); margin-bottom:4px; display:block;">使用機体:</label>
+              <select id="unified-aircraft-select" aria-label="機体モデル選択" class="select" style="width:100%; font-weight:600;">
+                <optgroup label="標準プリセット機" id="optgroup-standard">
+                  <option value="preset_glider" selected>ペーパーグライダー (標準滑空機)</option>
+                  <option value="preset_dart">高速ダーツ機 (Dart High-Speed)</option>
+                  <option value="preset_wide">広翼型グライダー (Wide-Body Glider)</option>
+                </optgroup>
+                <optgroup label="ギネス世界記録モデル" id="optgroup-guinness">
+                  <!-- JSで動的生成 -->
+                </optgroup>
+                <optgroup label="カスタム3Dモデル" id="optgroup-custom" hidden>
+                  <!-- インポート時に追加 -->
+                </optgroup>
+              </select>
+            </div>
+
+            <!-- 3Dモデルファイルインポート（ドラッグ&ドロップ / 選択） -->
+            <div class="quick-mesh-import" style="margin-top:8px;">
+              <input type="file" id="unified-mesh-file" accept=".gltf,.glb,.obj,.stl" hidden>
+              <button type="button" class="btn btn-mini btn-outline" id="btn-unified-mesh-import" style="width:100%; justify-content:center; padding:5px 8px; gap:6px;">
+                <svg class="ui-icon" viewBox="0 0 24 24" fill="currentColor"><path d="M19.35 10.04C18.67 6.59 15.64 4 12 4 9.11 4 6.6 5.64 5.35 8.04 2.34 8.36 0 10.91 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96M14 13v4h-4v-4H7l5-5 5 5z"/></svg> 3Dモデル読込 (.glb / .obj / .stl)
+              </button>
+            </div>
+
+            <!-- 選択中機体サマリーカード -->
+            <div id="unified-model-card" class="record-card" style="margin-top:8px;">
+              <div class="record-card-head">
+                <span class="record-badge" id="unified-model-badge">標準機</span>
+                <span class="record-val num" id="unified-model-metric">AR 2.67</span>
+              </div>
+              <div class="record-title" id="unified-model-title">ペーパーグライダー</div>
+              <div class="record-notes" id="unified-model-desc" style="font-size:11px; color:var(--ink-2); line-height:1.4; margin-top:4px;">高アスペクト比で安定した滑空性能を持つ標準モデルです。</div>
+            </div>
+
+            <!-- 互換性保持用非表示要素 (JS依存解決) -->
+            <select id="record-preset-select" style="display:none;"></select>
+            <div id="record-card" style="display:none;">
+              <span id="record-badge"></span><span id="record-value"></span><span id="record-name"></span>
+              <span id="record-holder"></span><span id="record-technique"></span><span id="record-notes"></span>
+              <span id="rec-speed"></span><span id="rec-angle"></span><span id="rec-height"></span><span id="rec-style"></span>
+            </div>
+          </div>
+        </section>
+
+        <section class="group" data-group="airframe" open>
+          <button class="group-head" type="button" aria-expanded="true">
+            <span class="group-name">機体寸法</span><span class="group-en">AIRFRAME</span>
+            <span class="group-note num" id="geom-summary">—</span>
+            <span class="group-chev" aria-hidden="true"></span>
+          </button>
+          <div class="group-body" data-host="airframe"></div>
+        </section>
+
+        <section class="group" data-group="origami" open>
+          <button class="group-head" type="button" aria-expanded="true">
+            <span class="group-name">折り紙ジオメトリ</span><span class="group-en">ORIGAMI</span>
+            <span class="group-note num" id="origami-summary">—</span>
+            <span class="group-note num" id="origami-shape-warning" role="status"></span>
+            <span class="group-chev" aria-hidden="true"></span>
+          </button>
+          <div class="group-body" data-host="origami"></div>
+        </section>
+
+        <section class="group" data-group="fold" open>
+          <button class="group-head" type="button" aria-expanded="true">
+            <span class="group-name">折り畳み</span><span class="group-en">FOLDS</span>
+            <span class="group-chev" aria-hidden="true"></span>
+          </button>
+          <div class="group-body" data-host="fold"></div>
+        </section>
+
+        <section class="group" data-group="throw" open>
+          <button class="group-head" type="button" aria-expanded="true">
+            <span class="group-name">投擲設定</span><span class="group-en">THROW & LAUNCH</span>
+            <span class="group-chev" aria-hidden="true"></span>
+          </button>
+          <div class="group-body">
+            <!-- 世界記録プリセットの再現モード（発射の入口ではない） -->
+            <!-- 注: data-host="throw" は panels.js が中身を生成・置換するため、
+                 モード切替は data-host の外側に置く（置換すると消えるため） -->
+            <div class="throw-mode-box" style="margin-bottom:8px;">
+              <span style="display:block; font-size:10px; font-weight:600; color:var(--ink-2); margin-bottom:4px;">世界記録の再現モード</span>
+              <div style="display:flex; gap:6px;">
+                <button type="button" class="btn btn-mini active" id="btn-mode-calibrated" style="flex:1; font-size:10.5px; padding:4px 6px; justify-content:center;" title="世界記録プリセットを手元からの全飛行（手元投擲〜上昇〜滑空〜着地）で再現します">
+                  フルフライト
+                </button>
+                <button type="button" class="btn btn-mini" id="btn-mode-raw" style="flex:1; font-size:10.5px; padding:4px 6px; justify-content:center;" title="世界記録プリセットを最高到達点（頂点）からの純粋滑空で再現します">
+                  頂点滑空のみ
+                </button>
+              </div>
+            </div>
+            <div data-host="throw"></div>
+          </div>
+        </section>
+
+        <section class="group" data-group="atmosphere">
+          <button class="group-head" type="button" aria-expanded="false">
+            <span class="group-name">大気</span><span class="group-en">ATMOSPHERE</span>
+            <span class="group-chev" aria-hidden="true"></span>
+          </button>
+          <div class="group-body" data-host="atmosphere"></div>
+        </section>
+
+        <section class="group" data-group="wind">
+          <button class="group-head" type="button" aria-expanded="false">
+            <span class="group-name">風況</span><span class="group-en">WIND</span>
+            <span class="group-chev" aria-hidden="true"></span>
+          </button>
+          <div class="group-body" data-host="wind"></div>
+        </section>
+
+        <section class="group" data-group="solver">
+          <button class="group-head" type="button" aria-expanded="false">
+            <span class="group-name">積分・負荷</span><span class="group-en">INTEGRATOR</span>
+            <span class="group-chev" aria-hidden="true"></span>
+          </button>
+          <div class="group-body" data-host="solver"></div>
+        </section>
+
+      </div>
+    </aside>
