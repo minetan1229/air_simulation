@@ -461,3 +461,22 @@ def result_cache_put(job_id: str, result: Dict[str, Any]) -> None:
             oldest = next(iter(RESULT_CACHE))
             RESULT_CACHE.pop(oldest, None)
             total_bytes -= _RESULT_CACHE_BYTES.pop(oldest, 0)
+
+
+try:
+    import orjson
+
+    def fast_dumps(obj: Any) -> bytes:
+        return orjson.dumps(obj)
+except ImportError:
+    def fast_dumps(obj: Any) -> bytes:
+        return json.dumps(obj, ensure_ascii=False, default=str).encode("utf-8")
+
+
+def fast_jsonify(data: Any, status: int = 200) -> Response:
+    """High-performance JSON response serializer with orjson support and safe fallback."""
+    return Response(
+        fast_dumps(data),
+        status=status,
+        mimetype="application/json",
+    )

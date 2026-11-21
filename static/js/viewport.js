@@ -1192,14 +1192,34 @@ export class Viewport {
     const x = p[0];
     const y = -p[2];
     const z = p[1];
-    if (this.trackPoints.length) {
-      const last = this.trackPoints[this.trackPoints.length - 1];
+    const count = this.trackPoints.length;
+    if (count > 0) {
+      const last = this.trackPoints[count - 1];
       const moved = Math.hypot(x - last[0], y - last[1], z - last[2]);
       if (moved < 0.006) return;
     }
-    this.trackPoints.push([x, y, z, Number(sample.max_stress_index) || 0]);
-    if (this.trackPoints.length > TRACK_CAPACITY) this.trackPoints.shift();
-    this._writeTrack();
+    const stress = Number(sample.max_stress_index) || 0;
+    if (count >= TRACK_CAPACITY) {
+      this.trackPoints.shift();
+      this.trackPoints.push([x, y, z, stress]);
+      this._writeTrack();
+      return;
+    }
+    this.trackPoints.push([x, y, z, stress]);
+    const idx = count;
+    const positions = this.trackGeometry.attributes.position;
+    const colors = this.trackGeometry.attributes.color;
+    positions.array[idx * 3] = x;
+    positions.array[idx * 3 + 1] = y;
+    positions.array[idx * 3 + 2] = z;
+    const index = Math.min(Math.max(stress, 0), 1);
+    const [r, g, b] = heatColour(index);
+    colors.array[idx * 3] = r / 255;
+    colors.array[idx * 3 + 1] = g / 255;
+    colors.array[idx * 3 + 2] = b / 255;
+    positions.needsUpdate = true;
+    colors.needsUpdate = true;
+    this.trackGeometry.setDrawRange(0, idx + 1);
   }
 
   _writeTrack() {
