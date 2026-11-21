@@ -5,7 +5,7 @@ from __future__ import annotations
 import uuid
 from typing import Any, List, Optional, Tuple
 
-from physics.origami_genome import (
+from geometry.origami_genome import (
     GripReport,
     GripThresholds,
     OrigamiGenome,

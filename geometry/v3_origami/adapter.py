@@ -5,7 +5,7 @@ from __future__ import annotations
 import uuid
 from typing import Any, List, Optional, Tuple
 
-from physics.origami_genome import (
+from geometry.origami_genome import (
     GripReport,
     GripThresholds,
     OrigamiGenome,
@@ -20,7 +20,87 @@ from core.interfaces import (
     ParametricOrigamiConfig,
 )
 from geometry.v3_origami.compiler import ParametricOrigamiCompiler
-from physics.benchmark.properties import extract_airframe_geometry
+
+
+def extract_airframe_geometry(
+    geometry_obj: Any,
+    step_count: int = 20,
+    default_mass_kg: float = 0.005,
+) -> AirframeGeometry:
+    """Extract physical dimensions and mass properties from folded genome geometry.
+
+    Safely extracts properties whether geometry_obj is a GenomeGeometry instance
+    or a dict representation. Uses real grip / keel dimensions when available.
+    """
+    if geometry_obj is None:
+        return AirframeGeometry(
+            mass_kg=default_mass_kg,
+            wing_area_m2=0.015,
+            wingspan_m=0.18,
+            chord_m=0.12,
+            aspect_ratio=2.16,
+            cg_m=(0.08, 0.0, 0.005),
+            keel_height_m=0.012,
+            keel_length_m=0.060,
+            keel_layers=4,
+            step_count=step_count,
+        )
+
+    if hasattr(geometry_obj, "mass_kg"):
+        mass = float(getattr(geometry_obj, "mass_kg", default_mass_kg))
+        wing_area = float(getattr(geometry_obj, "wing_area_m2", 0.015))
+        span = float(getattr(geometry_obj, "span_m", 0.18))
+        chord = float(getattr(geometry_obj, "chord_m", 0.12))
+        cg = getattr(geometry_obj, "cg", (0.08, 0.0, 0.005))
+        cg_tuple = (float(cg[0]), float(cg[1]), float(cg[2]))
+        total_layers = int(getattr(geometry_obj, "max_layers", 4))
+    elif isinstance(geometry_obj, dict):
+        mass = float(geometry_obj.get("mass_kg", default_mass_kg))
+        wing_area = float(geometry_obj.get("wing_area_m2", 0.015))
+        span = float(geometry_obj.get("span_m", 0.18))
+        chord = float(geometry_obj.get("chord_m", 0.12))
+        cg = geometry_obj.get("cg", [0.08, 0.0, 0.005])
+        cg_tuple = (float(cg[0]), float(cg[1]), float(cg[2]))
+        total_layers = int(geometry_obj.get("max_layers", 4))
+    else:
+        mass = default_mass_kg
+        wing_area = 0.015
+        span = 0.18
+        chord = 0.12
+        cg_tuple = (0.08, 0.0, 0.005)
+        total_layers = 4
+
+    safe_area = max(1.0e-5, wing_area)
+    aspect_ratio = (span * span) / safe_area
+
+    keel_height = max(0.008, chord * 0.10)
+    keel_length = max(0.030, chord * 0.50)
+    keel_layers = max(2, total_layers)
+
+    try:
+        if hasattr(geometry_obj, "faces") and hasattr(geometry_obj, "pattern"):
+            report = evaluate_grip(geometry_obj)
+            if report.grip_height_m > 0.0:
+                keel_height = report.grip_height_m
+            if report.grip_length_m > 0.0:
+                keel_length = report.grip_length_m
+            if report.grip_layers > 0:
+                keel_layers = report.grip_layers
+    except Exception:
+        pass
+
+    return AirframeGeometry(
+        mass_kg=mass,
+        wing_area_m2=wing_area,
+        wingspan_m=span,
+        chord_m=chord,
+        aspect_ratio=aspect_ratio,
+        cg_m=cg_tuple,
+        keel_height_m=keel_height,
+        keel_length_m=keel_length,
+        keel_layers=keel_layers,
+        step_count=step_count,
+    )
 
 
 def validate_tier0(

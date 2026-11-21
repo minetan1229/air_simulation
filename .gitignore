@@ -73,6 +73,8 @@ tmp/
 *.tmp
 *.bak
 site/
-
+output/
+.kilo/plans/
+test.svg
 
 /slide/

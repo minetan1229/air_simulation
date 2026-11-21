@@ -1,8 +1,8 @@
 """Physics package for the 3D paper airplane simulator.
 
-The public contract lives in :mod:`physics.config_schema` and the rotation
-algebra in :mod:`physics.geometry_utils`; every other module is a pure
-function/collection-of-classes layer built on top of those two.
+The canonical public contracts live in :mod:`core.config_schema` and the rotation
+algebra in :mod:`core.geometry_utils`. This package provides aerodynamic kernels,
+6-DoF numerical integration, atmospheric models, wind fields, and structural stress.
 """
 
 from __future__ import annotations

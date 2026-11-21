@@ -12,7 +12,7 @@ from __future__ import annotations
 import math
 from typing import List, Tuple
 
-from physics.origami_domain import (
+from geometry.origami_domain import (
     _HALF_LENGTH,
     _HALF_WIDTH,
     RESIDUAL_CREASE_DEG,
@@ -22,7 +22,7 @@ from physics.origami_domain import (
     _mirror_crease,
     Crease,
 )
-from physics.origami_genome import (
+from geometry.origami_genome import (
     FoldStep,
     genome_from_creases,
 )
