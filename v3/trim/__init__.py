@@ -1,5 +1,8 @@
-"""v3.trim: Stage 3 Nelder-Mead local continuous parameter optimization."""
+"""Backward-compatibility re-export.
 
-from .nelder_mead import NelderMeadTrimOptimizer
+The canonical module is :mod:`optimization.trim`.
+"""
+from optimization.trim import *  # noqa: F401,F403
+from optimization.trim.nelder_mead import NelderMeadTrimOptimizer  # noqa: F401
 
 __all__ = ["NelderMeadTrimOptimizer"]

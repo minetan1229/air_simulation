@@ -1,0 +1,228 @@
+{
+  "topic_num": "17",
+  "query": "laminar separation bubble transition low Reynolds number airfoil",
+  "candidates": [
+    {
+      "primary_paper": {
+        "title": "XFOIL: An Analysis and Design System for Low Reynolds Number Airfoils",
+        "year": 1989,
+        "doi": "https://doi.org/10.1007/978-3-642-84010-4_1",
+        "cited_by_count": 2512,
+        "authors": [
+          "Mark Drela"
+        ],
+        "abstract": ""
+      },
+      "second_tier_references": [
+        {
+          "title": "Compressible Fluid Flow",
+          "year": 2024,
+          "doi": "https://doi.org/10.1002/9781394266173.ch9",
+          "authors": [
+            "S. David Graber"
+          ],
+          "abstract": "The environmental engineer designs and/or specifies various systems in which gases are the fluid medium. Such gases include air, digester gas, molecular oxygen, chlorine, ozone, natural gas, and carbon dioxide. These gases are compressed, conveyed, dispersed, and diffused for a variety of purposes. Some gaseous systems, such as those providing molecular oxygenation, chlorination, and ozonation are largely manufacturer-designed, with the prime design engineer's role being mainly that of selection"
+        },
+        {
+          "title": "An Interactive Approach to Subsonic Flows with Separation",
+          "year": 1984,
+          "doi": "https://doi.org/10.1007/978-3-662-09014-5_11",
+          "authors": [
+            "Tuncer Cebeci",
+            "R. W. Clark"
+          ],
+          "abstract": ""
+        }
+      ]
+    },
+    {
+      "primary_paper": {
+        "title": "Modal Analysis of Fluid Flows: An Overview",
+        "year": 2017,
+        "doi": "https://doi.org/10.2514/1.j056060",
+        "cited_by_count": 1893,
+        "authors": [
+          "Kunihiko Taira",
+          "Steven L. Brunton",
+          "Scott T. M. Dawson",
+          "Clarence W. Rowley",
+          "Tim Colonius"
+        ],
+        "abstract": "Simple aerodynamic configurations under even modest conditions can exhibit complex flows with a wide range of temporal and spatial features. It has become common practice in the analysis of these flows to look for and extract physically important features, or modes, as a first step in the analysis. This step typically starts with a modal decomposition of an experimental or numerical dataset of the flow field, or of an operator relevant to the system. We describe herein some of the dominant techniques for accomplishing these modal decompositions and analyses that have seen a surge of activity in recent decades. For a non-expert, keeping track of recent developments can be daunting, and the intent of this document is to provide an introduction to modal analysis that is accessible to the larger fluid dynamics community. In particular, we present a brief overview of several of the well-established techniques and clearly lay the framework of these methods using familiar linear algebra. The "
+      },
+      "second_tier_references": [
+        {
+          "title": "Matrix Analysis",
+          "year": 1985,
+          "doi": "https://doi.org/10.1017/cbo9780511810817",
+          "authors": [
+            "Roger A. Horn",
+            "Charles R. Johnson"
+          ],
+          "abstract": "In this book the authors present classical and recent results for matrix analysis that have proved to be important to applied mathematics. Facts about matrices, beyond those found in an elementary linear algebra course, are needed to understand virtually any area of mathematics, and the necessary material has only occurred sporadically in the literature and university curricula. As the interest in applied mathematics has grown, the need for a text and a reference work offering a broad selection "
+        },
+        {
+          "title": "Spectra and Pseudospectra",
+          "year": 2005,
+          "doi": "https://doi.org/10.1515/9780691213101",
+          "authors": [
+            "Lloyd Nicholas Trefethen",
+            "Mark Embree"
+          ],
+          "abstract": ""
+        },
+        {
+          "title": "Global stability of a jet in crossflow",
+          "year": 2009,
+          "doi": "https://doi.org/10.1017/s0022112009006053",
+          "authors": [
+            "Shervin Bagheri",
+            "Philipp Schlatter",
+            "Peter J. Schmid"
+          ],
+          "abstract": "A linear stability analysis shows that the jet in crossflow is characterized by self-sustained global oscillations for a jet-to-crossflow velocity ratio of 3. A fully three-dimensional unstable steady-state solution and its associated global eigenmodes are computed by direct numerical simulations and iterative eigenvalue routines. The steady flow, obtained by means of selective frequency damping, consists mainly of a (steady) counter-rotating vortex pair (CVP) in the far field and horseshoe-shap"
+        },
+        {
+          "title": "SPECTRAL ELEMENT STABILITY ANALYSIS OF VORTICAL FLOWS",
+          "year": 2006,
+          "doi": "https://doi.org/10.1007/1-4020-4159-4_18",
+          "authors": [
+            "Michael S. Broadhurst",
+            "Vassilios Theofilis",
+            "Spencer J. Sherwin"
+          ],
+          "abstract": "The scope of the present study is to demonstrate the use of spectral/hp-element methods in understanding the global instability mechanisms of vortex dominated flows. Using a BiGlobal stability analysis, analytically constructed and numerically evaluated base flows have been investigated, with the leading eigenvalues obtained by the Arnoldi algorithm. Subsequently, Direct Numerical Simulation (DNS) was used to investigate the non-linear development of an unstable Batchelor vortex. It was found th"
+        }
+      ]
+    },
+    {
+      "primary_paper": {
+        "title": "Phenomena of liquid drop impact on solid and liquid surfaces",
+        "year": 1993,
+        "doi": "https://doi.org/10.1016/0169-5983(93)90106-k",
+        "cited_by_count": 1179,
+        "authors": [
+          "Martin Rein"
+        ],
+        "abstract": "The fluid dynamic phenomena of liquid drop impact are described and reviewed. These phenomena include bouncing, spreading and splashing on solid surfaces, and bouncing, coalescence and splashing on liquid surfaces. Further, cavitation and the entrainment of gas into an impacted liquid may be observed. In order to distinguish properly between the results of different experiments different impact scenarios are discussed. The specific conditions under which the above phenomena did occur in experiments are analyzed and the characteristics of drop impact phenomena are described in detail."
+      },
+      "second_tier_references": [
+        {
+          "title": "The Physical Products of a Splashing Water Drop",
+          "year": 1977,
+          "doi": "https://doi.org/10.2151/jmsj1965.55.5_518",
+          "authors": [
+            "C. David Stow",
+            "R. D. Stainer"
+          ],
+          "abstract": ""
+        },
+        {
+          "title": "Vortex Rings Formed By Free Surface Interaction.",
+          "year": 1967,
+          "doi": "https://doi.org/10.7302/15208",
+          "authors": [
+            "Hugh Forrest. Keedy"
+          ],
+          "abstract": "PhD"
+        }
+      ]
+    },
+    {
+      "primary_paper": {
+        "title": "High‐order CFD methods: current status and perspective",
+        "year": 2013,
+        "doi": "https://doi.org/10.1002/fld.3767",
+        "cited_by_count": 1022,
+        "authors": [
+          "Z.J. Wang",
+          "Krzysztof J. Fidkowski",
+          "Rémi Abgrall",
+          "F. Bassi",
+          "Doru Caraeni"
+        ],
+        "abstract": "SUMMARY After several years of planning, the 1st International Workshop on High‐Order CFD Methods was successfully held in Nashville, Tennessee, on January 7–8, 2012, just before the 50th Aerospace Sciences Meeting. The American Institute of Aeronautics and Astronautics, the Air Force Office of Scientific Research, and the German Aerospace Center provided much needed support, financial and moral. Over 70 participants from all over the world across the research spectrum of academia, government labs, and private industry attended the workshop. Many exciting results were presented. In this review article, the main motivation and major findings from the workshop are described. Pacing items requiring further effort are presented. Copyright © 2013 John Wiley & Sons, Ltd."
+      },
+      "second_tier_references": [
+        {
+          "title": "LARGE-EDDY SIMULATION FOR ACOUSTICS",
+          "year": 2007,
+          "doi": "https://doi.org/10.1017/cbo9780511546143.002",
+          "authors": [
+            "Claus D. Wagner",
+            "Thomas Hüttl",
+            "Pierre Sagaut"
+          ],
+          "abstract": ""
+        },
+        {
+          "title": "Discontinuous Spectral Difference Method for Conservation Laws on Unstructured Grids",
+          "year": 2006,
+          "doi": "https://doi.org/10.1007/3-540-31801-1_63",
+          "authors": [
+            "Yen Liu",
+            "Marcel Vinokur",
+            "Z.J. Wang"
+          ],
+          "abstract": ""
+        }
+      ]
+    },
+    {
+      "primary_paper": {
+        "title": "A review of energy harvesting using piezoelectric materials: state-of-the-art a decade later (2008–2018)",
+        "year": 2019,
+        "doi": "https://doi.org/10.1088/1361-665x/ab36e4",
+        "cited_by_count": 870,
+        "authors": [
+          "Mohsen Safaei",
+          "Henry Angelo Sodano",
+          "Steven R. Anton"
+        ],
+        "abstract": "Abstract Energy harvesting technologies have been explored by researchers for more than two decades as an alternative to conventional power sources (e.g. batteries) for small-sized and low-power electronic devices. The limited life-time and necessity for periodic recharging or replacement of batteries has been a consistent issue in portable, remote, and implantable devices. Ambient energy can usually be found in the form of solar energy, thermal energy, and vibration energy. Amongst these energy sources, vibration energy presents a persistent presence in nature and manmade structures. Various materials and transduction mechanisms have the ability to convert vibratory energy to useful electrical energy, such as piezoelectric, electromagnetic, and electrostatic generators. Piezoelectric transducers, with their inherent electromechanical coupling and high power density compared to electromagnetic and electrostatic transducers, have been widely explored to generate power from vibration ene"
+      },
+      "second_tier_references": [
+        {
+          "title": "Lead-Free Piezoelectrics",
+          "year": 2011,
+          "doi": "https://doi.org/10.1007/978-1-4419-9598-8",
+          "authors": [
+            "Shashank Priya",
+            "Sahn Nahm"
+          ],
+          "abstract": ""
+        },
+        {
+          "title": "An introduction to electric circuits",
+          "year": 2003,
+          "doi": "https://doi.org/10.4324/9780080474311-38",
+          "authors": [
+            "John Bird"
+          ],
+          "abstract": "Section 3 Electrical Applications"
+        },
+        {
+          "title": "A mathematical model for piezoelectric ring energy harvesting technology from vehicle tires",
+          "year": 2015,
+          "doi": "https://doi.org/10.1016/j.ijengsci.2015.05.004",
+          "authors": [
+            "Xiangdong Xie",
+            "Quan Wang"
+          ],
+          "abstract": ""
+        },
+        {
+          "title": "Contact-less Wind Turbine Utilizing Piezoelectric Bimorphs with Magnetic Actuation",
+          "year": 2011,
+          "doi": "https://doi.org/10.1007/978-1-4419-9834-7_21",
+          "authors": [
+            "Scott Bressers",
+            "Dragan Avirovik",
+            "Mickaël Lallart"
+          ],
+          "abstract": ""
+        }
+      ]
+    }
+  ]
+}

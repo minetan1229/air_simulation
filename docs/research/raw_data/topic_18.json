@@ -1,0 +1,343 @@
+{
+  "topic_num": "18",
+  "query": "origami folding stiffness mechanics thin sheet paper",
+  "candidates": [
+    {
+      "primary_paper": {
+        "title": "Soft Robotic Grippers",
+        "year": 2018,
+        "doi": "https://doi.org/10.1002/adma.201707035",
+        "cited_by_count": 1962,
+        "authors": [
+          "Jun Shintake",
+          "Vito Cacucciolo",
+          "Dario Floreano",
+          "Herbert R. Shea"
+        ],
+        "abstract": "Advances in soft robotics, materials science, and stretchable electronics have enabled rapid progress in soft grippers. Here, a critical overview of soft robotic grippers is presented, covering different material sets, physical principles, and device architectures. Soft gripping can be categorized into three technologies, enabling grasping by: a) actuation, b) controlled stiffness, and c) controlled adhesion. A comprehensive review of each type is presented. Compared to rigid grippers, end-effectors fabricated from flexible and soft components can often grasp or manipulate a larger variety of objects. Such grippers are an example of morphological computation, where control complexity is greatly reduced by material softness and mechanical compliance. Advanced materials and soft components, in particular silicone elastomers, shape memory materials, and active polymers and gels, are increasingly investigated for the design of lighter, simpler, and more universal grippers, using the inhere"
+      },
+      "second_tier_references": [
+        {
+          "title": "Design, fabrication and control of soft robots",
+          "year": 2015,
+          "doi": "https://doi.org/10.1038/nature14543",
+          "authors": [
+            "Daniela L. Rus",
+            "Michael Thomas Tolley"
+          ],
+          "abstract": ""
+        },
+        {
+          "title": "High-Speed Electrically Actuated Elastomers with Strain Greater Than 100%",
+          "year": 2000,
+          "doi": "https://doi.org/10.1126/science.287.5454.836",
+          "authors": [
+            "Ron Pelrine",
+            "Roy D. Kornbluh",
+            "Qibing Pei"
+          ],
+          "abstract": "Electrical actuators were made from films of dielectric elastomers (such as silicones) coated on both sides with compliant electrode material. When voltage was applied, the resulting electrostatic forces compressed the film in thickness and expanded it in area, producing strains up to 30 to 40%. It is now shown that prestraining the film further improves the performance of these devices. Actuated strains up to 117% were demonstrated with silicone elastomers, and up to 215% with acrylic elastomer"
+        },
+        {
+          "title": "Microrobotic tentacles with spiral bending capability based on shape-engineered elastomeric microtubes",
+          "year": 2015,
+          "doi": "https://doi.org/10.1038/srep10768",
+          "authors": [
+            "Jungwook Paek",
+            "Inho Cho",
+            "Jaeyoun Jay Kim"
+          ],
+          "abstract": "Microscale soft-robots hold great promise as safe handlers of delicate micro-objects but their wider adoption requires micro-actuators with greater efficiency and ease-of-fabrication. Here we present an elastomeric microtube-based pneumatic actuator that can be extended into a microrobotic tentacle. We establish a new, direct peeling-based technique for building long and thin, highly deformable microtubes and a semi-analytical model for their shape-engineering. Using them in combination, we ampl"
+        },
+        {
+          "title": "Design of Artificial Hands: A Review",
+          "year": 2014,
+          "doi": "https://doi.org/10.1007/978-3-319-03017-3_11",
+          "authors": [
+            "Marco Controzzi",
+            "Christian Cipriani",
+            "Maria Chiara Carrozza"
+          ],
+          "abstract": ""
+        },
+        {
+          "title": "Mechanics and Control of Soft-fingered Manipulation",
+          "year": 2008,
+          "doi": "https://doi.org/10.1007/978-1-84800-981-3",
+          "authors": [
+            "Takahiro INOUE",
+            "Shinichi Hirai"
+          ],
+          "abstract": ""
+        }
+      ]
+    },
+    {
+      "primary_paper": {
+        "title": "Flexible mechanical metamaterials",
+        "year": 2017,
+        "doi": "https://doi.org/10.1038/natrevmats.2017.66",
+        "cited_by_count": 1852,
+        "authors": [
+          "Katia Bertoldi",
+          "Vincenzo Vitelli",
+          "Johan Christensen",
+          "Martin van Hecke"
+        ],
+        "abstract": ""
+      },
+      "second_tier_references": [
+        {
+          "title": "Reentrant Origami-Based Metamaterials with Negative Poisson’s Ratio and Bistability",
+          "year": 2015,
+          "doi": "https://doi.org/10.1103/physrevlett.114.185502",
+          "authors": [
+            "Hiromi Yasuda",
+            "Jinkyu Yang"
+          ],
+          "abstract": "We investigate the unique mechanical properties of reentrant 3D origami structures based on the Tachi-Miura polyhedron (TMP). We explore the potential usage as mechanical metamaterials that exhibit tunable negative Poisson's ratio and structural bistability simultaneously. We show analytically and experimentally that the Poisson's ratio changes from positive to negative and vice versa during its folding motion. In addition, we verify the bistable mechanism of the reentrant 3D TMP under rigid ori"
+        },
+        {
+          "title": "Phonons and elasticity in critically coordinated lattices",
+          "year": 2015,
+          "doi": "https://doi.org/10.1088/0034-4885/78/7/073901",
+          "authors": [
+            "T. C. Lubensky",
+            "C. L. Kane",
+            "Xiaoming Mao"
+          ],
+          "abstract": "Much of our understanding of vibrational excitations and elasticity is based upon analysis of frames consisting of sites connected by bonds occupied by central-force springs, the stability of which depends on the average number of neighbors per site z. When z < zc ≈ 2d, where d is the spatial dimension, frames are unstable with respect to internal deformations. This pedagogical review focuses on the properties of frames with z at or near zc, which model systems like randomly packed spheres near "
+        },
+        {
+          "title": "Biaxial crushing of honeycombs",
+          "year": 1999,
+          "doi": "https://doi.org/10.1016/s0020-7683(98)00224-8",
+          "authors": [
+            "Scott D. Papka",
+            "Stelios Kyriakides"
+          ],
+          "abstract": ""
+        },
+        {
+          "title": "Torsional topology and fermion-like behavior of elastic waves in phononic structures",
+          "year": 2015,
+          "doi": "https://doi.org/10.1016/j.crme.2015.07.003",
+          "authors": [
+            "Pierre  Alix Deymier",
+            "Keith Runge",
+            "Nick Swinteck"
+          ],
+          "abstract": "A one-dimensional block-spring model that supports rotational waves is analyzed within Dirac formalism. We show that the wave functions possess a spinor and a spatio-temporal part. The spinor part leads to a non-conventional torsional topology of the wave function. In the long-wavelength limit, field theoretical methods are used to demonstrate that rotational phonons can exhibit fermion-like behavior. Subsequently, we illustrate how information can be encoded in the spinor-part of the wave funct"
+        },
+        {
+          "title": "How to fold it: the mathematics of linkages, origami, and polyhedra",
+          "year": 2012,
+          "doi": "https://doi.org/10.5860/choice.49-3314",
+          "authors": [],
+          "abstract": "Part I. Linkages: 1. Robot arms 2. Straight-line linkages and the pantograph 3. Protein folding and pop-up cards Part II. Origami: 4. Flat vertex folds 5. Fold and one-cut 6. The shopping bag theorem Part III. Polyhedra: 7. Durer's problem: edge unfolding 8. Unfolding orthogonal polyhedra 9. Folding polygons to convex polyhedra 10. Further reading 11. Glossary 12. Answers to exercises 13. Permissions and acknowledgments."
+        }
+      ]
+    },
+    {
+      "primary_paper": {
+        "title": "Multimaterial 4D Printing with Tailorable Shape Memory Polymers",
+        "year": 2016,
+        "doi": "https://doi.org/10.1038/srep31110",
+        "cited_by_count": 1149,
+        "authors": [
+          "Qi Ge",
+          "Amir Hosein Sakhaei",
+          "Howon Lee",
+          "Conner K. Dunn",
+          "Nicholas X. Fang"
+        ],
+        "abstract": "We present a new 4D printing approach that can create high resolution (up to a few microns), multimaterial shape memory polymer (SMP) architectures. The approach is based on high resolution projection microstereolithography (PμSL) and uses a family of photo-curable methacrylate based copolymer networks. We designed the constituents and compositions to exhibit desired thermomechanical behavior (including rubbery modulus, glass transition temperature and failure strain which is more than 300% and larger than any existing printable materials) to enable controlled shape memory behavior. We used a high resolution, high contrast digital micro display to ensure high resolution of photo-curing methacrylate based SMPs that requires higher exposure energy than more common acrylate based polymers. An automated material exchange process enables the manufacture of 3D composite architectures from multiple photo-curable SMPs. In order to understand the behavior of the 3D composite microarchitectures,"
+      },
+      "second_tier_references": [
+        {
+          "title": "Finite deformation thermo-mechanical behavior of thermally induced shape memory polymers",
+          "year": 2007,
+          "doi": "https://doi.org/10.1016/j.jmps.2007.12.002",
+          "authors": [
+            "Hang Jerry Qi",
+            "Thao D. Nguyen",
+            "Francisco Castro"
+          ],
+          "abstract": ""
+        },
+        {
+          "title": "Multi-material, multi-technology stereolithography",
+          "year": 2012,
+          "doi": "https://doi.org/10.1080/17452759.2012.721119",
+          "authors": [
+            "Ryan B. Wicker",
+            "Eric W. MacDonald"
+          ],
+          "abstract": "For more than a decade, our group has been developing the methods and systems required to have spatial control over material placement and structure creation, leading to, for example, the realisation of complex three-dimensional (3D) devices that integrate electronics and thus intelligence within mechanical structures as well as 3D spatially complex bioactive, implantable, tissue engineered constructs. There are myriad issues associated with combining multiple materials to create functional prod"
+        },
+        {
+          "title": "Effects of thermal rates on the thermomechanical behaviors of amorphous shape memory polymers",
+          "year": 2010,
+          "doi": "https://doi.org/10.1007/s11043-010-9109-6",
+          "authors": [
+            "Francisco Castro",
+            "Kristofer K. Westbrook",
+            "Kevin Long"
+          ],
+          "abstract": ""
+        },
+        {
+          "title": "Three-dimensional photovoltaics",
+          "year": 2010,
+          "doi": "https://doi.org/10.1063/1.3308490",
+          "authors": [
+            "Bryan Myers",
+            "Marco Bernardi",
+            "Jeffrey C. Grossman"
+          ],
+          "abstract": "The concept of three-dimensional (3D) photovoltaics is explored computationally using a genetic algorithm to optimize the energy production in a day for arbitrarily shaped 3D solar cells confined to a given area footprint and total volume. Our simulations demonstrate that the performance of 3D photovoltaic structures scales linearly with height, leading to volumetric energy conversion, and provides power fairly evenly throughout the day. Furthermore, we show that optimal 3D structures are not si"
+        }
+      ]
+    },
+    {
+      "primary_paper": {
+        "title": "3D metamaterials",
+        "year": 2019,
+        "doi": "https://doi.org/10.1038/s42254-018-0018-y",
+        "cited_by_count": 1110,
+        "authors": [
+          "Muamer Kadic",
+          "Graeme Walter Milton",
+          "Martin van Hecke",
+          "Martin Wegener"
+        ],
+        "abstract": ""
+      },
+      "second_tier_references": [
+        {
+          "title": "Asymptotic Analysis for Periodic Structures",
+          "year": 2011,
+          "doi": "https://doi.org/10.1090/chel/374",
+          "authors": [
+            "Alain Bensoussan",
+            "J. L. Lions",
+            "George Papanicolaou"
+          ],
+          "abstract": "This is a reprinting of a book originally published in 1978. At that time it was the first book on the subject of homogenization, which is the asymptotic analysis of partial differential equations with rapidly oscillating coefficients, and as such it sets the stage for what problems to consider and what methods to use, including probabilistic methods. At the time the book was written the use of asymptotic expansions with multiple scales was new, especially their use as a theoretical tool, combin"
+        },
+        {
+          "title": "Negative Refractive Index at Optical Wavelengths",
+          "year": 2007,
+          "doi": "https://doi.org/10.1126/science.1136481",
+          "authors": [
+            "Costas M. Soukoulis",
+            "Stefan Lindén",
+            "Martin Wegener"
+          ],
+          "abstract": "Recent progress in terahertz biosensors based on artificial electromagnetic subwavelength structure,"
+        },
+        {
+          "title": "Asymmetric Propagation of Electromagnetic Waves through a Planar Chiral Structure",
+          "year": 2006,
+          "doi": "https://doi.org/10.1103/physrevlett.97.167401",
+          "authors": [
+            "V.A. Fedotov",
+            "Pavel L. Mladyonov",
+            "S. L. Prosvirnin"
+          ],
+          "abstract": "We report that normal incidence transmission of circularly polarized waves through the lossy anisotropic planar chiral structure is asymmetric in the opposite direction. The new effect is fundamentally distinct from conventional gyrotropy of bulk chiral media and the Faraday effect, where the eigenstates are a pair of counterrotating elliptical states, while the eigenstates of the lossy anisotropic planar chiral structure are two corotating elliptical polarizations."
+        },
+        {
+          "title": "A Helical Metamaterial for Broadband Circular Polarization Conversion",
+          "year": 2015,
+          "doi": "https://doi.org/10.1002/adom.201500194",
+          "authors": [
+            "Johannes Kaschke",
+            "Leonard Blume",
+            "Lin Wu"
+          ],
+          "abstract": "Metallic helical metamaterials give rise to broadband and scalable chiro‐optical effects orders of magnitude higher than found in nature. While arrays of gold helices have been suggested as compact circular polarizers, where a large difference of the diagonal elements of the Jones transmission matrix is desired, chiral metamaterials can also be designed to exhibit strong circular‐polarization conversions. Here, a novel helical metamaterial design, exhibiting asymmetric, broadband circular‐polari"
+        },
+        {
+          "title": "Nonlinear, Tunable and Active Metamaterials",
+          "year": 2014,
+          "doi": "https://doi.org/10.1007/978-3-319-08386-5",
+          "authors": [
+            "Ilya V. Shadrivov",
+            "Mikhail Lapine",
+            "Yuri S. Kivshar"
+          ],
+          "abstract": ""
+        }
+      ]
+    },
+    {
+      "primary_paper": {
+        "title": "Self-assembling peptide and protein amyloids: from structure to tailored function in nanotechnology",
+        "year": 2017,
+        "doi": "https://doi.org/10.1039/c6cs00542j",
+        "cited_by_count": 904,
+        "authors": [
+          "Gang Wei",
+          "Zhiqiang Su",
+          "Nicholas P. Reynolds",
+          "Paolo Arosio",
+          "Ian William Hamley"
+        ],
+        "abstract": "Self-assembled peptide and protein amyloid nanostructures have traditionally been considered only as pathological aggregates implicated in human neurodegenerative diseases. In more recent times, these nanostructures have found interesting applications as advanced materials in biomedicine, tissue engineering, renewable energy, environmental science, nanotechnology and material science, to name only a few fields. In all these applications, the final function depends on: (i) the specific mechanisms of protein aggregation, (ii) the hierarchical structure of the protein and peptide amyloids from the atomistic to mesoscopic length scales and (iii) the physical properties of the amyloids in the context of their surrounding environment (biological or artificial). In this review, we will discuss recent progress made in the field of functional and artificial amyloids and highlight connections between protein/peptide folding, unfolding and aggregation mechanisms, with the resulting amyloid struct"
+      },
+      "second_tier_references": [
+        {
+          "title": "Experimental and Theoretical Aspects of Protein Folding",
+          "year": 1975,
+          "doi": "https://doi.org/10.1016/s0065-3233(08)60413-1",
+          "authors": [
+            "Christian B. Anfinsen",
+            "H. A. Scheraga"
+          ],
+          "abstract": ""
+        },
+        {
+          "title": "[17] Analysis of protein aggregation kinetics",
+          "year": 1999,
+          "doi": "https://doi.org/10.1016/s0076-6879(99)09019-9",
+          "authors": [
+            "Frank A. Ferrone"
+          ],
+          "abstract": ""
+        },
+        {
+          "title": "Formation of highly toxic soluble amyloid beta oligomers by the molecular chaperone prefoldin",
+          "year": 2008,
+          "doi": "https://doi.org/10.1111/j.1742-4658.2008.06727.x",
+          "authors": [
+            "Masafumi Sakono",
+            "Tamotsu Zako",
+            "Hiroshi Ueda"
+          ],
+          "abstract": "Alzheimer's disease (AD) is a neurological disorder characterized by the presence of amyloid beta (Abeta) peptide fibrils and oligomers in the brain. It has been suggested that soluble Abeta oligomers, rather than Abeta fibrils, contribute to neurodegeneration and dementia due to their higher level of toxicity. Recent studies have shown that Abeta is also generated intracellularly, where it can subsequently accumulate. The observed inhibition of cytosolic proteasome by Abeta suggests that Abeta "
+        },
+        {
+          "title": "100 Years of Alzheimer's disease (1906–2006)",
+          "year": 2006,
+          "doi": "https://doi.org/10.3233/jad-2006-9s303",
+          "authors": [
+            "J. Manuel Martínez Lage"
+          ],
+          "abstract": "As we commemorate the first centennial since Alzheimer's disease (AD) was first diagnosed, this article casts back into the past while also looking to the future. It reflects on the life of Alois Alzheimer (1864-1915) and the scientific work he undertook in describing the disorder suffered by Auguste D. from age 51 to 56 and the neuropathological findings revealed by her brain, reminding us of the origin of the eponym. It highlights how, throughout the 1960's, the true importance of AD as the ma"
+        },
+        {
+          "title": "A Colloidal Description of Intermolecular Interactions Driving Fibril–Fibril Aggregation of a Model Amphiphilic Peptide",
+          "year": 2015,
+          "doi": "https://doi.org/10.1021/acs.langmuir.5b01110",
+          "authors": [
+            "Marta Owczarz",
+            "Anna C. Motta",
+            "Massimo Morbidelli"
+          ],
+          "abstract": "We apply a kinetic analysis platform to study the intermolecular interactions underlying the colloidal stability of dispersions of charged amyloid fibrils consisting of a model amphiphilic peptide (RADA 16-I). In contrast to the aggregation mechanisms observed in the large majority of proteins and peptides, where several elementary reactions involving both monomers and fibrils are present simultaneously, the system selected in this work allows the specific investigation of the fibril-fibril aggr"
+        }
+      ]
+    }
+  ]
+}

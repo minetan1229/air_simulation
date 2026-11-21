@@ -1,8 +1,12 @@
-"""v3.search: 3D MAP-Elites search engine with parametric mutation and deterministic evaluation."""
+"""Backward-compatibility re-export.
 
-from .engine import MAPElitesEngine
-from .grid import MAPElitesGridArchive
-from .mutation import mutate_parametric_config
+The canonical module is :mod:`optimization.map_elites`.
+"""
+from optimization.map_elites import (  # noqa: F401
+    MAPElitesEngine,
+    MAPElitesGridArchive,
+    mutate_parametric_config,
+)
 
 __all__ = [
     "MAPElitesGridArchive",

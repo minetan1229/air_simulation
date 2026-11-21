@@ -1,8 +1,13 @@
-"""v3.origami: 20-step parametric origami compiler, adapter, and MCTS generator."""
+"""Backward-compatibility re-export.
 
-from .adapter import OrigamiAdapter, validate_tier0
-from .compiler import ParametricOrigamiCompiler
-from .mcts import MCTSOrigamiGenerator
+The canonical module is :mod:`geometry.v3_origami`.
+"""
+from geometry.v3_origami import (  # noqa: F401
+    MCTSOrigamiGenerator,
+    OrigamiAdapter,
+    ParametricOrigamiCompiler,
+    validate_tier0,
+)
 
 __all__ = [
     "ParametricOrigamiCompiler",

@@ -1,0 +1,222 @@
+{
+  "topic_num": "16",
+  "query": "ground effect aerodynamics low altitude induced drag reduction",
+  "candidates": [
+    {
+      "primary_paper": {
+        "title": "The 2017 Plasma Roadmap: Low temperature plasma science and technology",
+        "year": 2017,
+        "doi": "https://doi.org/10.1088/1361-6463/aa76f5",
+        "cited_by_count": 967,
+        "authors": [
+          "Igor Adamovich",
+          "Scott Baalrud",
+          "Annemie Bogaerts",
+          "Peter Bruggeman",
+          "Mark Cappelli"
+        ],
+        "abstract": "Journal of Physics D: Applied Physics published the first Plasma Roadmap in 2012 consisting of the individual perspectives of 16 leading experts in the various sub-fields of low temperature plasma science and technology. The 2017 Plasma Roadmap is the first update of a planned series of periodic updates of the Plasma Roadmap. The continuously growing interdisciplinary nature of the low temperature plasma field and its equally broad range of applications are making it increasingly difficult to identify major challenges that encompass all of the many sub-fields and applications. This intellectual diversity is ultimately a strength of the field. The current state of the art for the 19 sub-fields addressed in this roadmap demonstrates the enviable track record of the low temperature plasma field in the development of plasmas as an enabling technology for a vast range of technologies that underpin our modern society. At the same time, the many important scientific and technological challeng"
+      },
+      "second_tier_references": [
+        {
+          "title": "Uncertainty and error in complex plasma chemistry models",
+          "year": 2015,
+          "doi": "https://doi.org/10.1088/0963-0252/24/3/035027",
+          "authors": [
+            "Miles M. Turner"
+          ],
+          "abstract": "Abstract Chemistry models that include dozens of species and hundreds to thousands of reactions are common in low-temperature plasma physics. The rate constants used in such models are uncertain, because they are obtained from some combination of experiments and approximate theories. Since the predictions of these models are a function of the rate constants, these predictions must also be uncertain. However, systematic investigations of the influence of uncertain rate constants on model predicti"
+        },
+        {
+          "title": "Industrial Plasma Technology",
+          "year": 2010,
+          "doi": "https://doi.org/10.1002/9783527629749",
+          "authors": [],
+          "abstract": "PREFACE INTRODUCTION TO PLASMAS Plasmas Discharge Plasmas ENVIRONMENTAL APPLICATION OF NONTHERMAL PLASMA ATMOSPHERIC PLASMA AIR POLLUTION CONTROL, SOLID WASTE, AND WATERTREATMENT TECHNOLOGIES: FUNDAMENTAL AND OVERVIEW Introduction Type of Plasmas Plasma Chemistry Plasma Reactor Determination of Plasma Parameters and the Other Phenomena Engineering and Economics Concluding Remarks References OPTICAL DIAGNOSTICS FOR HIGH-PRESSURE NONTHERMAL PLASMAANALYSIS Introduction Experimental Examples Conclus"
+        },
+        {
+          "title": "Manipulating the electron distribution through a combination of electron injection and MacKenzie’s Maxwell Demon",
+          "year": 2015,
+          "doi": "https://doi.org/10.1088/0963-0252/24/3/034004",
+          "authors": [
+            "Chi-Shung Yip",
+            "N. Hershkowitz"
+          ],
+          "abstract": "Abstract Experiments on electron heating are performed in a biased hot filament-produced argon plasma. Electrons are confined by multi-dipole magnetic fields on the radial wall of the cylindrical chamber but not the planar end walls. Electron heating is provided by a combination of cold electron injection (Hershowitz N and Leung K N 1975 Appl. Phys. Lett. 26 607) and a MacKenzie Maxwell Demon (Mackenzie K R et al 1971 Appl. Phys. Lett. 18 529). This approach allows the manipulation of the electr"
+        },
+        {
+          "title": "Low-Energy Electron Scattering from Molecules, Biomolecules and Surfaces",
+          "year": 2012,
+          "doi": "https://doi.org/10.1201/b11360",
+          "authors": [
+            "Petr Čárský",
+            "Roman Čurı́k"
+          ],
+          "abstract": "Since the turn of the 21st century, the field of electron molecule collisions has undergone a renaissance. The importance of such collisions in applications from radiation chemistry to astrochemistry has flowered, and their role in industrial processes such as plasma technology and lighting are vital to the advancement of next generation devices. F"
+        }
+      ]
+    },
+    {
+      "primary_paper": {
+        "title": "Are Superhydrophobic Surfaces Best for Icephobicity?",
+        "year": 2011,
+        "doi": "https://doi.org/10.1021/la104762g",
+        "cited_by_count": 696,
+        "authors": [
+          "Stefan Jung",
+          "Marko Dorrestijn",
+          "Dominik M. Raps",
+          "Arindam Das",
+          "Constantine M. Megaridis"
+        ],
+        "abstract": "Ice formation can have catastrophic consequences for human activity on the ground and in the air. Here we investigate water freezing delays on untreated and coated surfaces ranging from hydrophilic to superhydrophobic and use these delays to evaluate icephobicity. Supercooled water microdroplets are inkjet-deposited and coalesce until spontaneous freezing of the accumulated mass occurs. Surfaces with nanometer-scale roughness and higher wettability display unexpectedly long freezing delays, at least 1 order of magnitude longer than typical superhydrophobic surfaces with larger hierarchical roughness and low wettability. Directly related to the main focus on heterogeneous nucleation and freezing delay of supercooled water droplets, the observed ensuing crystallization process consisted of two distinct phases: one very rapid recalescent partial solidification phase and a subsequent slower phase. Observations of the droplet collision process employed for the continuous liquid mass accumul"
+      },
+      "second_tier_references": [
+        {
+          "title": "Microphysics of Clouds and Precipitation",
+          "year": 1978,
+          "doi": "https://doi.org/10.1007/978-94-009-9905-3",
+          "authors": [
+            "Hans Rudolf Pruppacher",
+            "James D. Klett"
+          ],
+          "abstract": ""
+        },
+        {
+          "title": "Thermodynamic determination of fragility in liquids and a fragile-to-strong liquid transition in water",
+          "year": 1999,
+          "doi": "https://doi.org/10.1038/19042",
+          "authors": [
+            "Kaori Ito",
+            "Cornelius T. Moynihan",
+            "C. Austen Angell"
+          ],
+          "abstract": ""
+        },
+        {
+          "title": "Theory of Solidification",
+          "year": 2001,
+          "doi": "https://doi.org/10.1017/cbo9780511546747",
+          "authors": [
+            "Stephen H. Davis"
+          ],
+          "abstract": "The processes of freezing and melting were present at the beginnings of the Earth and continue to dominate the natural and industrial worlds. The solidification of a liquid or the melting of a solid involves a complex interplay of many physical effects. This 2001 book presents in a systematic way the field of continuum solidification theory based on instability phenomena. An understanding of the physics is developed by using examples of increasing complexity with the object of creating a deep ph"
+        },
+        {
+          "title": "Viscous “Interphase” Water Adjacent to Oligo(ethylene glycol)-Terminated Monolayers",
+          "year": 2003,
+          "doi": "https://doi.org/10.1021/la034585x",
+          "authors": [
+            "Hyun I. Kim",
+            "James G. Kushmerick",
+            "Jack E. Houston"
+          ],
+          "abstract": "We report measurements of the interaction force between functionalized probe tips and oligo(ethylene glycol) (OEG)-terminated monolayers. Force profiles obtained with the interfacial force microscope indicate the presence of an interphase water layer adjacent to the OEG-terminated monolayer that generates a repulsive hydration force. This interphase layer extends up to 5 nm from the surface and has a viscosity that is 6 orders of magnitude greater than that of bulk water. The possible role this "
+        }
+      ]
+    },
+    {
+      "primary_paper": {
+        "title": "Fuel consumption and CO 2 emissions from passenger cars in Europe – Laboratory versus real-world emissions",
+        "year": 2017,
+        "doi": "https://doi.org/10.1016/j.pecs.2016.12.004",
+        "cited_by_count": 681,
+        "authors": [
+          "Georgios Fontaras",
+          "Nikiforos Zacharof",
+          "Biagio Ciuffo"
+        ],
+        "abstract": "Official laboratory-measured monitoring data indicate a progressive decline in the average fuel consumption and CO 2 emissions of the European passenger car fleet. There is increasing evidence to suggest that officially reported CO 2 values do not reflect the actual performance of the vehicles on the road. A reported difference of 30–40% between official values and real-world estimates was found which has been continuously increasing. This paper reviews the influence of different factors that affect fuel consumption and CO 2 emissions on the road and in the laboratory. Factors such as driving behaviour, vehicle configuration and traffic conditions are reconfirmed as highly influential. Neglected factors (e.g. side winds, rain, road grade), which may have significant contributions in fuel consumption in real world driving are identified. The margins of the present certification procedure contribute between 10 and 20% in the gap between the reported values and reality. The latter was est"
+      },
+      "second_tier_references": [
+        {
+          "title": "The effect on road load due to variations in valid coast down tests for passenger cars",
+          "year": 2014,
+          "doi": "https://doi.org/10.13140/2.1.2300.9283",
+          "authors": [
+            "P. van Mensch",
+            "N.E. Ligterink",
+            "R.F.A. Cuelenaere"
+          ],
+          "abstract": "Real-world CO2 emissions of passenger cars very often deviate from the Type Approval value. The Type Approval value for CO2 emissions of passenger cars is based on a chassis dynamometer test in a laboratory. The total vehicle resistance of a vehicle, or 'road load', is simulated on the chassis dynamometer to obtain representative emissions. The road load of a vehicle is determined by means of a coast down test. As a large number of parameters and external conditions influence the coast down test"
+        },
+        {
+          "title": "Carbon Burdens from New Car Sales in the United States",
+          "year": 2007,
+          "doi": "https://doi.org/10.1016/b978-012369495-9/50006-3",
+          "authors": [
+            "John DeCicco",
+            "Freda Fung",
+            "Feng An"
+          ],
+          "abstract": ""
+        }
+      ]
+    },
+    {
+      "primary_paper": {
+        "title": "Wind Turbine Blade Design",
+        "year": 2012,
+        "doi": "https://doi.org/10.3390/en5093425",
+        "cited_by_count": 512,
+        "authors": [
+          "Peter J. Schubel",
+          "Richard J. Crossley"
+        ],
+        "abstract": "A detailed review of the current state-of-art for wind turbine blade design is presented, including theoretical maximum efficiency, propulsion, practical efficiency, HAWT blade design, and blade loads. The review provides a complete picture of wind turbine blade design and shows the dominance of modern turbines almost exclusive use of horizontal axis rotors. The aerodynamic design principles for a modern wind turbine blade are detailed, including blade plan shape/quantity, aerofoil selection and optimal attack angles. A detailed review of design loads on wind turbine blades is offered, describing aerodynamic, gravitational, centrifugal, gyroscopic and operational conditions."
+      },
+      "second_tier_references": [
+        {
+          "title": "Wind Energy Handbook",
+          "year": 2001,
+          "doi": "https://doi.org/10.1002/0470846062",
+          "authors": [
+            "Tony Burton",
+            "David Sharpe",
+            "Nick Jenkins"
+          ],
+          "abstract": "Named as one of Choice's Outstanding Academic Titles of 2012Every year, Choice subject editors recognise the most significant print and electronic works reviewed in Choice during the previous calendar year. Appearing annually inChoice's January issue, this prestigious list of publications reflects the best in scholarly titles and attracts extraordinary attention from the academic library community. The authoritative reference on wind energy, now fully revised and updated to include offshore wind"
+        },
+        {
+          "title": "Wind turbines : fundamentals, technologies, application, economics",
+          "year": 2000,
+          "doi": "https://doi.org/10.1007/3-540-29284-5",
+          "authors": [
+            "Erich Hau"
+          ],
+          "abstract": ""
+        },
+        {
+          "title": "Structural investigation of composite wind turbine blade considering various load cases and fatigue life",
+          "year": 2004,
+          "doi": "https://doi.org/10.1016/j.energy.2004.08.016",
+          "authors": [
+            "Changduk Kong",
+            "J. Bang",
+            "Y. Sugiyama"
+          ],
+          "abstract": ""
+        },
+        {
+          "title": "Fundamentals of Airplane Flight Mechanics",
+          "year": 2007,
+          "doi": "https://doi.org/10.1007/978-3-540-46573-7",
+          "authors": [
+            "David G. Hull"
+          ],
+          "abstract": ""
+        },
+        {
+          "title": "Local design, testing and manufacturing of small mixed airfoil wind turbine blades of glass fiber reinforced plastics",
+          "year": 2000,
+          "doi": "https://doi.org/10.1016/s0196-8904(99)00103-x",
+          "authors": [
+            "S.M. Habali",
+            "I.A. Saleh"
+          ],
+          "abstract": ""
+        }
+      ]
+    }
+  ]
+}

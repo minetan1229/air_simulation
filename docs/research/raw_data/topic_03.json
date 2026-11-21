@@ -1,0 +1,209 @@
+{
+  "topic_num": "03",
+  "query": "wind tunnel low Reynolds number aerodynamic testing",
+  "candidates": [
+    {
+      "primary_paper": {
+        "title": "Machine Learning for Fluid Mechanics",
+        "year": 2019,
+        "doi": "https://doi.org/10.1146/annurev-fluid-010719-060214",
+        "cited_by_count": 3029,
+        "authors": [
+          "Steven L. Brunton",
+          "Bernd R. Noack",
+          "Petros Koumoutsakos"
+        ],
+        "abstract": "The field of fluid mechanics is rapidly advancing, driven by unprecedented volumes of data from experiments, field measurements, and large-scale simulations at multiple spatiotemporal scales. Machine learning (ML) offers a wealth of techniques to extract information from data that can be translated into knowledge about the underlying fluid mechanics. Moreover, ML algorithms can augment domain knowledge and automate tasks related to flow control and optimization. This article presents an overview of past history, current developments, and emerging opportunities of ML for fluid mechanics. We outline fundamental ML methodologies and discuss their uses for understanding, modeling, optimizing, and controlling fluid flows. The strengths and limitations of these methods are addressed from the perspective of scientific inquiry that considers data as an inherent part of modeling, experiments, and simulations. ML provides a powerful information-processing framework that can augment, and possibly"
+      },
+      "second_tier_references": [
+        {
+          "title": "Learning representations by back-propagating errors",
+          "year": 1986,
+          "doi": "https://doi.org/10.1038/323533a0",
+          "authors": [
+            "David E. Rumelhart",
+            "Geoffrey E. Hinton",
+            "Ronald J. Williams"
+          ],
+          "abstract": ""
+        },
+        {
+          "title": "Learning a Deep Convolutional Network for Image Super-Resolution",
+          "year": 2014,
+          "doi": "https://doi.org/10.1007/978-3-319-10593-2_13",
+          "authors": [
+            "Chao Dong",
+            "Chen Change Loy",
+            "Kaiming He"
+          ],
+          "abstract": ""
+        },
+        {
+          "title": "Numerische Optimierung von Computer-Modellen mittels der Evolutionsstrategie",
+          "year": 1977,
+          "doi": "https://doi.org/10.1007/978-3-0348-5927-1",
+          "authors": [
+            "Hans–Paul Schwefel"
+          ],
+          "abstract": ""
+        },
+        {
+          "title": "Evaluation of machine learning algorithms for prediction of regions of high Reynolds averaged Navier Stokes uncertainty",
+          "year": 2015,
+          "doi": "https://doi.org/10.1063/1.4927765",
+          "authors": [
+            "Julia Ling",
+            "Jeremy Alan Templeton"
+          ],
+          "abstract": "Reynolds Averaged Navier Stokes (RANS) models are widely used in industry to predict fluid flows, despite their acknowledged deficiencies. Not only do RANS models often produce inaccurate flow predictions, but there are very limited diagnostics available to assess RANS accuracy for a given flow configuration. If experimental or higher fidelity simulation results are not available for RANS validation, there is no reliable method to evaluate RANS accuracy. This paper explores the potential of util"
+        },
+        {
+          "title": "Step-size adaptation based on non-local use of selection information",
+          "year": 1994,
+          "doi": "https://doi.org/10.1007/3-540-58484-6_263",
+          "authors": [
+            "Andreas Ostermeier",
+            "Andreas Gawelczyk",
+            "Nikolaus Hansen C"
+          ],
+          "abstract": ""
+        }
+      ]
+    },
+    {
+      "primary_paper": {
+        "title": "Mineral Dust Entrainment and Deposition (DEAD) model: Description and 1990s dust climatology",
+        "year": 2003,
+        "doi": "https://doi.org/10.1029/2002jd002775",
+        "cited_by_count": 1261,
+        "authors": [
+          "Charles Sutton Zender",
+          "Huisheng Bian",
+          "David J. Newman"
+        ],
+        "abstract": "We describe a model for predicting the size‐resolved distribution of atmospheric dust for climate and chemistry‐related studies. The dust distribution from 1990 to 1999 is simulated with our mineral aerosol entrainment and deposition module embedded in a chemical transport model. Mobilization processes include entrainment thresholds for saltation, moisture inhibition, drag partitioning, and saltation feedback. For mobilization we assume that soil texture is globally uniform and is replete with saltators. Soil erodibility is prescribed by a new physically based geomorphic index that is proportional to the runoff area upstream of each source region. Dry deposition processes include sedimentation and turbulent mix‐out. Nucleation scavenging and size‐resolved washout in both stratiform and convective cloud types are represented. Simulations of the 1990s broadly agree with station observations and satellite‐inferred dust distributions. Without invoking anthropogenic mechanisms the model cap"
+      },
+      "second_tier_references": [
+        {
+          "title": "Microphysics of Clouds and Precipitation",
+          "year": 1978,
+          "doi": "https://doi.org/10.1007/978-94-009-9905-3",
+          "authors": [
+            "Hans Rudolf Pruppacher",
+            "James D. Klett"
+          ],
+          "abstract": ""
+        },
+        {
+          "title": "Introduction to Soil Physics",
+          "year": 1982,
+          "doi": "https://doi.org/10.1016/c2009-0-03052-9",
+          "authors": [],
+          "abstract": ""
+        },
+        {
+          "title": "Aeolian Dust and Dust Deposits",
+          "year": 1987,
+          "doi": "https://doi.org/10.1016/c2013-0-05007-4",
+          "authors": [],
+          "abstract": ""
+        },
+        {
+          "title": "Saharan Dust Transport Over the North Atlantic Ocean and Mediterranean: An Overview",
+          "year": 1996,
+          "doi": "https://doi.org/10.1007/978-94-017-3354-0_13",
+          "authors": [
+            "Joseph M. Prospero"
+          ],
+          "abstract": ""
+        }
+      ]
+    },
+    {
+      "primary_paper": {
+        "title": "Wind-Turbine and Wind-Farm Flows: A Review",
+        "year": 2019,
+        "doi": "https://doi.org/10.1007/s10546-019-00473-0",
+        "cited_by_count": 1119,
+        "authors": [
+          "Fernando Porté‐Agel",
+          "Majid Bastankhah",
+          "Sina Shamsoddin"
+        ],
+        "abstract": "Wind energy, together with other renewable energy sources, are expected to grow substantially in the coming decades and play a key role in mitigating climate change and achieving energy sustainability. One of the main challenges in optimizing the design, operation, control, and grid integration of wind farms is the prediction of their performance, owing to the complex multiscale two-way interactions between wind farms and the turbulent atmospheric boundary layer (ABL). From a fluid mechanical perspective, these interactions are complicated by the high Reynolds number of the ABL flow, its inherent unsteadiness due to the diurnal cycle and synoptic-forcing variability, the ubiquitous nature of thermal effects, and the heterogeneity of the terrain. Particularly important is the effect of ABL turbulence on wind-turbine wake flows and their superposition, as they are responsible for considerable turbine power losses and fatigue loads in wind farms. These flow interactions affect, in turn, t"
+      },
+      "second_tier_references": [
+        {
+          "title": "Turbulent Flows",
+          "year": 2000,
+          "doi": "https://doi.org/10.1017/cbo9780511840531",
+          "authors": [
+            "Stephen Bailey Pope"
+          ],
+          "abstract": "This is a graduate text on turbulent flows, an important topic in fluid dynamics. It is up-to-date, comprehensive, designed for teaching, and is based on a course taught by the author at Cornell University for a number of years. The book consists of two parts followed by a number of appendices. Part I provides a general introduction to turbulent flows, how they behave, how they can be described quantitatively, and the fundamental physical processes involved. Part II is concerned with different a"
+        },
+        {
+          "title": "Wind tunnel performance data for the Darrieus wind turbine with NACA 0012 blades",
+          "year": 1976,
+          "doi": "https://doi.org/10.2172/7269797",
+          "authors": [
+            "Bennie F. Blackwell",
+            "Robert E. Sheldahl",
+            "L.V. Feltz"
+          ],
+          "abstract": "Five blade configurations of a 2-meter-diameter Darrieus wind turbine have been tested in the LTV Aerospace Corporation 4.6- x 6.1-m (15- x 20-ft) Low Speed Wind Tunnel. The airfoil section for all configurations was NACA 0012. The parameters measured were torque, rotational speed, and tunnel conditions. Data are presented in the form of power coefficient as a function of tip-speed ratio for the various solidities, Reynolds number, and freestream velocities tested."
+        },
+        {
+          "title": "Free-air performance tests of a 5-metre-diameter Darrieus turbine",
+          "year": 1977,
+          "doi": "https://doi.org/10.2172/5265052",
+          "authors": [
+            "Robert E. Sheldahl",
+            "Bennie F. Blackwell"
+          ],
+          "abstract": "A five-meter-diameter vertical-axis wind turbine has been tested at the Sandia Laboratories Wind Turbine Site. The results of these tests and some of the problems associated with free-air testing of wind turbines are presented. The performance data obtained follow the general trend of data obtained in extensive wind tunnel tests of a 2-meter-diameter turbine. However, the power coefficient data are slightly lower than anticipated. The reasons for this discrepancy are explored along with comparis"
+        }
+      ]
+    },
+    {
+      "primary_paper": {
+        "title": "High‐order CFD methods: current status and perspective",
+        "year": 2013,
+        "doi": "https://doi.org/10.1002/fld.3767",
+        "cited_by_count": 1022,
+        "authors": [
+          "Z.J. Wang",
+          "Krzysztof J. Fidkowski",
+          "Rémi Abgrall",
+          "F. Bassi",
+          "Doru Caraeni"
+        ],
+        "abstract": "SUMMARY After several years of planning, the 1st International Workshop on High‐Order CFD Methods was successfully held in Nashville, Tennessee, on January 7–8, 2012, just before the 50th Aerospace Sciences Meeting. The American Institute of Aeronautics and Astronautics, the Air Force Office of Scientific Research, and the German Aerospace Center provided much needed support, financial and moral. Over 70 participants from all over the world across the research spectrum of academia, government labs, and private industry attended the workshop. Many exciting results were presented. In this review article, the main motivation and major findings from the workshop are described. Pacing items requiring further effort are presented. Copyright © 2013 John Wiley & Sons, Ltd."
+      },
+      "second_tier_references": [
+        {
+          "title": "LARGE-EDDY SIMULATION FOR ACOUSTICS",
+          "year": 2007,
+          "doi": "https://doi.org/10.1017/cbo9780511546143.002",
+          "authors": [
+            "Claus D. Wagner",
+            "Thomas Hüttl",
+            "Pierre Sagaut"
+          ],
+          "abstract": ""
+        },
+        {
+          "title": "Discontinuous Spectral Difference Method for Conservation Laws on Unstructured Grids",
+          "year": 2006,
+          "doi": "https://doi.org/10.1007/3-540-31801-1_63",
+          "authors": [
+            "Yen Liu",
+            "Marcel Vinokur",
+            "Z.J. Wang"
+          ],
+          "abstract": ""
+        }
+      ]
+    }
+  ]
+}

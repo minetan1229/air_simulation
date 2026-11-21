@@ -1,0 +1,131 @@
+{
+  "topic_num": "12",
+  "query": "NSGA-II multi-objective aerodynamic shape optimization genetic algorithm",
+  "candidates": [
+    {
+      "primary_paper": {
+        "title": "Data-Driven Evolutionary Optimization: An Overview and Case Studies",
+        "year": 2018,
+        "doi": "https://doi.org/10.1109/tevc.2018.2869001",
+        "cited_by_count": 686,
+        "authors": [
+          "Yaochu Jin",
+          "Handing Wang",
+          "Tinkle Chugh",
+          "Dan Guo",
+          "Kaisa Miettinen"
+        ],
+        "abstract": "Most evolutionary optimization algorithms assume that the evaluation of the objective and constraint functions is straightforward. In solving many real-world optimization problems, however, such objective functions may not exist. Instead, computationally expensive numerical simulations or costly physical experiments must be performed for fitness evaluations. In more extreme cases, only historical data are available for performing optimization and no new data can be generated during optimization. Solving evolutionary optimization problems driven by data collected in simulations, physical experiments, production processes, or daily life are termed data-driven evolutionary optimization. In this paper, we provide a taxonomy of different data driven evolutionary optimization problems, discuss main challenges in data-driven evolutionary optimization with respect to the nature and amount of data, and the availability of new data during optimization. Real-world application examples are given t"
+      },
+      "second_tier_references": [
+        {
+          "title": "Knowledge Incorporation in Evolutionary Computation",
+          "year": 2005,
+          "doi": "https://doi.org/10.1007/978-3-540-44511-1",
+          "authors": [
+            "Yaochu Jin"
+          ],
+          "abstract": ""
+        },
+        {
+          "title": "Local SVM Constraint Surrogate Models for Self-adaptive Evolution Strategies",
+          "year": 2013,
+          "doi": "https://doi.org/10.1007/978-3-642-40942-4_15",
+          "authors": [
+            "Jendrik Poloczek",
+            "Oliver Krämer"
+          ],
+          "abstract": ""
+        }
+      ]
+    },
+    {
+      "primary_paper": {
+        "title": "Overview of energy storage systems in distribution networks: Placement, sizing, operation, and power quality",
+        "year": 2018,
+        "doi": "https://doi.org/10.1016/j.rser.2018.03.068",
+        "cited_by_count": 657,
+        "authors": [
+          "Choton Kanti Das",
+          "Octavian Bass",
+          "Ganesh Kothapalli",
+          "Thair S. Mahmoud",
+          "Daryoush Habibi"
+        ],
+        "abstract": "The deployment of energy storage systems (ESSs) is a significant avenue for maximising the energy efficiency of a distribution network, and overall network performance can be enhanced by their optimal placement, sizing, and operation. An optimally sized and placed ESS can facilitate peak energy demand fulfilment, enhance the benefits from the integration of renewables and distributed energy sources, aid power quality management, and reduce distribution network expansion costs. This paper provides an overview of optimal ESS placement, sizing, and operation. It considers a range of grid scenarios, targeted performance objectives, applied strategies, ESS types, and advantages and limitations of the proposed systems and approaches. While batteries are widely used as ESSs in various applications, the detailed comparative analysis of ESS technical characteristics suggests that flywheel energy storage (FES) also warrants consideration in some distribution network scenarios. This research prov"
+      },
+      "second_tier_references": [
+        {
+          "title": "A review on the state-of-the-art technologies of electric vehicle, its impacts and prospects",
+          "year": 2015,
+          "doi": "https://doi.org/10.1016/j.rser.2015.04.130",
+          "authors": [
+            "Jia Ying Yong",
+            "Vigna K. Ramachandaramurthy",
+            "Kang Miao Tan"
+          ],
+          "abstract": ""
+        },
+        {
+          "title": "Power Quality in Power Systems and Electrical Machines",
+          "year": 2015,
+          "doi": "https://doi.org/10.1016/c2013-0-18758-2",
+          "authors": [
+            "Ewald F. Fuchs",
+            "Mohammad A. S. Masoum"
+          ],
+          "abstract": ""
+        }
+      ]
+    },
+    {
+      "primary_paper": {
+        "title": "Bio-inspired computation: Where we stand and what's next",
+        "year": 2019,
+        "doi": "https://doi.org/10.1016/j.swevo.2019.04.008",
+        "cited_by_count": 594,
+        "authors": [
+          "Javier Del Ser",
+          "Eneko Osaba",
+          "Daniel Molina",
+          "Xin‐She Yang",
+          "Sancho Salcedo‐Sanz"
+        ],
+        "abstract": ""
+      },
+      "second_tier_references": [
+        {
+          "title": "Breast MRI Tumour Segmentation Using Modified Automatic Seeded Region Growing Based on Particle Swarm Optimization Image Clustering",
+          "year": 2013,
+          "doi": "https://doi.org/10.1007/978-3-319-00930-8_5",
+          "authors": [
+            "Ali Qusay Al-Faris",
+            "Umi Kalthum Ngah",
+            "Nor Ashidi Mat Isa"
+          ],
+          "abstract": ""
+        },
+        {
+          "title": "A Library to Run Evolutionary Algorithms in the Cloud Using MapReduce",
+          "year": 2012,
+          "doi": "https://doi.org/10.1007/978-3-642-29178-4_42",
+          "authors": [
+            "Pedro Fazenda",
+            "James McDermott",
+            "Una-May O’Reilly"
+          ],
+          "abstract": ""
+        },
+        {
+          "title": "No Free Lunch Theorems: Limitations and Perspectives of Metaheuristics",
+          "year": 2013,
+          "doi": "https://doi.org/10.1007/978-3-642-33206-7_1",
+          "authors": [
+            "Christian Igel"
+          ],
+          "abstract": ""
+        }
+      ]
+    }
+  ]
+}

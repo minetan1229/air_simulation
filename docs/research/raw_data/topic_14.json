@@ -1,0 +1,246 @@
+{
+  "topic_num": "14",
+  "query": "GPU particle system fluid vector field WebGL visualization",
+  "candidates": [
+    {
+      "primary_paper": {
+        "title": "DeePMD-kit v2: A software package for deep potential models",
+        "year": 2023,
+        "doi": "https://doi.org/10.1063/5.0155600",
+        "cited_by_count": 618,
+        "authors": [
+          "Jinzhe Zeng",
+          "Duo Zhang",
+          "Denghui Lu",
+          "Pinghui Mo",
+          "Zeyu Li"
+        ],
+        "abstract": "DeePMD-kit is a powerful open-source software package that facilitates molecular dynamics simulations using machine learning potentials known as Deep Potential (DP) models. This package, which was released in 2017, has been widely used in the fields of physics, chemistry, biology, and material science for studying atomistic systems. The current version of DeePMD-kit offers numerous advanced features, such as DeepPot-SE, attention-based and hybrid descriptors, the ability to fit tensile properties, type embedding, model deviation, DP-range correction, DP long range, graphics processing unit support for customized operators, model compression, non-von Neumann molecular dynamics, and improved usability, including documentation, compiled binary packages, graphical user interfaces, and application programming interfaces. This article presents an overview of the current major version of the DeePMD-kit package, highlighting its features and technical details. Additionally, this article presen"
+      },
+      "second_tier_references": [
+        {
+          "title": "Spectral neighbor analysis method for automated generation of quantum-accurate interatomic potentials",
+          "year": 2014,
+          "doi": "https://doi.org/10.1016/j.jcp.2014.12.018",
+          "authors": [
+            "Aidan P. Thompson",
+            "Laura Painton Swiler",
+            "Christian Robert Trott"
+          ],
+          "abstract": ""
+        },
+        {
+          "title": "MPICH2: A New Start for MPI Implementations",
+          "year": 2002,
+          "doi": "https://doi.org/10.1007/3-540-45825-5_5",
+          "authors": [
+            "William Gropp"
+          ],
+          "abstract": ""
+        },
+        {
+          "title": "Adam: A Method for Stochastic Optimization",
+          "year": 2014,
+          "doi": "https://doi.org/10.48550/arxiv.1412.6980",
+          "authors": [
+            "Diederik P. Kingma",
+            "Jimmy Lei Ba"
+          ],
+          "abstract": "We introduce Adam, an algorithm for first-order gradient-based optimization of stochastic objective functions, based on adaptive estimates of lower-order moments. The method is straightforward to implement, is computationally efficient, has little memory requirements, is invariant to diagonal rescaling of the gradients, and is well suited for problems that are large in terms of data and/or parameters. The method is also appropriate for non-stationary objectives and problems with very noisy and/o"
+        },
+        {
+          "title": "GROMACS: High performance molecular simulations through multi-level parallelism from laptops to supercomputers",
+          "year": 2015,
+          "doi": "https://doi.org/10.1016/j.softx.2015.06.001",
+          "authors": [
+            "M Abraham",
+            "Teemu J. Murtola",
+            "Roland Schulz"
+          ],
+          "abstract": "GROMACS is one of the most widely used open-source and free software codes in chemistry, used primarily for dynamical simulations of biomolecules. It provides a rich set of calculation types, preparation and analysis tools. Several advanced techniques for free-energy calculations are supported. In version 5, it reaches new performance heights, through several new and enhanced parallelization algorithms. These work on every level; SIMD registers inside cores, multithreading, heterogeneous CPU–GPU"
+        }
+      ]
+    },
+    {
+      "primary_paper": {
+        "title": "Visualization of Biomolecular Structures: State of the Art Revisited",
+        "year": 2016,
+        "doi": "https://doi.org/10.1111/cgf.13072",
+        "cited_by_count": 116,
+        "authors": [
+          "Barbora Kozlíková",
+          "Michael Krone",
+          "Martin Falk",
+          "Norbert Lindow",
+          "Marc Baaden"
+        ],
+        "abstract": "Abstract Structural properties of molecules are of primary concern in many fields. This report provides a comprehensive overview on techniques that have been developed in the fields of molecular graphics and visualization with a focus on applications in structural biology. The field heavily relies on computerized geometric and visual representations of three‐dimensional, complex, large and time‐varying molecular structures. The report presents a taxonomy that demonstrates which areas of molecular visualization have already been extensively investigated and where the field is currently heading. It discusses visualizations for molecular structures, strategies for efficient display regarding image quality and frame rate, covers different aspects of level of detail and reviews visualizations illustrating the dynamic aspects of molecular simulation data. The survey concludes with an outlook on promising and important research topics to foster further success in the development of tools that"
+      },
+      "second_tier_references": [
+        {
+          "title": "Monte Carlo Methods for Simulating Realistic Synaptic Microphysiology Using MCell",
+          "year": 2000,
+          "doi": "https://doi.org/10.1201/9781420039290.ch4",
+          "authors": [
+            "Joel R. Stiles",
+            "Thomas M. Bartol"
+          ],
+          "abstract": ""
+        },
+        {
+          "title": "Personalized View Selection of 3D Molecular Proteins",
+          "year": 2010,
+          "doi": "https://doi.org/10.1007/978-3-642-15690-8_11",
+          "authors": [
+            "Nikolaos D. Doulamis",
+            "Evangelos Chronis",
+            "Georgios Miaoulis"
+          ],
+          "abstract": ""
+        }
+      ]
+    },
+    {
+      "primary_paper": {
+        "title": "LassoNet: Deep Lasso-Selection of 3D Point Clouds",
+        "year": 2019,
+        "doi": "https://doi.org/10.1109/tvcg.2019.2934332",
+        "cited_by_count": 59,
+        "authors": [
+          "Zhutian Chen",
+          "Wei Zeng",
+          "Zhiguang Yang",
+          "Lingyun Yu",
+          "Chi‐Wing Fu"
+        ],
+        "abstract": "Selection is a fundamental task in exploratory analysis and visualization of 3D point clouds. Prior researches on selection methods were developed mainly based on heuristics such as local point density, thus limiting their applicability in general data. Specific challenges root in the great variabilities implied by point clouds (e.g., dense vs. sparse), viewpoint (e.g., occluded vs. non-occluded), and lasso (e.g., small vs. large). In this work, we introduce LassoNet, a new deep neural network for lasso selection of 3D point clouds, attempting to learn a latent mapping from viewpoint and lasso to point cloud regions. To achieve this, we couple user-target points with viewpoint and lasso information through 3D coordinate transform and naive selection, and improve the method scalability via an intention filtering and farthest point sampling. A hierarchical network is trained using a dataset with over 30K lasso-selection records on two different point cloud data. We conduct a formal user "
+      },
+      "second_tier_references": [
+        {
+          "title": "3D ShapeNets: A deep representation for volumetric shapes",
+          "year": 2015,
+          "doi": "https://doi.org/10.1109/cvpr.2015.7298801",
+          "authors": [
+            "Zhirong Wu",
+            "Shuran Song",
+            "Aditya Khosla"
+          ],
+          "abstract": "3D shape is a crucial but heavily underutilized cue in today's computer vision systems, mostly due to the lack of a good generic shape representation. With the recent availability of inexpensive 2.5D depth sensors (e.g. Microsoft Kinect), it is becoming increasingly important to have a powerful 3D shape representation in the loop. Apart from category recognition, recovering full 3D shapes from view-based 2.5D depth maps is also a critical part of visual understanding. To this end, we propose to "
+        },
+        {
+          "title": "Multi-view Convolutional Neural Networks for 3D Shape Recognition",
+          "year": 2015,
+          "doi": "https://doi.org/10.1109/iccv.2015.114",
+          "authors": [
+            "Hang Su",
+            "Subhransu Maji",
+            "Evangelos Kalogerakis"
+          ],
+          "abstract": "A longstanding question in computer vision concerns the representation of 3D shapes for recognition: should 3D shapes be represented with descriptors operating on their native 3D formats, such as voxel grid or polygon mesh, or can they be effectively represented with view-based descriptors? We address this question in the context of learning to recognize 3D shapes from a collection of their rendered views on 2D images. We first present a standard CNN architecture trained to recognize the shapes'"
+        },
+        {
+          "title": "CAST: Effective and Efficient User Interaction for Context-Aware Selection in 3D Particle Clouds",
+          "year": 2015,
+          "doi": "https://doi.org/10.1109/tvcg.2015.2467202",
+          "authors": [
+            "Lingyun Yu",
+            "Konstantinos Efstathiou",
+            "Petra Isenberg"
+          ],
+          "abstract": "We present a family of three interactive Context-Aware Selection Techniques (CAST) for the analysis of large 3D particle datasets. For these datasets, spatial selection is an essential prerequisite to many other analysis tasks. Traditionally, such interactive target selection has been particularly challenging when the data subsets of interest were implicitly defined in the form of complicated structures of thousands of particles. Our new techniques SpaceCast, TraceCast, and PointCast improve usa"
+        }
+      ]
+    },
+    {
+      "primary_paper": {
+        "title": "Voxelisation Algorithms and Data Structures: A Review",
+        "year": 2021,
+        "doi": "https://doi.org/10.3390/s21248241",
+        "cited_by_count": 54,
+        "authors": [
+          "Mitko Aleksandrov",
+          "Sisi Zlatanova B",
+          "David James Heslop"
+        ],
+        "abstract": "Voxel-based data structures, algorithms, frameworks, and interfaces have been used in computer graphics and many other applications for decades. There is a general necessity to seek adequate digital representations, such as voxels, that would secure unified data structures, multi-resolution options, robust validation procedures and flexible algorithms for different 3D tasks. In this review, we evaluate the most common properties and algorithms for voxelisation of 2D and 3D objects. Thus, many voxelisation algorithms and their characteristics are presented targeting points, lines, triangles, surfaces and solids as geometric primitives. For lines, we identify three groups of algorithms, where the first two achieve different voxelisation connectivity, while the third one presents voxelisation of curves. We can say that surface voxelisation is a more desired voxelisation type compared to solid voxelisation, as it can be achieved faster and requires less memory if voxels are stored in a spa"
+      },
+      "second_tier_references": [
+        {
+          "title": "Point in Polygon Strategies",
+          "year": 1994,
+          "doi": "https://doi.org/10.1016/b978-0-12-336156-1.50013-6",
+          "authors": [
+            "Eric Haines"
+          ],
+          "abstract": ""
+        },
+        {
+          "title": "Real-time voxelization for complex polygonal models",
+          "year": 2004,
+          "doi": "https://doi.org/10.1109/pccga.2004.1348333",
+          "authors": [
+            "Dong Xu Zhao",
+            "Wei Chen",
+            "Hujun Bao"
+          ],
+          "abstract": "In this paper, we present an efficient voxelization algorithm for complex polygonal models by exploiting newest programmable graphics hardware. We first convert the model into three discrete voxel spaces according to its surface orientation. The resultant voxels are encoded as 2D textures and stored in three intermediate sheet buffers called directional sheet buffers. These buffers are finally synthesized into one worksheet, which records the volumetric representation of the target. The whole al"
+        }
+      ]
+    },
+    {
+      "primary_paper": {
+        "title": "Automated integration of extract-based CFD results with AR/VR in engineering education for practitioners",
+        "year": 2021,
+        "doi": "https://doi.org/10.1007/s11042-021-10621-9",
+        "cited_by_count": 35,
+        "authors": [
+          "Serkan Solmaz",
+          "Tom Van Gerven"
+        ],
+        "abstract": ""
+      },
+      "second_tier_references": [
+        {
+          "title": "Multidimensional Signal, Image, and Video Processing and Coding",
+          "year": 2012,
+          "doi": "https://doi.org/10.1016/c2009-0-62200-5",
+          "authors": [
+            "John W. Woods"
+          ],
+          "abstract": ""
+        },
+        {
+          "title": "Collaborative visualization of engineering processes using tabletop augmented reality",
+          "year": 2012,
+          "doi": "https://doi.org/10.1016/j.advengsoft.2012.09.001",
+          "authors": [
+            "Suyang Dong",
+            "Amir H. Behzadan",
+            "Chen Feng"
+          ],
+          "abstract": ""
+        },
+        {
+          "title": "Approaching virtual process engineering with exploring mesoscience",
+          "year": 2014,
+          "doi": "https://doi.org/10.1016/j.cej.2014.10.005",
+          "authors": [
+            "Jinghai Li"
+          ],
+          "abstract": ""
+        },
+        {
+          "title": "A highly flexible virtual reality system",
+          "year": 1998,
+          "doi": "https://doi.org/10.1016/s0167-739x(98)00019-3",
+          "authors": [
+            "Roland Blach",
+            "Jürgen Landauer",
+            "Angela Rösch"
+          ],
+          "abstract": ""
+        }
+      ]
+    }
+  ]
+}

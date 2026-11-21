@@ -1,0 +1,321 @@
+{
+  "topic_num": "09",
+  "query": "GPU accelerated fluid simulation CUDA parallel computing",
+  "candidates": [
+    {
+      "primary_paper": {
+        "title": "LAMMPS - a flexible simulation tool for particle-based materials modeling at the atomic, meso, and continuum scales",
+        "year": 2021,
+        "doi": "https://doi.org/10.1016/j.cpc.2021.108171",
+        "cited_by_count": 12446,
+        "authors": [
+          "Aidan P. Thompson",
+          "Hasan Metin Aktulga",
+          "Richard A. Berger",
+          "Dan Bolintineanu",
+          "W. Michael Brown"
+        ],
+        "abstract": "Since the classical molecular dynamics simulator LAMMPS was released as an open source code in 2004, it has become a widely-used tool for particle-based modeling of materials at length scales ranging from atomic to mesoscale to continuum. Reasons for its popularity are that it provides a wide variety of particle interaction models for different materials, that it runs on any platform from a single CPU core to the largest supercomputers with accelerators, and that it gives users control over simulation details, either via the input script or by adding code for new interatomic potentials, constraints, diagnostics, or other features needed for their models. As a result, hundreds of people have contributed new capabilities to LAMMPS and it has grown from fifty thousand lines of code in 2004 to a million lines today. In this paper several of the fundamental algorithms used in LAMMPS are described along with the design strategies which have made it flexible for both users and developers. We "
+      },
+      "second_tier_references": [
+        {
+          "title": "Spectral neighbor analysis method for automated generation of quantum-accurate interatomic potentials",
+          "year": 2014,
+          "doi": "https://doi.org/10.1016/j.jcp.2014.12.018",
+          "authors": [
+            "Aidan P. Thompson",
+            "Laura Painton Swiler",
+            "Christian Robert Trott"
+          ],
+          "abstract": ""
+        },
+        {
+          "title": "Direct simulation Monte Carlo investigation of the Richtmyer-Meshkov instability",
+          "year": 2015,
+          "doi": "https://doi.org/10.1063/1.4928338",
+          "authors": [
+            "M. A. Gallis",
+            "Timothy Koehler",
+            "J. R. Torczynski"
+          ],
+          "abstract": "The Richtmyer-Meshkov instability (RMI) is investigated using the Direct Simulation Monte Carlo (DSMC) method of molecular gas dynamics. Due to the inherent statistical noise and the significant computational requirements, DSMC is hardly ever applied to hydrodynamic flows. Here, DSMC RMI simulations are performed to quantify the shock-driven growth of a single-mode perturbation on the interface between two atmospheric-pressure monatomic gases prior to re-shocking as a function of the Atwood and "
+        },
+        {
+          "title": "Optimizing legacy molecular dynamics software with directive-based offload",
+          "year": 2015,
+          "doi": "https://doi.org/10.1016/j.cpc.2015.05.004",
+          "authors": [
+            "W. Michael Brown",
+            "Jan‐Michael Y. Carrillo",
+            "Nitin Gavhane"
+          ],
+          "abstract": ""
+        },
+        {
+          "title": "GROMACS: High performance molecular simulations through multi-level parallelism from laptops to supercomputers",
+          "year": 2015,
+          "doi": "https://doi.org/10.1016/j.softx.2015.06.001",
+          "authors": [
+            "M Abraham",
+            "Teemu J. Murtola",
+            "Roland Schulz"
+          ],
+          "abstract": "GROMACS is one of the most widely used open-source and free software codes in chemistry, used primarily for dynamical simulations of biomolecules. It provides a rich set of calculation types, preparation and analysis tools. Several advanced techniques for free-energy calculations are supported. In version 5, it reaches new performance heights, through several new and enhanced parallelization algorithms. These work on every level; SIMD registers inside cores, multithreading, heterogeneous CPU–GPU"
+        },
+        {
+          "title": "Coarse-Graining of Condensed Phase and Biomolecular Systems",
+          "year": 2008,
+          "doi": "https://doi.org/10.1201/9781420059564",
+          "authors": [
+            "Gregory A. Voth"
+          ],
+          "abstract": "Exploring recent developments in the field, Coarse-Graining of Condensed Phase and Biomolecular Systems examines systematic ways of constructing coarse-grained representations for complex systems. It explains how this approach can be used in the simulation and modeling of condensed phase and biomolecular systems. Each chapter focuses on s"
+        }
+      ]
+    },
+    {
+      "primary_paper": {
+        "title": "The ReaxFF reactive force-field: development, applications and future directions",
+        "year": 2016,
+        "doi": "https://doi.org/10.1038/npjcompumats.2015.11",
+        "cited_by_count": 2347,
+        "authors": [
+          "Thomas Patrick Senftle",
+          "Sungwook Leo Hong",
+          "Md Mahbubul Islam",
+          "Sudhir B. Kylasa",
+          "Yuanxia Zheng"
+        ],
+        "abstract": "Abstract The reactive force-field (ReaxFF) interatomic potential is a powerful computational tool for exploring, developing and optimizing material properties. Methods based on the principles of quantum mechanics (QM), while offering valuable theoretical guidance at the electronic level, are often too computationally intense for simulations that consider the full dynamic evolution of a system. Alternatively, empirical interatomic potentials that are based on classical principles require significantly fewer computational resources, which enables simulations to better describe dynamic processes over longer timeframes and on larger scales. Such methods, however, typically require a predefined connectivity between atoms, precluding simulations that involve reactive events. The ReaxFF method was developed to help bridge this gap. Approaching the gap from the classical side, ReaxFF casts the empirical interatomic potential within a bond-order formalism, thus implicitly describing chemical bo"
+      },
+      "second_tier_references": [
+        {
+          "title": "Large-Scale Computations in Chemistry: A Bird’s Eye View of a Vibrant Field",
+          "year": 2015,
+          "doi": "https://doi.org/10.1021/cr500524c",
+          "authors": [
+            "Alexey V. Akimov",
+            "Oleg V. Prezhdo"
+          ],
+          "abstract": "ADVERTISEMENT RETURN TO ISSUEPREVReviewNEXTLarge-Scale Computations in Chemistry: A Bird's Eye View of a Vibrant FieldAlexey V. Akimov and Oleg V. Prezhdo*View Author Information Department of Chemistry, University of South California, Los Angeles, California 90089, United States*E-mail: [email protected] Cite this: Chem. Rev. 2015, 115, 12, 5797–5890Publication Date (Web):April 8, 2015Publication History Received18 September 2014Published online8 April 2015Published inissue 24 June 2015https://"
+        },
+        {
+          "title": "QTPIE: Charge transfer with polarization current equalization. A fluctuating charge model with correct asymptotics",
+          "year": 2007,
+          "doi": "https://doi.org/10.1016/j.cplett.2007.02.065",
+          "authors": [
+            "Jiahao Chen",
+            "Todd J. Martı́nez"
+          ],
+          "abstract": ""
+        },
+        {
+          "title": "Implementing TiO2 as gate dielectric for Ge-channel complementary metal-oxide-semiconductor devices by using HfO2/GeO2 interlayer",
+          "year": 2010,
+          "doi": "https://doi.org/10.1063/1.3490710",
+          "authors": [
+            "Qi Xie",
+            "Davy Deduytsche",
+            "Marc Schaekers"
+          ],
+          "abstract": "The electrical properties of plasma-enhanced atomic-layer-deposited (PE-ALD) TiO2 as gate dielectric were investigated for germanium-channel complementary metal-oxide-semiconductor capacitors by using ultrathin in situ HfO2/GeO2 interlayers. TiO2 grown by PE-ALD exhibited a k value of 50±5. An equivalent oxide thickness of 0.9 nm was obtained for the TiO2(3 nm)/HfO2(1.2 nm)/GeO2(0.7 nm)/Ge capacitor with very low leakage current density of 2×10−7 A/cm2 at VFB±1 V. Capacitance-voltage hysteresis "
+        },
+        {
+          "title": "Hf-based high-k dielectrics for p-Ge MOS gate stacks",
+          "year": 2013,
+          "doi": "https://doi.org/10.1116/1.4837295",
+          "authors": [
+            "Sivan Fadida",
+            "Félix Palumbo",
+            "Laura Nyns"
+          ],
+          "abstract": "The physical and electrical properties of the gate stack high-k/Al2O3/GeO2/p-Ge were studied in detail, where the high-k is either HfO2 or alloyed HfO2 (HfZrOy, HfGdOx, or HfAlOx). Electrical measurements combined with x-ray photoelectron spectroscopy chemical bonding analysis and band alignment determination were conducted in order to assess the suitability of hafnium-based high-k for this kind of gate stacks, with emphasis on low density of interface states and border traps. HfAlOx was found t"
+        },
+        {
+          "title": "In Situ Process Control of Trilayer Gate-Stacks on p-Germanium With 0.85-nm EOT",
+          "year": 2015,
+          "doi": "https://doi.org/10.1109/led.2015.2459663",
+          "authors": [
+            "Yuanxia Zheng",
+            "A. Agrawal",
+            "G. B. Rayner"
+          ],
+          "abstract": "In situ spectroscopic ellipsometry was utilized in an atomic-layer-deposition (ALD) reactor for rapid and rational gate stack process optimization of the trilayer dielectric HfO2/Al2O3/GeOxon Ge. The benefit of this approach was demonstrated by developing an entire process in situ: 1) native oxide removal by hydrogen plasma; 2) controlled reoxidation for Ge surface passivation; and 3) deposition of Al2O3and HfO2using thermal ALD. The low-k layer thicknesses were scaled down without losing their "
+        }
+      ]
+    },
+    {
+      "primary_paper": {
+        "title": "Roadmap on structured light",
+        "year": 2016,
+        "doi": "https://doi.org/10.1088/2040-8978/19/1/013001",
+        "cited_by_count": 1344,
+        "authors": [
+          "Halina H. Rubinsztein-Dunlop",
+          "Andrew Forbes",
+          "Michael Berry",
+          "Mark R. Dennis",
+          "Davıd L. Andrews"
+        ],
+        "abstract": "Abstract Structured light refers to the generation and application of custom light fields. As the tools and technology to create and detect structured light have evolved, steadily the applications have begun to emerge. This roadmap touches on the key fields within structured light from the perspective of experts in those areas, providing insight into the current state and the challenges their respective fields face. Collectively the roadmap outlines the venerable nature of structured light research and the exciting prospects for the future that are yet to be realized."
+      },
+      "second_tier_references": [
+        {
+          "title": "Optical communications using orbital angular momentum beams",
+          "year": 2015,
+          "doi": "https://doi.org/10.1364/aop.7.000066",
+          "authors": [
+            "Alan Eli Willner",
+            "Hao Huang",
+            "Y. Yan"
+          ],
+          "abstract": "Orbital angular momentum (OAM), which describes the “phase twist” (helical phase pattern) of light beams, has recently gained interest due to its potential applications in many diverse areas. Particularly promising is the use of OAM for optical communications since: (i) coaxially propagating OAM beams with different azimuthal OAM states are mutually orthogonal, (ii) inter-beam crosstalk can be minimized, and (iii) the beams can be efficiently multiplexed and demultiplexed. As a result, multiple "
+        },
+        {
+          "title": "Twisted Photons",
+          "year": 2011,
+          "doi": "https://doi.org/10.1002/9783527635368",
+          "authors": [
+            "P Torres",
+            "Lluís Torner"
+          ],
+          "abstract": ""
+        },
+        {
+          "title": "Simultaneous real-time visible and infrared video with single-pixel detectors",
+          "year": 2015,
+          "doi": "https://doi.org/10.1038/srep10669",
+          "authors": [
+            "M. Edgar",
+            "Graham M. Gibson",
+            "Richard W Bowman"
+          ],
+          "abstract": "Conventional cameras rely upon a pixelated sensor to provide spatial resolution. An alternative approach replaces the sensor with a pixelated transmission mask encoded with a series of binary patterns. Combining knowledge of the series of patterns and the associated filtered intensities, measured by single-pixel detectors, allows an image to be deduced through data inversion. In this work we extend the concept of a 'single-pixel camera' to provide continuous real-time video at 10 Hz , simultaneo"
+        },
+        {
+          "title": "Pattern Generators for Reflective Electron-Beam Lithography (REBL)",
+          "year": 2015,
+          "doi": "https://doi.org/10.1016/bs.aiep.2015.02.001",
+          "authors": [
+            "Allen M. Carroll"
+          ],
+          "abstract": ""
+        },
+        {
+          "title": "Optical Angular Momentum",
+          "year": 2016,
+          "doi": "https://doi.org/10.1201/9781482269017",
+          "authors": [
+            "L.J. Allen",
+            "Stephen Mark Barnett",
+            "Miles J. Padgett"
+          ],
+          "abstract": "Spin angular momentum of photons and the associated polarization of light has been known for many years. However, it is only over the last decade or so that physically realizable laboratory light beams have been used to study the orbital angular momentum of light. In many respects, orbital and spin angular momentum behave in a similar manner, but t"
+        }
+      ]
+    },
+    {
+      "primary_paper": {
+        "title": "A Comprehensive Survey on Particle Swarm Optimization Algorithm and Its Applications",
+        "year": 2015,
+        "doi": "https://doi.org/10.1155/2015/931256",
+        "cited_by_count": 1155,
+        "authors": [
+          "Yudong Zhang",
+          "Shuihua Wang‎",
+          "Genlin Ji"
+        ],
+        "abstract": "Particle swarm optimization (PSO) is a heuristic global optimization method, proposed originally by Kennedy and Eberhart in 1995. It is now one of the most commonly used optimization techniques. This survey presented a comprehensive investigation of PSO. On one hand, we provided advances with PSO, including its modifications (including quantum-behaved PSO, bare-bones PSO, chaotic PSO, and fuzzy PSO), population topology (as fully connected, von Neumann, ring, star, random, etc.), hybridization (with genetic algorithm, simulated annealing, Tabu search, artificial immune system, ant colony algorithm, artificial bee colony, differential evolution, harmonic search, and biogeography-based optimization), extensions (to multiobjective, constrained, discrete, and binary optimization), theoretical analysis (parameter selection and tuning, and convergence analysis), and parallel implementation (in multicore, multiprocessor, GPU, and cloud computing forms). On the other hand, we offered a survey "
+      },
+      "second_tier_references": [
+        {
+          "title": "A PSO-Based Algorithm for Load Balancing in Virtual Machines of Cloud Computing Environment",
+          "year": 2012,
+          "doi": "https://doi.org/10.1007/978-3-642-30976-2_17",
+          "authors": [
+            "Zhanghui Liu",
+            "Xiaoli Wang"
+          ],
+          "abstract": ""
+        },
+        {
+          "title": "Task Scheduling Optimization in Cloud Computing Applying Multi-Objective Particle Swarm Optimization",
+          "year": 2013,
+          "doi": "https://doi.org/10.1007/978-3-642-45005-1_17",
+          "authors": [
+            "Fahimeh Ramezani",
+            "Jie Lu B",
+            "Farookh Khadeer Hussain"
+          ],
+          "abstract": ""
+        }
+      ]
+    },
+    {
+      "primary_paper": {
+        "title": "A Survey of Techniques for Approximate Computing",
+        "year": 2016,
+        "doi": "https://doi.org/10.1145/2893356",
+        "cited_by_count": 1062,
+        "authors": [
+          "Sparsh Mittal"
+        ],
+        "abstract": "Approximate computing trades off computation quality with effort expended, and as rising performance demands confront plateauing resource budgets, approximate computing has become not merely attractive, but even imperative. In this article, we present a survey of techniques for approximate computing (AC). We discuss strategies for finding approximable program portions and monitoring output quality, techniques for using AC in different processing units (e.g., CPU, GPU, and FPGA), processor components, memory technologies, and so forth, as well as programming frameworks for AC. We classify these techniques based on several key characteristics to emphasize their similarities and differences. The aim of this article is to provide insights to researchers into working of AC techniques and inspire more efforts in this area to make AC the mainstream computing approach in future systems."
+      },
+      "second_tier_references": [
+        {
+          "title": "ApproxANN: an approximate computing framework for artificial neural network",
+          "year": 2015,
+          "doi": "https://doi.org/10.5555/2755753.2755913",
+          "authors": [
+            "Qian Zhang",
+            "Ting Wang",
+            "Ye Tian"
+          ],
+          "abstract": "Artificial Neural networks (ANNs) are one of the most well-established machine learning techniques and have a wide range of applications, such as Recognition, Mining and Synthesis (RMS). As many of these applications are inherently error-tolerant, in this work, we propose a novel approximate computing framework for ANN, namely ApproxANN. When compared to existing solutions, ApproxANN considers approximation for both computation and memory accesses, thereby achieving more energy savings. To be sp"
+        },
+        {
+          "title": "Opportunities for Nonvolatile Memory Systems in Extreme-Scale High-Performance Computing",
+          "year": 2015,
+          "doi": "https://doi.org/10.1109/mcse.2015.4",
+          "authors": [
+            "Jeffrey S. Vetter",
+            "Sparsh Mittal"
+          ],
+          "abstract": "For extreme-scale high-performance computing systems, system-wide power consumption has been identified as one of the key constraints moving forward, where DRAM main memory systems account for about 30 to 50 percent of a node's overall power consumption. As the benefits of device scaling for DRAM memory slow, it will become increasingly difficult to keep memory capacities balanced with increasing computational rates offered by next-generation processors. However, several emerging memory technolo"
+        },
+        {
+          "title": "Axilog: language support for approximate hardware design",
+          "year": 2015,
+          "doi": "https://doi.org/10.5555/2755753.2755938",
+          "authors": [
+            "Amir Yazdanbakhsh",
+            "Divya Mahajan",
+            "Bradley Thwaites"
+          ],
+          "abstract": "Relaxing the traditional abstraction of near-perfect accuracy in hardware design can lead to significant gains in energy efficiency, area, and performance. To exploit this opportunity, there is a need for design abstractions that can systematically incorporate approximation in hardware design. We introduce Axilog, a set of language annotations, that provides the necessary syntax and semantics for approximate hardware design and reuse in Verilog. Axilog enables the designer to relax the accuracy "
+        },
+        {
+          "title": "Energy-aware hybrid precision selection framework for mobile GPUs",
+          "year": 2013,
+          "doi": "https://doi.org/10.1016/j.cag.2013.03.003",
+          "authors": [
+            "Chih-Chieh Hsiao",
+            "Slo‐Li Chu",
+            "Chen-Yu Chen"
+          ],
+          "abstract": ""
+        },
+        {
+          "title": "Item Unavailable",
+          "year": 1900,
+          "doi": "https://doi.org/10.2172/1150909",
+          "authors": [
+            "Sparsh Mittal"
+          ],
+          "abstract": "Page Not Found - If you're seeing this page, it's because the URL you requested cannot be located. It might not exist or maybe you mistyped it into your browser. But, if you think it's our mistake, please let us know. Otherwise, you have a few options: try using our navigation bar at the top of this page, visit our home page, or browse our products below. - Homepage Basic Content,"
+        }
+      ]
+    }
+  ]
+}

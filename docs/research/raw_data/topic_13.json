@@ -1,0 +1,258 @@
+{
+  "topic_num": "13",
+  "query": "aircraft mass properties center of gravity inertia tensor polyhedron",
+  "candidates": [
+    {
+      "primary_paper": {
+        "title": "Morphing matter: from mechanical principles to robotic applications",
+        "year": 2023,
+        "doi": "https://doi.org/10.20517/ss.2023.42",
+        "cited_by_count": 112,
+        "authors": [
+          "Xudong Yang",
+          "Yuan Zhou",
+          "Huichan Zhao",
+          "Weicheng Huang",
+          "Yifan Wang"
+        ],
+        "abstract": "The adaptability of natural organisms in altering body shapes in response to the environment has inspired the development of artificial morphing matter. These materials encode the ability to transform their geometrical configurations in response to specific stimuli and have diverse applications in soft robotics, wearable electronics, and biomedical devices. However, achieving the morphing of intricate three-dimensional shapes from a two-dimensional flat state is challenging, as it requires manipulations of surface curvature in a controlled manner. In this review, we first summarize the mechanical principles extensively explored for realizing morphing matter, both at the material and structural levels. We then highlight its applications in the soft robotics field. Moreover, we offer insights into the open challenges and opportunities that this rapidly growing field faces. This review aims to inspire researchers to uncover innovative working principles and create multifunctional morphing"
+      },
+      "second_tier_references": [
+        {
+          "title": "Design, fabrication and control of soft robots",
+          "year": 2015,
+          "doi": "https://doi.org/10.1038/nature14543",
+          "authors": [
+            "Daniela L. Rus",
+            "Michael Thomas Tolley"
+          ],
+          "abstract": ""
+        },
+        {
+          "title": "Origami tubes assembled into stiff, yet reconfigurable structures and metamaterials",
+          "year": 2015,
+          "doi": "https://doi.org/10.1073/pnas.1509465112",
+          "authors": [
+            "Evgueni T. Filipov",
+            "Tomohiro Tachi",
+            "Gláucio H. Paulino"
+          ],
+          "abstract": "Thin sheets have long been known to experience an increase in stiffness when they are bent, buckled, or assembled into smaller interlocking structures. We introduce a unique orientation for coupling rigidly foldable origami tubes in a \"zipper\" fashion that substantially increases the system stiffness and permits only one flexible deformation mode through which the structure can deploy. The flexible deployment of the tubular structures is permitted by localized bending of the origami along prescr"
+        },
+        {
+          "title": "Edge Effects Determine the Direction of Bilayer Bending",
+          "year": 2011,
+          "doi": "https://doi.org/10.1021/nl200473p",
+          "authors": [
+            "Silas Alben",
+            "Bavani Balakrisnan",
+            "Elisabeth Smela"
+          ],
+          "abstract": "We elucidate the reason for preferential bending along the long edge in thin rectangular bilayers in which one of the layers is isotropically strained. While this preference has been observed previously, the physical basis for this preference has not been understood. We find that the bending direction is determined by the existence of doubly curved regions at the curled edges, which lower the energy. This energy difference between \"spiral\" and \"cigar\" shapes increases with aspect ratio."
+        },
+        {
+          "title": "Nonlinear Geometric Effects in Mechanical Bistable Morphing Structures",
+          "year": 2012,
+          "doi": "https://doi.org/10.1103/physrevlett.109.114302",
+          "authors": [
+            "Zi Chen",
+            "Qiaohang Guo",
+            "Carmel Majidi"
+          ],
+          "abstract": "Bistable structures associated with nonlinear deformation behavior, exemplified by the Venus flytrap and slap bracelet, can switch between different functional shapes upon actuation. Despite numerous efforts in modeling such large deformation behavior of shells, the roles of mechanical and nonlinear geometric effects on bistability remain elusive. We demonstrate, through both theoretical analysis and tabletop experiments, that two dimensionless parameters control bistability. Our work classifies"
+        },
+        {
+          "title": "Recent Results in Computational Origami",
+          "year": 2002,
+          "doi": "https://doi.org/10.1201/b15735-3",
+          "authors": [
+            "Erik D. Demaine",
+            "Martin L. Demaine"
+          ],
+          "abstract": "Computational origami is a recent branch of computer science studying efficient algorithms for solving paper-folding problems. This field essentially began with Robert Lang's work on algorithmic origami design [25], starting around 1993. Since then, the field of computational origami has grown significantly. The purpose of this paper is to survey the work in the field, with a focus on recent results, and to present several open problems that remain. The survey cannot hope to be complete, but we "
+        }
+      ]
+    },
+    {
+      "primary_paper": {
+        "title": "Attainable Moment Set Optimization to Support Configuration Design: A Required Moment Set Based Approach",
+        "year": 2021,
+        "doi": "https://doi.org/10.3390/app11083685",
+        "cited_by_count": 18,
+        "authors": [
+          "Jiannan Zhang",
+          "Max Söpper",
+          "Florian Holzapfel"
+        ],
+        "abstract": "In this paper, we discuss an attainable moment set (AMS) optimization methodology considering a system’s required moment set (RMS). The AMS describes the achievable moments from a system, given its input limits. An RMS, like an AMS, is a convex set in the moment space, describing the required moments for a system to meet the designed mission profile and disturbance rejection requirements. Given the configuration of a system, its mission requirements, and the derived RMS, the proposed optimization maximizes coverage of the AMS onto the RMS, thus ensuring the system possesses the guaranteed controllability to fulfill its required missions from a design level. To achieve this goal, the variables to optimize are chosen as effector settings, such as the installation position and angle of propellers and control surfaces, which effectively change the AMS without a vast impact on major design parameters, such as mass and moment of inertia. Since the optimization includes massive geometry opera"
+      },
+      "second_tier_references": [
+        {
+          "title": "Multirotor Aerial Vehicles: Modeling, Estimation, and Control of Quadrotor",
+          "year": 2012,
+          "doi": "https://doi.org/10.1109/mra.2012.2206474",
+          "authors": [
+            "Robert E. Mahony",
+            "Vijay Kumar",
+            "Peter Corke"
+          ],
+          "abstract": "This article provides a tutorial introduction to modeling, estimation, and control formultirotor aerial vehicles that includes the common four-rotor or quadrotor case."
+        },
+        {
+          "title": "Control allocation—A survey",
+          "year": 2013,
+          "doi": "https://doi.org/10.1016/j.automatica.2013.01.035",
+          "authors": [
+            "Tor Arne Johansen",
+            "Thor Inge Fossen"
+          ],
+          "abstract": ""
+        },
+        {
+          "title": "The generalized simplex method for minimizing a linear form under linear inequality restraints",
+          "year": 1955,
+          "doi": "https://doi.org/10.2140/pjm.1955.5.183",
+          "authors": [
+            "George B. Dantzig",
+            "Alex Orden",
+            "Philip Wolfe"
+          ],
+          "abstract": "Background and summary.The determination of \"optimum\" solutions of systems of linear inequalities is assuming increasing importance as a tool for mathematical analysis of certain problems in economics, logistics, and the theory of games [l;5] The solution of large systems is becoming more feasible with the advent of high-speed digital computers; however, as in the related problem of inversion of large matrices, there are difficulties which remain to be resolved connected with rank.This paper dev"
+        },
+        {
+          "title": "Constrained control allocation",
+          "year": 1993,
+          "doi": "https://doi.org/10.2514/3.21072",
+          "authors": [
+            "Wayne C. Durham"
+          ],
+          "abstract": ""
+        },
+        {
+          "title": "Constrained control allocation - Three-moment problem",
+          "year": 1994,
+          "doi": "https://doi.org/10.2514/3.21201",
+          "authors": [
+            "Wayne C. Durham"
+          ],
+          "abstract": "This paper presents a method for the solution of the constrained control allocation problem for the case of three moments. The control allocation problem is to find the combination of several flight control effectors for the generation of specified body-axis moments. The number of controls is greater than the number of moments being controlled, and the ranges of the controls are constrained to certain limits. The controls are assumed to be individually linear in their effect throughout their ran"
+        }
+      ]
+    },
+    {
+      "primary_paper": {
+        "title": "Three-dimensional CFD simulations with large displacement of the geometries using a connectivity-change moving mesh approach",
+        "year": 2018,
+        "doi": "https://doi.org/10.1007/s00366-018-0607-5",
+        "cited_by_count": 18,
+        "authors": [
+          "Nicolas Barral",
+          "Frédéric Alauzet"
+        ],
+        "abstract": "This paper deals with three-dimensional (3D) numerical simulations involving 3D moving geometries with large displacements on unstructured meshes. Such simulations are of great value to industry, but remain very time-consuming. A robust moving mesh algorithm coupling an elasticity-like mesh deformation solution and mesh optimizations was proposed in previous works, which removes the need for global remeshing when performing large displacements. The optimizations, and in particular generalized edge/face swapping, preserve the initial quality of the mesh throughout the simulation. We propose to integrate an Arbitrary Lagrangian Eulerian compressible flow solver into this process to demonstrate its capabilities in a full CFD computation context. This solver relies on a local enforcement of the discrete geometric conservation law to preserve the order of accuracy of the time integration. The displacement of the geometries is either imposed, or driven by fluid–structure interaction (FSI). I"
+      },
+      "second_tier_references": [
+        {
+          "title": "Adaptive Moving Mesh Methods",
+          "year": 2010,
+          "doi": "https://doi.org/10.1007/978-1-4419-7916-2",
+          "authors": [
+            "Weizhang Huang",
+            "Robert D. Russell"
+          ],
+          "abstract": ""
+        },
+        {
+          "title": "Anisotropic Delaunay Mesh Adaptation for Unsteady Simulations",
+          "year": 2008,
+          "doi": "https://doi.org/10.1007/978-3-540-87921-3_11",
+          "authors": [
+            "Cécile Dobrzynski",
+            "P. Frey"
+          ],
+          "abstract": ""
+        },
+        {
+          "title": "On the Use of Space Filling Curves for Parallel Anisotropic Mesh Adaptation",
+          "year": 2009,
+          "doi": "https://doi.org/10.1007/978-3-642-04319-2_20",
+          "authors": [
+            "Frédéric Alauzet",
+            "Adrien Loseille"
+          ],
+          "abstract": ""
+        },
+        {
+          "title": "Serial and Parallel Mesh Modification Through a Unique Cavity-Based Primitive",
+          "year": 2013,
+          "doi": "https://doi.org/10.1007/978-3-319-02335-9_30",
+          "authors": [
+            "Adrien Loseille",
+            "Victorien Menier"
+          ],
+          "abstract": ""
+        }
+      ]
+    },
+    {
+      "primary_paper": {
+        "title": "Concept of a Modular Multirotor Heavy Lift Unmanned Aerial Vehicle Platform",
+        "year": 2023,
+        "doi": "https://doi.org/10.3390/aerospace10060528",
+        "cited_by_count": 17,
+        "authors": [
+          "Denis Kotarski",
+          "Petar Piljek",
+          "Marko Pranjić",
+          "Josip Kasać"
+        ],
+        "abstract": "This paper presents a novel concept of a modular multirotor aerial robotic platform that can be used for specific profiles of heavy payload missions. A comprehensive mathematical model of the multirotor unmanned aerial vehicle (UAV) is presented, which is divided into the dynamic model and the control allocation scheme that describes the configuration of the aircraft. The components of the propulsion and energy module are selected, and the characterization of the propulsion units is carried out, as well as a preliminary analysis of the module parameters with regard to the considered payloads from 5 to 50 kg. The main goal is to design a modular aircraft that consists of easy-to-assemble modules and that enables the assembly of different propulsion and energy module configurations. Based on the analysis of system parameters, a modular aerial system is designed and the process of manufacturing using rapid prototyping technologies is presented. Based on the parameters obtained from the ai"
+      },
+      "second_tier_references": [
+        {
+          "title": "PX4: A node-based multithreaded open source robotics framework for deeply embedded platforms",
+          "year": 2015,
+          "doi": "https://doi.org/10.1109/icra.2015.7140074",
+          "authors": [
+            "Lorenz Meier",
+            "Dominik Honegger",
+            "Marc Pollefeys"
+          ],
+          "abstract": "We present a novel, deeply embedded robotics middleware and programming environment. It uses a multithreaded, publish-subscribe design pattern and provides a Unix-like software interface for micro controller applications. We improve over the state of the art in deeply embedded open source systems by providing a modular and standards-oriented platform. Our system architecture is centered around a publish-subscribe object request broker on top of a POSIX application programming interface. This all"
+        },
+        {
+          "title": "AR-Drone as a Platform for Robotic Research and Education",
+          "year": 2011,
+          "doi": "https://doi.org/10.1007/978-3-642-21975-7_16",
+          "authors": [
+            "Tomáš Krajník",
+            "Vojtěch Vonásek",
+            "Daniel Fišer"
+          ],
+          "abstract": ""
+        },
+        {
+          "title": "Design and manufacture of umanned aerial vehicles (UAV) wing structure using composite materials",
+          "year": 2015,
+          "doi": "https://doi.org/10.1002/mawe.201500351",
+          "authors": [
+            "Wojciech Grodzki",
+            "Andrzej Łukaszewicz"
+          ],
+          "abstract": "This paper presents possibilities of simulating composites materials in SolidWorks environment and selected aspects of the unmanned aerial vehicle (UAV) design and manufacturing process (real airplane model was used in Air Cargo Challenge 2013 competition). First part of article contains informations about types of composite materials, mechanical properties and their structures. UAV wing design process is presented as multistage task. Next part of manuscript includes numerical analysis which dea"
+        },
+        {
+          "title": "Survey of Unmanned Helicopter Model-Based Navigation and Control Techniques",
+          "year": 2014,
+          "doi": "https://doi.org/10.1007/s10846-014-0143-5",
+          "authors": [
+            "Jessica Alvarenga",
+            "Nikolaos I. Vitzilaios",
+            "Kimon P. Valavanis"
+          ],
+          "abstract": ""
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,133 @@
+{
+  "topic_num": "11",
+  "query": "atmospheric turbulence wind Dryden von Karman simulation",
+  "candidates": [
+    {
+      "primary_paper": {
+        "title": "Nonlinear Time-Varying Turbulence Signal Processing and Simulation Under Curvilinear Coordinate System",
+        "year": 2016,
+        "doi": "https://doi.org/10.11648/j.com.20160401.11",
+        "cited_by_count": 95,
+        "authors": [
+          "Xiaoyang Liu"
+        ],
+        "abstract": "In order to analyse the nature of the turbulence, the curvilinear coordinate system is established according to the relations of cartesian coordinate system. Aiming at this turbulence mechanism, the turbulence boundary equations were established, then all grid points of the coordinates can be got by the established equations. The dangerous degree measure (risk factor) was put forward. The mathematical model of risk factor was established as to quantitatively describe the danger level of turbulence. A turbulence signal processing algorithm is proposed combined with the Doppler effect and the computing grid. The simulation results show that the curvilinear coordinate system and three-dimensional turbulence field can reflect the characteristics of turbulence, and risk factor can reflect the danger level of turbulence, the proposed turbulence signal processing algorithm can detect and forecast the turbulence effectively."
+      },
+      "second_tier_references": [
+        {
+          "title": "Energy dissipation and flux laws for unsteady turbulence",
+          "year": 2015,
+          "doi": "https://doi.org/10.1016/j.physleta.2015.02.025",
+          "authors": [
+            "Susumu Goto",
+            "John Christos Vassilicos"
+          ],
+          "abstract": ""
+        },
+        {
+          "title": "Characterization of turbulence anisotropy, coherence, and intermittency at a prospective tidal energy site: Observational data analysis",
+          "year": 2014,
+          "doi": "https://doi.org/10.1016/j.renene.2014.11.063",
+          "authors": [
+            "Katherine L. McCaffrey",
+            "Baylor Fox‐Kemper",
+            "Peter E. Hamlington"
+          ],
+          "abstract": ""
+        },
+        {
+          "title": "Intermittency in turbulence",
+          "year": 1993,
+          "doi": "https://doi.org/10.1016/0378-4371(93)90382-e",
+          "authors": [
+            "Detlef Lohse",
+            "Siegfried Großmann"
+          ],
+          "abstract": ""
+        },
+        {
+          "title": "Turbulence–chemistry interactions in a heavy-duty compression–ignition engine",
+          "year": 2014,
+          "doi": "https://doi.org/10.1016/j.proci.2014.06.098",
+          "authors": [
+            "V. Raj Mohan",
+            "Daniel C. Haworth"
+          ],
+          "abstract": ""
+        },
+        {
+          "title": "Wind Shear Target Echo Modeling and Simulation",
+          "year": 2015,
+          "doi": "https://doi.org/10.1155/2015/479804",
+          "authors": [
+            "Xiaoyang Liu",
+            "Chao Liu",
+            "Wanping Liu"
+          ],
+          "abstract": "Wind shear is a dangerous atmospheric phenomenon in aviation. Wind shear is defined as a sudden change of speed or direction of the wind. In order to analyze the influence of wind shear on the efficiency of the airplane, this paper proposes a mathematical model of point target rain echo and weather target signal echo based on Doppler effect. The wind field model is developed in this paper, and the antenna model is also studied by using Bessel function. The spectrum distribution of symmetric and "
+        }
+      ]
+    },
+    {
+      "primary_paper": {
+        "title": "Wind estimation using quadcopter motion: A machine learning approach",
+        "year": 2020,
+        "doi": "https://doi.org/10.1016/j.ast.2020.105699",
+        "cited_by_count": 77,
+        "authors": [
+          "Sam Allison",
+          "He Bai",
+          "Balaji Jayaraman"
+        ],
+        "abstract": ""
+      },
+      "second_tier_references": [
+        {
+          "title": "Gust Loads on Aircraft: Concepts and Applications",
+          "year": 1988,
+          "doi": "https://doi.org/10.2514/4.861888",
+          "authors": [
+            "Frederic M. Hoblit"
+          ],
+          "abstract": "This is a presentation of the determination of gust loads on airplanes, especially continuous turbulence gust loads. It emphasizes the basic concepts involved and covers relationships, definitions of terminology and nomenclature, historical perspective and explanations of calculations."
+        },
+        {
+          "title": "A Metric for Covariance Matrices",
+          "year": 2003,
+          "doi": "https://doi.org/10.1007/978-3-662-05296-9_31",
+          "authors": [
+            "Wolfgang Förstner",
+            "Boudewijn Moonen"
+          ],
+          "abstract": ""
+        },
+        {
+          "title": "Geodesy-The Challenge of the 3rd Millennium",
+          "year": 2003,
+          "doi": "https://doi.org/10.1007/978-3-662-05296-9",
+          "authors": [],
+          "abstract": ""
+        },
+        {
+          "title": "Improvement of Meteorological Data for Air Traffic Management Purposes",
+          "year": 1994,
+          "doi": "https://doi.org/10.2514/atcq.2.2.85",
+          "authors": [
+            "David A. Forrester",
+            "G. Dean"
+          ],
+          "abstract": "The article considers the forecasting of wind and temperature for en-route air traffic management (ATM). The problems of (anti)icing and turbulence are also mentioned, but weather in the terminal area (e.g. cloud, visibility, wind shear, wake vortices) is not considered. First, the broad requirements for meteorological data in ATM are stated and current forecasting methods are briefly described. Next an optimum interpolation model, called WAFTAGE is described and the impact of the density of obs"
+        },
+        {
+          "title": "Small Unmanned Aircraft: Theory and Practice",
+          "year": 2012,
+          "doi": "https://doi.org/10.2514/1.61067",
+          "authors": [
+            "John Valasek"
+          ],
+          "abstract": ""
+        }
+      ]
+    }
+  ]
+}

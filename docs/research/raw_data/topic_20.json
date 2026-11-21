@@ -1,0 +1,247 @@
+{
+  "topic_num": "20",
+  "query": "micro air vehicle bio-inspired flight aerodynamics Reynolds",
+  "candidates": [
+    {
+      "primary_paper": {
+        "title": "Unmanned Aerial Vehicles for Search and Rescue: A Survey",
+        "year": 2023,
+        "doi": "https://doi.org/10.3390/rs15133266",
+        "cited_by_count": 419,
+        "authors": [
+          "Mingyang Lyu",
+          "Yibo Zhao",
+          "Chao Huang",
+          "Hailong Huang"
+        ],
+        "abstract": "In recent years, unmanned aerial vehicles (UAVs) have gained popularity due to their flexibility, mobility, and accessibility in various fields, including search and rescue (SAR) operations. The use of UAVs in SAR can greatly enhance the task success rates in reaching inaccessible or dangerous areas, performing challenging operations, and providing real-time monitoring and modeling of the situation. This article aims to help readers understand the latest progress and trends in this field by synthesizing and organizing papers related to UAV search and rescue. An introduction to the various types and components of UAVs and their importance in SAR operations is settled first. Additionally, we present a comprehensive review of sensor integrations in UAVs for SAR operations, highlighting their roles in target perception, localization, and identification. Furthermore, we elaborate on the various applications of UAVs in SAR, including on-site monitoring and modeling, perception and localizati"
+      },
+      "second_tier_references": [
+        {
+          "title": "Basic Helicopter Aerodynamics",
+          "year": 2011,
+          "doi": "https://doi.org/10.1002/9781119994114",
+          "authors": [
+            "John Seddon",
+            "Simon Newman"
+          ],
+          "abstract": "Basic Helicopter Aerodynamics is widely appreciated as an easily accessible, rounded introduction to the first principles of the aerodynamics of helicopter flight. Simon Newman has brought this third edition completely up to date with a full new set of illustrations and imagery. An accompanying website www.wiley.com/go/seddon contains all the calculation files used in the book, problems, solutions, PPT slides and supporting MATLAB® code. Simon Newman addresses the unique considerations applicabl"
+        },
+        {
+          "title": "Deep learning helicopter dynamics models",
+          "year": 2015,
+          "doi": "https://doi.org/10.1109/icra.2015.7139643",
+          "authors": [
+            "Ali Punjani",
+            "Pieter Abbeel"
+          ],
+          "abstract": "We consider the problem of system identification of helicopter dynamics. Helicopters are complex systems, coupling rigid body dynamics with aerodynamics, engine dynamics, vibration, and other phenomena. Resultantly, they pose a challenging system identification problem, especially when considering non-stationary flight regimes. We pose the dynamics modeling problem as direct high-dimensional regression, and take inspiration from recent results in Deep Learning to represent the helicopter dynamic"
+        },
+        {
+          "title": "AI 2007: Advances in Artificial Intelligence",
+          "year": 2007,
+          "doi": "https://doi.org/10.1007/978-3-540-76928-6",
+          "authors": [
+            "Mehmet Ali Orgun",
+            "Thornton, John"
+          ],
+          "abstract": ""
+        },
+        {
+          "title": "Building crack inspection using small UAV",
+          "year": 2015,
+          "doi": "https://doi.org/10.1109/icact.2015.7224792",
+          "authors": [
+            "Sung-suk Choi",
+            "Eung-Kon Kim"
+          ],
+          "abstract": "As for large scaled skyscrapers, it is time-consuming, requires a significant amount of expenditures, and too risky for an inspector to examine in person with tools on hands. Therefore, unmanned aerial vehicle is specifically required to inspect the facilities in order to deal with limited access of an inspector, to examine multiple structures, and to confirm whether the inspected areas are damaged in each season or daily time frame. This study is intended to specifically develop the small aeria"
+        }
+      ]
+    },
+    {
+      "primary_paper": {
+        "title": "A review of modelling and analysis of morphing wings",
+        "year": 2018,
+        "doi": "https://doi.org/10.1016/j.paerosci.2018.06.002",
+        "cited_by_count": 398,
+        "authors": [
+          "Daochun Li",
+          "Shiwei Zhao",
+          "Andrea DA RONCH",
+          "Jinwu Xiang",
+          "Jernej Drofelnik"
+        ],
+        "abstract": ""
+      },
+      "second_tier_references": [
+        {
+          "title": "The mechanics of composite corrugated structures: A review with applications in morphing aircraft",
+          "year": 2015,
+          "doi": "https://doi.org/10.1016/j.compstruct.2015.07.099",
+          "authors": [
+            "Iman Dayyani",
+            "Alexander D. Shaw",
+            "Erick I. Saavedra Flores"
+          ],
+          "abstract": ""
+        },
+        {
+          "title": "Aerodynamic study of corrugated skins for morphing wing applications",
+          "year": 2010,
+          "doi": "https://doi.org/10.1017/s0001924000003687",
+          "authors": [
+            "C. Thill",
+            "J. D. Downsborough",
+            "S. J. Lai"
+          ],
+          "abstract": "Abstract Corrugated structures offer a potential solution for morphing wing skin applications due to their anisotropic behaviour that allows chordwise camber and length changes. Aerofoils with corrugated skins in the aft 1/3 of the chordwise section have been studied experimentally and computationally using various corrugation shapes and forms (sinusoidal, trapezoidal and triangular) at different Reynolds numbers. The study showed that the aerodynamic performance is highly dependent on corrugati"
+        },
+        {
+          "title": "Tensor product model-based control of morphing aircraft in transition process",
+          "year": 2015,
+          "doi": "https://doi.org/10.1177/0954410015591835",
+          "authors": [
+            "Zhen He",
+            "Ming Yin",
+            "Yuping Lu"
+          ],
+          "abstract": "Morphing aircraft can change their shapes in order to acquire enhanced flight performance. In the transition process of shape change, the aerodynamics and dynamics of aircraft would change dramatically, and the aircraft is a time-varying and highly nonlinear system. This article presents a tensor product (TP) modeling method and a TP model-based control design method for a kind of morphing aircraft in transition process. First, a new linear parameter varying (LPV) modeling method is proposed to "
+        },
+        {
+          "title": "Modeling and Experiments of the Hysteretic Response of an Active Hydrofoil Actuated by SMA Line Actuators",
+          "year": 1999,
+          "doi": "https://doi.org/10.1007/978-94-011-4611-1_18",
+          "authors": [
+            "Dimitris C. Lagoudas",
+            "Luke J. Garner",
+            "Othon K. Rediniotis"
+          ],
+          "abstract": ""
+        }
+      ]
+    },
+    {
+      "primary_paper": {
+        "title": "Fundamentals of soft robot locomotion",
+        "year": 2017,
+        "doi": "https://doi.org/10.1098/rsif.2017.0101",
+        "cited_by_count": 309,
+        "authors": [
+          "Marcello Calisti",
+          "Giacomo Picardi",
+          "Cecilia Laschi"
+        ],
+        "abstract": "Soft robotics and its related technologies enable robot abilities in several robotics domains including, but not exclusively related to, manipulation, manufacturing, human-robot interaction and locomotion. Although field applications have emerged for soft manipulation and human-robot interaction, mobile soft robots appear to remain in the research stage, involving the somehow conflictual goals of having a deformable body and exerting forces on the environment to achieve locomotion. This paper aims to provide a reference guide for researchers approaching mobile soft robotics, to describe the underlying principles of soft robot locomotion with its pros and cons, and to envisage applications and further developments for mobile soft robotics."
+      },
+      "second_tier_references": [
+        {
+          "title": "Bioinspired locomotion and grasping in water: the soft eight-arm OCTOPUS robot",
+          "year": 2015,
+          "doi": "https://doi.org/10.1088/1748-3190/10/3/035003",
+          "authors": [
+            "Matteo Cianchetti",
+            "Marcello Calisti",
+            "Laura Margheri"
+          ],
+          "abstract": "The octopus is an interesting model for the development of soft robotics, due to its high deformability, dexterity and rich behavioural repertoire. To investigate the principles of octopus dexterity, we designed an eight-arm soft robot and evaluated its performance with focused experiments. The OCTOPUS robot presented here is a completely soft robot, which integrates eight arms extending in radial direction and a central body which contains the main processing units. The front arms are mainly us"
+        },
+        {
+          "title": "The Bioinspiration Design Paradigm: A Perspective for Soft Robotics",
+          "year": 2013,
+          "doi": "https://doi.org/10.1089/soro.2013.0004",
+          "authors": [
+            "Mirko Kovač"
+          ],
+          "abstract": "Abstract Biological inspiration is a key design approach for the development of innovative robots. Flapping wings, sensitized robotic skins, insect-inspired compound eyes, and artificial muscles are examples of nature acting as a source of inspiration for the design of novel artificial systems. The heart of successful bioinspired design is the abstraction of the underlying design principles found in biology and their implementation in robotics using state-of-the-art technology. In this article, "
+        },
+        {
+          "title": "Flexible flapping wings with self-organized microwrinkles",
+          "year": 2015,
+          "doi": "https://doi.org/10.1088/1748-3190/10/4/046005",
+          "authors": [
+            "Hiroto Tanaka",
+            "Hiroyuki Okada",
+            "Yosuke Shimasue"
+          ],
+          "abstract": "Bio-inspired flapping wings with a wrinkled wing membrane were designed and fabricated. The wings consist of carbon fibre-reinforced plastic frames and a polymer film with microscale wrinkles inspired by bird feathers and the corrugations of insect wings. The flexural and tensile stiffness of the wrinkled film can be controlled by modifying the orientations and waveforms of the wrinkles, thereby expanding the design space of flexible wings for micro flapping-wing aerial robots. A self-organizati"
+        },
+        {
+          "title": "Characterization of running with compliant curved legs",
+          "year": 2015,
+          "doi": "https://doi.org/10.1088/1748-3190/10/4/046008",
+          "authors": [
+            "Jae‐Yun Jun",
+            "Jonathan E. Clark"
+          ],
+          "abstract": "Running with compliant curved legs involves the progression of the center of pressure, the changes of both the leg's stiffness and effective rest length, and the shift of the location of the maximum stress point along the leg. These phenomena are product of the geometric and material properties of these legs, and the rolling motion produced during stance. We examine these aspects with several reduced-order dynamical models to relate the leg's design parameters (such as normalized foot radius, le"
+        }
+      ]
+    },
+    {
+      "primary_paper": {
+        "title": "Structural Analysis of a Dragonfly Wing",
+        "year": 2010,
+        "doi": "https://doi.org/10.1007/s11340-010-9411-x",
+        "cited_by_count": 247,
+        "authors": [
+          "Stefan R. Jongerius",
+          "David Lentink"
+        ],
+        "abstract": "Dragonfly wings are highly corrugated, which increases the stiffness and strength of the wing significantly, and results in a lightweight structure with good aerodynamic performance. How insect wings carry aerodynamic and inertial loads, and how the resonant frequency of the flapping wings is tuned for carrying these loads, is however not fully understood. To study this we made a three-dimensional scan of a dragonfly ( Sympetrum vulgatum ) fore- and hindwing with a micro-CT scanner. The scans contain the complete venation pattern including thickness variations throughout both wings. We subsequently approximated the forewing architecture with an efficient three-dimensional beam and shell model. We then determined the wing’s natural vibration modes and the wing deformation resulting from analytical estimates of 8 load cases containing aerodynamic and inertial loads (using the finite element solver Abaqus). Based on our computations we find that the inertial loads are 1.5 to 3 times highe"
+      },
+      "second_tier_references": [
+        {
+          "title": "Mechanical Design in Organisms",
+          "year": 2020,
+          "doi": "https://doi.org/10.2307/j.ctv143mdjg",
+          "authors": [
+            "S. A. Wainwright",
+            "W. D. Biggs",
+            "J. D. Currey"
+          ],
+          "abstract": "This book deals with an interface between mechanical engineering and biology. Available for the first time in paperback, it reviews biological structural materials and systems and their mechanically important features and demonstrates that function at any particular level of biological integration is permitted and controlled by structure at lower levels of integration. Five chapters discuss the properties of materials in general and those of biomaterials in particular. The authors examine the de"
+        },
+        {
+          "title": "The novel aerodynamics of insect flight: applications to micro-air vehicles",
+          "year": 1999,
+          "doi": "https://doi.org/10.1242/jeb.202.23.3439",
+          "authors": [
+            "C. P. Ellington"
+          ],
+          "abstract": "The wing motion in free flight has been described for insects ranging from 1 to 100 mm in wingspan. To support the body weight, the wings typically produce 2-3 times more lift than can be accounted for by conventional aerodynamics. Some insects use the fling mechanism: the wings are clapped together and then flung open before the start of the downstroke, creating a lift-enhancing vortex around each wing. Most insects, however, rely on a leading-edge vortex (LEV) created by dynamic stall during f"
+        },
+        {
+          "title": "Kinematic Analysis of Symmetrical Flight Manoeuvres of Odonata",
+          "year": 1989,
+          "doi": "https://doi.org/10.1242/jeb.144.1.13",
+          "authors": [
+            "Georg Rüppell"
+          ],
+          "abstract": "ABSTRACT By analysis of slow-motion films of dragonflies and damselflies in free flight, released in front of a backdrop or startled during flight, the following flight parameters have been quantified for symmetrical manoeuvres: wingbeat frequency, relative durations of up-and downstroke, phase relationships of the beats of fore-and hindwings, stroke amplitude, mean stroke velocity, flight velocity, nondimensional flight velocity, advance ratio, acceleration, angle of attack and stroke plane. Th"
+        },
+        {
+          "title": "The Control of Wing Kinematics And Flight Forces In Fruit Flies (Drosophila Spp.)",
+          "year": 1998,
+          "doi": "https://doi.org/10.1242/jeb.201.3.385",
+          "authors": [
+            "Fritz‐Olaf Lehmann",
+            "Michael H. Dickinson"
+          ],
+          "abstract": "By simultaneously measuring flight forces and stroke kinematics in several species of fruit flies in the genus Drosophila, we have investigated the relationship between wing motion and aerodynamic force production. We induced tethered flies to vary their production of total flight force by presenting them with a vertically oscillating visual background within a closed-loop flight arena. In response to the visual motion, flies modulated their flight force by changing the translational velocity of"
+        },
+        {
+          "title": "Clapping-wing Micro Air Vehicle of Insect Size",
+          "year": 2011,
+          "doi": "https://doi.org/10.1007/978-4-431-73380-5_26",
+          "authors": [
+            "Yoshiyuki Kawamura",
+            "Satoshi Souda",
+            "Satoshi Nishimoto"
+          ],
+          "abstract": ""
+        }
+      ]
+    }
+  ]
+}

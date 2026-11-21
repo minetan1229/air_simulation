@@ -1,0 +1,202 @@
+{
+  "topic_num": "06",
+  "query": "aircraft flight dynamic stability longitudinal lateral trim",
+  "candidates": [
+    {
+      "primary_paper": {
+        "title": "Development of Linear-Parameter-Varying Models for Aircraft",
+        "year": 2004,
+        "doi": "https://doi.org/10.2514/1.9165",
+        "cited_by_count": 376,
+        "authors": [
+          "Andrés Marcos",
+          "Gary Balas"
+        ],
+        "abstract": "Reprinted with permission of the American Institute of Aeronautics and Astronautics, Inc. See http://www.aiaa.org/content.cfm?pageid=2 for more information."
+      },
+      "second_tier_references": [
+        {
+          "title": "LPV control design for pitch-axis missile autopilots",
+          "year": 2002,
+          "doi": "https://doi.org/10.1109/cdc.1995.478672",
+          "authors": [
+            "Fen Wu",
+            "Andy Packard",
+            "G.J. Balas"
+          ],
+          "abstract": "The missile pitch-axis autopilot is designed using linear parameter-varying (LPV) control theory. The controller guarantees quadratic stability and bounded induced L/sub 2/-norm performance for the missile plant. Our approach is motivated by gain-scheduling methodology and provides a well founded and systematic procedure for high performance missile autopilot design."
+        },
+        {
+          "title": "On the design of LPV controllers for the F-14 aircraft lateral-directional axis during powered approach",
+          "year": 1997,
+          "doi": "https://doi.org/10.1109/acc.1997.611768",
+          "authors": [
+            "G.J. Balas",
+            "Ian J. Fialho",
+            "Andy Packard"
+          ],
+          "abstract": "Presents the preliminary design and testing of a linear parameter-varying (LPV) controller for the F-14 aircraft lateral-directional axis. The controller is designed for the powered approach flight envelope, which consists of angle-of-attack/airspeed variations from 2 degrees/182 knots to 14 degrees/126 knots. The design is based on four linearized models at /spl alpha/=2, 6, 10.5, and 14 degrees angle-of-attack. The resulting LPV controller performs well when implemented in a Simulink nonlinear"
+        },
+        {
+          "title": "Analysis of linear parameter varying system models based on reachable sets",
+          "year": 2003,
+          "doi": "https://doi.org/10.1109/acc.2002.1024776",
+          "authors": [
+            "Jong-Yeob Shin"
+          ],
+          "abstract": "Presents the analysis method of quasi-LPV models, comparing the ellipsoid set which contains the reachable set of a nonlinear system to determine which quasi-LPV model is less conservative to present the nonlinear dynamics. Quasi-LPV models are constructed from a nonlinear model using different methods, to facilitate synthesis of an LPV controller for the nonlinear system. The comparison results of the closed-loop system performance with the synthesized LPV controllers correspond to the analysis"
+        }
+      ]
+    },
+    {
+      "primary_paper": {
+        "title": "Applications of the unsteady vortex-lattice method in aircraft aeroelasticity and flight dynamics",
+        "year": 2012,
+        "doi": "https://doi.org/10.1016/j.paerosci.2012.06.001",
+        "cited_by_count": 308,
+        "authors": [
+          "Joseba Murua",
+          "Rafael Palacios",
+          "J. M. R. Graham"
+        ],
+        "abstract": ""
+      },
+      "second_tier_references": [
+        {
+          "title": "Low-Speed Aerodynamics",
+          "year": 2001,
+          "doi": "https://doi.org/10.1017/cbo9780511810329",
+          "authors": [
+            "Joseph Katz",
+            "Allen Plotkin"
+          ],
+          "abstract": "Low-speed aerodynamics is important in the design and operation of aircraft flying at low Mach number, and ground and marine vehicles. This 2001 book offers a modern treatment of the subject, both the theory of inviscid, incompressible, and irrotational aerodynamics and the computational techniques now available to solve complex problems. A unique feature of the text is that the computational approach (from a single vortex element to a three-dimensional panel formulation) is interwoven throughou"
+        },
+        {
+          "title": "An Improved Vortex Lattice Method for Nonstationary Problems",
+          "year": 2001,
+          "doi": "https://doi.org/10.1023/a:1011325112413",
+          "authors": [
+            "S. A. Dovgii",
+            "A. V. Shekhovtsov"
+          ],
+          "abstract": ""
+        },
+        {
+          "title": "Progress in Computational Flow-Structure Interaction",
+          "year": 2003,
+          "doi": "https://doi.org/10.1007/978-3-540-45489-2",
+          "authors": [
+            "George N. Barakos",
+            "Dimitris Drikakis"
+          ],
+          "abstract": ""
+        },
+        {
+          "title": "A Compilation of the Mathematics Leading to the Doublet Lattice Method",
+          "year": 1992,
+          "doi": "https://doi.org/10.21236/ada256304",
+          "authors": [
+            "Maxwell Blair"
+          ],
+          "abstract": "This report provides a theoretical development of the doublet lattice method, the method of choice for most subsonic unsteady aerodynamic modelling for over twenty years. This is a tutorial based on many-key mathematical developments provided in the References section. An example source code is provided in the Appendix."
+        }
+      ]
+    },
+    {
+      "primary_paper": {
+        "title": "Nonlinear Flight Dynamics of Very Flexible Aircraft",
+        "year": 2007,
+        "doi": "https://doi.org/10.2514/1.27606",
+        "cited_by_count": 291,
+        "authors": [
+          "Christopher M. Shearer",
+          "Carlos E. S. Cesnik"
+        ],
+        "abstract": "Peer Reviewed"
+      },
+      "second_tier_references": [
+        {
+          "title": "Advanced Dynamics",
+          "year": 2003,
+          "doi": "https://doi.org/10.1017/cbo9780511800207",
+          "authors": [
+            "Donald T. Greenwood"
+          ],
+          "abstract": "Advanced Dynamics is a broad and detailed description of the analytical tools of dynamics as used in mechanical and aerospace engineering. The strengths and weaknesses of various approaches are discussed, and particular emphasis is placed on learning through problem solving. The book begins with a thorough review of vectorial dynamics and goes on to cover Lagrange's and Hamilton's equations as well as less familiar topics such as impulse response, and differential forms and integrability. Techni"
+        },
+        {
+          "title": "Response of B-2 aircraft to nonuniform spanwise turbulence",
+          "year": 1993,
+          "doi": "https://doi.org/10.2514/3.46394",
+          "authors": [
+            "John P. Crimaldi",
+            "Robert T. Britt",
+            "William P. Rodden"
+          ],
+          "abstract": "Design load requirements for random gusts prescribe a one-dimensional gust field, i.e., a field that is uniform spanwise for a vertical gust. By definition, such a gust will produce purely symmetric vehicle response with corresponding symmetric stresses. The more general case of a three-dimensional gust will cause an asymmetric response. The difference in response characteristics which may result are exemplified by the fact that at the centerline of a flying wing, symmetric shear and torsion are"
+        }
+      ]
+    },
+    {
+      "primary_paper": {
+        "title": "Review of designs and flight control techniques of hybrid and convertible VTOL UAVs",
+        "year": 2021,
+        "doi": "https://doi.org/10.1016/j.ast.2021.107035",
+        "cited_by_count": 287,
+        "authors": [
+          "Guillaume Ducard",
+          "Mike Allenspach"
+        ],
+        "abstract": "This paper provides a broad perspective and analysis of the work done in control of hybrid and convertible unmanned aerial vehicles (UAVs) for the main existing designs. These flying machines are capable of vertical take off and landing (VTOL) in helicopter mode and able to transition to high-speed forward flight in airplane mode and vice versa. This paper aims at helping engineers and researchers develop flight control systems for VTOL UAVs. To this end, a historical perspective first shows the technological advances in VTOL aircraft over the years. The main VTOL concepts and state-of-art flight control methods for VTOL UAVs are presented and discussed. This study shows both the common parts and the fundamental differences in the modeling, guidance, control, and control allocation for each hybrid-VTOL-UAV type. The open challenges and the current trends in the field are highlighted. These are namely: 1) augmenting or replacing classical controllers with data-driven methods such as neu"
+      },
+      "second_tier_references": [
+        {
+          "title": "Design and control of quadrotors with application to autonomous flying",
+          "year": 2006,
+          "doi": "https://doi.org/10.5075/epfl-thesis-3727",
+          "authors": [
+            "Samir Bouabdallah"
+          ],
+          "abstract": "This thesis is about modelling, design and control of Miniature Flying Robots (MFR) with a focus on Vertical Take-Off and Landing (VTOL) systems and specifically, micro quadrotors. It introduces a mathematical model for simulation and control of such systems. It then describes a design methodology for a miniature rotorcraft. The methodology is subsequently applied to design an autonomous quadrotor named OS4. Based on the mathematical model, linear and nonlinear control techniques are used to des"
+        },
+        {
+          "title": "Fault-tolerant Flight Control and Guidance Systems: Practical Methods for Small Unmanned Aerial Vehicles",
+          "year": 2009,
+          "doi": "https://doi.org/10.1007/978-1-84882-561-1",
+          "authors": [
+            "Guillaume Ducard"
+          ],
+          "abstract": ""
+        },
+        {
+          "title": "Disturbance Observer Based Control: Aerospace Applications",
+          "year": 2013,
+          "doi": "https://doi.org/10.1007/978-0-8176-4893-0_8",
+          "authors": [
+            "Yuri B. Shtessel",
+            "Christopher Edwards",
+            "Leonid M. Fridman"
+          ],
+          "abstract": ""
+        },
+        {
+          "title": "53rd IEEE Conference on Decision and Control",
+          "year": 2014,
+          "doi": "https://doi.org/10.1109/cdc18905.2014",
+          "authors": [],
+          "abstract": ""
+        },
+        {
+          "title": "Adaptive Control Techniques for Transition-to-Hover Flight of Fixed-Wing UAVs",
+          "year": 2013,
+          "doi": "https://doi.org/10.15368/theses.2013.191",
+          "authors": [
+            "Brian Decimo Marchini"
+          ],
+          "abstract": "Fixed-wing unmanned aerial vehicles (UAVs) with the ability to hover combine the speed and endurance of traditional fixed-wing fight with the stable hovering and vertical takeoff and landing (VTOL) capabilities of helicopters and quadrotors. This combination of abilities can provide strategic advantages for UAV operators, especially when operating in urban environments where the airspace may be crowded with obstacles. Traditionally, fixed-wing UAVs with hovering capabilities had to be custom des"
+        }
+      ]
+    }
+  ]
+}

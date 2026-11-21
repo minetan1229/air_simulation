@@ -1,0 +1,336 @@
+{
+  "topic_num": "05",
+  "query": "six degree of freedom flight dynamics RK4 quaternion",
+  "candidates": [
+    {
+      "primary_paper": {
+        "title": "VINS-Mono: A Robust and Versatile Monocular Visual-Inertial State Estimator",
+        "year": 2018,
+        "doi": "https://doi.org/10.1109/tro.2018.2853729",
+        "cited_by_count": 4642,
+        "authors": [
+          "Tong Qin",
+          "Peiliang Li",
+          "Shaojie Shen"
+        ],
+        "abstract": "One camera and one low-cost inertial measurement unit (IMU) form a monocular visual-inertial system (VINS), which is the minimum sensor suite (in size, weight, and power) for the metric six degrees-of-freedom (DOF) state estimation. In this paper, we present VINS-Mono: a robust and versatile monocular visual-inertial state estimator. Our approach starts with a robust procedure for estimator initialization. A tightly coupled, nonlinear optimization-based method is used to obtain highly accurate visual-inertial odometry by fusing preintegrated IMU measurements and feature observations. A loop detection module, in combination with our tightly coupled formulation, enables relocalization with minimum computation. We additionally perform 4-DOF pose graph optimization to enforce the global consistency. Furthermore, the proposed system can reuse a map by saving and loading it in an efficient way. The current and previous maps can be merged together by the global pose graph optimization. We val"
+      },
+      "second_tier_references": [
+        {
+          "title": "LSD-SLAM: Large-Scale Direct Monocular SLAM",
+          "year": 2014,
+          "doi": "https://doi.org/10.1007/978-3-319-10605-2_54",
+          "authors": [
+            "Jakob Julian Engel",
+            "Thomas Schöps",
+            "Daniel Cremers"
+          ],
+          "abstract": ""
+        },
+        {
+          "title": "BRIEF: Binary Robust Independent Elementary Features",
+          "year": 2010,
+          "doi": "https://doi.org/10.1007/978-3-642-15561-1_56",
+          "authors": [
+            "Michael Calonder",
+            "Vincent Lepetit",
+            "Christoph Strecha"
+          ],
+          "abstract": ""
+        },
+        {
+          "title": "Scale Drift-Aware Large Scale Monocular SLAM",
+          "year": 2011,
+          "doi": "https://doi.org/10.7551/mitpress/9123.003.0014",
+          "authors": [
+            "Hauke Strasdat",
+            "J. M. M. Montiel",
+            "Andrew J. Davison"
+          ],
+          "abstract": "Abstract—State of the art visual SLAM systems have recently been presented which are capable of accurate, large-scale and real-time performance, but most of these require stereo vision. Important application areas in robotics and beyond open up if similar performance can be demonstrated using monocular vision, since a single camera will always be cheaper, more compact and easier to calibrate than a multi-camera rig. With high quality estimation, a single camera moving through a static scene of c"
+        },
+        {
+          "title": "Tightly-coupled monocular visual-inertial fusion for autonomous flight of rotorcraft MAVs",
+          "year": 2015,
+          "doi": "https://doi.org/10.1109/icra.2015.7139939",
+          "authors": [
+            "Shaojie Shen",
+            "Nathan Michael",
+            "Vijay Kumar"
+          ],
+          "abstract": "There have been increasing interests in the robotics community in building smaller and more agile autonomous micro aerial vehicles (MAVs). In particular, the monocular visual-inertial system (VINS) that consists of only a camera and an inertial measurement unit (IMU) forms a great minimum sensor suite due to its superior size, weight, and power (SWaP) characteristics. In this paper, we present a tightly-coupled nonlinear optimization-based monocular VINS estimator for autonomous rotorcraft MAVs."
+        },
+        {
+          "title": "Automatic re-initialization and failure recovery for aggressive flight with a monocular vision-based quadrotor",
+          "year": 2015,
+          "doi": "https://doi.org/10.1109/icra.2015.7139420",
+          "authors": [
+            "Matthias Faessler",
+            "Flavio Fontana",
+            "Christian Förster"
+          ],
+          "abstract": "Autonomous, vision-based quadrotor flight is widely regarded as a challenging perception and control problem since the accuracy of a flight maneuver is strongly influenced by the quality of the on-board state estimate. In addition, any vision-based state estimator can fail due to the lack of visual information in the scene or due to the loss of feature tracking after an aggressive maneuver. When this happens, the robot should automatically re-initialize the state estimate to maintain its autonom"
+        }
+      ]
+    },
+    {
+      "primary_paper": {
+        "title": "RAMP-Net: A Robust Adaptive MPC for Quadrotors via Physics-informed Neural Network",
+        "year": 2023,
+        "doi": "https://doi.org/10.1109/icra48891.2023.10161410",
+        "cited_by_count": 36,
+        "authors": [
+          "Sourav Sanyal",
+          "Kaushik Roy"
+        ],
+        "abstract": "Model Predictive Control (MPC) is a state-of-the-art (SOTA) control technique which requires solving hard constrained optimization problems iteratively. For uncertain dynamics, analytical model based robust MPC imposes additional constraints, increasing the hardness of the problem. The problem exacerbates in performance-critical applications, when more compute is required in lesser time. Data-driven regression methods such as Neural Networks have been proposed in the past to approximate system dynamics. However, such models rely on high volumes of labeled data, in the absence of symbolic analytical priors. This incurs non-trivial training overheads. Physics-informed Neural Networks (PINNs) have gained traction for approximating non-linear system of ordinary differential equations (ODEs), with reasonable accuracy. In this work, we propose a Robust Adaptive MPC framework via PINNs (RAMP-Net), which uses a neural network trained partly from simple ODEs and partly from data. A physics loss"
+      },
+      "second_tier_references": [
+        {
+          "title": "Mathematical Control Theory: Deterministic Finite Dimensional Systems",
+          "year": 1990,
+          "doi": "https://doi.org/10.1007/978-1-4612-0577-7",
+          "authors": [
+            "Eduardo D. Sontag"
+          ],
+          "abstract": ""
+        },
+        {
+          "title": "Robust model predictive control of constrained linear systems with bounded disturbances",
+          "year": 2004,
+          "doi": "https://doi.org/10.1016/j.automatica.2004.08.019",
+          "authors": [
+            "D.Q. Mayne",
+            "Maria Marta Seron",
+            "Saša V. Raković"
+          ],
+          "abstract": ""
+        },
+        {
+          "title": "ACADO toolkit—An open‐source framework for automatic control and dynamic optimization",
+          "year": 2010,
+          "doi": "https://doi.org/10.1002/oca.939",
+          "authors": [
+            "Boris Houska",
+            "Hans Joachim Ferreau",
+            "Moritz Diehl"
+          ],
+          "abstract": "Abstract In this paper the software environment and algorithm collection ACADO Toolkit is presented, which implements tools for automatic control and dynamic optimization. It provides a general framework for using a great variety of algorithms for direct optimal control, including model predictive control as well as state and parameter estimation. The ACADO Toolkit is implemented as a self‐contained C++ code, while the object‐oriented design allows for convenient coupling of existing optimizatio"
+        },
+        {
+          "title": "Model Predictive Control",
+          "year": 2012,
+          "doi": "https://doi.org/10.1155/2012/240898",
+          "authors": [
+            "Baocang Ding",
+            "Marcin T. Cychowski",
+            "Yugeng Xi"
+          ],
+          "abstract": "1Ministry of Education Key Lab For Intelligent Networks and Network Security (MOE KLINNS Lab), Department of Automation, School of Electronic and Information Engineering, Xi’an Jiaotong University, Xi’an 710049, China 2NIMBUS Centre for Embedded Systems Research, Cork Institute of Technology, Rossa Avenue, Cork, Ireland 3Department of Automation, Shanghai Jiaotong University, Shanghai 200240, China 4 School of Electronic and Electrical Engineering, Nanyang Technological University, BLK S2, Singa"
+        },
+        {
+          "title": "Neural Network-Based Model Predictive Control: Fault Tolerance and Stability",
+          "year": 2014,
+          "doi": "https://doi.org/10.1109/tcst.2014.2354981",
+          "authors": [
+            "Krzysztof Patan"
+          ],
+          "abstract": "This brief deals with nonlinear model predictive control designed for a tank unit. The predictive controller is realized by means of a recurrent neural network, which acts as a one-step ahead predictor. Then, based on the neural predictor, the control law is derived solving an optimization problem. An important issue in control theory is stability of the control system. In this brief, this problem is investigated by showing that a cost function is monotonically decreasing with respect to time. T"
+        }
+      ]
+    },
+    {
+      "primary_paper": {
+        "title": "Nonlinear Model Predictive Control for Cooperative Transportation and Manipulation of Cable Suspended Payloads with Multiple Quadrotors",
+        "year": 2023,
+        "doi": "https://doi.org/10.1109/iros55552.2023.10341785",
+        "cited_by_count": 35,
+        "authors": [
+          "Guanrui Li",
+          "Giuseppe Loianno"
+        ],
+        "abstract": "Autonomous Micro Aerial Vehicles (MAVs) such as quadrotors equipped with manipulation mechanisms have the potential to assist humans in tasks such as construction and package delivery. Cables are a promising option for manipulation mechanisms due to their low weight, low cost, and simple design. However, designing control and planning strategies for cable mechanisms presents challenges due to indirect load actuation, nonlinear configuration space, and highly coupled system dynamics. In this paper, we propose a novel Nonlinear Model Predictive Control (NMPC) method that enables a team of quadrotors to manipulate a rigid-body payload in all 6 degrees of freedom via suspended cables. Our approach can concurrently exploit, as part of the receding horizon optimization, the available mechanical system redundancies to perform additional tasks such as inter-robot separation and obstacle avoidance while respecting payload dynamics and actuator constraints. To address real-time computational req"
+      },
+      "second_tier_references": [
+        {
+          "title": "Cooperative manipulation and transportation with aerial robots",
+          "year": 2010,
+          "doi": "https://doi.org/10.1007/s10514-010-9205-0",
+          "authors": [
+            "Nathan Michael",
+            "Jonathan Fink",
+            "Vijay Kumar"
+          ],
+          "abstract": ""
+        },
+        {
+          "title": "Planning and control for cooperative manipulation and transportation with aerial robots",
+          "year": 2010,
+          "doi": "https://doi.org/10.1177/0278364910382803",
+          "authors": [
+            "Jonathan Fink",
+            "Nathan Michael",
+            "Soonkyum Kim"
+          ],
+          "abstract": "We consider the planning and control of multiple aerial robots manipulating and transporting a payload in three dimensions via cables. Individual robot control laws and motion plans enable the control of the payload (position and orientation) along a desired trajectory. We address the fact that robot configurations may admit multiple payload equilibrium solutions by developing constraints for the robot configuration that guarantee the existence of a unique payload pose. Further, we formulate ind"
+        },
+        {
+          "title": "Geometric control of cooperating multiple quadrotor UAVs with a suspended payload",
+          "year": 2013,
+          "doi": "https://doi.org/10.1109/cdc.2013.6760757",
+          "authors": [
+            "Tae Young Lee",
+            "Koushil Sreenath",
+            "Vijay Kumar"
+          ],
+          "abstract": "This paper investigates tracking controls for an arbitrary number of cooperating quadrotor unmanned aerial vehicles with a suspended load. Assuming that a point mass is connected to multiple quadrotors by rigid massless links, control systems for quadrotors are constructed such that the point mass asymptotically follows a given desired trajectory and quadrotors maintain a prescribed formation, either relative to the point mass or with respect to the inertial frame. These are developed in a coord"
+        },
+        {
+          "title": "Geometric control of multiple quadrotor UAVs transporting a cable-suspended rigid body",
+          "year": 2014,
+          "doi": "https://doi.org/10.1109/cdc.2014.7040353",
+          "authors": [
+            "Taeyoung Lee"
+          ],
+          "abstract": "This paper is focused on tracking control for a rigid body payload, that is connected to an arbitrary number of quadrotor unmanned aerial vehicles via rigid links. An intrinsic form of the equations of motion is derived on the nonlinear configuration manifold, and a geometric controller is constructed such that the payload asymptotically follows a given desired trajectory for its position and attitude. The unique feature is that the coupled dynamics between the rigid body payload, links, and qua"
+        },
+        {
+          "title": "Geometric control of multiple quadrotors transporting a rigid-body load",
+          "year": 2014,
+          "doi": "https://doi.org/10.1109/cdc.2014.7040351",
+          "authors": [
+            "Guofan Wu",
+            "Koushil Sreenath"
+          ],
+          "abstract": "We address the problem of cooperative transportation of a cable-suspended rigid-body payload by multiple quadrotors. We develop a coordinate-free dynamical model of the system by developing equations of motions directly on the unit sphere and the special orthogonal group. This model is used to design a geometric feedback control to track a reference trajectory for the load's pose (position and orientation), as well as the yaw angle of each quadrotor, and the orientation of each cable. Simulation"
+        }
+      ]
+    },
+    {
+      "primary_paper": {
+        "title": "A method for normal-mode-based model reduction in nonlinear dynamics of slender structures",
+        "year": 2015,
+        "doi": "https://doi.org/10.1016/j.compstruc.2015.07.001",
+        "cited_by_count": 33,
+        "authors": [
+          "Yinan Wang",
+          "Rafael Palacios",
+          "Andrew Wynn"
+        ],
+        "abstract": "This paper introduces a nonlinear reduced-order modelling methodology for finite-element models of structures with slender subcomponents and inertia represented by lumped masses along main load paths. The constructed models have dynamics described by 1-D intrinsic equations of motion, which are further written in modal co-ordinates. This yields finite-dimensional approximations of the system dynamics with only quadratic nonlinearities. Evaluation of the problem coefficients is performed from static condensation of the original model on the lumped masses. The method exploits the multi-point constraints typically used to obtain sectional loads in aircraft aeroelastic analysis. The technique is illustrated on simple 3D structural models built using solid elements."
+      },
+      "second_tier_references": [
+        {
+          "title": "The Finite Element Method for Solid and Structural Mechanics",
+          "year": 2014,
+          "doi": "https://doi.org/10.1016/c2009-0-26332-x",
+          "authors": [
+            "Olgierd Cecil Zienkiewicz",
+            "R. L. Taylor",
+            "David Fox"
+          ],
+          "abstract": ""
+        },
+        {
+          "title": "Vibration Control of Active Structures",
+          "year": 2011,
+          "doi": "https://doi.org/10.1007/978-94-007-2033-6",
+          "authors": [
+            "A. Preumont"
+          ],
+          "abstract": ""
+        },
+        {
+          "title": "A computational procedure for prebending of wind turbine blades",
+          "year": 2011,
+          "doi": "https://doi.org/10.1002/nme.3244",
+          "authors": [
+            "Yuri Bazilevs",
+            "Ming‐Chen Hsu",
+            "Josef Kiendl"
+          ],
+          "abstract": "SUMMARY Prebending of wind turbine blades constitutes a viable engineering solution to the problem of tower clearance, that is, ensuring that during wind turbine operation there is sufficient distance between the rotor blades and the tower to avoid collision. The prebent shape of the blade must be such that when the turbine rotor is subjected to wind and inertial loads, the blades are straightened into their design configuration. In this paper, we propose a method for accurate prediction of the "
+        },
+        {
+          "title": "A model for the structural dynamic response of the CX‐100 wind turbine blade",
+          "year": 2013,
+          "doi": "https://doi.org/10.1002/we.1603",
+          "authors": [
+            "Ian Fleming",
+            "Darby J. Luscher"
+          ],
+          "abstract": "ABSTRACT A geometrically exact beam model for simulating the structural dynamic response of the CX‐100 wind turbine blade is presented. The underlying geometrically nonlinear theory is detailed, and its implementation into a finite‐element code, NLBeam, developed as part of this research is outlined. The parameters used to represent the varying cross‐sectional distributions of stiffness and mass are calculated consistent with the geometrically exact beam theory by using the variational asymptoti"
+        }
+      ]
+    },
+    {
+      "primary_paper": {
+        "title": "Time-Optimal Handover Trajectory Planning for Aerial Manipulators Based on Discrete Mechanics and Complementarity Constraints",
+        "year": 2023,
+        "doi": "https://doi.org/10.1109/tro.2023.3301298",
+        "cited_by_count": 21,
+        "authors": [
+          "Wei Hua Luo",
+          "Jingshan Chen",
+          "Henrik Ebel",
+          "Peter Eberhard"
+        ],
+        "abstract": "Planning a time-optimal trajectory for aerial robots is critical in many drone applications, such as rescue missions and package delivery, which have been widely researched in recent years. However, it still involves several challenges, particularly when it comes to incorporating special task requirements as well as the aerial robot's dynamics into the planning. In this work, we study a case where an aerial manipulator shall pick up a parcel from a moving mobile robot in a time-optimal manner. Rather than setting up the approach trajectory manually, which makes it difficult to determine the optimal total travel time to accomplish the desired task within dynamic limits, we propose an optimization framework, which utilizes the framework of discrete mechanics and complementarity constraints. In the proposed approach, the system dynamics is considered via discrete variational Lagrangian mechanics that provides reliable estimation results according to our experiments. The handover opportuni"
+      },
+      "second_tier_references": [
+        {
+          "title": "PX4: A node-based multithreaded open source robotics framework for deeply embedded platforms",
+          "year": 2015,
+          "doi": "https://doi.org/10.1109/icra.2015.7140074",
+          "authors": [
+            "Lorenz Meier",
+            "Dominik Honegger",
+            "Marc Pollefeys"
+          ],
+          "abstract": "We present a novel, deeply embedded robotics middleware and programming environment. It uses a multithreaded, publish-subscribe design pattern and provides a Unix-like software interface for micro controller applications. We improve over the state of the art in deeply embedded open source systems by providing a modular and standards-oriented platform. Our system architecture is centered around a publish-subscribe object request broker on top of a POSIX application programming interface. This all"
+        },
+        {
+          "title": "MPEC problem formulations and solution strategies with chemical engineering applications",
+          "year": 2008,
+          "doi": "https://doi.org/10.1016/j.compchemeng.2008.02.010",
+          "authors": [
+            "B.T. Baumrucker",
+            "J.G. Renfro",
+            "Lorenz T. Biegler"
+          ],
+          "abstract": ""
+        },
+        {
+          "title": "Integrators for Nonholonomic Mechanical Systems",
+          "year": 2006,
+          "doi": "https://doi.org/10.1007/s00332-005-0698-1",
+          "authors": [
+            "Robert I. McLachlan",
+            "Matthew Perlmutter"
+          ],
+          "abstract": ""
+        },
+        {
+          "title": "Time-optimal quadrotor flight",
+          "year": 2013,
+          "doi": "https://doi.org/10.23919/ecc.2013.6669253",
+          "authors": [
+            "Wannes Van Loock",
+            "Goele Pipeleers",
+            "Jan Swevers"
+          ],
+          "abstract": "Solving the time-optimal path planning problem, where a system is brought from an initial to terminal state in minimal time while obeying geometric and dynamic constraints, has been an active area of research for many years. Very often the problem is divided into a high-level path planning stage where a feasible geometric path is determined and a low-level path following stage where system dynamics are taken into account. This paper combines both approaches for differentially flat systems into a"
+        },
+        {
+          "title": "Park City lectures on mechanics, dynamics, and symmetry",
+          "year": 2006,
+          "doi": "https://doi.org/10.1090/pcms/007/09",
+          "authors": [
+            "Jerrold Eldon Marsden"
+          ],
+          "abstract": "In these five lectures, I cover selected items from the following topics: 1. Reduction theory for mechanical systems with symmetry, 2. Stability, bifurcation and underwater vehicle dynamics, 3. Systems with rolling constraints and locomotion, 4. Optimal control and stabilization of balance systems, 5. Variational integrators.Each topic itself could be expanded into several lectures, but I limited myself to what I could reasonably explain in the allotted time.The hope is that the overview is info"
+        }
+      ]
+    }
+  ]
+}

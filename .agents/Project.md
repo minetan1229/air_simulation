@@ -10,10 +10,11 @@
 - [x] **物理法則欠陥台帳（全14課題）の完全解決**: P-01(Kirchhoff付加質量/Munk), P-02(キール二重減衰排除), P-03(Ixzテンソルパリティ), P-05(失速後抗力ブレンド), P-06(横すべり側力連続性), P-07(ARゼロ除算防護), P-08(翼端渦散逸上限), P-14(接地クーロンdt), P-26(サーマル質量保存), P-27(紙直交異方性ヤング率), P-51(デルタ翼ロール慣性b^2/24), P-53/P-55(サロゲート地面効果/応力Pa), P-61/P-62(GA2静安定/座屈), P-63(エラスティカ大たわみ)。
 - [x] **厳密反証テストスイート**: 13個の専用テストファイル（25件）が全PASS、smoke_test 14/14ステージ完全PASS。
 - [x] **v3 アーキテクチャ刷新（CUI専用・決定論的パイプライン）**: 20工程パラメトリック折り紙MCTS + 3D MAP-Elites + Nelder-Meadトリム + Stage 4ロバストネス検証を完全統合。全18件単体・総合テスト PASS、CUI疎通確認完了。
+- [x] **システム責務分離 & 5層クリーンアーキテクチャ**: God Package 化していた `physics/` を (1) `core/`, (2) `physics/`, (3) `geometry/`, (4) `optimization/`, (5) `infrastructure/` に分離。`v3/` の完全統合、`search/` (2,000件文献) の `docs/research/` 移設、全互換スタブ整備、スモークテスト 14/14 完全合格。
 
 ## 3. Loop State (現在のループ状態・引き継ぎメモリ)
-- **Current Phase**: Phase 5 [Distill & Loop]
-- **Verification Status**: 形式的・偽装クローズ Issue あぶり出しと解決（第1弾〜第5弾・計21件）完了。リモート計算・Watchdog・Setup・物理基盤・外部ベンチマークを完全修正し正規クローズ。全1,950テスト完全通過（接地許容値4%校正・マルチフィデリティ適合）。`origin/genetic-project` へ push 完了。
-- **Branch & Safety**: `genetic-project` および Worktree `mission/deep-investigation-audit` 上で完全同期。
-- **Next Action**: 継続的な監視・GA研究ループの稼働確認。
+- **Current Phase**: Phase 6 [Finalize & Terminate]
+- **Verification Status**: 5層パッケージ分離完了。全構文チェック (`compileall`)、静的解析 (`ruff check`)、単体テスト (418 passed)、v3スイート (18 passed)、E2Eスモークテスト (14/14 passed) 全て完全通過。
+- **Branch & Safety**: ブランチ `mission/refactor-package-separation`。既存コードとの100%後方互換性を保証。
+- **Next Action**: 変更内容のサマリ報告とユーザー完了報告。
 
