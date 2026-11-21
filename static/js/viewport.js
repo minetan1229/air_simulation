@@ -228,10 +228,12 @@ export class Viewport {
       }).catch(() => {});
     }
 
-    canvas.addEventListener("webglcontextlost", (event) => {
+    this.canvas = canvas;
+    this._onContextLost = (event) => {
       event.preventDefault();
       this.running = false;
-    });
+    };
+    canvas.addEventListener("webglcontextlost", this._onContextLost);
   }
 
   _detectGpuRenderer() {
@@ -2312,12 +2314,31 @@ export class Viewport {
     this.stopRecording();
     this.clearFleet();
     this.clearEnsembleTracks();
-    cancelAnimationFrame(this.frameHandle);
-    this._observer.disconnect();
-    this.controls.dispose();
-    this.particles.dispose();
+    if (this.frameHandle) {
+      cancelAnimationFrame(this.frameHandle);
+      this.frameHandle = null;
+    }
+    if (this._observer) {
+      this._observer.disconnect();
+    }
+    if (this._onContextLost && this.canvas) {
+      this.canvas.removeEventListener("webglcontextlost", this._onContextLost);
+      this._onContextLost = null;
+    }
+    if (this.controls) this.controls.dispose();
+    if (this.particles) this.particles.dispose();
+    if (this.airframeMaterial) this.airframeMaterial.dispose();
+    if (this.origamiMaterial) this.origamiMaterial.dispose();
+    if (this.trackGeometry) this.trackGeometry.dispose();
+    if (this.ghostGeometry) this.ghostGeometry.dispose();
+    if (this.trackLine?.material) this.trackLine.material.dispose();
+    if (this.ghostLine?.material) this.ghostLine.material.dispose();
+    if (this.keelMarker?.geometry) this.keelMarker.geometry.dispose();
+    if (this.keelMarker?.material) this.keelMarker.material.dispose();
+    if (this.keelFrame?.geometry) this.keelFrame.geometry.dispose();
+    if (this.keelFrame?.material) this.keelFrame.material.dispose();
     disposeTree(this.scene);
-    this.renderer.dispose();
+    if (this.renderer) this.renderer.dispose();
   }
 }
 
