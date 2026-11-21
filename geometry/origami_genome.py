@@ -1486,7 +1486,7 @@ def genome_to_aircraft_config(
     """
     import dataclasses
 
-    from .config_schema import AircraftConfig
+    from core.config_schema import AircraftConfig
 
     template = base if base is not None else AircraftConfig()
     config = dataclasses.replace(template)

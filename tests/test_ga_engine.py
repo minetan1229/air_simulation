@@ -162,11 +162,21 @@ def test_the_default_trial_counts_are_defined_once() -> None:
     assert DEFAULT_TIER2_TRIALS == 1_000
     assert DEFAULT_TIER3_TRIALS == 100_000
 
-    source = (ROOT / "physics" / "ga_domain.py").read_text(encoding="utf-8")
+    domain_file = (
+        ROOT / "optimization" / "ga_domain.py"
+        if (ROOT / "optimization" / "ga_domain.py").exists()
+        else ROOT / "physics" / "ga_domain.py"
+    )
+    source = domain_file.read_text(encoding="utf-8")
     for literal in ("100000", "100_000", "1000", "1_000"):
         assert literal not in source, f"{literal} must not appear in the search logic"
 
-    config_source = (ROOT / "physics" / "ga_config.py").read_text(encoding="utf-8")
+    config_file = (
+        ROOT / "optimization" / "ga_config.py"
+        if (ROOT / "optimization" / "ga_config.py").exists()
+        else ROOT / "physics" / "ga_config.py"
+    )
+    config_source = config_file.read_text(encoding="utf-8")
     assert config_source.count("100_000") == 2  # max trials and tier 3 trials
     assert config_source.count("1_000") == 2  # top k and tier 2 trials
 
