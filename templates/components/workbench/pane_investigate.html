@@ -1,0 +1,102 @@
+      <!-- auto investigate -->
+      <div class="wb-pane" data-pane="investigate" role="tabpanel">
+        <div class="wb-col wb-col-1">
+          <h4 class="wb-h">Auto調査モード<small>AUTO INVESTIGATE</small></h4>
+          <p class="muted" style="margin: 4px 0 12px; font-size: 11px; line-height: 1.4;">
+            現在の機体から重さや紙質などの前提条件を固定したまま、手作業で調整可能な「トリム・上反角・投げ方・重心」のみを変えて、なぜ・どうすればもっと飛ぶようになるかを自動診断します。
+          </p>
+          <div class="inv-config-group">
+            <label class="inv-label">調査目標 (TARGET OBJECTIVE)</label>
+            <select id="inv-target-select" class="inv-select">
+              <option value="distance">最大飛距離を伸ばす (Max Distance)</option>
+              <option value="flight_time">滞空時間を伸ばす (Max Flight Time)</option>
+            </select>
+          </div>
+          <div class="btn-row" style="margin-top: 12px;">
+            <button class="btn btn-primary" id="inv-run" type="button"><img src="https://api.iconify.design/material-symbols/search.svg?color=%23ffffff" class="ui-icon" alt=""> 調査開始</button>
+            <button class="btn" id="inv-cancel" type="button" disabled>中断</button>
+          </div>
+          <div class="prog" style="margin-top: 12px;">
+            <div class="prog-track"><div class="prog-fill" id="inv-fill"></div></div>
+            <div class="prog-meta">
+              <span class="num" id="inv-prog-pct">0%</span>
+              <span class="muted" id="inv-status">待機中</span>
+            </div>
+            <div class="prog-eta" id="inv-eta-row">
+              <span class="eta-row-label">計算完了予想:</span>
+              <span class="num eta-row-clock" id="inv-eta-clock">—</span>
+              <span class="eta-row-left" id="inv-eta-left">(待機中)</span>
+            </div>
+          </div>
+          <h4 class="wb-h" style="margin-top: 16px;">調整可能変数（固定変数は除外）<small>HAND-ADJUSTABLE</small></h4>
+          <ul class="inv-var-list muted" style="font-size: 11px; padding-left: 16px; margin: 4px 0;">
+            <li>主翼エレボン角（昇降舵反り）</li>
+            <li>主翼上反角（V字バンザイ角）</li>
+            <li>主翼後縁キャンバー折り</li>
+            <li>翼端折り（ウイングレット）</li>
+            <li>エルロン・ラダー偏り矯正</li>
+            <li>クリップによる重心前後位置</li>
+            <li>射出角度・傾き・初速（投げ方）</li>
+          </ul>
+        </div>
+
+        <div class="wb-col wb-col-2" style="overflow-y: auto;">
+          <div id="inv-result-area" style="display: none;">
+            <!-- 診断サマリー -->
+            <div class="inv-diag-box">
+              <div class="inv-diag-header">
+                <span id="inv-diag-badge" class="inv-badge">STATUS</span>
+                <span id="inv-diag-title" class="inv-diag-title">—</span>
+              </div>
+              <div id="inv-diag-desc" class="inv-diag-desc">—</div>
+            </div>
+
+            <!-- Before vs After 比較 -->
+            <h4 class="wb-h">飛行結果の比較<small>BEFORE vs AFTER</small></h4>
+            <div class="inv-comp-grid">
+              <div class="inv-comp-card">
+                <div class="inv-comp-label">水平飛距離</div>
+                <div class="inv-comp-row">
+                  <span class="muted">現在:</span> <span class="num" id="inv-comp-dist-base">—</span>
+                  <span class="inv-arrow">&rarr;</span>
+                  <span class="num inv-comp-val" id="inv-comp-dist-rec">—</span>
+                </div>
+                <div class="inv-comp-gain"><span id="inv-comp-dist-gain" class="num">—</span></div>
+              </div>
+              <div class="inv-comp-card">
+                <div class="inv-comp-label">滞空時間</div>
+                <div class="inv-comp-row">
+                  <span class="muted">現在:</span> <span class="num" id="inv-comp-time-base">—</span>
+                  <span class="inv-arrow">&rarr;</span>
+                  <span class="num inv-comp-val" id="inv-comp-time-rec">—</span>
+                </div>
+                <div class="inv-comp-gain"><span id="inv-comp-time-gain" class="num">—</span></div>
+              </div>
+            </div>
+
+            <!-- 改善アドバイスカード -->
+            <div style="display: flex; align-items: center; justify-content: space-between; margin-top: 14px;">
+              <h4 class="wb-h" style="margin: 0;">実践的な折り方・投げ方アドバイス<small>ACTIONABLE ADVICE</small></h4>
+              <button class="btn btn-primary btn-mini" id="inv-adopt" type="button" disabled><img src="https://api.iconify.design/material-symbols/check-circle.svg?color=%23ffffff" class="ui-icon" alt=""> 推奨設定を機体に適用</button>
+            </div>
+            <div id="inv-advice-list" class="inv-advice-list"></div>
+
+            <!-- 感度ランキング -->
+            <h4 class="wb-h" style="margin-top: 14px;">変数の影響度・感度ランキング<small>SENSITIVITY RANKING</small></h4>
+            <div id="inv-sens-list" class="inv-sens-list"></div>
+          </div>
+          <div id="inv-empty-msg" class="chart-empty" style="padding-top: 60px;">
+            「調査開始」を押すと、現在の機体の飛行診断と改善ステップを自動探索します。
+          </div>
+        </div>
+
+        <div class="wb-col wb-col-3" style="overflow-y: auto;">
+          <h4 class="wb-h">探索ログ &amp; 診断レポート<small>LOG &amp; REPORT</small></h4>
+          <div class="chart-wrap" style="height: 140px;">
+            <canvas id="inv-chart" role="img" aria-label="Auto調査探索収束チャート"></canvas>
+            <p class="chart-empty" id="inv-chart-empty">未実行</p>
+          </div>
+          <h4 class="wb-h" style="margin-top: 10px;">診断テキストレポート<small>TEXT REPORT</small></h4>
+          <pre class="preview" id="inv-report-text" style="height: calc(100% - 180px); min-height: 120px; margin: 0; font-size: 10px;">調査未実行</pre>
+        </div>
+      </div>
