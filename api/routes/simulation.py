@@ -24,6 +24,7 @@ from ..core import (
     body,
     build,
     domain,
+    fast_jsonify,
 )
 
 log = logging.getLogger("paper_airplane")
@@ -83,7 +84,7 @@ def simulation_step():
         out.setdefault("device_name", gpu_info.get("device_name"))
     else:
         out.setdefault("backend", "numpy")
-    return jsonify(out)
+    return fast_jsonify(out)
 
 
 @sim_bp.post("/api/v1/simulation/reset")
@@ -179,7 +180,7 @@ def simulation_history():
             raise BadRequest("no simulation has been started; POST /api/v1/simulation/reset first")
         samples = [as_dict(s) for s in simulator.history()]
         metrics = simulator.metrics()
-    return jsonify({"samples": samples, "metrics": metrics, "backend": "numpy"})
+    return fast_jsonify({"samples": samples, "metrics": metrics, "backend": "numpy"})
 
 
 @sim_bp.get("/api/v1/simulation/history/<int:index>")
@@ -237,7 +238,7 @@ def simulation_batch():
         if not (0 <= processes <= 64):
             raise BadRequest("'processes' must lie within [0, 64]")
     results = parallel.parallel_evaluate(normalised, processes=processes)
-    return jsonify(
+    return fast_jsonify(
         {
             "count": len(results),
             "results": results,
@@ -283,4 +284,4 @@ def simulation_ensemble():
         random_seed=random_seed,
         max_sample_tracks=max_sample_tracks,
     )
-    return jsonify(result)
+    return fast_jsonify(result)

@@ -33,22 +33,33 @@ def main() -> int:
         "--tb=short",
     ]
 
-    try:
-        import xdist  # type: ignore # noqa: F401
-        cmd.extend(["-n", "auto"])
-    except ImportError:
-        pass
+    # xdist parallel execution: opt-in via CI_PYTEST_XDIST to prevent worker
+    # serialization crashes (Issue #213) with multiprocessing pools on constrained runners.
+    use_xdist = os.environ.get("CI_PYTEST_XDIST", "").strip().lower()
+    if use_xdist in ("1", "true", "yes", "auto"):
+        try:
+            import xdist  # type: ignore # noqa: F401
+            workers = os.environ.get("CI_PYTEST_WORKERS", "auto")
+            cmd.extend(["-n", workers])
+        except ImportError:
+            pass
 
     try:
         import pytest_timeout  # type: ignore # noqa: F401
-        cmd.append("--timeout=1200")
+        timeout_val = os.environ.get("CI_PYTEST_TIMEOUT", "180")
+        cmd.append(f"--timeout={timeout_val}")
     except ImportError:
         pass
 
+    marker = os.environ.get("CI_PYTEST_MARKER")
+    if marker:
+        cmd.extend(["-m", marker])
+
     cmd.extend([
         "--cov=physics",
+        "--cov=geometry",
+        "--cov=optimization",
         "--cov=api",
-        "--cov=v3",
         "--cov-report=term-missing:skip-covered",
     ])
     print(f"Running: {' '.join(cmd)}", flush=True)

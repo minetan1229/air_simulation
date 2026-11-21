@@ -42,10 +42,10 @@ ROOT = Path(__file__).resolve().parents[1]
 
 OPTIMIZER_JS = ROOT / "static" / "js" / "optimizer.js"
 GA_RESEARCH_JS = ROOT / "static" / "js" / "ga_research.js"
-GA_DOMAIN_PY = ROOT / "physics" / "ga_domain.py"
+GA_DOMAIN_PY = ROOT / "optimization" / "ga_domain.py" if (ROOT / "optimization" / "ga_domain.py").exists() else ROOT / "physics" / "ga_domain.py"
 GA_RESEARCH_ROUTE_PY = ROOT / "api" / "routes" / "ga_research.py"
-OPTIMIZER_DOMAIN_PY = ROOT / "physics" / "optimizer_domain.py"
-PAYLOAD_CONTRACT_PY = ROOT / "physics" / "payload_contract.py"
+OPTIMIZER_DOMAIN_PY = ROOT / "optimization" / "optimizer_domain.py" if (ROOT / "optimization" / "optimizer_domain.py").exists() else ROOT / "physics" / "optimizer_domain.py"
+PAYLOAD_CONTRACT_PY = ROOT / "core" / "payload_contract.py" if (ROOT / "core" / "payload_contract.py").exists() else ROOT / "physics" / "payload_contract.py"
 JOBS_ROUTE_PY = ROOT / "api" / "routes" / "jobs.py"
 
 #: The provenance contract of ``docs/SPECIFICATION.md`` -- the same five keys
