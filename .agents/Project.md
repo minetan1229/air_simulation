@@ -11,10 +11,11 @@
 - [x] **厳密反証テストスイート**: 13個の専用テストファイル（25件）が全PASS、smoke_test 14/14ステージ完全PASS。
 - [x] **v3 アーキテクチャ刷新（CUI専用・決定論的パイプライン）**: 20工程パラメトリック折り紙MCTS + 3D MAP-Elites + Nelder-Meadトリム + Stage 4ロバストネス検証を完全統合。全18件単体・総合テスト PASS、CUI疎通確認完了。
 - [x] **システム責務分離 & 5層クリーンアーキテクチャ**: God Package 化していた `physics/` を (1) `core/`, (2) `physics/`, (3) `geometry/`, (4) `optimization/`, (5) `infrastructure/` に分離。`v3/` の完全統合、`search/` (2,000件文献) の `docs/research/` 移設、全互換スタブ整備、スモークテスト 14/14 完全合格。
+- [x] **フロントエンド解体 & 物理コア細分化**: `index.html` を 7 つの Jinja2 コンポーネントに部品化、`app.js` から `app_modes.js`, `app_events.js`, `app_ensemble.js` を抽出。`flight_sim.py` から `throw_solver.py`, `ground_contact.py` を分離。全54単体テスト・E2Eスモーク14/14完全通過。
 
 ## 3. Loop State (現在のループ状態・引き継ぎメモリ)
 - **Current Phase**: Phase 6 [Finalize & Terminate]
-- **Verification Status**: 5層パッケージ分離完了。全構文チェック (`compileall`)、静的解析 (`ruff check`)、単体テスト (418 passed)、v3スイート (18 passed)、E2Eスモークテスト (14/14 passed) 全て完全通過。
-- **Branch & Safety**: ブランチ `mission/refactor-package-separation`。既存コードとの100%後方互換性を保証。
-- **Next Action**: 変更内容のサマリ報告とユーザー完了報告。
+- **Verification Status**: フロントエンド解体・物理コア細分化完了。`check_ui_css` PASS, `check_js_modules` (19モジュール全て解決) PASS, `test_flight.py` (54 passed), E2Eスモーク (14/14 passed)。
+- **Branch & Safety**: ブランチ `mission/frontend-and-core-modularization`。
+- **Next Action**: ユーザーへ完了報告。
 
