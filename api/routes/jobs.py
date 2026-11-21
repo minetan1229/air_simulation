@@ -182,12 +182,14 @@ def optimizer_run():
                 result["job_id"] = job.job_id
                 result_cache_put(job.job_id, result)
                 JOB_MANAGER.finish(job.job_id, message=f"{result['evaluations']} evaluations")
-            except Exception as exc:
+            except BaseException as exc:
                 log.error("optimizer job %s failed: %s\n%s", job.job_id, exc, traceback.format_exc())
                 try:
                     JOB_MANAGER.fail(job.job_id, str(exc))
                 except KeyError:
                     pass
+                if isinstance(exc, (KeyboardInterrupt, SystemExit)):
+                    raise
 
         thread = threading.Thread(target=worker, name=f"optimizer-{job.job_id}", daemon=True)
         JOB_MANAGER.register_thread(job.job_id, thread)
@@ -304,7 +306,7 @@ def investigate_run():
             res_dict["job_id"] = job.job_id
             result_cache_put(job.job_id, res_dict)
             JOB_MANAGER.finish(job.job_id, message=f"Completed auto-investigation: {res.summary.get('primary_issue', 'OK')}")
-        except Exception as exc:
+        except BaseException as exc:
             try:
                 if JOB_MANAGER.is_cancelled(job.job_id) or JOB_MANAGER.is_cancel_requested(job.job_id):
                     JOB_MANAGER.cancel(job.job_id)
@@ -316,6 +318,8 @@ def investigate_run():
                 JOB_MANAGER.fail(job.job_id, str(exc))
             except KeyError:
                 pass
+            if isinstance(exc, (KeyboardInterrupt, SystemExit)):
+                raise
 
         JOB_MANAGER.start(job.job_id)
 

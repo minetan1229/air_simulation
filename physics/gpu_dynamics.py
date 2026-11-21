@@ -1053,6 +1053,20 @@ def _is_device_module(xp: Any) -> bool:
     return getattr(xp, "__name__", "") == "cupy"
 
 
+def release_gpu_memory_pool(xp: Any = None) -> bool:
+    """Release all free memory blocks from CuPy default pools back to the OS."""
+    try:
+        if xp is not None and not _is_device_module(xp):
+            return False
+        import cupy as cp
+
+        cp.get_default_memory_pool().free_all_blocks()
+        cp.get_default_pinned_memory_pool().free_all_blocks()
+        return True
+    except Exception:
+        return False
+
+
 def _capture_step(
     xp: Any, step: Any, snapshot: Any, restore: Any, timeout_s: float = 10.0
 ) -> Tuple[Any, Any, Any]:
@@ -1600,6 +1614,9 @@ def simulate_batch(
         density=trim_air["density_kgm3"],
     )
     trim_cm = trim_coefficients["cm"]
+
+    if _is_device_module(xp):
+        release_gpu_memory_pool(xp)
 
     return {
         "state": y,
