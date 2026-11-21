@@ -12,10 +12,11 @@
 - [x] **v3 アーキテクチャ刷新（CUI専用・決定論的パイプライン）**: 20工程パラメトリック折り紙MCTS + 3D MAP-Elites + Nelder-Meadトリム + Stage 4ロバストネス検証を完全統合。全18件単体・総合テスト PASS、CUI疎通確認完了。
 - [x] **システム責務分離 & 5層クリーンアーキテクチャ**: God Package 化していた `physics/` を (1) `core/`, (2) `physics/`, (3) `geometry/`, (4) `optimization/`, (5) `infrastructure/` に分離。`v3/` の完全統合、`search/` (2,000件文献) の `docs/research/` 移設、全互換スタブ整備、スモークテスト 14/14 完全合格。
 - [x] **フロントエンド解体 & 物理コア細分化**: `index.html` を 7 つの Jinja2 コンポーネントに部品化、`app.js` から `app_modes.js`, `app_events.js`, `app_ensemble.js` を抽出。`flight_sim.py` から `throw_solver.py`, `ground_contact.py` を分離。全54単体テスト・E2Eスモーク14/14完全通過。
+- [x] **ワークベンチ細分化 & テスト階層化**: `workbench.html`（24KB）を 6 つのタブペインに分割。`pytest.ini` に `fast`/`slow` マーカー導入（高速テスト 233 件が 14 秒で通過）。E2Eスモーク 14/14 完全通過。
 
 ## 3. Loop State (現在のループ状態・引き継ぎメモリ)
 - **Current Phase**: Phase 6 [Finalize & Terminate]
-- **Verification Status**: フロントエンド解体・物理コア細分化完了。`check_ui_css` PASS, `check_js_modules` (19モジュール全て解決) PASS, `test_flight.py` (54 passed), E2Eスモーク (14/14 passed)。
-- **Branch & Safety**: ブランチ `mission/frontend-and-core-modularization`。
+- **Verification Status**: ワークベンチタブ分離・テスト階層化完了。`check_ui_css` PASS, `check_js_modules` PASS, Mypy PASS, 高速テスト 233 件通過 (14s), E2Eスモーク 14/14 ステージ完全合格。
+- **Branch & Safety**: `genetic-project` へ統合・プッシュ完了。
 - **Next Action**: ユーザーへ完了報告。
 
