@@ -1,4 +1,4 @@
-"""v3 Headless CUI Entry Point.
+"""milcy Algorithm (formerly v3) Headless CUI Entry Point.
 
 Zero-placeholder, strictly headless, pure terminal execution pipeline:
   1. Bootstraps 20-step origami skeletons with MCTS.
@@ -62,7 +62,8 @@ def run_pipeline(
     jsonl_log_path = out_path / "v3_search.jsonl"
 
     print("=" * 70)
-    print("  AIR SIMULATION v3: CUI AUTONOMOUS ORIGAMI RESEARCH PIPELINE")
+    print("  AIR SIMULATION: milcy ALGORITHM AUTONOMOUS RESEARCH PIPELINE")
+    print("  (Quality Diversity MAP-Elites + MCTS Origami + Nelder-Mead Trim)")
     print("=" * 70)
     print(f"  Random Seed           : {seed}")
     print(f"  Search Iterations     : {iterations}")
@@ -162,8 +163,23 @@ def run_pipeline(
 
 def main() -> None:
     """CLI entry point."""
-    parser = argparse.ArgumentParser(description="v3 Autonomous Origami Aircraft CUI Framework")
-    parser.add_argument("--config", type=str, default="config/v3_map_elites.yaml", help="Path to config YAML")
+    parser = argparse.ArgumentParser(
+        description="milcy Algorithm (formerly v3) Autonomous Origami Aircraft CUI Framework"
+    )
+    parser.add_argument(
+        "--algorithm",
+        "--pipeline",
+        type=str,
+        default="milcy",
+        choices=["milcy", "milkcy", "v3", "map_elites"],
+        help="Algorithm identifier (default: milcy)",
+    )
+    parser.add_argument(
+        "--config",
+        type=str,
+        default=None,
+        help="Path to config YAML (defaults to config/milcy_map_elites.yaml or config/v3_map_elites.yaml)",
+    )
     parser.add_argument("--iterations", type=int, default=None, help="Number of search iterations")
     parser.add_argument("--seed", type=int, default=None, help="Random seed")
     parser.add_argument("--output-dir", type=str, default=None, help="Directory to export outputs")
@@ -172,7 +188,15 @@ def main() -> None:
 
     args = parser.parse_args()
 
-    cfg = _load_yaml_config(args.config)
+    # Determine config file
+    config_file = args.config
+    if not config_file:
+        if Path("config/milcy_map_elites.yaml").exists():
+            config_file = "config/milcy_map_elites.yaml"
+        else:
+            config_file = "config/v3_map_elites.yaml"
+
+    cfg = _load_yaml_config(config_file)
     search_cfg = cfg.get("search", {})
     grid_cfg = cfg.get("grid", {})
     trim_cfg = cfg.get("trim", {})

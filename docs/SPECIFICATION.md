@@ -360,6 +360,26 @@ physics/origami_genome.py の GripThresholds 既定（最低高さ 8 mm / 前後
 
 ---
 
+## 8.1 milcy アルゴリズム (milcy Morphogenetic Quality-Diversity Search Architecture)
+
+旧 v3 パイプラインとして開発された形態創発アルゴリズムの正式体系。遺伝的アルゴリズム（GA）の世代淘汰型アプローチとは異なり、高品質かつ多様な機体群を同時発見する **MAP-Elites（多次元品質多様性探索）** を基軸とする。
+
+### 主要構成要素
+1. **20工程パラメトリック折り紙文法 (MCTS Origami)**:
+   - `geometry.milcy_origami`（互換 `geometry.v3_origami`）
+   - モンテカルロ木探索（MCTS）を用いて有効な折り紙構造（折り線、角度、重なり順、持ち手・把持条件）を自律生成。
+2. **3D MAP-Elites 特徴空間アーカイブ (Quality-Diversity)**:
+   - `optimization.map_elites`
+   - 翼面荷重（Wing Loading）、静安定余裕（Static Stability Margin）、アスペクト比（Aspect Ratio）の 3 軸から成る 1,000 ニッチ（10×10×10）グリッド上にエリート機体を保持・更新。
+3. **連続滑空トリム最適化 (Nelder-Mead Local Trim)**:
+   - `optimization.trim`
+   - エリート個体ごとにエレボン角（-4°〜+8°）および上反角（0°〜8°）を局所シンプレックス法で最適化し、最大揚抗比と滑空平衡角を自動チューニング。
+4. **多次元頑健性ストレステスト (Robustness Grid)**:
+   - `optimization.eval`
+   - Dryden 乱流（MIL-F-8785C）および投下擾乱下でのシミュレーションを行い、頑健性スコアを算出して最終エクスポート（.obj, .json, .jsonl）。
+
+---
+
 ## 9. 検証コマンドと CI/CD ガイド (Verification & CI/CD Protocol)
 
 コード変更・機能追加時は、以下の段階的検証を必ずローカル環境で通過させること：

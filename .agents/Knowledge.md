@@ -92,4 +92,4 @@ irst_order_lag による動的ねじり/上反角追従。受動構造減衰に�
 ## [Modular Layered Architecture & Package Separation] (2026-11-20)
 - **God Package `physics/` の5層責務分離**: 従来の `physics/`（55ファイル）を責務別に分離。(1) `core/` (契約・スキーマ・数学基盤・規約) (2) `physics/` (純粋空力・大気・応力・6DoF運動方程式) (3) `geometry/` (折り紙・メッシュ・3D生成) (4) `optimization/` (GA・CMA-ES・MAP-Elites・自動調査) (5) `infrastructure/` (ジョブキュー・永続化・記録DB)。
 - **透過的スタブとアンスコ属性フォワーディング**: 既存143テストおよびツールの互換性を壊さないよう、`physics/` 内に `globals()[_k] = _v` を備えた re-export スタブを配置し、プライベート関数（`_planform_area_m2`, `_HALF_LENGTH` 等）を含む全属性のアクセス互換性を完全維持。
-- **v3 の正規統合と文献レジストリ移行**: `v3/` サブシステムを `core.interfaces`, `geometry.v3_origami`, `physics.benchmark`, `optimization.map_elites/trim/eval/cli` に完全統合し全18テスト PASS。`search/` (2,000件論文データ) を `docs/research/` 配下に体系的再配置。
+- **milcyアルゴリズムの正規統合と文献レジストリ移行**: 旧v3非GA系列（20工程折り紙MCTS + 3D MAP-Elites + Nelder-Meadトリム + 多次元頑健性グリッド）を「milcyアルゴリズム」として再定義し、`milcy/`, `core.interfaces`, `geometry.milcy_origami`, `physics.benchmark`, `optimization.cli` に完全統合。`search/` (2,000件論文データ) を `docs/research/` 配下に体系的再配置。
