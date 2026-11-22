@@ -80,10 +80,10 @@ def _to_host(xp: Any) -> Any:
 def default_objective(records: Dict[str, float]) -> float:
     """The scalar fitness of one individual.
 
-    The flight distance is the primary objective (the longest hang time of an
-    indoor design), and the static stability and the structural head room
-    enter as multipliers: a design that flies far but stalls or buckles is
-    worse than a slightly shorter flight that does neither.
+    Flight distance is the primary objective, modulated by physical static
+    stability and structural stress headroom. Completely unstable gliders
+    or structurally failing designs receive zero score (no free 25% baseline
+    reward hacking).
     """
     distance = float(records.get("distance_m", 0.0))
     ld_ratio = float(records.get("max_ld_ratio", 0.0))
@@ -91,8 +91,12 @@ def default_objective(records: Dict[str, float]) -> float:
     stress_index = float(records.get("peak_stress_index", 1.0))
     if distance <= 0.0:
         return 0.0
-    quality = max(0.0, min(1.0, stability)) * max(0.0, min(1.0, 1.0 - stress_index))
-    return distance * (0.25 + 0.75 * quality) * (1.0 + 0.05 * min(ld_ratio, 20.0))
+    stab_factor = max(0.0, min(1.0, stability))
+    stress_factor = max(0.0, min(1.0, 1.0 - stress_index))
+    quality = stab_factor * stress_factor
+    if quality <= 1e-6:
+        return 0.0
+    return distance * quality * (1.0 + 0.05 * min(ld_ratio, 20.0))
 
 
 def _dominates_candidate(
@@ -248,7 +252,7 @@ def select_high_fidelity_candidates(
         remaining_front = list(front)
         while remaining_front and len(selected_indices) < limit:
             best_idx = None
-            best_score: Tuple[float, float, float] = (-1.0, -1.0, -1.0)
+            best_score: Tuple[int, float, float, float] = (-1, -1.0, -1.0, -1.0)
             for idx in remaining_front:
                 # Minimum Euclidean distance to already selected set in normalized objective space
                 vec_norm = [(vectors[idx][m] - mins[m]) / spans[m] for m in range(len(obj_directions))]
@@ -258,9 +262,11 @@ def select_high_fidelity_candidates(
                 ) if selected_indices else 1.0
 
                 cr = crowding.get(idx, 0.0)
-                cr_val = 1e6 if math.isinf(cr) else cr
+                is_extreme = 1 if math.isinf(cr) else 0
+                cr_val = 1e6 if is_extreme else cr
                 fit = float(candidates[idx].get("fitness", 0.0))
-                score = (min_dist_to_selected, cr_val, fit)
+                # Protect extreme solutions first (is_extreme=1), then diversity in objective space
+                score = (is_extreme, min_dist_to_selected, cr_val, fit)
                 if best_idx is None or score > best_score:
                     best_score = score
                     best_idx = idx

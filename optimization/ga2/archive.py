@@ -584,16 +584,31 @@ class ParetoFront:
 
         while len(self._points) > self.capacity:
             distances = self._crowding_distances()
-            worst_index = 0
-            worst_dist = distances[0]
-            worst_key = self._points[0][0]
-            for idx in range(1, len(self._points)):
-                d = distances[idx]
-                k = self._points[idx][0]
-                if d < worst_dist or (d == worst_dist and k > worst_key):
-                    worst_index = idx
-                    worst_dist = d
-                    worst_key = k
+
+            # Identify finite (internal) candidates vs extreme candidates
+            finite_candidates = [
+                (distances[idx], self._points[idx][0], idx)
+                for idx in range(len(self._points))
+                if not math.isinf(distances[idx])
+            ]
+
+            if finite_candidates:
+                # Strictly protect extreme points: pick the lowest crowding distance among internal points
+                finite_candidates.sort(key=lambda item: (item[0], item[1]))
+                worst_index = finite_candidates[0][2]
+            else:
+                # All points are extreme; fall back to dropping the point with lowest normalized score
+                scores = self._normalised_scores()
+                worst_index = 0
+                worst_score = scores[0] if scores else 0.0
+                worst_key = self._points[0][0]
+                for idx in range(1, len(self._points)):
+                    s = scores[idx] if idx < len(scores) else 0.0
+                    k = self._points[idx][0]
+                    if s < worst_score or (s == worst_score and k > worst_key):
+                        worst_index = idx
+                        worst_score = s
+                        worst_key = k
 
             self._points.pop(worst_index)
 

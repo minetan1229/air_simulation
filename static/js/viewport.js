@@ -2320,34 +2320,98 @@ export class Viewport {
     }
     if (this._observer) {
       this._observer.disconnect();
+      this._observer = null;
     }
     if (this._onContextLost && this.canvas) {
       this.canvas.removeEventListener("webglcontextlost", this._onContextLost);
       this._onContextLost = null;
     }
-    if (this.controls) this.controls.dispose();
-    if (this.particles) this.particles.dispose();
-    if (this.airframeMaterial) this.airframeMaterial.dispose();
-    if (this.origamiMaterial) this.origamiMaterial.dispose();
-    if (this.trackGeometry) this.trackGeometry.dispose();
-    if (this.ghostGeometry) this.ghostGeometry.dispose();
-    if (this.trackLine?.material) this.trackLine.material.dispose();
-    if (this.ghostLine?.material) this.ghostLine.material.dispose();
+    if (this.controls) {
+      this.controls.dispose();
+      this.controls = null;
+    }
+    if (this.particles) {
+      this.particles.dispose();
+      this.particles = null;
+    }
+    if (this.airframeMaterial) {
+      disposeMaterial(this.airframeMaterial);
+      this.airframeMaterial = null;
+    }
+    if (this.origamiMaterial) {
+      disposeMaterial(this.origamiMaterial);
+      this.origamiMaterial = null;
+    }
+    if (this.trackGeometry) {
+      this.trackGeometry.dispose();
+      this.trackGeometry = null;
+    }
+    if (this.ghostGeometry) {
+      this.ghostGeometry.dispose();
+      this.ghostGeometry = null;
+    }
+    if (this.trackLine?.material) {
+      disposeMaterial(this.trackLine.material);
+    }
+    if (this.ghostLine?.material) {
+      disposeMaterial(this.ghostLine.material);
+    }
     if (this.keelMarker?.geometry) this.keelMarker.geometry.dispose();
-    if (this.keelMarker?.material) this.keelMarker.material.dispose();
+    if (this.keelMarker?.material) disposeMaterial(this.keelMarker.material);
     if (this.keelFrame?.geometry) this.keelFrame.geometry.dispose();
-    if (this.keelFrame?.material) this.keelFrame.material.dispose();
-    disposeTree(this.scene);
-    if (this.renderer) this.renderer.dispose();
+    if (this.keelFrame?.material) disposeMaterial(this.keelFrame.material);
+    
+    if (this.scene) {
+      disposeTree(this.scene);
+      this.scene = null;
+    }
+
+    if (this.renderer) {
+      this.renderer.dispose();
+      if (typeof this.renderer.forceContextLoss === "function") {
+        this.renderer.forceContextLoss();
+      }
+      this.renderer = null;
+    }
+
+    this.canvas = null;
+    this.camera = null;
+    this.trackPoints = [];
+    this.ghostPoints = [];
+  }
+}
+
+function disposeMaterial(material) {
+  if (!material) return;
+  const textureKeys = [
+    "map", "alphaMap", "bumpMap", "normalMap", "roughnessMap",
+    "metalnessMap", "specularMap", "envMap", "lightMap", "aoMap",
+    "displacementMap", "emissiveMap", "gradientMap",
+  ];
+  for (const key of textureKeys) {
+    if (material[key] && typeof material[key].dispose === "function") {
+      material[key].dispose();
+      material[key] = null;
+    }
+  }
+  if (typeof material.dispose === "function") {
+    material.dispose();
   }
 }
 
 function disposeTree(root) {
+  if (!root) return;
   root.traverse((node) => {
-    if (node.geometry) node.geometry.dispose();
+    if (node.geometry && typeof node.geometry.dispose === "function") {
+      node.geometry.dispose();
+      node.geometry = null;
+    }
     if (node.material) {
       const materials = Array.isArray(node.material) ? node.material : [node.material];
-      for (const material of materials) material.dispose();
+      for (const material of materials) {
+        disposeMaterial(material);
+      }
+      node.material = null;
     }
   });
 }

@@ -110,15 +110,15 @@ class ConsoleApp {
   /* ---------------------------------------------------------------- boot */
 
   async boot() {
+    if (this._booted) {
+      console.warn("ConsoleApp is already booted. Skipping duplicate initialization.");
+      return;
+    }
+    this._booted = true;
+
     this._cacheDom();
     paintRamp($("#heat-ramp"));
-    this._bindGroups();
-    this._bindWorkbench();
-    this._bindTransport();
-    this._bindHeader();
-    this._bindKeyboard();
-    this._bindModeSwitch();
-    this._initChampionActions();
+    this._bindEventsOnce();
 
     this.toastHost = $("#toasts");
 
@@ -562,6 +562,18 @@ class ConsoleApp {
   }
 
   /* -------------------------------------------------------------- chrome */
+
+  _bindEventsOnce() {
+    if (this._eventsBound) return;
+    this._eventsBound = true;
+    this._bindGroups();
+    this._bindWorkbench();
+    this._bindTransport();
+    this._bindHeader();
+    this._bindKeyboard();
+    this._bindModeSwitch();
+    this._initChampionActions();
+  }
 
   _bindGroups() {
     for (const group of document.querySelectorAll(".group")) {
