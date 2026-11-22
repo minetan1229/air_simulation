@@ -1,19 +1,19 @@
-### [[ドキュメント ホーム|Home]]
+### [[Documentation Home|Home]]
 
 ---
 
-### はじめに
-- [[環境構築と起動手順|Getting-Started]]
+### Getting Started
+- [[Setup & Launch|Getting-Started]]
 
-### システム設計
-- [[アーキテクチャ設計|Architecture]]
+### System Design
+- [[Architecture Design|Architecture]]
 
-### 開発・運用
-- [[開発・運用ガイド|Development-Guide]]
+### Development & Operations
+- [[Development & Operations Guide|Development-Guide]]
 
 ---
 
-### 外部・リポジトリリンク
-- [プロジェクト README](../README.md)
-- [REST API 仕様書](../docs/api.md)
-- [トラブルシューティング](../docs/troubleshooting.md)
+### External & Repository Links
+- [Project README](../README.md)
+- [REST API Specifications](../docs/api.md)
+- [Troubleshooting](../docs/troubleshooting.md)

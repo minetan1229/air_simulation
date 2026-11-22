@@ -1,6 +1,6 @@
 ---
 name: verification-pipeline
-description: プロジェクト全体の品質保証、テスト実行、構文チェック、E2Eスモークテスト、CI互換性確認を行う手順。コード変更後やコミット前、PR作成前の検証指示・テスト実行要求時にトリガーする。
+description: Standard verification runbook covering syntax check, unit/physics verification, E2E smoke test, and Discord notification for the 3D Paper Airplane Simulator. Trigger on code changes, pre-commit quality gate checks, or "run tests"/"syntax check"/"smoke test" instructions.
 prerequisites:
   - Python 3.11+
   - pytest
@@ -9,60 +9,60 @@ prerequisites:
 
 # Verification Pipeline Skill
 
-3D紙飛行機シミュレーターにおける構文検証・単体/物理検証・E2E結合テスト・Discord通知までを網羅する標準検証ランブックです。
+Standard verification runbook for the 3D Paper Airplane Simulator covering syntax validation, unit/physics verification, E2E integration test, and Discord notification.
 
-## 1. Prerequisites (前提条件)
-- 仮想環境（Python 3.11+）が有効化されていること
-- 必要な依存ライブラリ（`requirements.txt`）が導入されていること
-- （任意）`.env` に `DISCORD_WEBHOOK_URL` が設定されていること
+## 1. Prerequisites
+- Virtual environment (Python 3.11+) activated
+- Required dependencies (`requirements.txt`) installed
+- (Optional) `DISCORD_WEBHOOK_URL` set in `.env`
 
-## 2. Trigger Conditions (発火条件)
-- `tests/` または `physics/`, `app.py`, `static/` などのコードを変更したとき
-- コミットまたはプッシュを行う前の品質ゲートチェック
-- 「テストを実行して」「構文チェックをして」「スモークテストを通して」等の指示を受けたとき
+## 2. Trigger Conditions
+- Code changes in `tests/`, `physics/`, `app.py`, `static/`, etc.
+- Pre-commit/push quality gate check
+- Instructions like "run tests", "syntax check", "run smoke test"
 
-## 3. Step-by-Step Workflow (実行手順)
+## 3. Step-by-Step Workflow
 
-### Step 1: 構文チェック (Syntax Compilation)
-すべての Python ソースコードで文法エラーやインポート破損がないか一括検証します。
+### Step 1: Syntax Check (Syntax Compilation)
+Batch-verify no syntax errors or broken imports across all Python source code.
 ```powershell
 python -m compileall physics app.py smoke_test.py tools
 ```
-- 終了コード 0 であることを確認します。
+- Verify exit code is 0.
 
-### Step 2: 軽量スモークテスト (Fast Smoke Tests)
-主要な API ルーティング、スキーマ、大気モデルの整合性を高速チェックします。
+### Step 2: Lightweight Smoke Tests (Fast Smoke Tests)
+Quick check of major API routing, schema, and atmosphere model consistency.
 ```powershell
 python smoke_test.py --stage health+schemas --stage environment
 ```
 
-### Step 3: フル E2E スモークテスト (Full E2E Smoke Test)
-最適化ジョブ、メッシュインポート、6DoF シミュレーションを含めた全体導通を確認します。
+### Step 3: Full E2E Smoke Test (Full E2E Smoke Test)
+Verify end-to-end connectivity including optimization jobs, mesh import, and 6DoF simulation.
 ```powershell
 python smoke_test.py
 ```
 
-### Step 4: 物理・ドメイン単体テスト (Domain Pytest)
-必要に応じて特定のサブドメインまたは全テストを実行します。
+### Step 4: Physics & Domain Unit Tests (Domain Pytest)
+Run specific subdomains or full test suite as needed.
 ```powershell
-# 特定ドメインの高速テスト例
+# Specific domain quick test examples
 python -m pytest tests/test_aero.py tests/test_flight.py -q
 
-# 全体テスト（※全体の完了には数分要するため、非同期実行または段階実行を推奨）
+# Full suite (takes several minutes due to 600+ physics numerical integrations; async or staged execution recommended)
 python -m pytest tests -q
 ```
 
-### Step 5: 結果のDiscord通知 (Notification)
-重大なテスト結果や作業完了ステータスを通知します。
+### Step 5: Discord Notification (Notification)
+Notify critical test results or work completion status.
 ```powershell
-# 成功時
-python tools/notify_discord.py end "テスト検証完了" "全構文チェックおよびE2Eスモークテストを通過しました。"
+# Success
+python tools/notify_discord.py end "Test Verification Complete" "All syntax checks and E2E smoke tests passed."
 
-# 失敗時
-python tools/notify_discord.py fail "テスト検証失敗" "特定ステージでアサーションエラーが発生しました。"
+# Failure
+python tools/notify_discord.py fail "Test Verification Failed" "Assertion error occurred in specific stage."
 ```
 
-## 4. Constraints & Prohibitions (制約・禁止事項)
-- **テストスキップの禁止**: エラーが出た際にアサーションを勝手に弱めたりコメントアウトしてパスさせてはならない。
-- **Zero-Placeholder Policy**: テストやスクリプト内に `TODO` やダミー関数を残さない。
-- **非同期コマンド管理**: 全体 pytest は 600 件以上の物理数値積分を含むため完了まで数分かかる場合がある。PowerShell の `WaitMsBeforeAsync` 設定およびタスク管理ツールを活用し、重複起動によるマシン負荷を避ける。
+## 4. Constraints & Prohibitions
+- **No Test Skipping**: Must not weaken assertions or comment them out to force pass when errors occur.
+- **Zero-Placeholder Policy**: No `TODO` or dummy functions left in tests or scripts.
+- **Async Command Management**: Full pytest includes 600+ physics numerical integrations and may take several minutes. Use PowerShell `WaitMsBeforeAsync` settings and task management tools to avoid duplicate execution and machine load.

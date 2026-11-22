@@ -1,31 +1,29 @@
-# 行動規範 (Code of Conduct)
+# Code of Conduct
 
-## 我々の宣言
+## Our Pledge
 
-オープンソースコミュニティのメンバーとして、我々は、敬意・善意・包括性を大切にするコミュニティの実現に努めます。
-本行動規範は、本リポジトリの全参加者（コントリビューター・ユーザー・メンテナー）が尊重すべき行動基準を定めます。
+As members of the open source community, we strive to foster a community that values respect, good faith, and inclusivity. This Code of Conduct defines the behavioral standards that all participants in this repository (contributors, users, maintainers) must respect.
 
-## 準拠すべき行動
+## Expected Behavior
 
-- **敬意と包括性**: 多様な背景・経験・視点を受け入れ、他者の意見を尊重すること。
-- **建設的なフィードバック**: 人物ではなく問題に焦点を当て、提案の意図を尊重すること。
-- **責任ある行動**: 公的コミュニケーションにおいて、プロフェッショナルにふさわしい振る舞いをすること。
-- **学術的誠実さ**: 物理モデルの提案・検証において、出典と適用限界を明記し、事実に基づく議論をすること。
+- **Respect and Inclusivity**: Accept diverse backgrounds, experiences, and perspectives; respect the opinions of others.
+- **Constructive Feedback**: Focus on the issue, not the person; respect the intent behind proposals.
+- **Responsible Conduct**: Behave professionally in public communications.
+- **Academic Integrity**: In physics model proposals and verification, clearly cite sources and applicable limits; engage in fact-based discussion.
 
-## 準拠すべきでない行動
+## Unacceptable Behavior
 
-- 侮辱的・攻撃的・差別的な言動、ハラスメント
-- 不必要な個人情報の公開（ドキシキング）
-- 建設的でない批判や、他の参加者の活動を意図的に妨げる行為
-- 学術的不正行為（偽データの記載・誤った出典の引用）
+- Insulting, aggressive, discriminatory language or actions, harassment
+- Unnecessary disclosure of personal information (doxing)
+- Non-constructive criticism or intentional obstruction of other participants' activities
+- Academic misconduct (fabrication of data, citation of incorrect sources)
 
-## 執行
+## Enforcement
 
-違反報告は **GitHub の Private Security Advisory** または Issue 経由で行ってください。
-報告者のプライバシーは厳密に保護され、調査期間中は一切公開されません。
+Violations should be reported via **GitHub Private Security Advisory** or through an Issue. The reporter's privacy will be strictly protected and will not be disclosed during the investigation.
 
-メンテナーは報告を受け取った後、警告・一時利用制限・永久利用制限のいずれかを、違反の深刻度に応じて適用します。
+Upon receiving a report, maintainers will apply one of the following based on severity: warning, temporary restriction, or permanent restriction.
 
-## 帰属
+## Attribution
 
-本行動規範は [Contributor Covenant 2.1](https://www.contributor-covenant.org/version/2/1/code_of_conduct.html) に準拠しています。
+This Code of Conduct conforms to the [Contributor Covenant 2.1](https://www.contributor-covenant.org/version/2/1/code_of_conduct.html).

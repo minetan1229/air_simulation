@@ -1,100 +1,100 @@
-# ドキュメント索引 (docs Index)
+# Documentation Index (docs Index)
 
-> [← README に戻る](../README.md)
+> [← Back to README](../README.md)
 
-本ディレクトリの文書一覧。根干は 3 文書に集約する:
+Document list in this directory. Canonical sources are consolidated into 3 documents:
 
-- **仕様の正本**: [`SPECIFICATION.md`](./SPECIFICATION.md)（理論・API・定数・文献根拠の総括）
-- **物理量ごとの正本**: [`PHYSICS_MODELS.md`](./PHYSICS_MODELS.md)（式 → 出典 → 正本モジュール → 適用限界 → 検証テスト）
-- **導入・操作の正本**: [`getting-started.md`](./getting-started.md) + [`usage.md`](./usage.md)
+- **Specification Canonical**: [`SPECIFICATION.md`](./SPECIFICATION.md) (Comprehensive theory, API, constants, literature sources)
+- **Physics Models Canonical**: [`PHYSICS_MODELS.md`](./PHYSICS_MODELS.md) (Formula → Source → Canonical Module → Applicable Limits → Verification Tests)
+- **Setup & Operation Canonical**: [`getting-started.md`](./getting-started.md) + [`usage.md`](./usage.md)
 
-其余は役割別に分類する。ファイル名は歴史的継承（小文字 = 旧 UI ガイド系、大文字 = 仕様・監査系）で、リンク断絶防止のため改名しない。
+Others are categorized by role. File names follow historical inheritance (lowercase = legacy UI guides, uppercase = specs/audits) and are not renamed to prevent link breakage.
 
 ---
 
-## 読み方（目的別ルート）
+## Reading Guide (Routes by Purpose)
 
-| あなたは | この順に読む |
+| You Are | Read In This Order |
 | :--- | :--- |
-| 初めて動かす | [getting-started](./getting-started.md) → [usage](./usage.md) → [troubleshooting](./troubleshooting.md) |
-| 開発者・修正者 | [development](./development.md) → [architecture](./architecture.md) → [api](./api.md) → [SPECIFICATION §3](./SPECIFICATION.md) |
-| 物理をいじる | [architecture §2](./architecture.md) → [PHYSICS_MODELS](./PHYSICS_MODELS.md) → [PHYSICS_ALGORITHM](./PHYSICS_ALGORITHM.md) → [SPECIFICATION §1](./SPECIFICATION.md) |
-| GAをいじる | [architecture §3](./architecture.md) → [GA_ALGORITHM](./GA_ALGORITHM.md) → [GA_V2_ARCHITECTURE](./GA_V2_ARCHITECTURE.md) |
-| 高校生・初学者 | [GA_HIGH_SCHOOL](./GA_HIGH_SCHOOL.md) → [PHYSICS_HIGH_SCHOOL](./PHYSICS_HIGH_SCHOOL.md) → [getting-started](./getting-started.md) |
-| 運用・サーバ | [discord-bridge](./discord-bridge.md) → [REMOTE_COMPUTE_ENVIRONMENT](./REMOTE_COMPUTE_ENVIRONMENT.md) |
+| First Time User | [getting-started](./getting-started.md) → [usage](./usage.md) → [troubleshooting](./troubleshooting.md) |
+| Developer / Fixer | [development](./development.md) → [architecture](./architecture.md) → [api](./api.md) → [SPECIFICATION §3](./SPECIFICATION.md) |
+| Physics Modifier | [architecture §2](./architecture.md) → [PHYSICS_MODELS](./PHYSICS_MODELS.md) → [PHYSICS_ALGORITHM](./PHYSICS_ALGORITHM.md) → [SPECIFICATION §1](./SPECIFICATION.md) |
+| GA Modifier | [architecture §3](./architecture.md) → [GA_ALGORITHM](./GA_ALGORITHM.md) → [GA_V2_ARCHITECTURE](./GA_V2_ARCHITECTURE.md) |
+| High School / Beginner | [GA_HIGH_SCHOOL](./GA_HIGH_SCHOOL.md) → [PHYSICS_HIGH_SCHOOL](./PHYSICS_HIGH_SCHOOL.md) → [getting-started](./getting-started.md) |
+| Operations / Server | [discord-bridge](./discord-bridge.md) → [REMOTE_COMPUTE_ENVIRONMENT](./REMOTE_COMPUTE_ENVIRONMENT.md) |
 
 ---
 
-## 1. 入門・操作（利用者向け）
+## 1. Getting Started & Operation (User-Facing)
 
-| 文書 | 読むタイミング | 状態 |
+| Document | When to Read | Status |
 | :--- | :--- | :--- |
-| [getting-started.md](./getting-started.md) | セットアップ / 起動 / 動作要件 | 現行 |
-| [usage.md](./usage.md) | 画面操作 / パラメータ / 最適化 / 入出力 | 現行 |
-| [troubleshooting.md](./troubleshooting.md) | 起動失敗 / GPU 未認識 / 描画・最適化トラブル | 現行 |
+| [getting-started.md](./getting-started.md) | Setup / Launch / System Requirements | Current |
+| [usage.md](./usage.md) | Screen Operation / Parameters / Optimization / I/O | Current |
+| [troubleshooting.md](./troubleshooting.md) | Launch Failure / GPU Not Recognized / Rendering & Optimization Issues | Current |
 
-## 2. 開発・運用（開発者・運用者向け）
+## 2. Development & Operations (Developer / Operator)
 
-| 文書 | 読むタイミング | 状態 |
+| Document | When to Read | Status |
 | :--- | :--- | :--- |
-| [development.md](./development.md) | テスト・Git 規約・コントリビューション | 現行 |
-| [api.md](./api.md) | REST エンドポイントを叩く / 仕様確認 | 現行（要約） |
-| [architecture.md](./architecture.md) | 全体構成 / データフロー / 物理方程式の俯瞰 | 現行（俯瞰。数式の正本は PHYSICS_MODELS） |
-| [discord-bridge.md](./discord-bridge.md) | Discord 遠隔操作 / ルーティング / クォータ | 現行 |
-| [REMOTE_COMPUTE_ENVIRONMENT.md](./REMOTE_COMPUTE_ENVIRONMENT.md) | リモート GPU 計算機の構築・保守 | 現行（認証情報は `.env` のみ。追跡ファイルに実ホスト・ID・パスワードを持たない） |
+| [development.md](./development.md) | Testing / Git Conventions / Contribution | Current |
+| [api.md](./api.md) | Calling REST Endpoints / Spec Verification | Current (Summary) |
+| [architecture.md](./architecture.md) | Overall Structure / Data Flow / Physics Equations Overview | Current (Overview; formulas canonical in PHYSICS_MODELS) |
+| [discord-bridge.md](./discord-bridge.md) | Discord Remote Control / Routing / Quota | Current |
+| [REMOTE_COMPUTE_ENVIRONMENT.md](./REMOTE_COMPUTE_ENVIRONMENT.md) | Remote GPU Compute Node Build & Maintenance | Current (Secrets in `.env` only. No actual hosts, IDs, or passwords in tracked files) |
 
-## 3. 物理・仕様（正本・設計文書）
+## 3. Physics & Specifications (Canonical & Design Documents)
 
-| 文書 | 読むタイミング | 状態 |
+| Document | When to Read | Status |
 | :--- | :--- | :--- |
-| [SPECIFICATION.md](./SPECIFICATION.md) | 仕様・定数・法則を横断確認（最優先の正本） | 正本 |
-| [PHYSICS_MODELS.md](./PHYSICS_MODELS.md) | 係数・式の典拠と適用限界を調べる | 正本（補足） |
-| [GA_ALGORITHM.md](./GA_ALGORITHM.md) | 遺伝的アルゴリズム統合アーキテクチャの技術詳細 | 正本（新規） |
-| [PHYSICS_ALGORITHM.md](./PHYSICS_ALGORITHM.md) | 物理計算アルゴリズム（空力・6-DoF・応力・大気・GPU） | 正本（新規） |
-| [GA_HIGH_SCHOOL.md](./GA_HIGH_SCHOOL.md) | 高校生向け GA 仕組み解説（数式なし・図解中心） | 入門（新規） |
-| [PHYSICS_HIGH_SCHOOL.md](./PHYSICS_HIGH_SCHOOL.md) | 高校生向け物理シミュレーション解説（物理基礎レベル） | 入門（新規） |
-| [CFD_ROADMAP.md](./CFD_ROADMAP.md) | 3D Navier–Stokes 追加の将来計画（Issue #47） | 設計文書（コード変更なし） |
+| [SPECIFICATION.md](./SPECIFICATION.md) | Cross-check specs, constants, laws (highest priority canonical) | Canonical |
+| [PHYSICS_MODELS.md](./PHYSICS_MODELS.md) | Investigate coefficient/formula provenance and applicable limits | Canonical (Supplementary) |
+| [GA_ALGORITHM.md](./GA_ALGORITHM.md) | Genetic Algorithm integrated architecture technical details | Canonical (New) |
+| [PHYSICS_ALGORITHM.md](./PHYSICS_ALGORITHM.md) | Physics computation algorithms (aero, 6-DoF, stress, atmosphere, GPU) | Canonical (New) |
+| [GA_HIGH_SCHOOL.md](./GA_HIGH_SCHOOL.md) | High-school level GA mechanism explanation (no formulas, diagram-focused) | Intro (New) |
+| [PHYSICS_HIGH_SCHOOL.md](./PHYSICS_HIGH_SCHOOL.md) | High-school level physics simulation explanation (basic physics level) | Intro (New) |
+| [CFD_ROADMAP.md](./CFD_ROADMAP.md) | Future plan for 3D Navier–Stokes addition (Issue #47) | Design Doc (no code changes) |
 
-## 4. 最適化・データ
+## 4. Optimization & Data
 
-| 文書 | 読むタイミング | 状態 |
+| Document | When to Read | Status |
 | :--- | :--- | :--- |
-| [GA_V2_ARCHITECTURE.md](./GA_V2_ARCHITECTURE.md) | 大規模 GA 探索（`physics/ga2/`）の構造 | 現行 |
-| [PAPER_REGISTRY_PIPELINE.md](./PAPER_REGISTRY_PIPELINE.md) | 論文レジストリ（2,000 件）の収集・運用 | 現行 |
-| [`../search/INDEX.md`](../search/INDEX.md) | 論文レコード索引（40 チャンク） | データ索引 |
+| [GA_V2_ARCHITECTURE.md](./GA_V2_ARCHITECTURE.md) | Large-scale GA search (`physics/ga2/`) structure | Current |
+| [PAPER_REGISTRY_PIPELINE.md](./PAPER_REGISTRY_PIPELINE.md) | Paper registry (2,000 entries) collection & operation | Current |
+| [`../search/INDEX.md`](../search/INDEX.md) | Paper record index (40 chunks) | Data Index |
 
-## 5. 監査・履歴（参照文書）
+## 5. Audits & History (Reference Documents)
 
-| 文書 | 読むタイミング | 状態 |
+| Document | When to Read | Status |
 | :--- | :--- | :--- |
-| [CODE_REVIEW_FINDINGS.md](./CODE_REVIEW_FINDINGS.md) | 過去レビュー（374 件 / 69 件再集約）の記録 | 履歴（911 行。目次付き） |
-| [`../PHYSICS_PAPER_CONFORMANCE_AUDIT.md`](../PHYSICS_PAPER_CONFORMANCE_AUDIT.md) | 論文一致度監査の記録（P0–P3 完了台帳） | 履歴（リポジトリ直下に配置） |
-| [`../archive/`](../archive/) | 旧監査・修復記録（3 件） | アーカイブ |
+| [CODE_REVIEW_FINDINGS.md](./CODE_REVIEW_FINDINGS.md) | Past reviews (374 items / 69 re-aggregated) records | History (911 lines, with TOC) |
+| [`../PHYSICS_PAPER_CONFORMANCE_AUDIT.md`](../PHYSICS_PAPER_CONFORMANCE_AUDIT.md) | Paper conformance audit records (P0–P3 completion ledger) | History (placed at repo root) |
+| [`../archive/`](../archive/) | Legacy audit/repair records (3 items) | Archive |
 
-## 6. エージェント協定・旧 Wiki（開発基盤）
+## 6. Agent Protocols & Legacy Wiki (Development Foundation)
 
-| 文書 | 読むタイミング | 状態 |
+| Document | When to Read | Status |
 | :--- | :--- | :--- |
-| [`../AGENTS.md`](../AGENTS.md) | 自律ループの常駐規約（優先） | 現行 |
-| [`../.agents/Project.md`](../.agents/Project.md) | 現在地・Loop State | 現行（エージェント作業用） |
-| [`../.agents/Knowledge.md`](../.agents/Knowledge.md) | 過去知見・回避策 | 現行（エージェント作業用） |
-| [`../skill/README.md`](../skill/README.md) | スキル索引（定型手順） | 現行 |
-| [`../wiki-docs/`](../wiki-docs/) | 旧 Wiki 鏡像（Home / Getting-Started / Architecture / Development-Guide） | **旧版**。重複保存のため参照は docs/ を優先 |
+| [`../AGENTS.md`](../AGENTS.md) | Autonomous loop resident protocol (priority) | Current |
+| [`../.agents/Project.md`](../.agents/Project.md) | Current State / Loop State | Current (for agent work) |
+| [`../.agents/Knowledge.md`](../.agents/Knowledge.md) | Past Knowledge / Workarounds | Current (for agent work) |
+| [`../skill/README.md`](../skill/README.md) | Skill Index (standard procedures) | Current |
+| [`../wiki-docs/`](../wiki-docs/) | Legacy Wiki Mirror (Home / Getting-Started / Architecture / Development-Guide) | **Legacy**. Duplicate storage; prefer docs/ for reference |
 
 ---
 
-## 画面イメージ
+## Screen Images
 
-`images/` 配下に 9 件ある。README の 2×2 表は代表画面のみで、以下も参照可能。
+9 images in `images/`. README 2×2 table shows representative screens only; the following are also available.
 
-| ファイル | 内容 |
+| File | Content |
 | :--- | :--- |
-| `01_main_console.png` / `ui_main_console.png` | メインコンソール |
-| `02_flight_trajectory.png` / `ui_flight_simulation.png` | 飛行軌道 |
-| `03_wind_tunnel_mode.png` | 風洞モード |
-| `04_workbench_investigate.png` / `05_workbench_optimizer.png` / `06_workbench_3d_mesh.png` | Workbench（調査 / 最適化 / 3D メッシュ） |
-| `07_ensemble_100_planes.png` | アンサンブル 100 機 |
+| `01_main_console.png` / `ui_main_console.png` | Main Console |
+| `02_flight_trajectory.png` / `ui_flight_simulation.png` | Flight Trajectory |
+| `03_wind_tunnel_mode.png` | Wind Tunnel Mode |
+| `04_workbench_investigate.png` / `05_workbench_optimizer.png` / `06_workbench_3d_mesh.png` | Workbench (Investigate / Optimizer / 3D Mesh) |
+| `07_ensemble_100_planes.png` | Ensemble 100 Planes |
 
 ---
 
-[README に戻る](../README.md)
+[Back to README](../README.md)

@@ -1,21 +1,18 @@
-# REST API リファレンス (API Specifications)
+# REST API Reference (API Specifications)
 
-本ドキュメントでは、本システムで提供される Flask REST API の全エンドポイント、リクエスト/レスポンス形式、およびエラーハンドリングについて説明します。
+This document describes all endpoints, request/response formats, and error handling for the Flask REST API provided by this system.
 
-> **インタラクティブ仕様**: サーバー起動後に [Swagger UI](http://127.0.0.1:5000/docs)（`GET /docs`）で
-> cURL / Python / JavaScript のリクエスト例を試演できます。機械可読仕様は
-> [`GET /api/openapi.json`](http://127.0.0.1:5000/api/openapi.json)（OpenAPI 3.0.3、自動生成。生成元: `api/openapi.py`）から取得可能です。
-> 本 Markdown は人間可読の要約であり、正本はランタイム仕様です。
+> **Interactive Specification**: After starting the server, you can try cURL / Python / JavaScript request examples via [Swagger UI](http://127.0.0.1:5000/docs) (`GET /docs`). The machine-readable specification is available from [`GET /api/openapi.json`](http://127.0.0.1:5000/api/openapi.json) (OpenAPI 3.0.3, auto-generated from `api/openapi.py`). This Markdown is a human-readable summary; the canonical source is the runtime specification.
 
 ---
 
-## 1. 共通仕様・エラーハンドリング
+## 1. Common Specifications & Error Handling
 
-- **ベースURL**: `http://localhost:5000`
-- **データ形式**: リクエスト / レスポンスともに `application/json` (ファイルアップロードを除く)
-- **バックエンド識別子**: 成功レスポンスには、実行した計算バックエンド（`"backend": "cupy"` / `"torch"` / `"numpy"`）が常に含まれます。
-- **エラーレスポンス**:
-  クライアント側の不正リクエスト時は `HTTP 400`、内部エラー時は `HTTP 500` と詳細メッセージが返却されます。
+- **Base URL**: `http://localhost:5000`
+- **Data Format**: Both requests and responses use `application/json` (except file uploads)
+- **Backend Identifier**: Successful responses always include the compute backend used (`"backend": "cupy"` / `"torch"` / `"numpy"`).
+- **Error Responses**:
+  Client-side bad requests return `HTTP 400`, internal errors return `HTTP 500` with a detailed message.
   ```json
   {
     "error": "Error description message",
@@ -26,39 +23,39 @@
 
 ---
 
-## 2. API エンドポイント一覧
+## 2. API Endpoint List
 
-| メソッド | エンドポイント | 概要 |
+| Method | Endpoint | Description |
 |:---|:---|:---|
-| `POST` | `/api/v1/aerodynamics/calculate` | 指定条件における揚力・抗力・モーメント・失速判定の計算 |
-| `POST` | `/api/v1/aerodynamics/polar` | 迎角スイープによる抗力極線（Drag Polar）データの取得 |
-| `POST` | `/api/v1/environment/atmosphere` | 大気・環境パラメータの設定と大気物性値（密度・動粘性等）の取得 |
-| `GET`  | `/api/v1/environment/current` | 現在の大気・環境パラメータの照会 |
-| `POST` | `/api/v1/wind/field` | 指定3D空間グリッドにおける風速ベクトル場の計算（GPU/CPU） |
-| `POST` | `/api/v1/stress/analysis` | 翼面動圧・Gフォースおよび頂点応力ヒートマップの算出 |
-| `POST` | `/api/v1/simulation/step` | 6DoF運動方程式の1ステップ状態更新（可変 $\Delta t$ 対応） |
-| `POST` | `/api/v1/simulation/reset` | シミュレーション初期化 |
-| `POST` | `/api/v1/simulation/batch` | 複数パラメータスイープ・並列飛行シミュレーション実行 |
-| `POST` | `/api/v1/mesh/import` | 3Dモデル（STL/OBJ/GLB）アップロードと自動物理量解析 |
-| `GET`  | `/api/v1/mesh/models` | アップロード済みモデル一覧の照会 |
-| `POST` | `/api/v1/mesh/select` | シミュレーションで使用する3Dモデルの選択 |
-| `GET`  | `/api/v1/mesh/metrics/<model_id>` | 指定モデルの詳細物理特性（重心・慣性テンソル等）照会 |
-| `POST` | `/api/v1/optimizer/run` | 最適化ジョブの非同期開始（即座に `job_id` 返却） |
-| `GET`  | `/api/v1/optimizer/status/<job_id>` | 最適化ジョブの進捗率・評価速度・推定完了時刻（ETA）照会 |
-| `POST` | `/api/v1/optimizer/cancel/<job_id>` | 実行中最適化ジョブのキャンセル |
-| `GET`  | `/api/v1/optimizer/result/<job_id>` | 最適化ジョブの結果（パレートフロント・最適値）取得 |
-| `GET`  | `/api/v1/jobs` | 登録済み全ジョブ一覧とステータス照会 |
-| `POST` | `/api/v1/data/export` | 飛行ログデータの CSV / JSON 形式エクスポート |
-| `POST` | `/api/v1/data/import` | プリセット設定のインポート |
+| `POST` | `/api/v1/aerodynamics/calculate` | Calculate lift, drag, moment, and stall judgment for specified conditions |
+| `POST` | `/api/v1/aerodynamics/polar` | Get drag polar data via angle-of-attack sweep |
+| `POST` | `/api/v1/environment/atmosphere` | Set atmosphere/environment parameters and get atmospheric properties (density, kinematic viscosity, etc.) |
+| `GET`  | `/api/v1/environment/current` | Query current atmosphere/environment parameters |
+| `POST` | `/api/v1/wind/field` | Compute wind velocity vector field on specified 3D spatial grid (GPU/CPU) |
+| `POST` | `/api/v1/stress/analysis` | Compute wing dynamic pressure, G-forces, and vertex stress heatmap |
+| `POST` | `/api/v1/simulation/step` | Single-step state update of 6DoF equations of motion (variable $\Delta t$ support) |
+| `POST` | `/api/v1/simulation/reset` | Simulation initialization |
+| `POST` | `/api/v1/simulation/batch` | Execute multiple parameter sweeps / parallel flight simulations |
+| `POST` | `/api/v1/mesh/import` | Upload 3D model (STL/OBJ/GLB) and automatic physics analysis |
+| `GET`  | `/api/v1/mesh/models` | Query list of uploaded models |
+| `POST` | `/api/v1/mesh/select` | Select 3D model for simulation |
+| `GET`  | `/api/v1/mesh/metrics/<model_id>` | Query detailed physics properties of specified model (center of mass, inertia tensor, etc.) |
+| `POST` | `/api/v1/optimizer/run` | Asynchronously start optimization job (immediately returns `job_id`) |
+| `GET`  | `/api/v1/optimizer/status/<job_id>` | Query optimization job progress, evaluation rate, estimated completion time (ETA) |
+| `POST` | `/api/v1/optimizer/cancel/<job_id>` | Cancel running optimization job |
+| `GET`  | `/api/v1/optimizer/result/<job_id>` | Get optimization job results (Pareto front, optimal values) |
+| `GET`  | `/api/v1/jobs` | Query list of all registered jobs and their statuses |
+| `POST` | `/api/v1/data/export` | Export flight log data in CSV / JSON format |
+| `POST` | `/api/v1/data/import` | Import preset configuration |
 
 ---
 
-## 3. 主要エンドポイント詳細
+## 3. Major Endpoint Details
 
-### 3.1 揚力・抗力計算
+### 3.1 Lift & Drag Calculation
 `POST /api/v1/aerodynamics/calculate`
 
-**リクエスト例:**
+**Request Example:**
 ```json
 {
   "alpha_deg": 4.5,
@@ -71,7 +68,7 @@
 }
 ```
 
-**レスポンス例:**
+**Response Example:**
 ```json
 {
   "lift_N": 0.0892,
@@ -87,10 +84,10 @@
 
 ---
 
-### 3.2 3D風場ベクトル計算
+### 3.2 3D Wind Field Vector Calculation
 `POST /api/v1/wind/field`
 
-**リクエスト例:**
+**Request Example:**
 ```json
 {
   "bounds": {
@@ -104,7 +101,7 @@
 }
 ```
 
-**レスポンス例:**
+**Response Example:**
 ```json
 {
   "grid_shape": [20, 20, 15, 3],
@@ -115,10 +112,10 @@
 
 ---
 
-### 3.3 非同期最適化ジョブ開始
+### 3.3 Asynchronous Optimization Job Start
 `POST /api/v1/optimizer/run`
 
-**リクエスト例:**
+**Request Example:**
 ```json
 {
   "algorithm": "nsga2",
@@ -128,7 +125,7 @@
 }
 ```
 
-**レスポンス例 (即座に返却):**
+**Response Example (immediate return):**
 ```json
 {
   "job_id": "8f3b2d1c-e7a9-4a2b-923f-1d84f04c64b1",
@@ -139,10 +136,10 @@
 
 ---
 
-### 3.4 最適化ジョブステータス照会
+### 3.4 Optimization Job Status Query
 `GET /api/v1/optimizer/status/<job_id>`
 
-**レスポンス例:**
+**Response Example:**
 ```json
 {
   "job_id": "8f3b2d1c-e7a9-4a2b-923f-1d84f04c64b1",
@@ -158,35 +155,35 @@
 
 ---
 
-## 4. ヘッドレス実行（Web UI を介さない）
+## 4. Headless Execution (Without Web UI)
 
 ```bash
-# Python 単体（サーバー不要）
+# Python standalone (no server required)
 python examples/quick_simulation.py --duration 6.0
 
-# REST 経路（サーバー起動後）
+# REST path (after server start)
 curl -X POST http://127.0.0.1:5000/api/v1/simulation/launch \
   -H 'Content-Type: application/json' \
   -d '{"launch":{"launch_speed":12.0,"launch_angle_deg":12.0}}'
 
-# 認証が必要な場合（API_KEY が設定されているとき）
+# When authentication is required (if API_KEY is set)
 curl -X POST http://127.0.0.1:5000/api/v1/optimizer/run \
   -H "Authorization: Bearer $API_KEY" \
   -H 'Content-Type: application/json' \
   -d '{"algorithm":"nsga2","objectives":["max_distance"],"population_size":24,"generations":10}'
 ```
 
-詳細は [examples/quick_simulation.py](../examples/quick_simulation.py) を参照。
+See [examples/quick_simulation.py](../examples/quick_simulation.py) for details.
 
 ---
 
-## 5. 関連ドキュメント
+## 5. Related Documents
 
-- [クイックスタート (docs/getting-started.md)](./getting-started.md)
-- [システムアーキテクチャ (docs/architecture.md)](./architecture.md)
-- [ユーザーガイド (docs/usage.md)](./usage.md)
-- [開発・テストガイド (docs/development.md)](./development.md)
+- [Quick Start (docs/getting-started.md)](./getting-started.md)
+- [System Architecture (docs/architecture.md)](./architecture.md)
+- [User Guide (docs/usage.md)](./usage.md)
+- [Development & Testing Guide (docs/development.md)](./development.md)
 
 ---
 
-[README に戻る](../README.md)
+[Back to README](../README.md)
