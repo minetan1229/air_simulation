@@ -25,9 +25,9 @@ class MAPElitesGridArchive:
         self,
         bins: Tuple[int, int, int] = (8, 8, 8),
         ranges: Tuple[Tuple[float, float], Tuple[float, float], Tuple[float, float]] = (
-            (0.10, 0.20),  # Wing loading range (kg/m^2) for paper aircraft
-            (0.60, 0.95),  # Static stability range
-            (0.15, 0.45),  # Aspect ratio range
+            (0.118, 0.128),  # High-resolution wing loading range (kg/m^2) for folded A4
+            (0.70, 0.90),    # High-resolution static stability range
+            (0.215, 0.255),  # High-resolution aspect ratio range
         ),
     ) -> None:
         self.bins = bins

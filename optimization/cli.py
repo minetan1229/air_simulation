@@ -223,9 +223,9 @@ def main() -> None:
     raw_bins = grid_cfg.get("bins", [10, 10, 10])
     grid_bins = (int(raw_bins[0]), int(raw_bins[1]), int(raw_bins[2])) if len(raw_bins) >= 3 else (10, 10, 10)
 
-    wl_range = grid_cfg.get("wing_loading_range", [0.10, 0.20])
-    st_range = grid_cfg.get("stability_range", [0.60, 0.95])
-    ar_range = grid_cfg.get("aspect_ratio_range", [0.15, 0.45])
+    wl_range = grid_cfg.get("wing_loading_range", [0.118, 0.128])
+    st_range = grid_cfg.get("stability_range", [0.70, 0.90])
+    ar_range = grid_cfg.get("aspect_ratio_range", [0.215, 0.255])
     grid_ranges = (
         (float(wl_range[0]), float(wl_range[1])),
         (float(st_range[0]), float(st_range[1])),

@@ -72,25 +72,26 @@ class MCTSOrigamiGenerator:
 
         geom = candidate.geometry
 
-        # 1. CG margin: desirable CG is between 25% and 45% of chord
-        cg_x = geom.cg_m[0]
+        # 1. CG margin: distance from nose tip (0.1485) to CG relative to chord
+        # Desirable CG for paper aircraft glide is between 25% and 55% of chord
+        dist_from_nose = 0.1485 - geom.cg_m[0]
         chord = max(1.0e-3, geom.chord_m)
-        cg_ratio = cg_x / chord
-        if 0.20 <= cg_ratio <= 0.45:
-            cg_score = 1.0 - abs(cg_ratio - 0.32) / 0.20
+        cg_ratio = dist_from_nose / chord
+        if 0.25 <= cg_ratio <= 0.55:
+            cg_score = 1.0 - abs(cg_ratio - 0.38) / 0.25
         else:
-            cg_score = max(0.0, 1.0 - abs(cg_ratio - 0.32))
+            cg_score = max(0.0, 1.0 - abs(cg_ratio - 0.38))
 
         # 2. Symmetry score: wing elevon & winglet symmetry
         elevon_diff = abs(config.wing.elevon_left_deg - config.wing.elevon_right_deg)
         symmetry_score = max(0.0, 1.0 - elevon_diff / 10.0)
 
-        # 3. Wing loading score: typical paper plane is 2.0 - 5.0 kg/m^2 (20-50 g/dm^2)
+        # 3. Wing loading score: typical paper plane is 0.10 - 0.20 kg/m^2 (10-20 g/dm^2)
         loading = geom.mass_kg / max(1.0e-5, geom.wing_area_m2)
-        if 2.0 <= loading <= 6.0:
-            loading_score = 1.0 - abs(loading - 3.5) / 2.5
+        if 0.10 <= loading <= 0.20:
+            loading_score = 1.0 - abs(loading - 0.14) / 0.08
         else:
-            loading_score = max(0.0, 1.0 - abs(loading - 3.5) / 5.0)
+            loading_score = max(0.0, 1.0 - abs(loading - 0.14) / 0.15)
 
         return GeometricStaticScore(
             cg_margin_score=cg_score,
