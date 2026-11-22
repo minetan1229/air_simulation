@@ -15,8 +15,8 @@ from v3.search.mutation import mutate_parametric_config
 def test_grid_archive_binning():
     """Verify behavior descriptor maps into correct 3D grid bins."""
     grid = MAPElitesGridArchive(bins=(4, 4, 4))
-    desc1 = BehaviorDescriptor(wing_loading_kg_m2=0.105, static_stability=0.62, aspect_ratio=0.16)
-    desc2 = BehaviorDescriptor(wing_loading_kg_m2=0.195, static_stability=0.94, aspect_ratio=0.44)
+    desc1 = BehaviorDescriptor(wing_loading_kg_m2=0.119, static_stability=0.71, aspect_ratio=0.216)
+    desc2 = BehaviorDescriptor(wing_loading_kg_m2=0.127, static_stability=0.89, aspect_ratio=0.254)
 
     bin1 = grid.get_bin_index(desc1)
     bin2 = grid.get_bin_index(desc2)
@@ -34,7 +34,7 @@ def test_grid_archive_add_and_coverage():
         config=ParametricOrigamiConfig(),
         step_count=20,
     )
-    cand.descriptor = BehaviorDescriptor(wing_loading_kg_m2=0.15, static_stability=0.75, aspect_ratio=0.30)
+    cand.descriptor = BehaviorDescriptor(wing_loading_kg_m2=0.123, static_stability=0.80, aspect_ratio=0.235)
 
     metric = EvaluationMetric(
         speed_mps=6.0,

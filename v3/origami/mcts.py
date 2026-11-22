@@ -86,12 +86,12 @@ class MCTSOrigamiGenerator:
         elevon_diff = abs(config.wing.elevon_left_deg - config.wing.elevon_right_deg)
         symmetry_score = max(0.0, 1.0 - elevon_diff / 10.0)
 
-        # 3. Wing loading score: typical paper plane is 2.0 - 5.0 kg/m^2 (20-50 g/dm^2)
+        # 3. Wing loading score: typical paper plane is 0.10 - 0.20 kg/m^2 (10-20 g/dm^2)
         loading = geom.mass_kg / max(1.0e-5, geom.wing_area_m2)
-        if 2.0 <= loading <= 6.0:
-            loading_score = 1.0 - abs(loading - 3.5) / 2.5
+        if 0.10 <= loading <= 0.20:
+            loading_score = 1.0 - abs(loading - 0.14) / 0.08
         else:
-            loading_score = max(0.0, 1.0 - abs(loading - 3.5) / 5.0)
+            loading_score = max(0.0, 1.0 - abs(loading - 0.14) / 0.15)
 
         return GeometricStaticScore(
             cg_margin_score=cg_score,
