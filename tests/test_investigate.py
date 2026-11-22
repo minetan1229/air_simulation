@@ -1,6 +1,7 @@
 """Unit tests for the Auto-Investigate domain."""
 
 import pytest
+import functools
 from physics.config_schema import AircraftConfig, EnvironmentConfig, LaunchConfig, as_dict
 from physics.auto_investigate import (
     ADJUSTABLE_VARIABLES,
@@ -10,6 +11,29 @@ from physics.auto_investigate import (
     run_focused_tuning,
     run_sensitivity_scan,
 )
+import optimization.investigate.tuning as tuning_mod
+
+
+@pytest.fixture(autouse=True)
+def fast_simulate_trajectory_for_investigate_tests(monkeypatch):
+    """Cap simulation duration to 0.2s to speed up unit tests while preserving numerical flight logic."""
+    orig_sim = tuning_mod.simulate_trajectory
+
+    @functools.wraps(orig_sim)
+    def _fast_sim(*args, **kwargs):
+        if "duration_s" in kwargs:
+            kwargs["duration_s"] = min(kwargs["duration_s"], 0.2)
+        elif len(args) >= 4:
+            args_list = list(args)
+            args_list[3] = min(args_list[3], 0.2)
+            args = tuple(args_list)
+        else:
+            kwargs["duration_s"] = 0.2
+        return orig_sim(*args, **kwargs)
+
+    monkeypatch.setattr(tuning_mod, "simulate_trajectory", _fast_sim)
+
+
 
 
 def test_adjustable_variables_freeze_mass_and_sheet():
