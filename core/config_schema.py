@@ -372,6 +372,7 @@ class AircraftConfig:
     residual_cl: float = 0.0  # post-stall residual lift parameter
     dynamic_damping_enabled: bool = False  # separation-aware non-linear dynamic damping
     apparent_inertia_enabled: bool = False  # 3-DoF thin plate rotational apparent inertia
+    munk_coupling_enabled: bool = False  # optional Kirchhoff Coriolis/Munk cross-coupling (Issue #194)
     fidelity_mode: str = "standard"  # "standard" | "improved_medium" | "multifidelity"
     ground_pitch_coupling: float = 0.0  # nose-down pitching moment coupling in ground effect
     ground_cushion_lift: float = 0.0  # ram pressure cushion lift gain in ground effect
@@ -480,6 +481,7 @@ class AircraftConfig:
             residual_cl=clamp(self.residual_cl, *AIRCRAFT_RANGES["residual_cl"]),
             dynamic_damping_enabled=bool(self.dynamic_damping_enabled),
             apparent_inertia_enabled=bool(self.apparent_inertia_enabled),
+            munk_coupling_enabled=bool(self.munk_coupling_enabled),
             fidelity_mode=str(self.fidelity_mode or "standard"),
             ground_pitch_coupling=clamp(self.ground_pitch_coupling, *AIRCRAFT_RANGES["ground_pitch_coupling"]),
             ground_cushion_lift=clamp(self.ground_cushion_lift, *AIRCRAFT_RANGES["ground_cushion_lift"]),

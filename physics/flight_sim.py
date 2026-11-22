@@ -2403,7 +2403,8 @@ class FlightSimulator:
             # Coupled passively inside generalized angular acceleration (Euler's equations).
             # Smoothly rolled off post-stall where potential flow suction breaks down.
             w_stall_val = float(result.get("w_stall", 0.0)) if isinstance(result, dict) else 0.0
-            munk_factor = max(1.0 - w_stall_val, 0.0)
+            munk_active = bool(getattr(self.aircraft, "munk_coupling_enabled", False))
+            munk_factor = max(1.0 - w_stall_val, 0.0) if munk_active else 0.0
             u_rel = float(body_relative[0])
             v_rel = float(body_relative[1])
             w_rel = float(body_relative[2])

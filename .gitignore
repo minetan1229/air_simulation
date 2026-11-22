@@ -32,6 +32,7 @@ smoke_*.json
 # Generated verification artefacts (regenerable with tools/verify_physics_repair.py
 # and tools/capture_ui.py; the JSON dumps are tens of megabytes)
 artifacts/
+reports/
 
 # Scratch diagnostics kept in the working tree are not part of the product.
 scratch_*
@@ -64,6 +65,7 @@ watchdog_status.txt
 best_*
 checkpoints/
 *.jsonl
+!docs/research/papers/**/*.jsonl
 diff_master.txt
 debug_energy.py
 .local/

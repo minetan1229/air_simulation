@@ -30,7 +30,7 @@ from physics.config_schema import AircraftConfig, EnvironmentConfig, LaunchConfi
 
 def test_munk_moment_direction_and_magnitude() -> None:
     """Verify that Munk moment produces destabilizing nose-up pitching moment for positive alpha."""
-    aircraft = AircraftConfig(added_mass_enabled=True, apparent_inertia_enabled=True)
+    aircraft = AircraftConfig(added_mass_enabled=True, apparent_inertia_enabled=True, munk_coupling_enabled=True)
     env = EnvironmentConfig(wind_speed=0.0)
     launch = LaunchConfig(launch_speed=5.0, launch_angle_deg=5.0, launch_height_m=2.0)
     settings = SimulationSettings()
@@ -93,7 +93,7 @@ def test_munk_skew_symmetric_zero_work() -> None:
 
 def test_munk_cpu_gpu_parity() -> None:
     """Verify bit-accurate parity of Munk coupling between CPU and GPU dynamics."""
-    aircraft = AircraftConfig(added_mass_enabled=True, apparent_inertia_enabled=True)
+    aircraft = AircraftConfig(added_mass_enabled=True, apparent_inertia_enabled=True, munk_coupling_enabled=True)
     env = EnvironmentConfig(wind_speed=0.0)
     launch = LaunchConfig(launch_speed=7.0, launch_angle_deg=8.0, launch_height_m=1.5)
     settings = SimulationSettings()
