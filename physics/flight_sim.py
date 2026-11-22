@@ -3065,7 +3065,7 @@ class FlightSimulator:
         if self._diagnostics_cache is not None:
             return self._diagnostics_cache
         state = self._state
-        core = self._compute_dynamics(_pack(state), float(state.time_s))
+        core = self._compute_dynamics(_pack(state), float(state.time_s), compute_trim=True)
         result = core["aero"]
         quaternion = core["quaternion"]
         roll, pitch, yaw = euler_zyx_from_quaternion(quaternion)
