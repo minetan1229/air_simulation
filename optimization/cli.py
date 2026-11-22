@@ -18,6 +18,10 @@ import time
 from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
 
+ROOT = Path(__file__).resolve().parent.parent
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
 import yaml
 
 from optimization.eval.robustness import RobustnessEvaluator
