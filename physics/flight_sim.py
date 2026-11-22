@@ -1110,6 +1110,7 @@ def aero_forces(
     angular_rate: VectorLike = (0.0, 0.0, 0.0),
     density: float = 1.225,
     kinematic_viscosity: float = 1.5e-5,
+    compute_trim: bool = False,
 ) -> AeroResult:
     """Evaluate the aerodynamics through the mandatory ``aero_domain`` solver.
 
@@ -1151,6 +1152,7 @@ def aero_forces(
             "angular_rate": vec3(angular_rate),
             "density_kgm3": density,
             "kinematic_viscosity_m2s": kinematic_viscosity,
+            "compute_trim": compute_trim,
         },
     )
     if out is None:
@@ -1961,6 +1963,7 @@ class FlightSimulator:
         time_s: float,
         dt: Optional[float] = None,
         lag_states: Optional[Dict[str, Any]] = None,
+        compute_trim: bool = False,
     ) -> Dict[str, Any]:
         """Aerodynamics plus rigid-body dynamics at an arbitrary 13-state.
 
@@ -2176,7 +2179,8 @@ class FlightSimulator:
             omega_strip = np.array([0.0, q_rot, 0.0], dtype=np.float64)
             res_c = aero_forces(
                 aero_cfg, self.environment, speed, effective_alpha_deg, beta_deg,
-                mach, reynolds, max(altitude, 0.0), omega_strip, air["density_kgm3"], air["kinematic_viscosity_m2s"]
+                mach, reynolds, max(altitude, 0.0), omega_strip, air["density_kgm3"], air["kinematic_viscosity_m2s"],
+                compute_trim=compute_trim,
             )
             # Sample spanwise local wind differential to resolve wind shear & gust gradients
             # Body station vectors: y_b points out right wing (+y)
@@ -2209,26 +2213,30 @@ class FlightSimulator:
             a_il = effective_alpha_deg - math.degrees(0.22 * b_span * p_rot / v_safe) - math.degrees(float(w_il_body[2]) / v_safe)
             res_il = aero_forces(
                 aero_cfg, self.environment, v_il, a_il, beta_deg,
-                mach, reynolds, max(altitude, 0.0), omega_strip, air["density_kgm3"], air["kinematic_viscosity_m2s"]
+                mach, reynolds, max(altitude, 0.0), omega_strip, air["density_kgm3"], air["kinematic_viscosity_m2s"],
+                compute_trim=False,
             )
             v_ir = max(speed - 0.22 * b_span * r_rot - float(w_ir_body[0]), 0.1)
             a_ir = effective_alpha_deg + math.degrees(0.22 * b_span * p_rot / v_safe) - math.degrees(float(w_ir_body[2]) / v_safe)
             res_ir = aero_forces(
                 aero_cfg, self.environment, v_ir, a_ir, beta_deg,
-                mach, reynolds, max(altitude, 0.0), omega_strip, air["density_kgm3"], air["kinematic_viscosity_m2s"]
+                mach, reynolds, max(altitude, 0.0), omega_strip, air["density_kgm3"], air["kinematic_viscosity_m2s"],
+                compute_trim=False,
             )
             # Tip stations (+/- 0.44b)
             v_ol = max(speed + 0.44 * b_span * r_rot - float(w_ol_body[0]), 0.1)
             a_ol = effective_alpha_deg - math.degrees(0.44 * b_span * p_rot / v_safe) - math.degrees(float(w_ol_body[2]) / v_safe)
             res_ol = aero_forces(
                 aero_cfg, self.environment, v_ol, a_ol, beta_deg,
-                mach, reynolds, max(altitude, 0.0), omega_strip, air["density_kgm3"], air["kinematic_viscosity_m2s"]
+                mach, reynolds, max(altitude, 0.0), omega_strip, air["density_kgm3"], air["kinematic_viscosity_m2s"],
+                compute_trim=False,
             )
             v_or = max(speed - 0.44 * b_span * r_rot - float(w_or_body[0]), 0.1)
             a_or = effective_alpha_deg + math.degrees(0.44 * b_span * p_rot / v_safe) - math.degrees(float(w_or_body[2]) / v_safe)
             res_or = aero_forces(
                 aero_cfg, self.environment, v_or, a_or, beta_deg,
-                mach, reynolds, max(altitude, 0.0), omega_strip, air["density_kgm3"], air["kinematic_viscosity_m2s"]
+                mach, reynolds, max(altitude, 0.0), omega_strip, air["density_kgm3"], air["kinematic_viscosity_m2s"],
+                compute_trim=False,
             )
 
             # Boole's / Simpson's 5-point quadrature weights: (7, 32, 12, 32, 7) / 90
@@ -2290,6 +2298,7 @@ class FlightSimulator:
                 omega,
                 air["density_kgm3"],
                 air["kinematic_viscosity_m2s"],
+                compute_trim=compute_trim,
             )
 
         # Unsteady Aerodynamics: Circulation lag (item 1)
@@ -3056,7 +3065,7 @@ class FlightSimulator:
         if self._diagnostics_cache is not None:
             return self._diagnostics_cache
         state = self._state
-        core = self._compute_dynamics(_pack(state), float(state.time_s))
+        core = self._compute_dynamics(_pack(state), float(state.time_s), compute_trim=True)
         result = core["aero"]
         quaternion = core["quaternion"]
         roll, pitch, yaw = euler_zyx_from_quaternion(quaternion)

@@ -51,6 +51,7 @@ the parasite drag, the pitch inertia and the reference moment arm together.
 from __future__ import annotations
 
 import math
+from collections import OrderedDict
 from dataclasses import replace
 from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
 
@@ -637,6 +638,10 @@ def elevon_effects(elevon_deg: float, cfg: AircraftConfig) -> Dict[str, float]:
     return {key: float(value) for key, value in effects.items()}
 
 
+_GLOBAL_TRIM_CACHE: OrderedDict[Tuple[Any, ...], float] = OrderedDict()
+_GLOBAL_TRIM_CACHE_MAX_SIZE: int = 2048
+
+
 def trim_alpha_from_elevon(cfg: AircraftConfig, elevon_deg: float, speed_mps: float = 9.0, env: Optional[EnvironmentConfig] = None) -> float:
     """Angle of attack that nulls the static pitching moment.
 
@@ -647,10 +652,28 @@ def trim_alpha_from_elevon(cfg: AircraftConfig, elevon_deg: float, speed_mps: fl
     """
     elevon_val = float(elevon_deg)
     speed_val = float(speed_mps)
-    cache_key = (round(elevon_val, 6), round(speed_val, 4), id(env) if env is not None else 0)
-    trim_cache = getattr(cfg, "_trim_cache", None)
-    if trim_cache is not None and cache_key in trim_cache:
-        return trim_cache[cache_key]
+    cm0_val = round(_finite(cfg.cm0), 5)
+    cm_a_val = round(_finite(cfg.cm_alpha), 5)
+    cl0_val = round(_finite(cfg.cL0), 5)
+    te_fold_val = round(_finite(getattr(cfg, "fold_trailing_deg", 0.0)), 4)
+    cp_shift_val = round(_finite(getattr(cfg, "cp_shift_gain", 0.0)), 4)
+    stall_val = round(_finite(getattr(cfg, "stall_alpha_deg", 14.0)), 4)
+    env_ground = round(float(env.ground_level_m), 4) if env is not None else 0.0
+
+    cache_key = (
+        round(elevon_val, 4),
+        round(speed_val, 3),
+        cm0_val,
+        cm_a_val,
+        cl0_val,
+        te_fold_val,
+        cp_shift_val,
+        stall_val,
+        env_ground,
+    )
+    if cache_key in _GLOBAL_TRIM_CACHE:
+        _GLOBAL_TRIM_CACHE.move_to_end(cache_key)
+        return _GLOBAL_TRIM_CACHE[cache_key]
 
     if env is None:
         env = EnvironmentConfig()
@@ -695,15 +718,9 @@ def trim_alpha_from_elevon(cfg: AircraftConfig, elevon_deg: float, speed_mps: fl
         if abs(step) < 1.0e-13:
             break
     result_val = float(alpha)
-    if trim_cache is None:
-        trim_cache = {}
-        try:
-            object.__setattr__(cfg, "_trim_cache", trim_cache)
-        except Exception:
-            pass
-    if len(trim_cache) > 256:
-        trim_cache.clear()
-    trim_cache[cache_key] = result_val
+    if len(_GLOBAL_TRIM_CACHE) >= _GLOBAL_TRIM_CACHE_MAX_SIZE:
+        _GLOBAL_TRIM_CACHE.popitem(last=False)
+    _GLOBAL_TRIM_CACHE[cache_key] = result_val
     return result_val
 
 
@@ -1090,6 +1107,7 @@ def evaluate_aero(
     angular_rate: Union[Sequence[float], np.ndarray] = (0.0, 0.0, 0.0),
     density_kgm3: Optional[float] = None,
     kinematic_viscosity_m2s: Optional[float] = None,
+    compute_trim: bool = True,
 ) -> AeroResult:
     """Complete 6-DoF aerodynamic evaluation at one instant.
 
@@ -1224,8 +1242,8 @@ def evaluate_aero(
         cd_min=float(minima["cd_min"]),
         alpha_ld_max_deg=float(minima["alpha_ld_max_deg"]),
         circulation_m2ps=float(gamma),
-        trim_alpha_deg=trim_alpha_from_elevon(cfg, _finite(cfg.elevon_deg)),
-        trim_elevon_deg=elevon_for_trim(cfg, alpha),
+        trim_alpha_deg=trim_alpha_from_elevon(cfg, _finite(cfg.elevon_deg)) if compute_trim else 0.0,
+        trim_elevon_deg=elevon_for_trim(cfg, alpha) if compute_trim else 0.0,
         ground_effect_ratio=float(ground_ratio),
         lift_left_n=float(lift_left_n),
         lift_right_n=float(lift_right_n),
