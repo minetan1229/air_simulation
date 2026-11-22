@@ -59,13 +59,14 @@ def investigate_airplane(
     max_tune_evaluations: int = 15,
     skip_scan: bool = False,
     skip_tuning: bool = False,
+    duration_s: float = 4.0,
 ) -> InvestigationResult:
     """Run full automated investigation pipeline: Diagnosis -> Sensitivity -> Tuning -> Advice."""
     env = environment if environment is not None else EnvironmentConfig()
     lau = launch if launch is not None else LaunchConfig()
 
     # Step 1: Baseline Trajectory & Diagnosis
-    base_summary, base_samples = simulate_trajectory(aircraft, env, lau)
+    base_summary, base_samples = simulate_trajectory(aircraft, env, lau, duration_s=duration_s)
     base_metrics = compute_flight_metrics(
         base_summary, base_samples, abs(float(aircraft.stall_alpha_deg))
     )
@@ -90,6 +91,9 @@ def investigate_airplane(
             target_metric=target_metric,
             sample_steps=sample_steps,
             progress_callback=scan_cb,
+            baseline_summary=base_summary,
+            baseline_samples=base_samples,
+            duration_s=duration_s,
         )
 
     # Step 3: Focused Multi-Variable Tuning
@@ -112,6 +116,7 @@ def investigate_airplane(
             target_metric=target_metric,
             max_evaluations=max_tune_evaluations,
             progress_callback=tune_cb,
+            duration_s=duration_s,
         )
         rec_metrics = compute_flight_metrics(
             rec_summary, rec_samples, abs(float(rec_air.stall_alpha_deg))

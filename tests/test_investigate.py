@@ -86,7 +86,7 @@ def test_focused_tuning_preserves_immutable_aircraft_properties():
     lau = LaunchConfig(launch_speed=12.0, launch_angle_deg=12.0)
 
     rec_air, rec_lau, rec_summary, rec_samples = run_focused_tuning(
-        air, env, lau, target_metric="distance", max_evaluations=8
+        air, env, lau, target_metric="distance", max_evaluations=8, duration_s=2.5
     )
 
     # Strictly immutable
@@ -105,7 +105,9 @@ def test_sensitivity_scan_ranks_variables():
     env = EnvironmentConfig()
     lau = LaunchConfig(launch_speed=12.0, launch_angle_deg=10.0)
 
-    sens = run_sensitivity_scan(air, env, lau, target_metric="distance", sample_steps=2)
+    sens = run_sensitivity_scan(
+        air, env, lau, target_metric="distance", sample_steps=2, duration_s=2.5
+    )
     assert len(sens) == len(ADJUSTABLE_VARIABLES)
     # Ranked descending
     for i in range(len(sens) - 1):
@@ -122,7 +124,13 @@ def test_full_investigate_pipeline():
     lau = LaunchConfig()
 
     res = investigate_airplane(
-        air, env, lau, target_metric="distance", sample_steps=2, max_tune_evaluations=5
+        air,
+        env,
+        lau,
+        target_metric="distance",
+        sample_steps=2,
+        max_tune_evaluations=5,
+        duration_s=2.5,
     )
     assert res.target_metric == "distance"
     assert "metrics" in res.baseline

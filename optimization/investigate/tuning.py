@@ -24,19 +24,19 @@ def simulate_trajectory(
     aircraft: AircraftConfig,
     environment: EnvironmentConfig,
     launch: LaunchConfig,
-    duration_s: float = 5.0,
-    dt_max: float = 0.05,
-    max_substeps: int = 8,
+    duration_s: float = 4.0,
+    dt_max: float = 0.02,
+    max_substeps: int = 64,
     record: bool = True,
-    adaptive: bool = False,
+    adaptive: bool = True,
 ) -> Tuple[Dict[str, Any], List[FlightLogSample]]:
     """Run full 6-DoF simulator and return summary and sample history."""
     settings = SimulationSettings(
         dt_max=dt_max,
-        dt_min=min(1.0e-4, dt_max),
+        dt_min=min(1.0e-5, dt_max),
         max_substeps=max_substeps,
         duration_s=duration_s,
-        record_interval_s=max(dt_max, 0.05),
+        record_interval_s=max(dt_max, 0.02),
         time_scale=1.0,
         adaptive=adaptive,
         collision_enabled=True,
@@ -62,12 +62,22 @@ def run_sensitivity_scan(
     target_metric: str = "distance",
     sample_steps: int = 5,
     progress_callback: Optional[Callable[[int, int, str], None]] = None,
+    baseline_summary: Optional[Dict[str, Any]] = None,
+    baseline_samples: Optional[List[FlightLogSample]] = None,
+    duration_s: float = 4.0,
 ) -> List[SensitivityResult]:
     """Perform a 1-D sweep for every adjustable variable to evaluate sensitivity."""
     results: List[SensitivityResult] = []
 
-    # Baseline run
-    base_summary, base_samples = simulate_trajectory(aircraft, environment, launch, duration_s=6.0)
+    # Baseline run (reuse if provided)
+    if baseline_summary is not None and baseline_samples is not None:
+        base_summary = baseline_summary
+        base_samples = baseline_samples
+    else:
+        base_summary, base_samples = simulate_trajectory(
+            aircraft, environment, launch, duration_s=duration_s
+        )
+
     base_metrics = compute_flight_metrics(
         base_summary, base_samples, abs(float(aircraft.stall_alpha_deg))
     )
@@ -94,33 +104,43 @@ def run_sensitivity_scan(
         max_score = -1e9
 
         for val in span_vals:
-            mod_air = copy.deepcopy(aircraft)
-            mod_lau = copy.deepcopy(launch)
-
-            if var.target_object == "aircraft":
-                setattr(mod_air, var.name, val)
+            if abs(val - cur_val) < 1e-4:
+                dist_val = float(base_summary.get("distance_m", 0.0))
+                time_val = float(base_summary.get("flight_time_s", 0.0))
+                if target_metric == "flight_time":
+                    score = time_val
+                elif target_metric == "ld_ratio":
+                    score = float(base_summary.get("max_ld_ratio", 0.0))
+                elif target_metric == "stability":
+                    score = float(base_summary.get("stability", 0.0))
+                else:
+                    score = dist_val
             else:
-                setattr(mod_lau, var.name, val)
+                mod_air = copy.deepcopy(aircraft)
+                mod_lau = copy.deepcopy(launch)
 
-            summary, _ = simulate_trajectory(
-                mod_air,
-                environment,
-                mod_lau,
-                duration_s=4.0,
-                dt_max=0.05,
-                max_substeps=12,
-                record=False,
-            )
-            dist_val = float(summary.get("distance_m", 0.0))
-            time_val = float(summary.get("flight_time_s", 0.0))
-            if target_metric == "flight_time":
-                score = time_val
-            elif target_metric == "ld_ratio":
-                score = float(summary.get("max_ld_ratio", 0.0))
-            elif target_metric == "stability":
-                score = float(summary.get("stability", 0.0))
-            else:
-                score = dist_val
+                if var.target_object == "aircraft":
+                    setattr(mod_air, var.name, val)
+                else:
+                    setattr(mod_lau, var.name, val)
+
+                summary, _ = simulate_trajectory(
+                    mod_air,
+                    environment,
+                    mod_lau,
+                    duration_s=duration_s,
+                    record=False,
+                )
+                dist_val = float(summary.get("distance_m", 0.0))
+                time_val = float(summary.get("flight_time_s", 0.0))
+                if target_metric == "flight_time":
+                    score = time_val
+                elif target_metric == "ld_ratio":
+                    score = float(summary.get("max_ld_ratio", 0.0))
+                elif target_metric == "stability":
+                    score = float(summary.get("stability", 0.0))
+                else:
+                    score = dist_val
 
             curve_points.append(
                 {
@@ -176,6 +196,7 @@ def run_focused_tuning(
     target_metric: str = "distance",
     max_evaluations: int = 50,
     progress_callback: Optional[Callable[[int, int, str], None]] = None,
+    duration_s: float = 4.0,
 ) -> Tuple[AircraftConfig, LaunchConfig, Dict[str, Any], List[FlightLogSample]]:
     """Run a focused local optimizer only modifying adjustable variables."""
     tuning_vars = [
@@ -234,9 +255,7 @@ def run_focused_tuning(
             mod_air,
             environment,
             mod_lau,
-            duration_s=4.0,
-            dt_max=0.05,
-            max_substeps=12,
+            duration_s=duration_s,
             record=False,
         )
         dist_val = float(summary.get("distance_m", 0.0))
@@ -284,5 +303,7 @@ def run_focused_tuning(
         else:
             setattr(rec_lau, v.name, round(final_val, 2))
 
-    rec_summary, rec_samples = simulate_trajectory(rec_air, environment, rec_lau)
+    rec_summary, rec_samples = simulate_trajectory(
+        rec_air, environment, rec_lau, duration_s=duration_s, record=True
+    )
     return rec_air, rec_lau, rec_summary, rec_samples
