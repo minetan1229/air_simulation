@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 """
-Sharded Pytest Runner with Massive Kilo Code Parallel Workers
+Dynamic Work-Queue Pytest Runner with Massive Kilo Code Parallel Workers
 
-This script divides the pytest test suite into N shards, executes them
-in parallel, and dispatches Kilo Code CLI workers (Nemotron 3 Ultra high)
-in parallel to analyze logs, detect bottlenecks, and summarize results.
+This script executes pytest test files using a dynamic work queue (work-stealing)
+with LPT (Longest Processing Time first) scheduling to maximize CPU efficiency,
+eliminating worker idle time. Afterwards, parallel Kilo Code CLI workers
+(Nemotron 3 Ultra high) analyze logs, bottlenecks, and summarize test health.
 """
 
 from __future__ import annotations
@@ -13,12 +14,15 @@ import argparse
 import concurrent.futures
 import json
 import os
+import queue
+import re
 import subprocess
 import sys
+import threading
 import time
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(PROJECT_ROOT) not in sys.path:
@@ -28,9 +32,8 @@ from tools.kilo_subagent import DEFAULT_WORKER_MODEL, execute_kilo_worker, get_k
 
 
 @dataclass
-class ShardResult:
-    shard_id: int
-    files: List[str]
+class SingleTestResult:
+    test_file: str
     return_code: int
     duration_sec: float
     passed: int = 0
@@ -38,7 +41,17 @@ class ShardResult:
     skipped: int = 0
     warnings: int = 0
     stdout: str = ""
-    analysis: str = ""
+
+
+@dataclass
+class WorkerSummary:
+    worker_id: int
+    executed_files: List[str] = field(default_factory=list)
+    total_duration_sec: float = 0.0
+    passed: int = 0
+    failed: int = 0
+    skipped: int = 0
+    warnings: int = 0
 
 
 def collect_test_files() -> List[str]:
@@ -52,19 +65,46 @@ def collect_test_files() -> List[str]:
     return test_files
 
 
-def partition_into_shards(items: List[str], num_shards: int) -> List[List[str]]:
-    """Partition items across num_shards evenly (round-robin)."""
-    shards: List[List[str]] = [[] for _ in range(num_shards)]
-    for i, item in enumerate(items):
-        shards[i % num_shards].append(item)
-    return [s for s in shards if s]
+# Known heavy test files or patterns based on execution profile
+HEAVY_PATTERNS = [
+    "test_cfd_",
+    "test_ga2_",
+    "test_ga_",
+    "test_issue12_",
+    "test_ensemble",
+    "test_nonlinear_aero",
+    "test_long_horizon",
+    "test_investigate",
+    "test_deformation",
+    "test_gpu_kernel",
+    "test_optimizer",
+    "test_search",
+    "test_structural",
+    "test_wind_axis",
+]
+
+
+def estimate_test_weight(test_file: str) -> int:
+    """
+    Estimate computation weight for LPT (Longest Processing Time) sorting.
+    Higher weight files run first to prevent late-tail stragglers.
+    """
+    weight = 10
+    for pat in HEAVY_PATTERNS:
+        if pat in test_file:
+            weight += 100
+    try:
+        # File size as secondary heuristic
+        size = (PROJECT_ROOT / test_file).stat().st_size
+        weight += int(size / 500)
+    except Exception:
+        pass
+    return weight
 
 
 def parse_pytest_summary(output: str) -> Dict[str, int]:
     """Parse pass/fail/skip counts from pytest terminal output."""
-    import re
     counts = {"passed": 0, "failed": 0, "skipped": 0, "warnings": 0}
-    # Pattern e.g. "15 passed, 2 skipped, 1 warning in 3.45s"
     m_pass = re.search(r"(\d+)\s+passed", output)
     if m_pass:
         counts["passed"] = int(m_pass.group(1))
@@ -80,15 +120,16 @@ def parse_pytest_summary(output: str) -> Dict[str, int]:
     return counts
 
 
-def run_single_shard(shard_id: int, files: List[str], verbose: bool = False) -> ShardResult:
-    """Execute pytest for a given shard."""
+def run_test_file(test_file: str) -> SingleTestResult:
+    """Execute pytest on a single test file."""
     cmd = [
         sys.executable,
         "-m",
         "pytest",
         "-q",
         "--tb=short",
-    ] + files
+        test_file,
+    ]
 
     start_time = time.time()
     proc = subprocess.Popen(
@@ -105,15 +146,8 @@ def run_single_shard(shard_id: int, files: List[str], verbose: bool = False) -> 
     ret = proc.returncode
 
     counts = parse_pytest_summary(stdout)
-    if verbose:
-        status_sym = "✅" if ret == 0 else "❌"
-        print(f"[{status_sym} Shard {shard_id:02d}] Finished in {duration:.1f}s: "
-              f"{counts['passed']} passed, {counts['failed']} failed, {counts['skipped']} skipped "
-              f"({len(files)} files)")
-
-    return ShardResult(
-        shard_id=shard_id,
-        files=files,
+    return SingleTestResult(
+        test_file=test_file,
         return_code=ret,
         duration_sec=duration,
         passed=counts["passed"],
@@ -124,28 +158,89 @@ def run_single_shard(shard_id: int, files: List[str], verbose: bool = False) -> 
     )
 
 
-def analyze_shard_with_kilo(
-    result: ShardResult,
+def dynamic_worker(
+    worker_id: int,
+    work_queue: queue.Queue[Optional[str]],
+    results_list: List[SingleTestResult],
+    worker_summary: WorkerSummary,
+    lock: threading.Lock,
+    total_files: int,
+    counter_ref: List[int],
+    verbose: bool = False,
+) -> None:
+    """Worker loop that dynamically consumes tests from queue until None."""
+    while True:
+        try:
+            test_file = work_queue.get(block=True, timeout=1.0)
+        except queue.Empty:
+            break
+
+        if test_file is None:
+            work_queue.task_done()
+            break
+
+        res = run_test_file(test_file)
+
+        with lock:
+            counter_ref[0] += 1
+            completed_count = counter_ref[0]
+            results_list.append(res)
+            worker_summary.executed_files.append(test_file)
+            worker_summary.total_duration_sec += res.duration_sec
+            worker_summary.passed += res.passed
+            worker_summary.failed += res.failed
+            worker_summary.skipped += res.skipped
+            worker_summary.warnings += res.warnings
+
+            status_icon = "✅" if res.return_code == 0 else "❌"
+            progress_pct = (completed_count / total_files) * 100
+            print(
+                f"[{completed_count:03d}/{total_files:03d} {progress_pct:4.1f}%] "
+                f"[W{worker_id:02d} {status_icon}] {test_file:<45} "
+                f"({res.duration_sec:5.1f}s | P:{res.passed} F:{res.failed} S:{res.skipped})",
+                flush=True,
+            )
+
+        work_queue.task_done()
+
+
+def analyze_diagnostics_with_kilo(
+    top_slow: List[SingleTestResult],
+    failed_tests: List[SingleTestResult],
+    worker_summaries: List[WorkerSummary],
+    total_duration: float,
     model: str = DEFAULT_WORKER_MODEL,
     verbose: bool = False,
 ) -> str:
-    """Dispatch Kilo Code CLI worker to analyze shard output."""
-    tail_output = "\n".join(result.stdout.strip().splitlines()[-40:])
-    file_list = ", ".join(result.files[:5])
-    if len(result.files) > 5:
-        file_list += f" ... (+{len(result.files)-5} files)"
+    """Dispatch Kilo Code CLI worker to analyze performance and failure diagnostics."""
+    slow_details = "\n".join([
+        f"- `{r.test_file}`: {r.duration_sec:.1f}s (P:{r.passed}, F:{r.failed}, S:{r.skipped})"
+        for r in top_slow[:10]
+    ])
+
+    fail_details = "None (All tests passed)"
+    if failed_tests:
+        fail_details = "\n".join([
+            f"- `{r.test_file}`: Code {r.return_code}\n  Tail log:\n"
+            + "\n".join(r.stdout.strip().splitlines()[-10:])
+            for r in failed_tests[:5]
+        ])
+
+    worker_balance = "\n".join([
+        f"- Worker {w.worker_id:02d}: {len(w.executed_files)} files, {w.total_duration_sec:.1f}s, Pass={w.passed}, Fail={w.failed}"
+        for w in worker_summaries
+    ])
 
     prompt = (
-        f"あなたはテスト監査・診断を行うAIワーカーです。以下のpytestシャード結果を分析し、"
-        f"1. 実行結果の概要（パス/失敗/スキップ/警告）\n"
-        f"2. 異常や低速実行、警告の原因と健全性評価\n"
-        f"3. 改善提案または特記事項\n"
-        f"を簡潔なMarkdown（5〜10行程度）で報告してください。\n\n"
-        f"【シャードID】: Shard {result.shard_id:02d}\n"
-        f"【対象ファイル】: {file_list}\n"
-        f"【所要時間】: {result.duration_sec:.2f}秒\n"
-        f"【終了コード】: {result.return_code}\n"
-        f"【出力末尾ログ】:\n```\n{tail_output}\n```"
+        f"あなたはテスト最適化・CI並列化の専門AIワーカーです。以下の動的キューpytest実行結果を分析し、\n"
+        f"1. 実行効率とワーカー負荷分散の評価（LPT動的キューの効果）\n"
+        f"2. 低速テスト上位（ボトルネック）の分析と今後の高速化提案\n"
+        f"3. テスト全体の健全性総合評価\n"
+        f"を簡潔かつ論理的なMarkdown（10〜15行程度）で報告してください。\n\n"
+        f"【総テスト実行実時間】: {total_duration:.1f}秒\n"
+        f"【ワーカー負荷分布】:\n{worker_balance}\n\n"
+        f"【最長所要時間テスト Top 10】:\n{slow_details}\n\n"
+        f"【失敗テスト状況】:\n{fail_details}"
     )
 
     try:
@@ -165,24 +260,12 @@ def analyze_shard_with_kilo(
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Run sharded pytest with Kilo Code workers.")
+    parser = argparse.ArgumentParser(description="Run pytest using dynamic work-queue with Kilo Code audit.")
     parser.add_argument(
-        "-n", "--shards",
-        type=int,
-        default=8,
-        help="Number of shards (default: 8)",
-    )
-    parser.add_argument(
-        "--workers",
+        "-w", "--workers",
         type=int,
         default=4,
-        help="Concurrent test runner workers (default: 4)",
-    )
-    parser.add_argument(
-        "--kilo-workers",
-        type=int,
-        default=8,
-        help="Concurrent Kilo Code analyzer workers (default: 8)",
+        help="Number of concurrent test worker processes (default: 4)",
     )
     parser.add_argument(
         "-m", "--model",
@@ -197,7 +280,7 @@ def main() -> int:
     parser.add_argument(
         "-o", "--output",
         type=str,
-        default="test_shards_report.md",
+        default="docs/test_shards_report.md",
         help="Output markdown report file",
     )
     parser.add_argument(
@@ -210,71 +293,98 @@ def main() -> int:
     files = collect_test_files()
     total_files = len(files)
     print(f"[*] Collected {total_files} test files from tests/")
-    shards = partition_into_shards(files, args.shards)
-    print(f"[*] Partitioned into {len(shards)} shards (max {args.workers} parallel test workers)")
 
-    # Step 1: Run pytest shards in parallel
-    shard_results: List[ShardResult] = []
+    # LPT (Longest Processing Time first) Sort:
+    # Heavier tests are queued first so no stragglers remain at the end!
+    files.sort(key=estimate_test_weight, reverse=True)
+    print("[*] Sorted tests by estimated weight (LPT scheduling).")
+    print(f"[*] Starting Dynamic Work-Queue with {args.workers} concurrent workers...\n")
+
+    work_queue: queue.Queue[Optional[str]] = queue.Queue()
+    for f in files:
+        work_queue.put(f)
+
+    # Put sentinel None for each worker
+    for _ in range(args.workers):
+        work_queue.put(None)
+
+    results_list: List[SingleTestResult] = []
+    worker_summaries: List[WorkerSummary] = [WorkerSummary(worker_id=i + 1) for i in range(args.workers)]
+    lock = threading.Lock()
+    counter_ref = [0]
+
     start_total = time.time()
+    threads: List[threading.Thread] = []
 
-    with concurrent.futures.ThreadPoolExecutor(max_workers=args.workers) as executor:
-        future_to_shard = {
-            executor.submit(run_single_shard, i + 1, shard_files, args.verbose): i + 1
-            for i, shard_files in enumerate(shards)
-        }
-        for future in concurrent.futures.as_completed(future_to_shard):
-            shard_id = future_to_shard[future]
-            try:
-                res = future.result()
-                shard_results.append(res)
-                print(f"  -> Shard {res.shard_id:02d} completed: "
-                      f"Pass={res.passed}, Fail={res.failed}, Skip={res.skipped}, Warn={res.warnings} ({res.duration_sec:.1f}s)")
-            except Exception as exc:
-                print(f"  -> Shard {shard_id:02d} generated an exception: {exc}", file=sys.stderr)
+    for i in range(args.workers):
+        t = threading.Thread(
+            target=dynamic_worker,
+            args=(
+                i + 1,
+                work_queue,
+                results_list,
+                worker_summaries[i],
+                lock,
+                total_files,
+                counter_ref,
+                args.verbose,
+            ),
+        )
+        t.start()
+        threads.append(t)
 
-    total_test_duration = time.time() - start_total
-    shard_results.sort(key=lambda r: r.shard_id)
+    for t in threads:
+        t.join()
 
-    total_pass = sum(r.passed for r in shard_results)
-    total_fail = sum(r.failed for r in shard_results)
-    total_skip = sum(r.skipped for r in shard_results)
-    total_warn = sum(r.warnings for r in shard_results)
-    any_failed = any(r.return_code != 0 for r in shard_results)
+    total_duration = time.time() - start_total
 
-    print("\n" + "=" * 60)
-    print(f"[*] All Shards Completed in {total_test_duration:.1f}s")
+    total_pass = sum(r.passed for r in results_list)
+    total_fail = sum(r.failed for r in results_list)
+    total_skip = sum(r.skipped for r in results_list)
+    total_warn = sum(r.warnings for r in results_list)
+    failed_tests = [r for r in results_list if r.return_code != 0]
+    any_failed = len(failed_tests) > 0
+
+    print("\n" + "=" * 65)
+    print(f"[*] Dynamic Work-Queue Test Run Completed in {total_duration:.1f}s")
     print(f"[*] Totals: Passed={total_pass}, Failed={total_fail}, Skipped={total_skip}, Warnings={total_warn}")
-    print("=" * 60 + "\n")
+    print("=" * 65 + "\n")
 
-    # Step 2: Parallel Kilo Code Analysis (Massive concurrency)
+    # Top slow tests
+    results_list.sort(key=lambda r: r.duration_sec, reverse=True)
+    top_slow = results_list[:10]
+    print("[*] Top 10 Slowest Test Files:")
+    for rank, r in enumerate(top_slow, 1):
+        print(f"  {rank:2d}. {r.test_file:<45} : {r.duration_sec:5.1f}s (P:{r.passed})")
+    print()
+
+    # Kilo Code Analysis
+    kilo_analysis = ""
     if not args.no_kilo:
-        print(f"[*] Dispatching {len(shard_results)} Kilo Code workers in parallel (Model: {args.model})...")
+        print(f"[*] Dispatching Kilo Code Worker to analyze efficiency & diagnostics (Model: {args.model})...")
         kilo_start = time.time()
-        with concurrent.futures.ThreadPoolExecutor(max_workers=args.kilo_workers) as kilo_executor:
-            kilo_futures = {
-                kilo_executor.submit(analyze_shard_with_kilo, r, args.model, args.verbose): r
-                for r in shard_results
-            }
-            for future in concurrent.futures.as_completed(kilo_futures):
-                r = kilo_futures[future]
-                try:
-                    analysis = future.result()
-                    r.analysis = analysis
-                    print(f"  [✓ Kilo Worker] Analyzed Shard {r.shard_id:02d}")
-                except Exception as exc:
-                    r.analysis = f"Analysis failed: {exc}"
-                    print(f"  [✗ Kilo Worker] Shard {r.shard_id:02d} failed: {exc}", file=sys.stderr)
-        kilo_duration = time.time() - kilo_start
-        print(f"[*] All Kilo Code Workers completed in {kilo_duration:.1f}s\n")
+        kilo_analysis = analyze_diagnostics_with_kilo(
+            top_slow=top_slow,
+            failed_tests=failed_tests,
+            worker_summaries=worker_summaries,
+            total_duration=total_duration,
+            model=args.model,
+            verbose=args.verbose,
+        )
+        print(f"[*] Kilo Code Worker analysis completed in {time.time() - kilo_start:.1f}s\n")
+        print("--- Kilo Code Diagnosis ---")
+        print(kilo_analysis)
+        print("---------------------------\n")
 
-    # Step 3: Generate Comprehensive Report
+    # Generate Markdown Report
     report_lines = [
-        "# Sharded Pytest & Kilo Code Parallel Audit Report",
+        "# Dynamic Work-Queue Pytest & Kilo Code Parallel Audit Report",
         "",
         f"- **Date / Time**: {time.strftime('%Y-%m-%d %H:%M:%S')}",
+        "- **Scheduling Strategy**: Dynamic Work-Queue with LPT (Longest Processing Time first)",
         f"- **Total Test Files**: {total_files}",
-        f"- **Shards**: {len(shards)}",
-        f"- **Parallel Test Duration**: {total_test_duration:.2f}s",
+        f"- **Active Workers**: {args.workers}",
+        f"- **Total Wall-Clock Duration**: {total_duration:.2f}s",
         f"- **Overall Status**: {'FAILED ❌' if any_failed else 'PASSED ✅'}",
         "",
         "## Summary Metrics",
@@ -285,30 +395,39 @@ def main() -> int:
         f"| **Total Skipped** | {total_skip} |",
         f"| **Total Warnings** | {total_warn} |",
         "",
-        "## Shard Details",
-        "| Shard | Files | Duration | Status | Passed | Failed | Skipped |",
-        "|---|---|---|---|---|---|---|",
+        "## Worker Load Distribution (Work-Stealing Efficiency)",
+        "| Worker | Files Done | Active Time (s) | Passed | Failed | Skipped |",
+        "|---|---|---|---|---|---|",
     ]
 
-    for r in shard_results:
-        status_icon = "✅" if r.return_code == 0 else "❌"
+    for w in worker_summaries:
         report_lines.append(
-            f"| Shard {r.shard_id:02d} | {len(r.files)} | {r.duration_sec:.1f}s | {status_icon} | {r.passed} | {r.failed} | {r.skipped} |"
+            f"| Worker {w.worker_id:02d} | {len(w.executed_files)} | {w.total_duration_sec:.1f}s | {w.passed} | {w.failed} | {w.skipped} |"
         )
 
-    if not args.no_kilo:
-        report_lines.extend(["", "## Kilo Code Worker Diagnoses", ""])
-        for r in shard_results:
-            report_lines.extend([
-                f"### Shard {r.shard_id:02d} Analysis",
-                f"- **Files**: {', '.join(r.files)}",
-                "",
-                r.analysis if r.analysis else "No analysis available.",
-                "",
-            ])
+    report_lines.extend([
+        "",
+        "## Top 10 Longest Running Test Files",
+        "| Rank | Test File | Duration | Passed | Failed | Skipped |",
+        "|---|---|---|---|---|---|",
+    ])
+    for rank, r in enumerate(top_slow, 1):
+        report_lines.append(
+            f"| {rank} | `{r.test_file}` | {r.duration_sec:.1f}s | {r.passed} | {r.failed} | {r.skipped} |"
+        )
+
+    if kilo_analysis:
+        report_lines.extend([
+            "",
+            "## Kilo Code Worker Optimization & Health Diagnosis",
+            "",
+            kilo_analysis,
+            "",
+        ])
 
     report_content = "\n".join(report_lines)
     out_path = Path(args.output)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(report_content, encoding="utf-8")
     print(f"[*] Report saved to {out_path.resolve()}")
 
