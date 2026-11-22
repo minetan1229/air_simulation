@@ -67,7 +67,9 @@ class ParametricOrigamiCompiler:
 
         nose_len = _clamp(float(nose_cfg.nose_length_ratio), 0.20, 0.35)
         taper = _clamp(float(nose_cfg.taper_ratio), 0.40, 0.85)
-        nose_v = 0.5 + (_HALF_LENGTH - _HALF_WIDTH) / SHEET_LENGTH_M
+        # Dynamic nose fold placement based on nose length and taper ratio
+        base_v = 0.5 + (_HALF_LENGTH - _HALF_WIDTH) / SHEET_LENGTH_M
+        nose_v = _clamp(base_v + (0.28 - nose_len) * 0.4 + (taper - 0.65) * 0.15, 0.55, 0.72)
 
         crease_l = _corner_crease(nose_v)
         crease_r = _mirror_crease(crease_l)
@@ -99,25 +101,38 @@ class ParametricOrigamiCompiler:
         g = genome_from_creases(creases, key="v3_origami")
         steps = list(g.steps)
 
-        # Pad with symmetric micro trim & camber creases to target 20 steps (between MIN 16 and MAX 24)
+        # Pad with strictly symmetric bilateral micro trim & camber pairs to target 16-24 steps
         target_count = 20
-        extra_count = target_count - len(steps)
-        for i in range(extra_count):
-            v = 0.25 + 0.08 * i
-            idx = len(steps) + 1
-            side_name = "wing_l" if i % 2 == 0 else "wing_r"
-            sym = "left" if i % 2 == 0 else "right"
-            u_range = ((0.15, v), (0.35, v)) if i % 2 == 0 else ((0.65, v), (0.85, v))
+        needed_pairs = max(0, (target_count - len(steps) + 1) // 2)
+        for pair_idx in range(needed_pairs):
+            if len(steps) + 2 > MAX_FOLD_STEPS:
+                break
+            v = 0.25 + 0.10 * pair_idx
+            fold_ang = 2.0 + 0.5 * pair_idx
+            # Left wing crease
             steps.append(
                 FoldStep(
-                    step_index=idx,
-                    crease_line=u_range,
-                    fold_angle_deg=2.0 + 0.5 * i,
-                    symmetry=sym,
+                    step_index=len(steps) + 1,
+                    crease_line=((0.15, v), (0.35, v)),
+                    fold_angle_deg=fold_ang,
+                    symmetry="left",
                     layer_order="auto",
-                    group=(side_name,),
-                    set_group=f"reinforce_{i}",
-                    label=f"Wing reinforcement crease {i + 1}",
+                    group=("wing_l",),
+                    set_group=f"reinforce_l_{pair_idx}",
+                    label=f"Wing reinforcement left {pair_idx + 1}",
+                )
+            )
+            # Right wing crease (mirror symmetry)
+            steps.append(
+                FoldStep(
+                    step_index=len(steps) + 1,
+                    crease_line=((0.65, v), (0.85, v)),
+                    fold_angle_deg=fold_ang,
+                    symmetry="right",
+                    layer_order="auto",
+                    group=("wing_r",),
+                    set_group=f"reinforce_r_{pair_idx}",
+                    label=f"Wing reinforcement right {pair_idx + 1}",
                 )
             )
 

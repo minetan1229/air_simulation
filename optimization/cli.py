@@ -55,6 +55,7 @@ def run_pipeline(
     mcts_iterations: int = 30,
     elevon_bounds: Tuple[float, float] = (-4.0, 8.0),
     dihedral_bounds: Tuple[float, float] = (0.0, 8.0),
+    mutation_rate: float = 0.35,
 ) -> None:
     """Run full headless v3 pipeline."""
     out_path = Path(output_dir)
@@ -67,6 +68,7 @@ def run_pipeline(
     print("=" * 70)
     print(f"  Random Seed           : {seed}")
     print(f"  Search Iterations     : {iterations}")
+    print(f"  Mutation Rate         : {mutation_rate}")
     print(f"  Grid Bins             : {grid_bins} ({grid_bins[0]*grid_bins[1]*grid_bins[2]} niches)")
     print(f"  Grid Ranges           : {grid_ranges}")
     print(f"  Benchmark Duration    : {benchmark_duration_s}s")
@@ -78,7 +80,13 @@ def run_pipeline(
     adapter = OrigamiAdapter()
     benchmark = DeterministicFlightBenchmark(duration_s=benchmark_duration_s)
     grid = MAPElitesGridArchive(bins=grid_bins, ranges=grid_ranges)
-    engine = MAPElitesEngine(archive=grid, adapter=adapter, benchmark=benchmark, seed=seed)
+    engine = MAPElitesEngine(
+        archive=grid,
+        adapter=adapter,
+        benchmark=benchmark,
+        seed=seed,
+        mutation_rate=mutation_rate,
+    )
     trim_optimizer = NelderMeadTrimOptimizer(
         adapter=adapter,
         benchmark=benchmark,
@@ -223,6 +231,7 @@ def main() -> None:
     bench_duration = float(bench_cfg.get("duration_s", 6.0))
     boot_count = int(search_cfg.get("bootstrap_count", 5))
     mcts_iters = int(search_cfg.get("mcts_iterations", 30))
+    mut_rate = float(search_cfg.get("mutation_rate", 0.35))
 
     raw_e_bounds = trim_cfg.get("elevon_bounds_deg", [-4.0, 8.0])
     raw_d_bounds = trim_cfg.get("dihedral_bounds_deg", [0.0, 8.0])
@@ -244,6 +253,7 @@ def main() -> None:
         mcts_iterations=mcts_iters,
         elevon_bounds=e_bounds,
         dihedral_bounds=d_bounds,
+        mutation_rate=mut_rate,
     )
 
 

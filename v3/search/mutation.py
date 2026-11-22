@@ -41,11 +41,15 @@ def mutate_parametric_config(
     if r.random() < mutation_rate:
         new_nose_len = _clamp(nose.nose_length_ratio + r.gauss(0.0, 0.03), 0.20, 0.35)
 
+    mutated_angles = tuple(
+        180.0 if i % 2 == 0 else -180.0 for i in range(new_fold_count)
+    )
+
     mutated_nose = ParametricNoseSpec(
         fold_count=new_fold_count,
         taper_ratio=new_taper,
         nose_length_ratio=new_nose_len,
-        fold_angles_deg=nose.fold_angles_deg,
+        fold_angles_deg=mutated_angles,
     )
 
     # Phase 2: Keel mutation

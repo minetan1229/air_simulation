@@ -33,6 +33,17 @@ class RobustnessEvaluator:
         dihedral_deg = cfg.wing.dihedral_deg
         elevon_deg = 0.5 * (cfg.wing.elevon_left_deg + cfg.wing.elevon_right_deg)
 
+        # Derive CG offset and static margin from folded geometry if available
+        cg_offset_x = 0.0
+        static_margin = 0.12
+        if geom:
+            chord = max(0.01, float(geom.chord_m))
+            x_from_nose = 0.1485 - float(geom.cg_m[0])
+            nominal_ac_from_nose = 0.35 * chord
+            raw_offset = x_from_nose - nominal_ac_from_nose
+            cg_offset_x = max(-0.05, min(0.05, float(raw_offset)))
+            static_margin = max(-0.20, min(0.30, float(-cg_offset_x / chord)))
+
         aircraft = AircraftConfig(
             mass_kg=mass_kg,
             wing_area_m2=wing_area,
@@ -40,6 +51,8 @@ class RobustnessEvaluator:
             aspect_ratio=aspect_ratio,
             dihedral_deg=dihedral_deg,
             elevon_deg=elevon_deg,
+            cg_offset_x=cg_offset_x,
+            static_margin=static_margin,
         )
 
         # 1. Dryden Turbulence Test
