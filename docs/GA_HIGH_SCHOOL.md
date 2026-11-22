@@ -530,6 +530,7 @@ milcy はただ多様なだけでなく、人間のように賢く折って飛�
 
 ## さらに詳しく知りたい人へ
 
+- **航空・計算科学大用語集（完全版・全281項目）**: [docs/HIGH_SCHOOL_GLOSSARY_MASTER.md](HIGH_SCHOOL_GLOSSARY_MASTER.md)
 - **milcy完全入門（高校生向け）**: [docs/MILCY_FOR_HIGH_SCHOOL.md](MILCY_FOR_HIGH_SCHOOL.md)
 - **milcy実践ガイド**: `docs/MILCY_PROJECT_GUIDE.md`
 - **技術仕様書**: `docs/GA_ALGORITHM.md` （数式・コード参照付き）
