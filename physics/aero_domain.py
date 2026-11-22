@@ -281,14 +281,22 @@ def prandtl_glauert(mach: float) -> float:
     return float(aero_kernel.prandtl_glauert(_SCALAR, value))
 
 
-def lift_slope_per_rad(cfg: AircraftConfig, compressible: bool = True, mach: float = 0.0) -> float:
-    """Effective ``dC_L / dalpha`` in ``1/rad``, compressibility included."""
+def lift_slope_per_rad(
+    cfg: AircraftConfig,
+    compressible: bool = True,
+    mach: float = 0.0,
+    reynolds: float = 1.0e5,
+) -> float:
+    """Effective ``dC_L / dalpha`` in ``1/rad``, compressibility and low-Re included."""
     geom = _geom(cfg)
     if _finite(cfg.cLalpha_per_rad) > 0.0:
         slope = float(cfg.cLalpha_per_rad)
     else:
         slope = helmbold_cl_alpha(geom["aspect_ratio"], geom["taper_ratio"])
-    return slope * prandtl_glauert(mach) if compressible else slope
+    comp = prandtl_glauert(mach) if compressible else 1.0
+    if getattr(cfg, "low_re_enabled", False):
+        slope *= float(aero_kernel.re_cl_alpha_factor(_SCALAR, reynolds))
+    return slope * comp
 
 
 # --------------------------------------------------------------------------

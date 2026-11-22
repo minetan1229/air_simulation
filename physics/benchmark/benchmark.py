@@ -73,6 +73,7 @@ def _build_aircraft_config(candidate: AircraftCandidate) -> AircraftConfig:
         aspect_ratio=aspect_ratio,
         dihedral_deg=dihedral_deg,
         elevon_deg=elevon_deg,
+        low_re_enabled=True,
     )
 
 
@@ -137,8 +138,9 @@ def evaluate_horizontal_glide(
         sm = float(getattr(aircraft_config, "static_margin", 0.12))
         sm_factor = max(0.0, min(1.0, sm / 0.15)) if sm > 0.0 else 0.0
         damping_factor = 1.0 / (1.0 + mean_q * 2.0)
-        climb_penalty = 1.0 / (1.0 + max(0.0, max_alt - LAUNCH_HEIGHT_M * 1.5))
-        stability = float(0.4 * sm_factor + 0.3 * damping_factor + 0.3 * climb_penalty)
+        excess_alt = max(0.0, max_alt - LAUNCH_HEIGHT_M * 1.25)
+        climb_penalty = 1.0 / (1.0 + 3.0 * excess_alt * excess_alt)
+        stability = float(0.35 * sm_factor + 0.35 * damping_factor + 0.30 * climb_penalty)
 
     return EvaluationMetric(
         speed_mps=float(speed_mps),
