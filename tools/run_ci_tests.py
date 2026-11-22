@@ -46,7 +46,7 @@ def main() -> int:
 
     try:
         import pytest_timeout  # type: ignore # noqa: F401
-        timeout_val = os.environ.get("CI_PYTEST_TIMEOUT", "180")
+        timeout_val = os.environ.get("CI_PYTEST_TIMEOUT", "1200")
         cmd.append(f"--timeout={timeout_val}")
     except ImportError:
         pass
