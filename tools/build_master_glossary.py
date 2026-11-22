@@ -30,7 +30,7 @@ def build_master_glossary():
 
     # Part 1: Clean up heading if needed
     p1_body = re.sub(r"^###\s*【.*?】\s*\n+", "", part1)
-    
+
     # Part 2: Contains both 6DoF and Atmosphere
     p2_split = re.split(r"###\s*【大気・風場・環境物理】", part2)
     p2_6dof = re.sub(r"^###\s*【.*?】\s*\n+", "", p2_split[0]).strip()

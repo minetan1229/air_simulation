@@ -17,7 +17,7 @@ for f in files:
     if dd_count % 2 != 0:
         print(f"ERROR: {f} has unbalanced $$ count: {dd_count}")
         has_error = True
-    
+
     content_no_dd = re.sub(r'\$\$.*?\$\$', '', content, flags=re.DOTALL)
     content_no_code = re.sub(r'```.*?```', '', content_no_dd, flags=re.DOTALL)
     dollar_count = content_no_code.count('$')
