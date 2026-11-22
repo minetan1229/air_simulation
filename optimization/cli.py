@@ -50,9 +50,9 @@ def run_pipeline(
     trim_iterations: int = 15,
     grid_bins: Tuple[int, int, int] = (10, 10, 10),
     grid_ranges: Tuple[Tuple[float, float], Tuple[float, float], Tuple[float, float]] = (
-        (1.2, 6.5),
-        (0.0, 1.0),
-        (1.2, 5.5),
+        (0.10, 0.20),
+        (0.60, 0.95),
+        (0.15, 0.45),
     ),
     benchmark_duration_s: float = 6.0,
     bootstrap_count: int = 5,
@@ -223,9 +223,9 @@ def main() -> None:
     raw_bins = grid_cfg.get("bins", [10, 10, 10])
     grid_bins = (int(raw_bins[0]), int(raw_bins[1]), int(raw_bins[2])) if len(raw_bins) >= 3 else (10, 10, 10)
 
-    wl_range = grid_cfg.get("wing_loading_range", [1.2, 6.5])
-    st_range = grid_cfg.get("stability_range", [0.0, 1.0])
-    ar_range = grid_cfg.get("aspect_ratio_range", [1.2, 5.5])
+    wl_range = grid_cfg.get("wing_loading_range", [0.10, 0.20])
+    st_range = grid_cfg.get("stability_range", [0.60, 0.95])
+    ar_range = grid_cfg.get("aspect_ratio_range", [0.15, 0.45])
     grid_ranges = (
         (float(wl_range[0]), float(wl_range[1])),
         (float(st_range[0]), float(st_range[1])),
