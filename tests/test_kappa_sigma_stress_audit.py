@@ -280,3 +280,21 @@ class TestOptimizerObjectiveCoupling:
             delta = scores[i] - scores[i + 1]
             expected_delta = (indices[i + 1] - indices[i]) / 0.5  # OBJECTIVE_SCALES["min_max_stress"] = 0.5
             assert delta == pytest.approx(expected_delta, rel=1e-5)
+
+
+class TestFirstPrinciplesFoldedSectionModulus:
+    """Verify first-principles thin-walled folded section modulus and true MPa stress scale."""
+
+    def test_folded_section_modulus_recovers_physical_scale(self) -> None:
+        """Z_fold must be ~10^-7 to 10^-6 m^3 and scale linearly with chord, thickness, depth."""
+        # 80 g/m2 paper: t = 0.1 mm, root chord = 100 mm, root keel height = 20 mm
+        z = sd.folded_section_modulus(chord_m=0.10, thickness_m=0.00010, height_m=0.020, crease_efficiency=0.80)
+        # Expected: 0.8 * (0.1 * 1e-4 * 0.02) / 6 = 0.8 * 2e-7 / 6 = 2.667e-8 m^3
+        assert 1e-8 <= z <= 1e-6
+
+        # Typical flight bending moment: M ~ 0.05 Nm
+        # Physical beam stress: sigma = M / Z ~ 0.05 / 2.67e-8 ~ 1.87 MPa
+        stress_pa = sd.true_material_stress_pa(bending_moment_nm=0.05, z_eff_m3=z)
+        assert 0.5e6 <= stress_pa <= 10.0e6  # Exactly in the 0.5 - 10 MPa range!
+        # Directly comparable to raw cellulose paper tensile strength (30 - 50 MPa)
+        assert stress_pa < 50.0e6

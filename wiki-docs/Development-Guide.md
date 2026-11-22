@@ -1,113 +1,113 @@
-# 開発・運用ガイド (Development Guide)
+# Development & Operations Guide
 
-本ドキュメントでは、本プロジェクトの開発フロー、ブランチ運用ルール、テスト実行手順、および CI/CD（GitHub Actions）の仕様を解説します。
-
----
-
-## 1. 開発フローとブランチ戦略
-
-本プロジェクトでは、コードの品質と安定稼働を担保するため、以下の運用規約を定めています。
-
-### ブランチ運用
-1. **master への直接コミット禁止**:
-   - すべての機能追加・バグ修正は必ず作業用トピックブランチ（`feat/...`、`fix/...`、`refactor/...`）を作成して作業を行います。
-2. **ローカル検証の通過**:
-   - ローカル環境で構文チェック、静的型検査、pytest が 100% 成功した実動コードのみを Git コミット対象とします。
-3. **Pull Request と CI 検証**:
-   - master への統合は GitHub の Pull Request を通じて行い、CI（GitHub Actions）のすべてのチェックが Green（通過）であることを確認した上でマージします。
-
-### コミットメッセージ規約 (Conventional Commits)
-コミットメッセージは以下の接頭辞（Prefix）を付与して記述します。
-
-- `feat(scope): message` : 新機能の追加
-- `fix(scope): message` : バグや不具合の修正
-- `refactor(scope): message` : 動作を変えないコード整理・リファクタリング
-- `test(scope): message` : テストコードの追加・修正
-- `docs(scope): message` : ドキュメントの作成・更新
+This document explains the project's development flow, branch management rules, test execution procedures, and CI/CD (GitHub Actions) specifications.
 
 ---
 
-## 2. 実装原則 (Zero-Placeholder Policy)
+## 1. Development Flow & Branch Strategy
 
-開発時には以下の「ゼロ・プレースホルダー方針」を徹底しています。
-- **未実装コードの禁止**: `TODO` コメントや `...` による関数の実装省略、空のスケルトンコードの配置は一切禁止。
-- **完全実動の保証**: 数式、シェーダー、並列処理、API、UI をすべて実際に計算・動作するコードとして記述する。
-- **フォールバック設計**: GPU 演算（CuPy/PyTorch）や拡張ライブラリ（trimesh）を導入していない環境でも、CPU/NumPy で同一の計算結果が得られるフォールバック処理を必ず実装する。
+To ensure code quality and stable operation, the following operational conventions are established.
+
+### Branch Management
+1. **No Direct Commits to master**:
+   - All feature additions and bug fixes must be done on dedicated topic branches (`feat/...`, `fix/...`, `refactor/...`).
+2. **Local Verification Must Pass**:
+   - Only fully working code that passes syntax check, static type checking, and pytest 100% locally may be committed.
+3. **Pull Request & CI Verification**:
+   - Integration to master goes through GitHub Pull Request; merge only after all CI (GitHub Actions) checks are Green (pass).
+
+### Commit Message Convention (Conventional Commits)
+Commit messages must use the following prefixes:
+
+- `feat(scope): message` : New feature addition
+- `fix(scope): message` : Bug/defect fix
+- `refactor(scope): message` : Refactoring without behavior change
+- `test(scope): message` : Test code addition/modification
+- `docs(scope): message` : Documentation creation/update
 
 ---
 
-## 3. テストと検証手順
+## 2. Implementation Principles (Zero-Placeholder Policy)
 
-コードを変更した後は、以下の検証コマンドを順番に実行してください。
+The following "Zero-Placeholder Policy" is strictly enforced during development:
+- **No Unimplemented Code**: `TODO` comments, `...` function body omissions, empty skeleton code are completely prohibited.
+- **Full Working Guarantee**: Formulas, shaders, parallel processing, APIs, UI all written as actually computing/operating code.
+- **Fallback Design**: Must implement fallback processing that yields identical computational results on CPU/NumPy even in environments without GPU (CuPy/PyTorch) or extended libraries (trimesh).
+
+---
+
+## 3. Test & Verification Procedures
+
+After code changes, execute the following verification commands in order:
 
 ```mermaid
 flowchart LR
-    A[コード変更] --> B[1. 構文チェック<br/>compileall]
-    B --> C[2. 静的解析<br/>Ruff]
-    C --> D[3. 型検査<br/>Mypy]
-    D --> E[4. 単体テスト<br/>pytest]
-    E --> F[5. 統合テスト<br/>smoke_test.py]
-    F --> G[コミット & Push]
+    A[Code Change] --> B[1. Syntax Check<br/>compileall]
+    B --> C[2. Static Analysis<br/>Ruff]
+    C --> D[3. Type Check<br/>Mypy]
+    D --> E[4. Unit Tests<br/>pytest]
+    E --> F[5. Integration Test<br/>smoke_test.py]
+    F --> G[Commit & Push]
 ```
 
-### 1. 構文チェック (Syntax Verification)
-Python ファイルのコンパイルエラーを検出します。
+### 1. Syntax Check (Syntax Verification)
+Detect Python file compilation errors.
 ```powershell
 python -m compileall physics app.py
 ```
 
-### 2. リンター & コードフォーマット検証 (Ruff)
+### 2. Linter & Code Format Verification (Ruff)
 ```powershell
 ruff check .
 ```
 
-### 3. 静的型検査 (Mypy)
-厳格な型安全性を確認します。
+### 3. Static Type Check (Mypy)
+Verify strict type safety.
 ```powershell
 mypy --config-file mypy.ini physics app.py
 ```
 
-### 4. 物理・単体テスト (pytest)
-空力モデル、大気粘性、6DoF 積分、最適化、メッシュ幾何の数値整合性を検証します（全 700 以上のテストケース）。
+### 4. Physics & Unit Tests (pytest)
+Verify numerical integrity of aero model, atmospheric viscosity, 6DoF integration, optimization, mesh geometry (700+ test cases).
 ```powershell
 python -m pytest tests -q
 ```
 
-### 5. 統合スモークテスト (smoke_test.py)
-Flask API の疎通、非同期最適化ジョブ、ETA 計算、3D メッシュ解析の E2E 導通を検証します。
+### 5. Integration Smoke Test (smoke_test.py)
+Verify Flask API connectivity, async optimization jobs, ETA calculation, 3D mesh analysis E2E connectivity.
 ```powershell
 python smoke_test.py
 ```
 
 ---
 
-## 4. CI/CD パイプライン (GitHub Actions)
+## 4. CI/CD Pipeline (GitHub Actions)
 
-本リポジトリでは、`.github/workflows/verify.yml` により、master への Push および Pull Request 発行時に自動検証が実行されます。
+This repository runs auto-verification on master push and Pull Request creation via `.github/workflows/verify.yml`.
 
-### CI ワークフローステップ
-1. **リポジトリの取得** (`actions/checkout@v4`)
-2. **Python 3.11 環境のセットアップ** (`actions/setup-python@v5`, pip キャッシュ有効)
-3. **依存ライブラリのインストール** (`requirements.txt`, `ruff`, `mypy`, `pytest`)
-4. **構文・スタイル検証** (`ruff check .`)
-5. **静的型検査** (`mypy --config-file mypy.ini physics app.py`)
-6. **自動テストの実行** (`python tools/run_ci_tests.py`)
-7. **失敗時の自動通知 & Issue 起票** (`tools/create_failure_issue.py` により、テスト失敗時に詳細トレースを含む Issue が自動作成されます)
+### CI Workflow Steps
+1. **Repository Checkout** (`actions/checkout@v4`)
+2. **Python 3.11 Environment Setup** (`actions/setup-python@v5`, pip cache enabled)
+3. **Dependency Installation** (`requirements.txt`, `ruff`, `mypy`, `pytest`)
+4. **Syntax & Style Verification** (`ruff check .`)
+5. **Static Type Check** (`mypy --config-file mypy.ini physics app.py`)
+6. **Automated Test Execution** (`python tools/run_ci_tests.py`)
+7. **Failure Auto-Notification & Issue Creation** (`tools/create_failure_issue.py` auto-creates Issue with detailed trace on test failure)
 
 ---
 
-## 5. デプロイと本番運用
+## 5. Deployment & Production Operations
 
-本シミュレーターは Web 標準技術のみで構成されており、以下の形態で容易に稼働・ホスティングが可能です。
+This simulator is built entirely on web standard technologies, enabling easy operation/hosting in the following forms.
 
-### ローカル / イントラネット運用
+### Local / Intranet Operation
 ```powershell
 python app.py
 ```
-- デフォルトでポート `5000` でリッスンします。
+- Listens on port `5000` by default.
 
-### WSGI / 本番サーバー運用 (Gunicorn / Waitress)
-本番環境で運用する場合は、WSGI サーバー経由での起動を推奨します。
+### WSGI / Production Server (Gunicorn / Waitress)
+For production, WSGI server launch is recommended.
 
 ```bash
 # Linux / macOS (Gunicorn)
@@ -121,8 +121,8 @@ waitress-serve --port=5000 app:app
 
 ---
 
-## 6. ドキュメント一覧
+## 6. Document List
 
-- [[ドキュメント ホーム|Home]]
-- [[環境構築と起動手順|Getting-Started]]
-- [[アーキテクチャ設計|Architecture]]
+- [[Documentation Home|Home]]
+- [[Setup & Launch|Getting-Started]]
+- [[Architecture Design|Architecture]]

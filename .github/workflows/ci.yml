@@ -92,7 +92,7 @@ jobs:
         run: pytest tests -q --tb=short
 
       - name: Run End-to-End Smoke Test
-        run: python smoke_test.py
+        run: python scripts/smoke_test.py
 
   security-audit:
     name: Security Vulnerability Scan (pip-audit)

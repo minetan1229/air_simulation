@@ -77,3 +77,24 @@ irst_order_lag による動的ねじり/上反角追従。受動構造減衰に�
 - **5点Boole積分とスパン方向モーメント (#75)**: 5ステーション y in {0, +-0.22b, +-0.44b}（7:32:12:32:7 / 90）は有効翼半幅0.44b（全幅88%）区間上の等間隔Boole則。翼端特異点回避・翼端渦散逸を意図し、ロール減衰寄与が理論比(0.88)^2 ~ 77.4%で安定減衰することを数理・テストで検証確定。
 - **Stage 1 適応刻み幅途中打ち切り防止 (#78)**: physics/ga2/stage1.pyの_integrateで、dt < dt_max適応縮小時のステップ枯渇・誤timeoutを防ぐためステップ数予算をmin(self.max_steps, nominal_steps * 3)に拡張し早期脱出と連携して完走保証。
 - **物理法則・保存則厳密化 (2026-11-12)**: ①静止時(V=0)pushoverトルクを0消衰し角運動量保存 ②Polhamus渦抗力への地面効果二重低減を排除 ③第一原理平板失速後ピッチングモーメントCM=-0.5*sin(α)導入 ④Kirchhoff見かけの力・Munkモーメントの符号整合により仕事率恒等ゼロ(F_app·v+M_app·ω≡0)を数学的保証(test_physics_first_principles.py, Parity 0.000e+00 / 1.077e-14)。
+- **抗力係数フロア・エネルギー保存則保証 (P-AERO-06, 2026-11-18)**: 後縁フォールド等のトリム・操舵面増分によるトータル $C_D < 0$（負抗力・自発加速による永動機的挙動・エネルギー保存則違反）を数理的に完全遮断するため、`MIN_DRAG_COEFFICIENT = 0.0` を新設。`aero_kernel.evaluate_coefficients` と `aero_domain.drag_coefficient` の合算値にフロア制約を導入（`drag_scale == 0` 時の厳密ゼロ挙動は維持）。回帰テスト `tests/test_aero.py::test_drag_coefficient_floor_non_negative` で検証確定。
+
+## [Added-Mass Passivity & Benchmark Audit] (2026-11-19)
+- **Kirchhoff 付加質量 Munk 連成項の受動的定式化 (Issue #194)**:
+  - 従来、外力項として $F_{app} = -\omega \times P_A, M_{app} = -v \times P_A$ を陽的に代入していたため、離散RK4積分器下でハミルトン構造が破綻し人工的なエネルギー成長（spurious work）を起こしていた。
+  - 一般化質量系 $M_{total} = \mathrm{diag}(M+M_A, I+I_A)$ の内部連成項として角運動量方程式 $(I+I_A)\dot{\omega} = M_{ext} - \omega \times ((I+I_A)\omega) - v_{rel} \times P_A$ を解くことで、内部 Coriolis/Munk 項の仕事率 $v \cdot F_{app} + \omega \cdot M_{munk} \equiv 0$（厳密なスキュー対称性・受動性）を完全に保証。CPU (`flight_sim.py`) と GPU (`gpu_dynamics.py`) でビット精度パリティを確立 (`tests/test_issue194_munk_coupling.py`, `tests/test_added_mass_parity.py`)。
+- **外部ベンチマーク定量回帰テストの実装 (Issue #178)**:
+  - Princeton 大 Robert F. Stengel「PaperPlane.m」標準滑空飛行条件 ($V_0=3.55\,\mathrm{m/s}, \gamma_0=-0.18\,\mathrm{rad}, h_0=2.0\,\mathrm{m}, m=3\,\mathrm{g}$) における滑空比 $L/D \approx 3.0 \sim 7.0$、沈下率、Phugoid 周期理論解との合致を定量アサート。
+  - Pelletier & Mueller (2000) 低Re数風洞実験データおよび NASA TN D-3767 Polhamus 渦揚力理論値との一致を自動回帰テスト (`tests/test_external_benchmarks.py`) で固定化。
+- **架空コミットクローズの監査と是正**:
+  - Issue #194, #193, #195, #197, #178 の未解決実態をあぶり出し、GitHub上で再オープン後に第一原理修正を実施して正式クローズ完了。
+
+## [Modular Layered Architecture & Package Separation] (2026-11-20)
+- **God Package `physics/` の5層責務分離**: 従来の `physics/`（55ファイル）を責務別に分離。(1) `core/` (契約・スキーマ・数学基盤・規約) (2) `physics/` (純粋空力・大気・応力・6DoF運動方程式) (3) `geometry/` (折り紙・メッシュ・3D生成) (4) `optimization/` (GA・CMA-ES・MAP-Elites・自動調査) (5) `infrastructure/` (ジョブキュー・永続化・記録DB)。
+- **透過的スタブとアンスコ属性フォワーディング**: 既存143テストおよびツールの互換性を壊さないよう、`physics/` 内に `globals()[_k] = _v` を備えた re-export スタブを配置し、プライベート関数（`_planform_area_m2`, `_HALF_LENGTH` 等）を含む全属性のアクセス互換性を完全維持。
+- **milcyアルゴリズムの正規統合と文献レジストリ移行**: 旧v3非GA系列（20工程折り紙MCTS + 3D MAP-Elites + Nelder-Meadトリム + 多次元頑健性グリッド）を「milcyアルゴリズム」として再定義し、`milcy/`, `core.interfaces`, `geometry.milcy_origami`, `physics.benchmark`, `optimization.cli` に完全統合。`search/` (2,000件論文データ) を `docs/research/` 配下に体系的再配置。
+## [Physics Stability & CI Infrastructure] (2026-11-22)
+- **薄翼付加質量 Munk 連成とピッチ安定性 (Issue #194, #211)**:
+  - 循環揚力・ピッチングモーメント（$C_L, C_m$）を既に持つ薄翼に対し、非循環 Kirchhoff Munk モーメント（$-v_{rel} \times P_A$）を外生付加すると前縁吸込力モーメントの相殺を欠いてピッチ発散を誘発する。Munk連成は `AircraftConfig.munk_coupling_enabled` で明示オプトイン化し、既定では有効質量／対角慣性のみの受動的定式化（Issue #131）を維持して中忠実度滑空比率（1.91x）と長期安定性を両立。CPU/GPUビットパリティを維持。
+- **論文レジストリ JSONL 追跡と CI クラッシュ防止 (Issue #213)**:
+  - `.gitignore` の `*.jsonl` 除外により脱落していた `docs/research/papers/**/*.jsonl`（40ファイル）を追跡指定（`!docs/...`）し、CI上での論文構造テスト通過（15件全パス）を保証。`tools/run_ci_tests.py` における `xdist` のオプトイン化（Issue #213）と併せて CI 堅牢性を確立。

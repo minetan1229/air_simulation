@@ -28,6 +28,8 @@ ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+pytestmark = [pytest.mark.slow, pytest.mark.integration]
+
 from physics.ga_cma import CMAES  # noqa: E402
 from physics.ga_config import (  # noqa: E402
     DEFAULT_MAX_TRIALS,
@@ -162,11 +164,21 @@ def test_the_default_trial_counts_are_defined_once() -> None:
     assert DEFAULT_TIER2_TRIALS == 1_000
     assert DEFAULT_TIER3_TRIALS == 100_000
 
-    source = (ROOT / "physics" / "ga_domain.py").read_text(encoding="utf-8")
+    domain_file = (
+        ROOT / "optimization" / "ga_domain.py"
+        if (ROOT / "optimization" / "ga_domain.py").exists()
+        else ROOT / "physics" / "ga_domain.py"
+    )
+    source = domain_file.read_text(encoding="utf-8")
     for literal in ("100000", "100_000", "1000", "1_000"):
         assert literal not in source, f"{literal} must not appear in the search logic"
 
-    config_source = (ROOT / "physics" / "ga_config.py").read_text(encoding="utf-8")
+    config_file = (
+        ROOT / "optimization" / "ga_config.py"
+        if (ROOT / "optimization" / "ga_config.py").exists()
+        else ROOT / "physics" / "ga_config.py"
+    )
+    config_source = config_file.read_text(encoding="utf-8")
     assert config_source.count("100_000") == 2  # max trials and tier 3 trials
     assert config_source.count("1_000") == 2  # top k and tier 2 trials
 
@@ -1720,6 +1732,7 @@ def test_the_hall_of_fame_admits_a_better_design_when_it_is_already_full(
 # ---------------------------------------------------------------------------
 # D9: the full fidelity tier is a Monte-Carlo ensemble
 # ---------------------------------------------------------------------------
+@pytest.mark.slow
 def test_the_full_fidelity_tier_is_a_monte_carlo_ensemble(tmp_path: Path) -> None:
     """Every promoted individual is evaluated once per Monte-Carlo sample.
 
@@ -1774,6 +1787,7 @@ def test_the_full_fidelity_tier_is_a_monte_carlo_ensemble(tmp_path: Path) -> Non
         assert individual.metric == pytest.approx(sum(metrics) / len(metrics))
 
 
+@pytest.mark.slow
 def test_the_monte_carlo_ensemble_stays_inside_the_budget(tmp_path: Path) -> None:
     """The extra flights of the ensemble are counted and never overrun."""
     summary = _run(

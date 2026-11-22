@@ -1,0 +1,43 @@
+      <!-- optimizer -->
+      <div class="wb-pane" data-pane="optimizer" role="tabpanel">
+        <div class="wb-col wb-col-1">
+          <h4 class="wb-h">目的関数<small>OBJECTIVES</small></h4>
+          <div class="obj-list" id="opt-objectives"></div>
+          <h4 class="wb-h">設計変数<small>DESIGN VARIABLES</small></h4>
+          <div class="var-list" id="opt-variables"></div>
+        </div>
+        <div class="wb-col wb-col-2">
+          <h4 class="wb-h">探索設定<small>SEARCH</small></h4>
+          <div class="grid-2" id="opt-settings"></div>
+          <div class="btn-row">
+            <button class="btn btn-primary" id="opt-run" type="button">実行</button>
+            <button class="btn" id="opt-cancel" type="button" disabled>中断</button>
+          </div>
+          <div class="prog">
+            <div class="prog-track"><div class="prog-fill" id="opt-fill"></div></div>
+            <div class="prog-meta">
+              <span class="num" id="opt-count">0 / 0</span>
+              <span class="num" id="opt-rate">—</span>
+            </div>
+            <div class="prog-eta" id="opt-eta-row">
+              <span class="eta-row-label">計算完了予想:</span>
+              <span class="num eta-row-clock" id="opt-eta-clock">—</span>
+              <span class="eta-row-left" id="opt-eta-left">(待機中)</span>
+            </div>
+          </div>
+          <h4 class="wb-h">ジョブ<small>JOBS</small></h4>
+          <div class="job-list" id="opt-jobs"></div>
+        </div>
+        <div class="wb-col wb-col-3">
+          <h4 class="wb-h">Pareto front<small id="opt-front-axes">—</small></h4>
+          <div class="chart-wrap">
+            <canvas id="opt-chart"></canvas>
+            <p class="chart-empty" id="opt-chart-empty">未実行</p>
+          </div>
+          <div class="btn-row">
+            <button class="btn btn-mini" id="opt-csv" type="button" disabled>Pareto CSV</button>
+            <button class="btn btn-mini" id="opt-adopt" type="button" disabled>この設計を反映</button>
+          </div>
+          <div class="best-grid" id="opt-best"><p class="chart-empty">未実行</p></div>
+        </div>
+      </div>

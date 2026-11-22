@@ -14,7 +14,8 @@ from pathlib import Path
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-SEARCH_DIR = REPO_ROOT / "search"
+SEARCH_DIR = REPO_ROOT / "docs" / "research" if (REPO_ROOT / "docs" / "research").exists() else REPO_ROOT / "search"
+PAPERS_DIR = SEARCH_DIR / "papers" if (SEARCH_DIR / "papers").is_dir() else SEARCH_DIR
 CATEGORIES = (
     "01_aerodynamics_cfd",
     "02_mechanics_multiphysics",
@@ -39,7 +40,7 @@ REQUIRED_JSON_KEYS = (
 
 
 def _category_entries(category: str):
-    directory = SEARCH_DIR / category
+    directory = PAPERS_DIR / category
     assert directory.is_dir(), f"missing category directory: {directory}"
     entries = []
     for jsonl_file in sorted(directory.glob("papers_*.jsonl")):
@@ -51,7 +52,7 @@ def _category_entries(category: str):
 
 def test_all_category_directories_exist():
     for category in CATEGORIES:
-        assert (SEARCH_DIR / category).is_dir(), category
+        assert (PAPERS_DIR / category).is_dir(), category
 
 
 @pytest.mark.parametrize("category", CATEGORIES)
@@ -86,7 +87,7 @@ def test_identifiers_are_globally_unique():
 def test_markdown_chunks_render_all_entries():
     total = 0
     for category in CATEGORIES:
-        for md_file in sorted((SEARCH_DIR / category).glob("papers_*.md")):
+        for md_file in sorted((PAPERS_DIR / category).glob("papers_*.md")):
             text = md_file.read_text(encoding="utf-8")
             entries = ENTRY_RE.findall(text)
             assert entries, md_file.name

@@ -1,0 +1,24 @@
+  <!-- ==================== workbench ==================== -->
+  <section class="workbench" id="workbench" data-open="0" aria-label="作業台">
+    <nav class="wb-tabs" role="tablist">
+      <button class="wb-tab" id="wb-tab-investigate" role="tab" aria-selected="true" data-tab="investigate"><img src="https://api.iconify.design/material-symbols/search.svg?color=%231a73e8" class="ui-icon" alt=""> Auto調査<small>INVESTIGATE</small></button>
+      <button class="wb-tab" id="wb-tab-research" role="tab" aria-selected="false" data-tab="research"><img src="https://api.iconify.design/material-symbols/science.svg?color=%235f6368" class="ui-icon" alt=""> GA自律研究<small>GA RESEARCH</small></button>
+      <button class="wb-tab" id="wb-tab-optimizer" role="tab" aria-selected="false" data-tab="optimizer"><img src="https://api.iconify.design/material-symbols/tune.svg?color=%235f6368" class="ui-icon" alt=""> 最適化<small>OPTIMIZER</small></button>
+      <button class="wb-tab" id="wb-tab-guinness" role="tab" aria-selected="false" data-tab="guinness"><img src="https://api.iconify.design/material-symbols/trophy-outline.svg?color=%23f29900" class="ui-icon" alt=""> ギネス独立検証<small>GUINNESS</small></button>
+      <button class="wb-tab" id="wb-tab-model" role="tab" aria-selected="false" data-tab="model"><img src="https://api.iconify.design/material-symbols/view-in-ar.svg?color=%235f6368" class="ui-icon" alt=""> 3D モデル<small>MESH</small></button>
+      <button class="wb-tab" id="wb-tab-data" role="tab" aria-selected="false" data-tab="data"><img src="https://api.iconify.design/material-symbols/table-chart.svg?color=%235f6368" class="ui-icon" alt=""> データ<small>EXPORT</small></button>
+      <div class="wb-spacer"></div>
+      <button class="wb-toggle" id="wb-toggle" type="button" title="作業台を開閉 (W)" aria-expanded="false">
+        <span class="wb-toggle-glyph" aria-hidden="true"></span>
+      </button>
+    </nav>
+
+    <div class="wb-panes">
+      {% include 'components/workbench/pane_investigate.html' %}
+      {% include 'components/workbench/pane_research.html' %}
+      {% include 'components/workbench/pane_optimizer.html' %}
+      {% include 'components/workbench/pane_guinness.html' %}
+      {% include 'components/workbench/pane_model.html' %}
+      {% include 'components/workbench/pane_data.html' %}
+    </div>
+  </section>

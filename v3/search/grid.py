@@ -1,0 +1,105 @@
+"""3D MAP-Elites grid archive for behavior-space illumination.
+
+Behavior Descriptors (3D):
+  1. Wing loading (kg/m^2): [1.0, 7.0]
+  2. Static stability (0..1): [0.0, 1.0]
+  3. Aspect ratio: [1.0, 6.0]
+"""
+
+from __future__ import annotations
+
+import math
+from typing import Dict, List, Optional, Tuple
+
+from v3.interfaces import AircraftCandidate, BehaviorDescriptor
+
+
+def _clamp(v: float, low: float, high: float) -> float:
+    return max(low, min(high, v))
+
+
+class MAPElitesGridArchive:
+    """Discretized 3D grid storing the highest-scoring candidate in each niche."""
+
+    def __init__(
+        self,
+        bins: Tuple[int, int, int] = (8, 8, 8),
+        ranges: Tuple[Tuple[float, float], Tuple[float, float], Tuple[float, float]] = (
+            (1.0, 7.0),   # Wing loading range (kg/m^2)
+            (0.0, 1.0),   # Static stability range
+            (1.0, 6.0),   # Aspect ratio range
+        ),
+    ) -> None:
+        self.bins = bins
+        self.ranges = ranges
+        # Key: (bin_x, bin_y, bin_z), Value: (best_score, AircraftCandidate)
+        self.cells: Dict[Tuple[int, int, int], Tuple[float, AircraftCandidate]] = {}
+        self.total_evaluations: int = 0
+        self.improved_evaluations: int = 0
+
+    @property
+    def total_cells(self) -> int:
+        return self.bins[0] * self.bins[1] * self.bins[2]
+
+    def get_bin_index(self, descriptor: BehaviorDescriptor) -> Tuple[int, int, int]:
+        """Convert a continuous 3D behavior descriptor into grid bin coordinates."""
+        vals = (
+            descriptor.wing_loading_kg_m2,
+            descriptor.static_stability,
+            descriptor.aspect_ratio,
+        )
+
+        indices: List[int] = []
+        for val, (low, high), num_bins in zip(vals, self.ranges, self.bins):
+            clamped = _clamp(val, low, high)
+            span = max(1.0e-9, high - low)
+            frac = (clamped - low) / span
+            idx = int(frac * num_bins)
+            idx = max(0, min(num_bins - 1, idx))
+            indices.append(idx)
+
+        return (indices[0], indices[1], indices[2])
+
+    def add_candidate(self, candidate: AircraftCandidate) -> bool:
+        """Add candidate to archive if niche is empty or candidate exceeds current best."""
+        self.total_evaluations += 1
+        if (
+            candidate.benchmark is None
+            or not candidate.benchmark.valid
+            or candidate.benchmark.composite_score <= 1.0e-5
+        ):
+            return False
+
+        desc = candidate.descriptor
+        if desc is None:
+            if candidate.geometry:
+                desc = candidate.geometry.compute_behavior_descriptor(
+                    stability=candidate.benchmark.low_speed.stability
+                )
+                candidate.descriptor = desc
+            else:
+                return False
+
+        score = candidate.benchmark.composite_score
+        bin_idx = self.get_bin_index(desc)
+
+        if bin_idx not in self.cells or score > self.cells[bin_idx][0]:
+            self.cells[bin_idx] = (score, candidate)
+            self.improved_evaluations += 1
+            return True
+
+        return False
+
+    def coverage(self) -> float:
+        """Calculate archive coverage fraction (filled niches / total niches)."""
+        return len(self.cells) / max(1, self.total_cells)
+
+    def get_elites(self) -> List[AircraftCandidate]:
+        """Return all niche elite candidates sorted by composite score descending."""
+        sorted_items = sorted(self.cells.values(), key=lambda item: item[0], reverse=True)
+        return [cand for _, cand in sorted_items]
+
+    def get_global_best(self) -> Optional[AircraftCandidate]:
+        """Return the globally highest-scoring candidate."""
+        elites = self.get_elites()
+        return elites[0] if elites else None

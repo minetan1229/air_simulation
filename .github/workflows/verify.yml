@@ -2,11 +2,11 @@ name: Python Code Verification
 
 on:
   push:
-    # The genetic-project phase is isolated from master, so its own branch
-    # has to be verified too.
-    branches: [ "master", "genetic-project" ]
+    # The genetic-project and v3 branches are isolated from master, so they
+    # have to be verified too.
+    branches: [ "master", "genetic-project", "v3" ]
   pull_request:
-    branches: [ "master" ]
+    branches: [ "master", "v3" ]
 
 # The branch guard refuses to run the suite on a protected branch.  Inside CI
 # the checkout is the triggering ref - ``actions/checkout`` creates a local
@@ -37,7 +37,7 @@ jobs:
       - name: 依存ライブラリと検証ツールのインストール
         run: |
           python -m pip install --upgrade pip
-          pip install ruff mypy pytest
+          pip install ruff mypy pytest pytest-xdist pytest-timeout
           if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
           # discord.py はオプション extras (bridge) 経由だが、CI では discord テストを
           # スキップさせないためここに明示インストールする（テスト実行時のみ）。
@@ -47,7 +47,7 @@ jobs:
         run: ruff check .
 
       - name: 静的型検査 (Mypy)
-        run: mypy --config-file mypy.ini physics app.py
+        run: mypy --config-file mypy.ini physics app.py v3
 
       # コンソールは ES モジュールグラフであり、1 ファイルでも構文エラーが
       # あればアプリケーション全体の JavaScript が無効になる。GitHub ランナー
@@ -65,7 +65,7 @@ jobs:
         run: python tools/run_ci_tests.py
 
       - name: エンドツーエンドスモークテスト
-        run: python smoke_test.py
+        run: python scripts/smoke_test.py
 
       - name: テスト失敗時のIssue起票
         if: failure() && steps.pytest_step.outcome == 'failure'

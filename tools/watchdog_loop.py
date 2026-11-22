@@ -44,24 +44,47 @@ class PMC(ctypes.Structure):
 
 
 def get_process_metrics(pid: int) -> tuple[float, int]:
-    """Return (working_set_mb, handle_count) for Windows PID, or (0.0, 0) on failure."""
-    if os.name != "nt":
-        return 0.0, 0
-    try:
-        h = ctypes.windll.kernel32.OpenProcess(0x0400 | 0x0010, False, pid)
-        if not h:
-            return 0.0, 0
-        pmc = PMC()
-        pmc.cb = ctypes.sizeof(pmc)
-        ctypes.windll.psapi.GetProcessMemoryInfo(h, ctypes.byref(pmc), ctypes.sizeof(pmc))
-        mem_mb = pmc.WorkingSetSize / (1024.0 * 1024.0)
+    """Return (working_set_mb, handle_count) for PID, or (0.0, 0) on failure."""
+    if os.name == "nt":
+        try:
+            h = ctypes.windll.kernel32.OpenProcess(0x0400 | 0x0010, False, pid)
+            if not h:
+                return 0.0, 0
+            pmc = PMC()
+            pmc.cb = ctypes.sizeof(pmc)
+            ctypes.windll.psapi.GetProcessMemoryInfo(h, ctypes.byref(pmc), ctypes.sizeof(pmc))
+            mem_mb = pmc.WorkingSetSize / (1024.0 * 1024.0)
 
-        handle_count = ctypes.c_uint32()
-        ctypes.windll.kernel32.GetProcessHandleCount(h, ctypes.byref(handle_count))
-        ctypes.windll.kernel32.CloseHandle(h)
-        return mem_mb, handle_count.value
-    except Exception:
-        return 0.0, 0
+            handle_count = ctypes.c_uint32()
+            ctypes.windll.kernel32.GetProcessHandleCount(h, ctypes.byref(handle_count))
+            ctypes.windll.kernel32.CloseHandle(h)
+            return mem_mb, handle_count.value
+        except Exception:
+            return 0.0, 0
+    else:
+        # POSIX (Linux / macOS / WSL)
+        mem_mb = 0.0
+        fd_count = 0
+        # 1. Try reading Linux /proc/<pid>/statm
+        proc_statm = Path(f"/proc/{pid}/statm")
+        if proc_statm.exists():
+            try:
+                # statm: size resident shared text lib data dirty (pages)
+                parts = proc_statm.read_text(encoding="utf-8").strip().split()
+                if len(parts) >= 2:
+                    pages = int(parts[1])
+                    page_size = os.sysconf("SC_PAGE_SIZE") if hasattr(os, "sysconf") else 4096
+                    mem_mb = (pages * page_size) / (1024.0 * 1024.0)
+            except Exception:
+                pass
+        # 2. Try counting open file descriptors from /proc/<pid>/fd
+        proc_fd = Path(f"/proc/{pid}/fd")
+        if proc_fd.exists():
+            try:
+                fd_count = len(list(proc_fd.iterdir()))
+            except Exception:
+                pass
+        return mem_mb, fd_count
 
 
 def is_process_running(pid: int) -> bool:
@@ -181,7 +204,20 @@ def main() -> int:
         if not running:
             # Check if finished normally
             summary_file = run_dir / "summary.json"
-            if summary_file.exists() or "completed" in (check_log_tail(log_path, 10000) or "").lower():
+            run_summary_file = run_dir / "run_summary.json"
+            log_tail = (check_log_tail(log_path, 20000) or "").lower()
+            completed_in_log = any(
+                phrase in log_tail
+                for phrase in (
+                    "completed",
+                    "simulation finished",
+                    "all generations completed",
+                    "ga optimization complete",
+                    "evolution finished",
+                    "finished successfully",
+                )
+            )
+            if summary_file.exists() or run_summary_file.exists() or completed_in_log:
                 reason = "Simulation completed normally."
                 print(f"[watchdog] {reason}")
                 write_status(0, reason)

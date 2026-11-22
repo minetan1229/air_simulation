@@ -328,6 +328,7 @@ def test_grid_points_enumerate_the_declared_axes() -> None:
 # ==========================================================================
 # 5. Every algorithm runs and honours the budget
 # ==========================================================================
+@pytest.mark.slow
 @pytest.mark.parametrize("algorithm", ALGORITHMS)
 def test_algorithm_payload_is_complete_and_finite(surrogate_path: bool, algorithm: str) -> None:
     cfg = make_cfg(algorithm)
@@ -384,6 +385,7 @@ def test_algorithm_stops_immediately_when_cancelled(surrogate_path: bool, algori
     assert calls, "cancel_cb must be polled at least once before the first evaluation"
 
 
+@pytest.mark.slow
 def test_progress_callback_is_monotonic_and_reaches_total(surrogate_path: bool) -> None:
     cfg = make_cfg("nsga2", max_evaluations=24, population_size=8)
     totals: List[int] = []
@@ -394,6 +396,7 @@ def test_progress_callback_is_monotonic_and_reaches_total(surrogate_path: bool) 
     assert done[-1] == cfg.max_evaluations
 
 
+@pytest.mark.slow
 def test_grid_search_caps_deterministically(surrogate_path: bool) -> None:
     cfg = make_cfg("grid", max_evaluations=12, population_size=8)
     first = run_optimizer(cfg)
@@ -407,6 +410,7 @@ def test_grid_search_caps_deterministically(surrogate_path: bool) -> None:
 # ==========================================================================
 # 6. NSGA-II specifics
 # ==========================================================================
+@pytest.mark.slow
 def test_nsga2_front_is_non_dominated_and_never_worse(surrogate_path: bool) -> None:
     cfg = make_cfg("nsga2", max_evaluations=30, population_size=12, seed=5)
     objectives = cfg.objectives
@@ -500,6 +504,7 @@ def test_build_surrogate_is_warm_started_from_real_evaluations(surrogate_path: b
     assert np.all(np.isfinite(model.y))
 
 
+@pytest.mark.slow
 def test_surrogate_needs_fewer_evaluations_than_differential_evolution(surrogate_path: bool) -> None:
     """Observed on the analytical surrogate, 5 variables, budget 40, seed 23:
 
@@ -622,6 +627,7 @@ def test_parallel_evaluate_honours_cancellation(surrogate_path: bool) -> None:
 # ==========================================================================
 # 9. Integration with the real integrator (whatever is available)
 # ==========================================================================
+@pytest.mark.slow
 def test_real_integrator_path_returns_the_flight_contract() -> None:
     case = make_case(speed=12.0, duration_s=0.6, dt_max=0.05)
     flight = parallel_engine.evaluate_case(case)
@@ -636,6 +642,7 @@ def test_real_integrator_path_returns_the_flight_contract() -> None:
     )
 
 
+@pytest.mark.slow
 def test_grid_search_runs_end_to_end_on_the_live_path() -> None:
     cfg = make_cfg("grid", max_evaluations=6, design_variables=["wingspan_m", "launch_speed"])
     cfg.sim_duration_s = 0.6

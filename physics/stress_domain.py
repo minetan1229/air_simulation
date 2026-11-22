@@ -109,6 +109,8 @@ __all__ = [
     "stress_field",
     "analyse",
     "analyze",
+    "folded_section_modulus",
+    "true_material_stress_pa",
 ]
 
 # --------------------------------------------------------------------------
@@ -1373,4 +1375,43 @@ def analyse(
 
 #: US spelling alias.
 analyze = analyse
+
+
+def folded_section_modulus(
+    chord_m: float,
+    thickness_m: float,
+    height_m: float,
+    crease_efficiency: float = 0.80,
+) -> float:
+    r"""First-principles thin-walled folded beam section modulus :math:`Z_{\mathrm{fold}}` [m^3].
+
+    Unlike flat-sheet assumption :math:`Z_{\mathrm{flat}} = b t^2 / 6` that ignores the
+    vertical keel / V-fold height :math:`h`, this evaluates the true thin-walled folded
+    section modulus:
+    .. math::
+        Z_{\mathrm{fold}} \approx \eta_{\mathrm{crease}} \cdot \frac{c \cdot t \cdot h}{6}
+
+    Yields physical values :math:`Z \sim 10^{-7} - 10^{-6}\,\mathrm{m}^3`, resolving the
+    historical :math:`(h/t)^2` discrepancy and eliminating the need for empirical scale constants.
+    """
+    c = max(float(chord_m), 1e-4)
+    t = max(float(thickness_m), 1e-5)
+    h = max(float(height_m), t)
+    eta = clamp(float(crease_efficiency), 0.1, 1.0)
+    return eta * (c * t * h) / 6.0
+
+
+def true_material_stress_pa(
+    bending_moment_nm: float,
+    z_eff_m3: float,
+) -> float:
+    r"""First-principles beam stress in true physical SI units [Pa / MPa].
+
+    Directly evaluates :math:`\sigma = M / Z_{\mathrm{eff}}` in true Pascals, allowing direct
+    comparison with physical cellulose paper tensile strength (30-50 MPa).
+    """
+    m = float(bending_moment_nm)
+    z = max(float(z_eff_m3), 1e-12)
+    return m / z
+
 

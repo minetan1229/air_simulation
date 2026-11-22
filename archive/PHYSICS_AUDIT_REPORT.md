@@ -1,112 +1,112 @@
-# 物理モデル・検証仕様書および課題監査記録 (Physics Model & Verification Audit)
+# Physics Model & Verification Audit Report
 
-本ドキュメントは、GitHub Issue #9〜#23 において提起された物理モデル妥当性、検証契約、適用限界、仮定、および独立検証結果を整理・体系化した技術監査レポートである。
+This document is a technical audit report that organizes and systematizes the physics model validity, verification contracts, applicability limits, assumptions, and independent verification results raised in GitHub Issues #9–#23.
 
 ---
 
-## 1. 空力モデル (Issues #9, #19, #20)
+## 1. Aerodynamic Models (Issues #9, #19, #20)
 
-### 1.1 揚力・抗力・失速モデルの定式化と出典
-- **線形域 (Pre-stall)**:
-  - 三角翼・低アスペクト比矩形翼に対する Helmbold / Jensen 補正揚力傾斜:
+### 1.1 Lift, Drag, & Stall Model Formulation & Sources
+- **Linear Regime (Pre-stall)**:
+  - Helmbold / Jensen corrected lift slope for delta wings and low-aspect-ratio rectangular wings:
     $$C_{L\alpha} = \frac{2\pi AR}{2 + \sqrt{AR^2 (1 + \lambda) + 4 AR / \pi}}$$
-  - ゼロ迎角揚力 $C_{L0}$ とエレボン・後縁トリム折り角 $\delta_{\text{elevon}}$ によるトリム迎角:
+  - Zero-AoA lift $C_{L0}$ and trim AoA from elevon/trailing-edge trim fold angle $\delta_{\text{elevon}}$:
     $$C_L(\alpha) = C_{L0} + C_{L\alpha}\alpha + \Delta C_{L,\text{elevon}}\delta_{\text{elevon}}$$
-- **失速遷移 (Stall Transition)**:
-  - Viterna / Corrigan 手法に基づくシグモイド重み関数による線形揚力から平板剥離極限への滑らかなブレンド。
-  - 失速角 $\alpha_{\text{stall}}$（既定 $14^\circ$）を超えると揚力傾斜が緩やかに低下し、最大揚力係数 $C_{L,\max}$ に達した後、剥離領域へと遷移。
-- **抗力極線 (Drag Polar)**:
-  - 零揚力抗力 $C_{D0}(Re) = C_{D0,\text{ref}} \cdot (Re_{\text{ref}} / Re)^{0.15}$
-  - 誘導抗力係数 $C_{Di} = \frac{C_L^2}{\pi e AR} \cdot \kappa_{\text{ground}}(h/b)$
-  - 剥離後平板抗力: Hoerner 式 $C_{D,\text{sep}} = 2 \sin^2\alpha + C_{D0}\cos\alpha$
-- **座標軸定義**:
-  - 風軸系 (Wind axes): 速度ベクトル $\mathbf{V}_{\text{rel}}$ と平行逆向きに抗力 $D$、迎え角・横滑り角直交面上に揚力 $L$ および横力 $Y$ を定義。
-  - 機体軸系 (Body axes): 前方 $+x$、右翼 $+y$、下方 $+z$（NED規約）。
+- **Stall Transition**:
+  - Smooth blend from linear lift to flat-plate separation limit via sigmoid weighting function based on Viterna / Corrigan method.
+  - Beyond stall angle $\alpha_{\text{stall}}$ (default $14^\circ$), lift slope gradually decreases, reaching max lift coefficient $C_{L,\max}$, then transitions to separated-flow regime.
+- **Drag Polar**:
+  - Zero-lift drag $C_{D0}(Re) = C_{D0,\text{ref}} \cdot (Re_{\text{ref}} / Re)^{0.15}$
+  - Induced drag coefficient $C_{Di} = \frac{C_L^2}{\pi e AR} \cdot \kappa_{\text{ground}}(h/b)$
+  - Post-separation flat-plate drag: Hoerner formula $C_{D,\text{sep}} = 2 \sin^2\alpha + C_{D0}\cos\alpha$
+- **Coordinate Axis Definitions**:
+  - Wind axes: Drag $D$ defined anti-parallel to relative velocity vector $\mathbf{V}_{\text{rel}}$; lift $L$ and side force $Y$ defined on plane orthogonal to AoA and sideslip angle.
+  - Body axes: Forward $+x$, right wing $+y$, downward $+z$ (NED convention).
 
-### 1.2 高迎角・横滑り・逆流境界 (Issue #20)
-- 迎角 $\alpha \in [-180^\circ, 180^\circ]$、横滑り角 $\beta \in [-90^\circ, 90^\circ]$ 全域で不連続・特異点・NaN が生じないよう、$C_L, C_D, C_Y$ を連続関数としてクランプ・ラップ。
-- 逆流域 ($\alpha \approx \pm 180^\circ$): 揚力はゼロへ漸近し、抗力は鈍頭平板抗力として正の値を維持。
+### 1.2 High AoA, Sideslip, & Reverse Flow Boundaries (Issue #20)
+- $C_L, C_D, C_Y$ clamped/wrapped as continuous functions to avoid discontinuities, singularities, or NaN across $\alpha \in [-180^\circ, 180^\circ]$, $\beta \in [-90^\circ, 90^\circ]$.
+- Reverse flow regime ($\alpha \approx \pm 180^\circ$): Lift asymptotically approaches zero; drag maintains positive value as blunt flat-plate drag.
 
-### 1.3 適用限界と未検証範囲の明示
-- **適用範囲**: レイノルズ数 $10^3 \le Re \le 10^5$、マッハ数 $Ma < 0.3$（非圧縮性〜亜音速Prandtl-Glauert補正）。
-- **未検証・経験仮定**:
-  - 超低レイノルズ数特有の層流剥離泡（LSB）によるヒステリシスループ。
-  - 実機風洞測定データとの定量的校正。現行パラメータは薄翼平板理論および既知文献からの準拠。
+### 1.3 Explicit Applicability Limits & Unverified Ranges
+- **Applicable Range**: Reynolds number $10^3 \le Re \le 10^5$, Mach number $Ma < 0.3$ (incompressible to subsonic Prandtl-Glauert correction).
+- **Unverified / Empirical Assumptions**:
+  - Hysteresis loops from laminar separation bubbles (LSB) specific to ultra-low Reynolds numbers.
+  - Quantitative calibration with actual wind tunnel measurements. Current parameters comply with thin-plate theory and known literature.
 
 ---
 
-## 2. 姿勢安定性とピッチモーメント力学 (Issues #10, #18)
+## 2. Attitude Stability & Pitch Moment Mechanics (Issues #10, #18)
 
-### 2.1 ピッチモーメントの物理モデル
-- 人工的な姿勢復元トルクや水平基準トルクは完全撤廃済み。
-- 空力モーメントの定式化:
+### 2.1 Pitch Moment Physics Model
+- Artificial attitude-restoring torques and horizontal-reference torques completely removed.
+- Aerodynamic moment formulation:
   $$M = q S \bar{c} \cdot \left[ C_{m0} + C_{m\alpha}\alpha + C_{mq}\frac{q_{\text{pitch}}\bar{c}}{2V} + \Delta C_{m,\text{elevon}}\delta_{\text{elevon}} \right] + (x_{\text{cg}} - x_{\text{cp}}) \cdot L \cos\alpha$$
-  - 静的縦安定性条件: $C_{m\alpha} < 0$ かつ風圧中心 $x_{\text{cp}}$ が重心 $x_{\text{cg}}$ より後方に位置すること。
-  - ピッチ減衰 $C_{mq} < 0$: 角速度 $q_{\text{pitch}}$ に比例する純減衰トルク。
-- **低速・頂点プッシュオーバー**:
-  - 上昇端の極低速域 ($V < 2.0\text{ m/s}$) において動圧が消失した際のモーメント発散を防止するため、相対風速ゼロ極限では空力トルクを滑らかにゼロへ収束。重力と微小相対風による自然なプッシュオーバー（機首下げ）を許容。
+  - Static longitudinal stability condition: $C_{m\alpha} < 0$ and aerodynamic center $x_{\text{cp}}$ located aft of CG $x_{\text{cg}}$.
+  - Pitch damping $C_{mq} < 0$: Pure damping torque proportional to angular velocity $q_{\text{pitch}}$.
+- **Low-Speed Apex Pushover**:
+  - At climb apex in ultra-low-speed regime ($V < 2.0\text{ m/s}$), aerodynamic torque smoothly converges to zero at zero relative wind speed limit to prevent moment divergence. Natural pushover (nose-down) via gravity and minute relative wind permitted.
 
 ---
 
-## 3. 空力弾性・紙の変形モデル (Issues #11, #21)
+## 3. Aeroelastic & Paper Deformation Models (Issues #11, #21)
 
-### 3.1 準静的モーフィングモデル
-- 動圧 $q = \frac{1}{2}\rho V^2$ に応じた後縁トリムたわみ減衰:
+### 3.1 Quasi-Steady Morphing Model
+- Trailing-edge trim deflection damping per dynamic pressure $q = \frac{1}{2}\rho V^2$:
   $$\delta_{\text{eff}}(q) = \delta_{\text{trim}} \cdot \left[ \frac{1}{1 + (q / q_{\text{ref}})^{n_{\text{morph}}}} \right]$$
-- **採用している仮定**:
-  - 現行実装は「準静的平衡（Quasi-steady equilibrium）」仮定を採用。
-  - 紙の質量・慣性モーメント・構造減衰に基づく動的フラッター（自励振動）や時間遅れ・ヒステリシスは未導入（Issue #21で制約として明記）。
+- **Adopted Assumptions**:
+  - Current implementation adopts "quasi-static equilibrium" assumption.
+  - Dynamic flutter (self-excited vibration), time delays, and hysteresis based on paper mass, inertia moments, and structural damping are not implemented (explicitly noted as constraints in Issue #21).
 
 ---
 
-## 4. 大気・環境・風場モデル (Issues #15, #16)
+## 4. Atmosphere, Environment, & Wind Field Models (Issues #15, #16)
 
-### 4.1 ISA 標準大気モデルの適用範囲と整合性
-- **温度・圧力・密度の一貫性**:
+### 4.1 ISA Standard Atmosphere Model Applicability & Consistency
+- **Temperature, Pressure, Density Consistency**:
   $$T(h) = T_0 - L h, \quad p(h) = p_0 \left(1 - \frac{L h}{T_0}\right)^{\frac{g}{L R_{\text{air}}}}, \quad \rho(h) = \frac{p(h)}{R_{\text{air}} T(h)}$$
-  - 対流圏界面（$h = 11,000\text{ m}$）以上では等温大気層として処理し、負の高度や極端な高度でも非有限値（NaN, Inf）が発生しないよう下限・上限をガード。
-  - 動粘性係数は Sutherland 式に基づき $T$ のみから独立算出。
+  - Tropopause ($h = 11,000\text{ m}$) and above treated as isothermal layer; lower/upper bounds guarded to prevent non-finite values (NaN, Inf) even at negative or extreme altitudes.
+  - Dynamic viscosity independently computed from $T$ only via Sutherland formula.
 
-### 4.2 風場・乱流・座標系
-- **ワールド座標系**: $+x$ = 東 (East), $+y$ = 北 (North), $+z$ = 下方 (Down)。
-- 風向角 $\psi_{\text{wind}}$ は気象規約（風が「吹いてくる」方角、北基準時計回り）に完全準拠。
-- 同一乱数シード（`turbulence_seed`）により、同一初期条件で完全な数値再現性を保証。
+### 4.2 Wind Field, Turbulence, & Coordinate Systems
+- **World Coordinate System**: $+x$ = East, $+y$ = North, $+z$ = Down.
+- Wind direction angle $\psi_{\text{wind}}$ fully complies with meteorological convention (direction wind "blows from", clockwise from North).
+- Identical random seed (`turbulence_seed`) guarantees full numerical reproducibility under identical initial conditions.
 
 ---
 
-## 5. 地面効果・接地・境界挙動 (Issue #14)
+## 5. Ground Effect, Grounding, & Boundary Behavior (Issue #14)
 
-### 5.1 地面効果
-- McCormick モデルに基づく誘導抗力低減係数:
+### 5.1 Ground Effect
+- Induced drag reduction coefficient based on McCormick model:
   $$\kappa_{\text{ground}}(h/b) = \frac{16 (h/b)^2}{1 + 16 (h/b)^2}$$
-  - $h \to 0$ で誘導抗力はゼロに漸近し、$h \gg b$ で $\kappa \to 1.0$ となる滑らかな有界関数。
+  - Induced drag asymptotically approaches zero as $h \to 0$; $\kappa \to 1.0$ as $h \gg b$; smooth bounded function.
 
-### 5.2 接地判定と反発・摩擦
-- 機体最下面高度が地表面（$z_{\text{ground}}$）に達した時点で接地判定。
-- 法線方向速度は反発係数 $e_{\text{restitution}} \in [0, 1]$ により減衰反発、接線方向速度は摩擦係数 $\mu_{\text{friction}}$ による非正の仕事（減速）を適用。人工的な運動エネルギー増加を厳密に排除。
-
----
-
-## 6. 数値積分・時間刻み収束性・サロゲート整合性 (Issues #12, #13)
-
-### 6.1 時間刻み収束性 (Time-step Convergence)
-- 4次ルンゲ＝クッタ法（RK4）による 6DoF 積分。
-- 固定時間刻み $\Delta t \in \{0.02, 0.01, 0.005\}\text{ s}$ の比較において、急峻な姿勢変化を伴う手元投擲モードでは再試行ステップ（ステップ半減）が発生しうるため、完全な収束基準（1%以内）の達成状況を `verification.md` に明記。
-
-### 6.2 最適化サロゲートモデルとの整合性
-- 最適化エンジン（NSGA-II, DE, Surrogate）が探索時に用いる簡略評価と、完全な 6DoF フライトシミュレータの評価を区別。
-- 最終選定された機体候補は必ず完全 6DoF シミュレーションによって再検証を行い、目的関数・制約の乖離を排除。
+### 5.2 Grounding Judgment & Rebound/Friction
+- Grounding judged when aircraft lowest surface reaches ground surface ($z_{\text{ground}}$).
+- Normal velocity damped rebound via restitution coefficient $e_{\text{restitution}} \in [0, 1]$; tangential velocity decelerated via friction coefficient $\mu_{\text{friction}}$ doing non-positive work. Artificial kinetic energy increase strictly excluded.
 
 ---
 
-## 7. 付加質量・非定常空力の監査 (Issue #17)
+## 6. Numerical Integration, Timestep Convergence, & Surrogate Consistency (Issues #12, #13)
 
-- **監査結果**: 現行コードでは付加質量（Added Mass）および非定常渦理論（Theodorsen / Wagner 関数）は**未実装**。
-- **判断理由**:
-  - 紙飛行機の代表質量比・減速加速度領域において、付加質量項の導入は剛体運動方程式の質量行列との二重計上リスクが高く、計算安定性を損なう懸念があるため、現行バージョンでは準定常空力＋減衰導関数モデルを維持。
+### 6.1 Timestep Convergence
+- 6DoF integration via 4th-order Runge-Kutta (RK4).
+- Comparison of fixed timesteps $\Delta t \in \{0.02, 0.01, 0.005\}\text{ s}$; retry steps (step halving) may occur in hand-launch mode with abrupt attitude changes. Full convergence criteria (within 1%) achievement status documented in `verification.md`.
+
+### 6.2 Optimization Surrogate Model Consistency
+- Distinction made between simplified evaluations used by optimization engines (NSGA-II, DE, Surrogate) during search and full 6DoF flight simulator evaluations.
+- Final selected aircraft candidates must always be re-verified via full 6DoF simulation to eliminate objective function/constraint discrepancies.
 
 ---
 
-## 8. パラメータ感度・不確かさ評価 (Issue #22)
+## 7. Added Mass & Unsteady Aerodynamics Audit (Issue #17)
 
-- `physics/auto_investigate.py` および `tests/test_sensitivity_audit.py` により、質量 $m$、スパン $b$、エレボン角 $\delta$、重心位置 $x_{\text{cg}}$ の単独・複合微小変化に対する飛行指標（距離、最高高度、飛行時間）の感度勾配（Jacobian）を算出し、結論の頑健性を評価。
+- **Audit Result**: Current code does **not implement** added mass or unsteady vortex theory (Theodorsen / Wagner functions).
+- **Rationale**:
+  - In paper airplane representative mass ratios and deceleration/acceleration regimes, introducing added mass terms carries high risk of double-counting with rigid body equations of motion mass matrix, potentially compromising computational stability. Current version maintains quasi-steady aerodynamics + damping derivative model.
+
+---
+
+## 8. Parameter Sensitivity & Uncertainty Evaluation (Issue #22)
+
+- `physics/auto_investigate.py` and `tests/test_sensitivity_audit.py` compute sensitivity gradients (Jacobian) of flight metrics (distance, max altitude, flight time) to individual/combined perturbations of mass $m$, span $b$, elevon angle $\delta$, CG position $x_{\text{cg}}$, evaluating conclusion robustness.

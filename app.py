@@ -21,7 +21,7 @@ dotenv.load_dotenv()
 from flask import Flask, Response, jsonify, render_template, request
 from werkzeug.exceptions import HTTPException
 
-from physics.config_schema import utc_now_iso
+from core.config_schema import utc_now_iso
 from api.core import (
     BadRequest,
     NotFound,
@@ -251,7 +251,7 @@ def healthz_live():
 @app.get("/healthz/ready")
 def healthz_ready():
     """Readiness probe: checks memory, active job capacity, and domain readiness."""
-    from physics.job_manager import JOB_MANAGER
+    from infrastructure.job_manager import JOB_MANAGER
     gpu_info = domain("parallel_engine").get_gpu_info()
     active_jobs = JOB_MANAGER.active_count()
     ready = active_jobs < 4

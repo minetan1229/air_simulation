@@ -42,6 +42,8 @@ from physics.geometry_utils import (
     quaternion_normalize,
 )
 
+pytestmark = pytest.mark.slow
+
 
 def _geodesic_distance_rad(q1: ArrayLike, q2: ArrayLike) -> float:
     """Geodesic distance on SO(3) between two unit quaternions: 2 * arccos(|q1 . q2|)."""

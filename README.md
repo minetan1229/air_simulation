@@ -2,11 +2,9 @@
 
 # ✈️ 3D Paper Airplane Simulator
 
-**6DoF RK4 飛行力学 × WebGL 3D × GPU 並列最適化 — 学術根拠を持つ紙飛行機シミュレーション基盤**
+**6DoF RK4 Flight Dynamics × WebGL 3D × GPU Parallel Optimization — Paper Airplane Simulation Foundation with Academic Foundation**
 
-Flask REST API + Three.js WebGL でリアルタイム 3D 飛行軌跡・姿勢・気流を可視化し、
-低レイノルズ数（$Re \sim 10^3 \sim 10^5$）特有の非線形空力（Helmbold / Polhamus / Hoerner / LSB）を
-GPU バッチ計算と遺伝的アルゴリズムで探索します。
+Flask REST API + Three.js WebGL visualizes real-time 3D flight trajectories, attitudes, and airflow, exploring low Reynolds number ($Re \sim 10^3 \sim 10^5$) specific nonlinear aerodynamics (Helmbold / Polhamus / Hoerner / LSB) via GPU batch computation and genetic algorithms.
 
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 [![Flask](https://img.shields.io/badge/backend-Flask%20REST%20API-lightgrey.svg)](https://flask.palletsprojects.com/)
@@ -17,140 +15,136 @@ GPU バッチ計算と遺伝的アルゴリズムで探索します。
 [![CodeQL](https://github.com/minetan1229/air_simulation/actions/workflows/codeql.yml/badge.svg)](https://github.com/minetan1229/air_simulation/actions/workflows/codeql.yml)
 [![License](https://img.shields.io/badge/license-Proprietary-red.svg)](./LICENSE)
 
-[ドキュメント](https://minetan1229.github.io/air_simulation/) ·
-[API リファレンス](./docs/api.md) ·
-[物理モデル](./docs/PHYSICS_MODELS.md) ·
-[開発ガイド](./CONTRIBUTING.md) ·
-[学術引用](./CITATION.cff) ·
+[Documentation](https://minetan1229.github.io/air_simulation/) ·
+[API Reference](./docs/api.md) ·
+[Physics Models](./docs/PHYSICS_MODELS.md) ·
+[Development Guide](./CONTRIBUTING.md) ·
+[Academic Citation](./CITATION.cff) ·
 [English](./README.en.md)
 
 </div>
 
-> **デモ動画について**: 1920×1080 の軌跡・風洞ループ GIF はリポジトリ容量抑制のため
-> 未同梱です。代わりに静止画で各画面を紹介し、ローカル起動でインタラクティブに
-> ご確認いただけます（60 FPS 計器盤・タイムラインシーク・GPU 気流パーティクル）。
-> GIF 化の手順は [docs/README.md §画面イメージ](./docs/README.md) を参照してください。
+> **About Demo Videos**: 1920×1080 trajectory/wind tunnel loop GIFs are not included to keep repository size down. Instead, screenshots show each screen; run locally for interactive verification (60 FPS instrument panel, timeline seek, GPU airflow particles). See [docs/README.md §Screen Images](./docs/README.md) for GIF creation steps.
 
 ---
 
-## ⚡ 30 秒で動かす (Quickstart)
+## ⚡ Quickstart (30 Seconds)
 
-> 前提: [Python 3.10+](https://www.python.org/downloads/) / WebGL2 対応ブラウザ（Chrome / Edge / Firefox）
-> GPU（NVIDIA / CUDA 12.x）は任意。未搭載時は NumPy / `multiprocessing` へ自動フォールバックします。
+> Prerequisites: [Python 3.10+](https://www.python.org/downloads/) / WebGL2 compatible browser (Chrome / Edge / Firefox)
+> GPU (NVIDIA / CUDA 12.x) optional. Auto-fallback to NumPy / `multiprocessing` when unavailable.
 
-=== "Docker (推奨・最速)"
+=== "Docker (Recommended, Fastest)"
 
-    ```bash
-    git clone https://github.com/minetan1229/air_simulation.git
-    cd air_simulation
-    docker compose up --build
-    # → http://127.0.0.1:5000 をブラウザで開く
-    ```
+```bash
+git clone https://github.com/minetan1229/air_simulation.git
+cd air_simulation
+docker compose up --build
+# → Open http://127.0.0.1:5000 in browser
+```
 
-    > Docker Compose ファイルが無い場合は以下をご参照ください。
-    > `docker build -t paper-sim . && docker run --rm -p 5000:5000 paper-sim`
+> If Docker Compose file missing: `docker build -t paper-sim . && docker run --rm -p 5000:5000 paper-sim`
 
 === "Python venv (Windows PowerShell)"
 
-    ```powershell
-    git clone https://github.com/minetan1229/air_simulation.git
-    cd air_simulation
-    python -m venv .venv
-    .\.venv\Scripts\Activate.ps1
-    pip install -e ".[dev]"
-    python app.py
-    # → http://127.0.0.1:5000
-    ```
+```powershell
+git clone https://github.com/minetan1229/air_simulation.git
+cd air_simulation
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+pip install -e ".[dev]"
+python app.py
+# → http://127.0.0.1:5000
+```
 
 === "Python venv (Linux / macOS / WSL)"
 
-    ```bash
-    git clone https://github.com/minetan1229/air_simulation.git
-    cd air_simulation
-    python3 -m venv .venv
-    source .venv/bin/activate
-    pip install -e ".[dev]"
-    python app.py
-    # → http://127.0.0.1:5000
-    ```
+```bash
+git clone https://github.com/minetan1229/air_simulation.git
+cd air_simulation
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -e ".[dev]"
+python app.py
+# → http://127.0.0.1:5000
+```
 
-**疎通確認**:
+**Connectivity Check**:
 
 ```bash
 curl http://127.0.0.1:5000/api/v1/meta/health
 curl http://127.0.0.1:5000/healthz/live
 ```
 
-**インタラクティブ API ドキュメント**: サーバー起動後に <http://127.0.0.1:5000/docs>（Swagger UI） / <http://127.0.0.1:5000/api/openapi.json>（OpenAPI 3.0 仕様）
+**Interactive API Documentation**: After server start, <http://127.0.0.1:5000/docs> (Swagger UI) / <http://127.0.0.1:5000/api/openapi.json> (OpenAPI 3.0 spec)
 
-詳細な環境構築・`.env`・GPU 検証は [docs/getting-started.md](./docs/getting-started.md) を参照。
+See [docs/getting-started.md](./docs/getting-started.md) for detailed environment setup, `.env`, GPU verification.
 
 ---
 
-## ✨ 機能ハイライト (Feature Matrix)
+## ✨ Feature Matrix
 
 <div align="center">
 
-| 領域 | 技術 | 何ができるか |
+| Domain | Technology | Capabilities |
 | :--- | :--- | :--- |
-| 🚀 **6DoF 飛行力学** | Quaternion + RK4 + 適応サブステッピング | 並進 + 回転オイラー方程式を 13 状態で実時間積分。連続衝突判定（CCD）・地表接地・翼端散逸まで一貫処理 |
-| 🌬️ **空力・環境モデル** | Helmbold（1942）/ Polhamus（1966）/ Hoerner（1965）/ LSB / ISA + Sutherland / Dryden 乱流 | 低 AR 翼の揚力傾斜・前縁渦揚力・失速後平板揚力・低 Re 層流剥離泡・地面効果・3D 風場を数式として統合 |
-| 🎛️ **3D インタラクティブ表示** | Three.js WebGL + GPU 気流パーティクル | 60 FPS 計器盤、飛行軌道・姿勢追跡、頂点応力ヒートマップ、仮想風洞、タイムラインシーク |
-| ⚡ **GPU 並列 & 最適化** | CuPy ベクトル化 + CPU 自動フォールバック + NSGA-II / DE / CMA-ES / Surrogate | 多機同時アンサンブル（100 機）・パレート探索・ETA 付き非同期ジョブ。スキーマ等価性を維持 |
-| 🧬 **GA 2.0 研究基盤** | `physics/ga2/` スケーリング・サロゲート・VRAM 管理 | 大規模進化探索の段階（Stage 0–3）・チェックポイント・ジャーナル・レジューム |
-| 🔌 **REST API + OpenAPI** | Flask + Swagger UI / `openapi.json` | `POST /api/v1/simulation/launch` でヘッドレス飛行、`GET /api/v1/meta/schemas` で UI スキーマ単一正本化 |
-| 🧪 **検証 (V&V)** | `pytest` + 閉形式テスト + `smoke_test.py` | ISA・誘導抗力・Sutherland・Helmbold 閉形式を $10^{-6} \sim 10^{-3}$ で検証。CI で Linux / Windows × Python 3.10–3.12 |
+| 🚀 **6DoF Flight Dynamics** | Quaternion + RK4 + Adaptive Sub-stepping | Real-time integration of translational + rotational Euler equations in 13 states. Continuous collision detection (CCD), ground contact, wingtip dissipation all integrated. |
+| 🌬️ **Aero & Environment Models** | Helmbold (1942) / Polhamus (1966) / Hoerner (1965) / LSB / ISA + Sutherland / Dryden Turbulence | Low AR wing lift slope, leading-edge vortex lift, post-stall flat plate lift, low Re laminar separation bubble, ground effect, 3D wind field integrated as formulas. |
+| 🎛️ **3D Interactive Display** | Three.js WebGL + GPU Airflow Particles | 60 FPS instrument panel, flight trajectory & attitude tracking, vertex stress heatmap, virtual wind tunnel, timeline seek. |
+| ⚡ **GPU Parallel & Optimization** | CuPy Vectorization + CPU Auto-fallback + NSGA-II / DE / CMA-ES / Surrogate | Multi-aircraft ensemble (100 planes), Pareto search, ETA-enabled async jobs. Schema equivalence maintained. |
+| 🧬 **GA 2.0 Research Foundation** | `physics/ga2/` Scaling, Surrogate, VRAM Management | Large-scale evolutionary search stages (Stage 0–3), checkpoints, journal, resume. |
+| 🔌 **REST API + OpenAPI** | Flask + Swagger UI / `openapi.json` | Headless flight via `POST /api/v1/simulation/launch`, UI schema single canonical via `GET /api/v1/meta/schemas`. |
+| 🧪 **Verification (V&V)** | `pytest` + Closed-form Tests + `smoke_test.py` | ISA, induced drag, Sutherland, Helmbold closed-form verified at $10^{-6} \sim 10^{-3}$. CI on Linux / Windows × Python 3.10–3.12. |
 
 </div>
 
 ---
 
-## 🖥️ スクリーンショット
+## 🖥️ Screenshots
 
-| メインコンソール | 3D 飛行軌道・姿勢追跡 |
+| Main Console | 3D Flight Trajectory & Attitude |
 | :---: | :---: |
-| ![メインコンソール](docs/images/01_main_console.png) | ![飛行軌道](docs/images/02_flight_trajectory.png) |
-| **風洞モード (気流解析)** | **Workbench (最適化)** |
-| ![風洞モード](docs/images/03_wind_tunnel_mode.png) | ![Optimizer](docs/images/05_workbench_optimizer.png) |
+| ![Main Console](docs/images/01_main_console.png) | ![Flight Trajectory](docs/images/02_flight_trajectory.png) |
+| **Wind Tunnel Mode (Airflow Analysis)** | **Workbench (Optimization)** |
+| ![Wind Tunnel Mode](docs/images/03_wind_tunnel_mode.png) | ![Optimizer](docs/images/05_workbench_optimizer.png) |
 
-> その他の画面（Workbench 調査 / 3D メッシュ / アンサンブル 100 機）は [docs/README.md](./docs/README.md) を参照。
+> Other screens (Workbench Investigate / 3D Mesh / Ensemble 100 Planes) at [docs/README.md](./docs/README.md).
 
 ---
 
-## 🧮 物理・理論アーキテクチャ (Physics & Theory Architecture)
+## 🧮 Physics & Theory Architecture
 
-本シミュレータは、紙飛行機の低レイノルズ数環境（$Re \sim 10^3 \sim 10^5$）特有の非線形現象と6自由度飛行力学を、学術的根拠に基づく数理モデルとして統合しています。
+This simulator integrates paper airplane low Reynolds number environment ($Re \sim 10^3 \sim 10^5$) specific nonlinear phenomena and 6-DoF flight dynamics as mathematical models with academic foundations.
 
 ```mermaid
 flowchart TD
-    subgraph Env["環境・流体場モデル"]
-        ISA["標準大気 (ISA + Sutherland)<br/>• 密度 ρ(h)<br/>• 動粘性係数 ν(T)"]
-        Wind["3D風場 & 乱気流<br/>• 平均風速プロファイル<br/>• Dryden乱流モデル"]
+    subgraph Env["Environment & Fluid Field Models"]
+        ISA["Standard Atmosphere (ISA + Sutherland)<br/>• Density ρ(h)<br/>• Kinematic Viscosity ν(T)"]
+        Wind["3D Wind Field & Turbulence<br/>• Mean Wind Profile<br/>• Dryden Turbulence Model"]
     end
 
-    subgraph State["機体運動状態 (Kinematics)"]
-        Pos["位置 & 速度 (NED系)"]
-        Att["姿勢四元数 (Quaternion q)<br/>• 角速度 ω (p, q, r)"]
-        AeroAngles["対気状態計算<br/>• 迎角 α, 横滑り角 β<br/>• レイノルズ数 Re, 動圧 q_bar"]
+    subgraph State["Aircraft Kinematic State"]
+        Pos["Position & Velocity (NED)"]
+        Att["Attitude Quaternion (Quaternion q)<br/>• Angular Velocity ω (p, q, r)"]
+        AeroAngles["Relative Air State Calculation<br/>• AoA α, Sideslip β<br/>• Reynolds Re, Dynamic Pressure q_bar"]
     end
 
-    subgraph AeroPhysics["空力理論・補正モデル (physics/aero_kernel.py)"]
-        Helmbold["揚力傾斜: Helmbold (1942)<br/>低AR(AR≲4) 3次元誘導効果補正"]
-        LSB["低Re層流剥離泡 (LSB) & 動的失速<br/>• ピッチ角速度 adot 遅延<br/>• f(Re)=√(10⁴/Re) スケーリング"]
-        Polhamus["前縁渦揚力: Polhamus (1966)<br/>大迎角三角翼・後退角渦"]
-        Stall["失速後揚力: Hoerner 平板混合<br/>α > α_stall での完全分離接続"]
-        Drag["抗力極線 & Reべき乗スケーリング<br/>• 摩擦抗力 Cd0(Re) ∝ Re^(-0.5)<br/>• 誘導抗力 C_L²/(π e AR)<br/>• 剥離圧力抗力 (大迎角)"]
-        Ground["地面効果 (Wieselberger / Phillips)<br/>高度低下時の誘導抗力低減 & 揚力増加"]
+    subgraph AeroPhysics["Aero Theory & Correction Models (physics/aero_kernel.py)"]
+        Helmbold["Lift Slope: Helmbold (1942)<br/>Low AR (AR≲4) 3D Induced Effect Correction"]
+        LSB["Low Re Laminar Separation Bubble (LSB) & Dynamic Stall<br/>• Pitch Rate adot Delay<br/>• f(Re)=√(10⁴/Re) Scaling"]
+        Polhamus["Leading-Edge Vortex Lift: Polhamus (1966)<br/>High AoA Delta Wing / Sweep Vortices"]
+        Stall["Post-Stall Lift: Hoerner Flat Plate Blend<br/>Complete Separation Connection at α > α_stall"]
+        Drag["Drag Polar & Re Power Scaling<br/>• Skin Friction Cd0(Re) ∝ Re^(-0.5)<br/>• Induced Drag C_L²/(π e AR)<br/>• Separation Pressure Drag (High AoA)"]
+        Ground["Ground Effect (Wieselberger / Phillips)<br/>Induced Drag Reduction & Lift Increase at Low Altitude"]
     end
 
-    subgraph AeroElastic["空力弾性・変形モデル"]
-        Stress["翼根曲げ応力 & 破損判定<br/>紙の破壊引張限界 (paper_allowable_stress)"]
-        Morph["準定常受動変形 (Quasi-steady Morphing)<br/>動圧・揚力荷重による局所迎角低減"]
+    subgraph AeroElastic["Aeroelastic & Deformation Models"]
+        Stress["Wing Root Bending Stress & Failure Judgment<br/>Paper Fracture Tensile Limit (paper_allowable_stress)"]
+        Morph["Quasi-Steady Passive Deformation<br/>Local AoA Reduction via Dynamic Pressure & Lift Load"]
     end
 
-    subgraph Integration["6DoF 数値積分 (physics/flight_sim.py)"]
-        RK4["ルンゲ＝クッタ法 (RK4)<br/>• 並進運動方程式 (質点 m)<br/>• 回転オイラー方程式 (慣性テンソル I)<br/>• 四元数正規化 (Quat Normalize)"]
-        CCD["連続衝突判定 (CCD)<br/>地面接地・反発・翼端散逸減衰"]
+    subgraph Integration["6DoF Numerical Integration (physics/flight_sim.py)"]
+        RK4["Runge-Kutta (RK4)<br/>• Translational EOM (Point Mass m)<br/>• Rotational Euler Equations (Inertia Tensor I)<br/>• Quaternion Normalize"]
+        CCD["Continuous Collision Detection (CCD)<br/>Ground Contact, Rebound, Wingtip Dissipation Damping"]
     end
 
     Env --> AeroAngles
@@ -167,65 +161,64 @@ flowchart TD
     Integration --> State
 ```
 
-### 採用されている物理理論と適用
+### Adopted Physics Theories & Applications
 
-| 物理現象・理論 | 適用モデル / 方程式 | 文献根拠・学術的背景 | 正本モジュール |
+| Physical Phenomenon / Theory | Applied Model / Equation | Literature Basis / Academic Background | Canonical Module |
 |---|---|---|---|
-| **低AR揚力傾斜** | Helmbold (1942) 3次元補正式 | Helmbold (1942), *Jahrbuch D. Luftfahrtforschung* | `physics/aero_kernel.py` |
-| **失速後挙動** | Hoerner 平板完全分離混合式 | Hoerner (1965), *Fluid-Dynamic Drag* | `physics/aero_kernel.py` |
-| **低Re層流剥離泡 (LSB)** | 動的失速ヒステリシス ($Re^{-0.5}$) | Pelletier & Mueller (2000), Sunada et al. (2002) | `physics/aero_kernel.py` |
-| **前縁渦揚力** | Polhamus 先導縁吸い込みアナロジー | Polhamus (1966), NASA TN D-3767 | `physics/aero_kernel.py` |
-| **6DoF実時間運動** | 四元数 + ルンゲ＝クッタ4段法 (RK4) | 剛体力学・オイラー回転方程式 | `physics/flight_sim.py` |
-| **環境・乱気流** | ISA大気 + Sutherland粘性 + Dryden乱流 | US Standard Atmosphere 1976 / MIL-F-8785C | `physics/atmosphere_domain.py`, `physics/wind_domain.py` |
-| **構造・空力弾性** | 翼根応力縮約 + 準定常変形 | 薄板曲げ理論 / 航空弾性一次縮約 | `physics/stress_domain.py`, `physics/aeroelastic_domain.py` |
+| **Low AR Lift Slope** | Helmbold (1942) 3D Correction Formula | Helmbold (1942), *Jahrbuch D. Luftfahrtforschung* | `physics/aero_kernel.py` |
+| **Post-Stall Behavior** | Hoerner Flat Plate Complete Separation Blend | Hoerner (1965), *Fluid-Dynamic Drag* | `physics/aero_kernel.py` |
+| **Low Re Laminar Separation Bubble (LSB)** | Dynamic Stall Hysteresis ($Re^{-0.5}$) | Pelletier & Mueller (2000), Sunada et al. (2002) | `physics/aero_kernel.py` |
+| **Leading-Edge Vortex Lift** | Polhamus Leading-Edge Suction Analogy | Polhamus (1966), NASA TN D-3767 | `physics/aero_kernel.py` |
+| **6DoF Real-Time Motion** | Quaternion + Runge-Kutta 4th Order (RK4) | Rigid Body Dynamics, Euler Rotation Equations | `physics/flight_sim.py` |
+| **Environment & Turbulence** | ISA Atmosphere + Sutherland Viscosity + Dryden Turbulence | US Standard Atmosphere 1976 / MIL-F-8785C | `physics/atmosphere_domain.py`, `physics/wind_domain.py` |
+| **Structure & Aeroelastic** | Wing Root Stress Reduction + Quasi-Steady Deformation | Thin Plate Bending Theory / Aeroelastic First-Order Reduction | `physics/stress_domain.py`, `physics/aeroelastic_domain.py` |
 
-> 数式の正本は [docs/SPECIFICATION.md](./docs/SPECIFICATION.md) / [docs/PHYSICS_MODELS.md](./docs/PHYSICS_MODELS.md)、
-> 検証・妥当性確認（V&V）は [docs/VALIDATION.md](./docs/VALIDATION.md) を参照。
+> Formula canonical sources: [docs/SPECIFICATION.md](./docs/SPECIFICATION.md) / [docs/PHYSICS_MODELS.md](./docs/PHYSICS_MODELS.md), Verification & Validation (V&V): [docs/VALIDATION.md](./docs/VALIDATION.md).
 
 ---
 
-## 📁 ディレクトリ構成
+## 📁 Directory Structure
 
 ```text
-├── app.py               # アプリケーション起動エントリーポイント (Flask)
-├── api/                 # REST API エンドポイント (Blueprint 群)
-├── physics/             # 物理演算・空力モデル・最適化エンジン
-├── examples/            # ヘッドレス実行サンプル (quick_simulation.py)
-├── static/              # フロントエンド (Three.js 描画、UI)
-├── templates/           # UI テンプレート HTML + Swagger UI
-├── tests/               # 単体・統合テストスイート
-├── docs/                # 詳細仕様・アーキテクチャ資料 (MkDocs ビルド対象)
-└── .github/workflows/   # CI / CodeQL / Dependency Review / Docs デプロイ
+├── app.py               # Application entry point (Flask)
+├── api/                 # REST API endpoints (Blueprint group)
+├── physics/             # Physics computation, aero models, optimization engine
+├── examples/            # Headless execution samples (quick_simulation.py)
+├── static/              # Frontend (Three.js rendering, UI)
+├── templates/           # UI templates HTML + Swagger UI
+├── tests/               # Unit & integration test suite
+├── docs/                # Detailed specs, architecture docs (MkDocs build target)
+└── .github/workflows/   # CI / CodeQL / Dependency Review / Docs deploy
 ```
 
 ---
 
-## 📚 詳細ドキュメント
+## 📚 Detailed Documentation
 
-Web サイト版: <https://minetan1229.github.io/air_simulation/>（`mkdocs.yml` から GitHub Pages へ自動公開）
+Website version: <https://minetan1229.github.io/air_simulation/> (auto-published to GitHub Pages from `mkdocs.yml`)
 
-| カテゴリ | 文書 |
+| Category | Documents |
 | :--- | :--- |
-| **入門** | [docs/getting-started.md](./docs/getting-started.md) 環境構築・起動、`[docs/usage.md](./docs/usage.md)` 画面操作 |
-| **物理・理論** | [docs/SPECIFICATION.md](./docs/SPECIFICATION.md) 技術仕様正本、`[docs/PHYSICS_MODELS.md](./docs/PHYSICS_MODELS.md)` 数式詳解、`[docs/VALIDATION.md](./docs/VALIDATION.md)` V&V |
-| **API** | [docs/api.md](./docs/api.md) REST リファレンス、`GET /api/openapi.json` OpenAPI 3.0、`GET /docs` Swagger UI |
-| **開発・運用** | [docs/architecture.md](./docs/architecture.md)、`[docs/development.md](./docs/development.md)`、`[CONTRIBUTING.md](./CONTRIBUTING.md)` |
+| **Getting Started** | [docs/getting-started.md](./docs/getting-started.md) Setup & Launch, `[docs/usage.md](./docs/usage.md)` Screen Operation |
+| **Physics & Theory** | [docs/SPECIFICATION.md](./docs/SPECIFICATION.md) Technical Spec Canonical, `[docs/PHYSICS_MODELS.md](./docs/PHYSICS_MODELS.md)` Formula Details, `[docs/VALIDATION.md](./docs/VALIDATION.md)` V&V |
+| **API** | [docs/api.md](./docs/api.md) REST Reference, `GET /api/openapi.json` OpenAPI 3.0, `GET /docs` Swagger UI |
+| **Development & Operations** | [docs/architecture.md](./docs/architecture.md), `[docs/development.md](./docs/development.md)`, `[CONTRIBUTING.md](./CONTRIBUTING.md)` |
 
 ---
 
-## 👥 開発・コントリビューション
+## 👥 Development & Contribution
 
-- **Issue / PR**: [CONTRIBUTING.md](./CONTRIBUTING.md) の規約（`feat(scope):` / `fix(scope):` 等）に従い、**物理モデル/issues テンプレート**で起票してください。
-- **Zero-Placeholder 政策**: `TODO`・空関数・ダミープレースホルダーは禁止。実動コードのみ。
-- **ブランチ隔離**: `genetic-project` フェーズでは `master` への直接コミット禁止。すべてのミッションは `mission/<slug>` ブランチで実施。
-- **セキュリティ**: 脆弱性の報告は [SECURITY.md](./SECURITY.md) を参照。
-- **行動規範**: [CODE_OF_CONDUCT.md](./CODE_OF_CONDUCT.md)
+- **Issue / PR**: Follow [CONTRIBUTING.md](./CONTRIBUTING.md) conventions (`feat(scope):` / `fix(scope):` etc.), file using **Physics Model / Issues templates**.
+- **Zero-Placeholder Policy**: `TODO`, empty functions, dummy placeholders prohibited. Working code only.
+- **Branch Isolation**: `genetic-project` phase prohibits direct commits to `master`. All missions on `mission/<slug>` branches.
+- **Security**: See [SECURITY.md](./SECURITY.md) for vulnerability reporting.
+- **Code of Conduct**: [CODE_OF_CONDUCT.md](./CODE_OF_CONDUCT.md)
 
 ---
 
-## 📖 学術引用 (Citation)
+## 📖 Academic Citation
 
-本ソフトウェアを論文・報告で引用する場合は以下をお使いください（詳細は [CITATION.cff](./CITATION.cff)）:
+When citing this software in papers/reports, use below (details in [CITATION.cff](./CITATION.cff)):
 
 ```bibtex
 @software{air_simulation_2026,
@@ -239,6 +232,7 @@ Web サイト版: <https://minetan1229.github.io/air_simulation/>（`mkdocs.yml`
 
 ---
 
-## 📄 ライセンス
+## 📄 License
 
-本ソフトウェアはプロプライエタリ（非公開）ライセンスです。詳細は [LICENSE](./LICENSE) を参照してください。
+This software is under a proprietary (non-public) license. See [LICENSE](./LICENSE) for details.
+

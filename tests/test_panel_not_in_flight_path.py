@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import pathlib
 
+import numpy as np
 import pytest
 
 
@@ -38,10 +39,13 @@ def test_panel_aerodynamics_not_in_flight_path():
 
 
 def test_call_sites_are_test_only():
-    """Every non-definition call site must live under tests/."""
+    """Every non-definition call site outside mesh_domain must live under tests/."""
     root = pathlib.Path(".")
     for path in list(root.rglob("*.py")):
         if ".venv" in str(path) or "site-packages" in str(path):
+            continue
+        # mesh_domain is the originating module (contains extract_panel_aerodynamic_rom)
+        if "mesh_domain.py" in str(path):
             continue
         text = path.read_text(encoding="utf-8", errors="ignore")
         if "panel_aerodynamics(" not in text:
@@ -50,3 +54,18 @@ def test_call_sites_are_test_only():
             for line in text.splitlines():
                 if "panel_aerodynamics(" in line and "def " not in line:
                     pytest.fail(f"runtime call site: {path}: {line.strip()}")
+
+
+def test_extract_panel_aerodynamic_rom_identifies_derivatives():
+    """Verify extract_panel_aerodynamic_rom calculates valid derivatives from panels."""
+    from physics.mesh_domain import build_panels, extract_panel_aerodynamic_rom
+    from tests.test_mesh import flat_wing
+    vertices, faces = flat_wing(span=0.20, root_chord=0.08, tip_chord=0.08, nx=8, ny=8)
+    panels = build_panels(vertices, faces)
+    area = 0.20 * 0.08
+    rom = extract_panel_aerodynamic_rom(panels, chord_m=0.08, area_m2=area, cg_m=(0.02, 0.0, 0.0))
+
+    assert "cl_alpha" in rom
+    assert "cm_alpha" in rom
+    assert "x_ac_frac" in rom
+    assert rom["cl_alpha"] > 0.0

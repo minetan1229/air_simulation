@@ -37,6 +37,26 @@ import { store } from "./state.js";
 import { Gauges, PolarChart, StripChart } from "./telemetry.js";
 import { RATES, Transport } from "./transport.js";
 import { Viewport } from "./viewport.js";
+import {
+  MODE_KEY,
+  SIMULATION_TABS,
+  readStoredMode,
+  bindModeSwitch,
+  setMode,
+  applyResearchBundle,
+} from "./app_modes.js";
+import {
+  detectGpu,
+  openGpuModal,
+  bindKeyboardShortcuts,
+} from "./app_events.js";
+import {
+  runGpuEnsemble,
+  showEnsembleChampionHud,
+  initChampionActions,
+  autoSaveEnsembleData,
+} from "./app_ensemble.js";
+
 
 const GEOMETRY_KEYS = [
   "wingspan_m",
@@ -53,9 +73,6 @@ const GEOMETRY_KEYS = [
   "shape_flag",
 ];
 
-/** localStorage key of the last console mode (simulation / research). */
-const MODE_KEY = "paper-airplane-console:mode";
-
 /**
  * Fold progression quantum of the origami slider.
  *
@@ -64,9 +81,6 @@ const MODE_KEY = "paper-airplane-console:mode";
  * drag responsive while the neighbouring angles stay meaningful (§G-6).
  */
 const ORIGAMI_ALPHA_STEP = 0.02;
-
-/** The workbench tabs of the simulation mode, in the order they appear. */
-const SIMULATION_TABS = ["investigate", "optimizer", "guinness", "model", "data"];
 
 /** Flight-status dot colours (CSS custom properties from console.css). */
 const FLIGHT_STATUS_COLOR = {
@@ -96,15 +110,15 @@ class ConsoleApp {
   /* ---------------------------------------------------------------- boot */
 
   async boot() {
+    if (this._booted) {
+      console.warn("ConsoleApp is already booted. Skipping duplicate initialization.");
+      return;
+    }
+    this._booted = true;
+
     this._cacheDom();
     paintRamp($("#heat-ramp"));
-    this._bindGroups();
-    this._bindWorkbench();
-    this._bindTransport();
-    this._bindHeader();
-    this._bindKeyboard();
-    this._bindModeSwitch();
-    this._initChampionActions();
+    this._bindEventsOnce();
 
     this.toastHost = $("#toasts");
 
@@ -549,6 +563,18 @@ class ConsoleApp {
 
   /* -------------------------------------------------------------- chrome */
 
+  _bindEventsOnce() {
+    if (this._eventsBound) return;
+    this._eventsBound = true;
+    this._bindGroups();
+    this._bindWorkbench();
+    this._bindTransport();
+    this._bindHeader();
+    this._bindKeyboard();
+    this._bindModeSwitch();
+    this._initChampionActions();
+  }
+
   _bindGroups() {
     for (const group of document.querySelectorAll(".group")) {
       // Panels without a data-group attribute are informational and open.
@@ -672,96 +698,21 @@ class ConsoleApp {
    * configuration file.
    */
   _readStoredMode() {
-    try {
-      const raw = window.localStorage.getItem(MODE_KEY);
-      if (raw === "research" || raw === "simulation") return raw;
-    } catch (error) {
-      /* localStorage may be unavailable (private mode) */
-    }
-    const stored = this.store && this.store.get("research", "mode");
-    if (stored === "research" || stored === "simulation") return stored;
-    return "simulation";
+    return readStoredMode(this.store);
   }
 
   _bindModeSwitch() {
-    this.modeButtons = {
-      simulation: document.getElementById("btn-mode-simulation"),
-      research: document.getElementById("btn-mode-research"),
-    };
-    for (const [mode, button] of Object.entries(this.modeButtons)) {
-      if (!button) continue;
-      button.addEventListener("click", () => this.setMode(mode));
-    }
+    bindModeSwitch(this);
   }
 
-  /**
-   * Switch between the simulation console and the autonomous research mode.
-   *
-   * The two modes really show different tools: the simulation mode keeps the
-   * flight rail, the flight instruments and the transport, the research mode
-   * hands the whole stage over to the GA workbench.
-   */
   setMode(mode) {
-    const next = mode === "research" ? "research" : "simulation";
-    this.mode = next;
-    document.body.dataset.mode = next;
-    for (const [key, button] of Object.entries(this.modeButtons || {})) {
-      if (button) button.classList.toggle("active", key === next);
-    }
-    this.store.set("research", "mode", next, "ui");
-    try {
-      window.localStorage.setItem(MODE_KEY, next);
-    } catch (error) {
-      /* localStorage may be unavailable (private mode) */
-    }
-    if (next === "research") {
-      if (this._activeTab !== "research" && SIMULATION_TABS.includes(this._activeTab)) {
-        this._simulationTab = this._activeTab;
-      }
-      this.setWorkbench(true);
-      const tab = document.getElementById("wb-tab-research");
-      if (tab) tab.click();
-    } else {
-      const wanted = SIMULATION_TABS.includes(this._simulationTab) ? this._simulationTab : "investigate";
-      const tab = document.getElementById(`wb-tab-${wanted}`);
-      if (tab) tab.click();
-    }
-    if (this.viewport) requestAnimationFrame(() => this.viewport.resize());
-    if (this.viewport && typeof this.viewport.setResearchPresentation === "function") {
-      this.viewport.setResearchPresentation(next === "research");
-      const followToggle = document.getElementById("tgl-follow");
-      if (followToggle) followToggle.dataset.on = this.viewport.follow ? "1" : "0";
-      if (next === "research") {
-        this._setCameraChipActive("cam-mode-fixed");
-      } else {
-        const previous = this.viewport.previousCameraMode();
-        if (previous) this._setCameraChipActive(`cam-mode-${previous}`);
-      }
-    }
+    setMode(this, mode);
   }
 
-  /**
-   * Restore the GA research section of a loaded configuration file.
-   *
-   * The server only knows the flight sections, so the research block is
-   * applied on the client.
-   */
   _applyResearchBundle(text) {
-    let bundle = null;
-    try {
-      bundle = JSON.parse(text);
-    } catch (error) {
-      return;
-    }
-    const research = bundle && bundle.research;
-    if (!research || typeof research !== "object") return;
-    this.store.merge("research", research, "load");
-    if (this.gaResearch && typeof this.gaResearch.applyStoreParams === "function") {
-      this.gaResearch.applyStoreParams();
-    }
-    const mode = research.mode === "research" ? "research" : "simulation";
-    this.setMode(mode);
+    applyResearchBundle(this, text);
   }
+
 
   _workbenchOpen() {
     return $("#workbench").dataset.open === "1";
@@ -980,502 +931,19 @@ class ConsoleApp {
   }
 
   async _runGpuEnsemble(count = 100) {
-    if (this._launching || this.transport.busy) {
-      console.warn("[App] Ensemble/Launch already running; ignoring duplicate request.");
-      return;
-    }
-    this._launching = true;
-    this._setLaunchButtonsDisabled(true);
-
-    if (this.tunnelMode) this.setTunnel(false);
-    this.hideSimulationError();
-    const tStart = performance.now();
-    this.startEtaCountdown({
-      clock: "GPU計算中...",
-      title: `GPU並列シミュレーション (${count}機同時計算) を実行中...`,
-    });
-
-    try {
-      await this._guard(async () => {
-        this.notify(`GPU一括並列シミュレーション (${count}機同時計算) を実行中...`, "info");
-
-        const currentAircraft = this.store.data.aircraft || {};
-        const currentEnv = this.store.data.environment || {};
-        const currentLaunch = this.store.data.launch || {};
-        const currentSettings = this.store.data.simulation || {};
-
-        const res = await api.ensemble({
-          aircraft: currentAircraft,
-          environment: currentEnv,
-          launch: currentLaunch,
-          settings: { ...currentSettings, duration_s: 25.0, dt_max: 0.01 },
-          n_trajectories: count,
-          max_sample_tracks: count,
-        });
-
-        const elapsedSec = ((performance.now() - tStart) / 1000).toFixed(2);
-        this.stopEtaCountdown();
-        this.setGlobalEta({
-          clock: `${elapsedSec}s`,
-          left: "GPU完了",
-          active: false,
-          title: `GPU 100機同時シミュレーション完了 (所要時間: ${elapsedSec}秒)`,
-        });
-
-        if (!res || !res.sample_trajectories) {
-          throw new Error("アンサンブルシミュレーションの結果が空です");
-        }
-
-        // Render trajectories and 100-plane InstancedMesh in Three.js viewport
-        if (this.viewport && res.sample_trajectories.length) {
-          this.viewport.setEnsembleTracks(res.sample_trajectories, this._skipFirstRank, res.mean_trajectory);
-          this.viewport.filterEnsembleTracks("all");
-          this.viewport.setEnsembleFleet(res.sample_trajectories, this._skipFirstRank, res.mean_trajectory);
-          this.viewport.setCameraMode("mean");
-          this._setCameraChipActive("cam-mode-mean");
-        }
-
-        const backendStr = res.backend_display || res.backend || "cupy";
-        const meanDist = Number(res.mean_distance_m || 0);
-        const maxDist = Number(res.max_distance_m || 0);
-        const meanTime = Number(res.mean_flight_time_s || 0);
-        const maxTime = Number(res.max_flight_time_s || 0);
-
-        this.notify(
-          `GPU 100機同時飛行完了 (${res.trajectories_count || count}機 · ${backendStr})\n最大飛距離: ${maxDist.toFixed(2)}m (平均: ${meanDist.toFixed(2)}m) · 最大滞空: ${maxTime.toFixed(2)}s (平均: ${meanTime.toFixed(2)}s)`,
-          "ok"
-        );
-
-        // Auto-save simulation data with date and timestamp
-        this._autoSaveEnsembleData(res, "json", false);
-
-        // Show comprehensive champion metrics & leaderboard HUD
-        this._showEnsembleChampionHud(res);
-        this._updateFlightStatus("landed", `100機同時飛行完了 — 1位最高飛距離: ${maxDist.toFixed(2)}m (平均: ${meanDist.toFixed(2)}m)`);
-      });
-    } finally {
-      this._launching = false;
-      this._setLaunchButtonsDisabled(false);
-      this.stopEtaCountdown();
-      const widget = this.dom["eta-widget"];
-      if (widget && widget.dataset.active === "1") {
-        const elapsedSec = ((performance.now() - tStart) / 1000).toFixed(2);
-        this.setGlobalEta({
-          clock: `${elapsedSec}s`,
-          left: "待機中",
-          active: false,
-        });
-      }
-    }
-
+    return runGpuEnsemble(this, count);
   }
 
   async _autoSaveEnsembleData(res, format = "json", isUserRequested = false) {
-    try {
-      const now = new Date();
-      const pad = (n) => String(n).padStart(2, "0");
-      const stamp = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}_${pad(now.getHours())}-${pad(now.getMinutes())}-${pad(now.getSeconds())}`;
-      const filename = `sim_data_${stamp}.${format}`;
-
-      const payload = {
-        executed_at: now.toISOString(),
-        timestamp_formatted: stamp,
-        parameters: {
-          aircraft: this.store.data.aircraft || {},
-          environment: this.store.data.environment || {},
-          launch: this.store.data.launch || {},
-          simulation: this.store.data.simulation || {},
-        },
-        mean_trajectory: res.mean_trajectory || null,
-        statistics: res.statistics || {},
-        trajectories_count: res.trajectories_count || 100,
-        mean_distance_m: res.mean_distance_m,
-        max_distance_m: res.max_distance_m,
-        mean_flight_time_s: res.mean_flight_time_s,
-        max_flight_time_s: res.max_flight_time_s,
-        sample_trajectories: res.sample_trajectories || [],
-        leaderboard: res.leaderboard || [],
-        bottomboard: res.bottomboard || [],
-      };
-
-      // Call server data export endpoint
-      const exportRes = await api.export({
-        kind: "ensemble",
-        format,
-        data: payload,
-      });
-
-      if (exportRes && exportRes.payload) {
-        const mime = format === "csv" ? "text/csv" : "application/json";
-        const fname = exportRes.filename || filename;
-        const blob = new Blob([exportRes.payload], { type: mime });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement("a");
-        a.href = url;
-        a.download = fname;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        setTimeout(() => URL.revokeObjectURL(url), 2000);
-
-        const notifyMsg = isUserRequested
-          ? `シミュレーションデータを保存しました: ${fname}`
-          : `📁 100機シミュレーションデータを自動保存しました: ${fname}`;
-        this.notify(notifyMsg, "ok");
-      }
-    } catch (err) {
-      console.warn("[App] Auto-save ensemble data failed:", err);
-      // Fallback local client save if API fails
-      try {
-        const now = new Date();
-        const pad = (n) => String(n).padStart(2, "0");
-        const stamp = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}_${pad(now.getHours())}-${pad(now.getMinutes())}-${pad(now.getSeconds())}`;
-        const filename = `sim_data_${stamp}.json`;
-        const blob = new Blob([JSON.stringify(res, null, 2)], { type: "application/json" });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement("a");
-        a.href = url;
-        a.download = filename;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        setTimeout(() => URL.revokeObjectURL(url), 2000);
-        this.notify(`📁 シミュレーションデータを自動保存しました: ${filename}`, "ok");
-      } catch (clientErr) {
-        console.error("[App] Fallback client save also failed:", clientErr);
-      }
-    }
+    return autoSaveEnsembleData(this, res, format, isUserRequested);
   }
 
   _showEnsembleChampionHud(res) {
-    if (!res) return;
-    this._lastEnsembleResult = res;
-    const card = this.dom["ensemble-champion-card"];
-    if (!card) return;
-
-    // Full trajectories list sorted descending by distance
-    const fullList = (res.sample_trajectories && res.sample_trajectories.length)
-      ? [...res.sample_trajectories].sort((a, b) => (Number(b.landing_distance_m) || 0) - (Number(a.landing_distance_m) || 0))
-      : (res.leaderboard ? [...res.leaderboard] : []);
-
-    const isSkipping = Boolean(this._skipFirstRank && fullList.length > 1);
-    const skippedFlight = isSkipping ? fullList[0] : null;
-    const effectiveList = isSkipping ? fullList.slice(1) : fullList;
-
-    const bestFlight = effectiveList.length ? effectiveList[0] : (res.best_flight || {});
-    const bestTimeFlight = res.best_hangtime || {};
-    const bestAltFlight = res.best_altitude || {};
-
-    const worstFlight = res.worst_flight || (fullList.length ? fullList[fullList.length - 1] : {});
-    const worstTimeFlight = res.worst_hangtime || {};
-
-    const maxDist = Number(bestFlight.landing_distance_m || res.max_distance_m || 0);
-    const meanDist = Number(res.mean_distance_m || 0);
-    const minDist = Number(res.min_distance_m || worstFlight.landing_distance_m || 0);
-    const maxTime = Number(res.max_flight_time_s || bestTimeFlight.flight_time_s || 0);
-    const meanTime = Number(res.mean_flight_time_s || 0);
-    const minTime = Number(res.min_flight_time_s || worstTimeFlight.flight_time_s || 0);
-    const maxAlt = Number(bestAltFlight.max_altitude_m || 0);
-
-    const bestSpeed = bestFlight.speed_mps != null ? bestFlight.speed_mps : "—";
-    const bestPitch = bestFlight.pitch_deg != null ? bestFlight.pitch_deg : "—";
-    const bestRoll = bestFlight.roll_deg != null ? bestFlight.roll_deg : "—";
-    const bestId = bestFlight.id != null ? bestFlight.id : "—";
-
-    const worstSpeed = worstFlight.speed_mps != null ? worstFlight.speed_mps : "—";
-    const worstPitch = worstFlight.pitch_deg != null ? worstFlight.pitch_deg : "—";
-    const worstRoll = worstFlight.roll_deg != null ? worstFlight.roll_deg : "—";
-    const worstId = worstFlight.id != null ? worstFlight.id : "—";
-
-    // 1. 最高値 (Max)
-    if (this.dom["champ-best-dist"]) this.dom["champ-best-dist"].textContent = maxDist.toFixed(2);
-    if (this.dom["champ-best-detail"]) {
-      const extraLabel = isSkipping ? ` (※元1位 #${skippedFlight.id} 除外中)` : "";
-      this.dom["champ-best-detail"].textContent = `機体 #${bestId}${extraLabel} · 初速: ${bestSpeed} m/s · 仰角: ${bestPitch}° · ロール: ${bestRoll}°`;
-    }
-    if (this.dom["champ-promoted-tag"]) {
-      this.dom["champ-promoted-tag"].style.display = isSkipping ? "inline-block" : "none";
-    }
-    if (this.dom["champ-skip-status-badge"]) {
-      this.dom["champ-skip-status-badge"].style.display = isSkipping ? "inline-block" : "none";
-      if (isSkipping && skippedFlight) {
-        this.dom["champ-skip-status-badge"].textContent = `⚠️ 元1位(#${skippedFlight.id} ${Number(skippedFlight.landing_distance_m || 0).toFixed(2)}m) スキップ中 · 2位(#${bestId})を最高記録に繰り上げ`;
-      }
-    }
-
-    // Update skip button UI state
-    const skipBtn = this.dom["champ-btn-skip-top1"];
-    const skipLbl = this.dom["champ-label-skip-top1"];
-    if (skipBtn) {
-      if (isSkipping) {
-        skipBtn.classList.add("active");
-        if (skipLbl) skipLbl.textContent = "↩️ 1位を含める (元に戻す)";
-        skipBtn.title = `現在、異常値の機体 #${skippedFlight.id} を除外して2位(機体 #${bestId})を繰り上げています。クリックで元に戻します。`;
-      } else {
-        skipBtn.classList.remove("active");
-        if (skipLbl) skipLbl.textContent = "1位をスキップ (2位繰上)";
-        skipBtn.title = "1位のデータに異常値がある場合に除外（スキップ）し、2位を繰り上げます";
-      }
-    }
-
-    if (this.dom["champ-best-time"]) this.dom["champ-best-time"].textContent = maxTime.toFixed(2);
-    if (this.dom["champ-best-time-detail"]) {
-      this.dom["champ-best-time-detail"].textContent = `機体 #${bestTimeFlight.id ?? "—"} · 飛距離: ${Number(bestTimeFlight.landing_distance_m || 0).toFixed(2)}m`;
-    }
-    if (this.dom["champ-best-alt"]) this.dom["champ-best-alt"].textContent = maxAlt.toFixed(2);
-    if (this.dom["champ-best-alt-detail"]) {
-      this.dom["champ-best-alt-detail"].textContent = `機体 #${bestAltFlight.id ?? "—"}`;
-    }
-
-    // 2. 平均値 (Mean / Average)
-    if (this.dom["champ-avg-dist"]) this.dom["champ-avg-dist"].textContent = meanDist.toFixed(2);
-    if (this.dom["champ-avg-range"]) {
-      this.dom["champ-avg-range"].textContent = `平均滞空: ${meanTime.toFixed(2)}s (飛距離 分散: 最小 ${minDist.toFixed(2)}m 〜 最大 ${maxDist.toFixed(2)}m)`;
-    }
-
-    // 3. 最低値 (Min / Worst)
-    if (this.dom["champ-worst-dist"]) this.dom["champ-worst-dist"].textContent = minDist.toFixed(2);
-    if (this.dom["champ-worst-detail"]) {
-      this.dom["champ-worst-detail"].textContent = `機体 #${worstId} · 初速: ${worstSpeed} m/s · 仰角: ${worstPitch}° · ロール: ${worstRoll}°`;
-    }
-    if (this.dom["champ-worst-time"]) this.dom["champ-worst-time"].textContent = minTime.toFixed(2);
-    if (this.dom["champ-worst-time-detail"]) {
-      this.dom["champ-worst-time-detail"].textContent = `機体 #${worstTimeFlight.id ?? "—"} · 飛距離: ${Number(worstTimeFlight.landing_distance_m || 0).toFixed(2)}m`;
-    }
-
-    if (this.dom["champ-backend-sub"]) {
-      const skipNote = isSkipping ? " [1位除外中]" : "";
-      this.dom["champ-backend-sub"].textContent = `${res.backend_display || res.backend || "CuPy GPU"} · 計 ${res.trajectories_count || 100}機${skipNote}`;
-    }
-
-    // Leaderboard table body
-    const tbody = this.dom["champ-leaderboard-body"];
-    if (tbody) {
-      tbody.innerHTML = "";
-      const totalCount = res.trajectories_count || (res.sample_trajectories ? res.sample_trajectories.length : 100);
-
-      // スキップ中なら元の1位を除外行として明示表示
-      if (isSkipping && skippedFlight) {
-        const trSkip = document.createElement("tr");
-        trSkip.className = "clickable champ-rank-skipped";
-        trSkip.innerHTML = `
-          <td><strong>🚫 [除外] 元1位</strong></td>
-          <td>#${skippedFlight.id}</td>
-          <td><strong>${Number(skippedFlight.landing_distance_m || 0).toFixed(2)} m</strong></td>
-          <td>${Number(skippedFlight.flight_time_s || 0).toFixed(2)} s</td>
-          <td>${Number(skippedFlight.max_altitude_m || 0).toFixed(2)} m</td>
-          <td>${skippedFlight.speed_mps != null ? skippedFlight.speed_mps : "—"} m/s</td>
-          <td>${skippedFlight.pitch_deg != null ? skippedFlight.pitch_deg : "—"}°</td>
-        `;
-        trSkip.title = `除外中の元1位 機体 #${skippedFlight.id} (クリックでフォーカス)`;
-        trSkip.addEventListener("click", () => {
-          if (this.viewport && skippedFlight.id != null) {
-            this.viewport.focusTrajectory(skippedFlight.id);
-            this.notify(`除外中の元1位 機体 #${skippedFlight.id} (${Number(skippedFlight.landing_distance_m || 0).toFixed(2)}m) にカメラをフォーカスしました`, "info");
-          }
-        });
-        tbody.appendChild(trSkip);
-      }
-
-      const topList = effectiveList.slice(0, 5);
-
-      topList.forEach((item, idx) => {
-        const tr = document.createElement("tr");
-        tr.className = `clickable ${idx === 0 ? "champ-rank-1" : ""}`;
-        const rankMedal = idx === 0
-          ? (isSkipping ? "🥇 1位 (繰上最高)" : "🥇 1位 (最高)")
-          : idx === 1 ? "🥈 2位" : idx === 2 ? "🥉 3位" : `${idx + 1}位`;
-        tr.innerHTML = `
-          <td><strong>${rankMedal}</strong></td>
-          <td>#${item.id}</td>
-          <td><strong>${Number(item.landing_distance_m || 0).toFixed(2)} m</strong></td>
-          <td>${Number(item.flight_time_s || 0).toFixed(2)} s</td>
-          <td>${Number(item.max_altitude_m || 0).toFixed(2)} m</td>
-          <td>${item.speed_mps != null ? item.speed_mps : "—"} m/s</td>
-          <td>${item.pitch_deg != null ? item.pitch_deg : "—"}°</td>
-        `;
-        tr.title = `クリックして機体 #${item.id} にカメラをフォーカス`;
-        tr.addEventListener("click", () => {
-          if (this.viewport && item.id != null) {
-            this.viewport.focusTrajectory(item.id);
-            this.notify(`機体 #${item.id} (${rankMedal}: ${Number(item.landing_distance_m || 0).toFixed(2)}m) にカメラをフォーカスしました`, "info");
-          }
-        });
-        tbody.appendChild(tr);
-      });
-
-      // 最低値 (最下位機体) をリスト末尾に追加表示
-      if (worstFlight && worstFlight.id != null && (topList.length === 0 || worstFlight.id !== topList[0].id)) {
-        const trWorst = document.createElement("tr");
-        trWorst.className = "clickable champ-rank-worst";
-        const worstRankLabel = `🔻 ${worstFlight.rank || totalCount}位 (最低)`;
-        trWorst.innerHTML = `
-          <td><strong>${worstRankLabel}</strong></td>
-          <td>#${worstFlight.id}</td>
-          <td><strong>${Number(worstFlight.landing_distance_m || minDist).toFixed(2)} m</strong></td>
-          <td>${Number(worstFlight.flight_time_s || 0).toFixed(2)} s</td>
-          <td>${Number(worstFlight.max_altitude_m || 0).toFixed(2)} m</td>
-          <td>${worstFlight.speed_mps != null ? worstFlight.speed_mps : "—"} m/s</td>
-          <td>${worstFlight.pitch_deg != null ? worstFlight.pitch_deg : "—"}°</td>
-        `;
-        trWorst.title = `クリックして最下位機体 #${worstFlight.id} にカメラをフォーカス`;
-        trWorst.addEventListener("click", () => {
-          if (this.viewport && worstFlight.id != null) {
-            this.viewport.focusTrajectory(worstFlight.id);
-            this.notify(`最下位 機体 #${worstFlight.id} (${Number(worstFlight.landing_distance_m || minDist).toFixed(2)}m) にカメラをフォーカスしました`, "info");
-          }
-        });
-        tbody.appendChild(trWorst);
-      }
-    }
-
-    this._lastChampionFlight = bestFlight;
-    this._lastWorstFlight = worstFlight;
-    card.hidden = false;
+    showEnsembleChampionHud(this, res);
   }
 
-  _updateFlightStatus(status, text) {
-    const dot = this.dom["status-dot"];
-    const txt = this.dom["status-text"];
-    if (!dot || !txt) return;
-
-    dot.className = `status-dot ${status}`;
-    dot.dataset.state = status;
-    dot.style.backgroundColor = FLIGHT_STATUS_COLOR[status] || "var(--line-2)";
-    txt.textContent = text;
-  }
-
-  /** Champion card actions (ensemble leaderboard, throw adoption, focus). */
   _initChampionActions() {
-    // Champion Card Actions
-    if (this.dom["champ-close-btn"]) {
-      this.dom["champ-close-btn"].addEventListener("click", () => {
-        if (this.dom["ensemble-champion-card"]) this.dom["ensemble-champion-card"].hidden = true;
-      });
-    }
-    // ESCキーでモーダル・カードを閉じる
-    window.addEventListener("keydown", (e) => {
-      if (e.key === "Escape") {
-        if (this.dom["ensemble-champion-card"] && !this.dom["ensemble-champion-card"].hidden) {
-          this.dom["ensemble-champion-card"].hidden = true;
-        }
-      }
-    });
-    if (this.dom["champ-btn-adopt"]) {
-      this.dom["champ-btn-adopt"].addEventListener("click", () => {
-        if (!this._lastChampionFlight) return;
-        const f = this._lastChampionFlight;
-        const speed = Number(f.speed_mps);
-        const pitch = Number(f.pitch_deg);
-        const roll = Number(f.roll_deg);
-        if (!Number.isFinite(speed) || !Number.isFinite(pitch) || !Number.isFinite(roll)) {
-          this.notify("1位の機体の投げ方データ (初速・仰角・ロール) が取得できないため反映できません", "warn");
-          return;
-        }
-
-        // 投げ方パラメータの正は左レール「投擲設定」だけなので、
-        // ここでもストアへ直接書き込み、同じ範囲補正を適用する。
-        const appliedSpeed = this._clampLaunchParam("launch_speed", speed);
-        const appliedPitch = this._clampLaunchParam("launch_angle_deg", pitch);
-        const appliedRoll = this._clampLaunchParam("launch_roll_deg", roll);
-        if (appliedSpeed == null || appliedPitch == null || appliedRoll == null) {
-          this.notify("投げ方設定が利用できないため、1位の投げ方を設定に反映できません", "warn");
-          return;
-        }
-
-        this.store.set("launch", "launch_speed", appliedSpeed, "adopt");
-        this.store.set("launch", "launch_angle_deg", appliedPitch, "adopt");
-        this.store.set("launch", "launch_roll_deg", appliedRoll, "adopt");
-        // 直接指定の初速・角を適用するので、投げ方も直接指定へ寄せる。
-        this.store.set("launch", "throw_speed_source", "direct", "adopt");
-        this.store.set("launch", "throw_style", "direct", "adopt");
-        if (this.panels) this.panels.sync();
-
-        const rankTag = this._skipFirstRank ? "繰り上げ1位" : "1位";
-        this.notify(`${rankTag} (機体 #${f.id ?? "—"}) の投げ方を設定に反映しました！ (初速: ${appliedSpeed}m/s, 仰角: ${appliedPitch}°, ロール: ${appliedRoll}°)`, "ok");
-      });
-    }
-    if (this.dom["champ-btn-focus-mean"]) {
-      this.dom["champ-btn-focus-mean"].addEventListener("click", () => {
-        if (this.viewport) {
-          this.viewport.focusMeanTrajectory();
-          this.viewport.setCameraMode("mean");
-          this._setCameraChipActive("cam-mode-mean");
-          this.notify("代表平均機 (Mean Aircraft) にフォーカスしました", "info");
-        }
-      });
-    }
-    if (this.dom["champ-btn-download-json"]) {
-      this.dom["champ-btn-download-json"].addEventListener("click", () => {
-        if (!this._lastEnsembleResult) return;
-        this._autoSaveEnsembleData(this._lastEnsembleResult, "json", true);
-      });
-    }
-    if (this.dom["champ-btn-download-csv"]) {
-      this.dom["champ-btn-download-csv"].addEventListener("click", () => {
-        if (!this._lastEnsembleResult) return;
-        this._autoSaveEnsembleData(this._lastEnsembleResult, "csv", true);
-      });
-    }
-    if (this.dom["champ-btn-focus"]) {
-      this.dom["champ-btn-focus"].addEventListener("click", () => {
-        if (!this._lastChampionFlight || this._lastChampionFlight.id == null) return;
-        if (this.viewport) {
-          this.viewport.focusTrajectory(this._lastChampionFlight.id);
-          const rankTag = this._skipFirstRank ? "繰り上げ1位" : "1位";
-          this.notify(`${rankTag} (機体 #${this._lastChampionFlight.id}) にフォーカスしました`, "info");
-        }
-      });
-    }
-    if (this.dom["champ-btn-skip-top1"]) {
-      this.dom["champ-btn-skip-top1"].addEventListener("click", () => {
-        this._skipFirstRank = !this._skipFirstRank;
-        if (this._lastEnsembleResult) {
-          this._showEnsembleChampionHud(this._lastEnsembleResult);
-        }
-        if (this.viewport) {
-          this.viewport.setSkipFirstRank(this._skipFirstRank);
-        }
-        const msg = this._skipFirstRank
-          ? "1位のデータを除外（スキップ）し、2位を最高記録に繰り上げました"
-          : "1位のデータ除外を解除し、元のランキングに戻しました";
-        this.notify(msg, "ok");
-      });
-    }
-    if (this.dom["champ-btn-focus-worst"]) {
-      this.dom["champ-btn-focus-worst"].addEventListener("click", () => {
-        if (!this._lastWorstFlight || this._lastWorstFlight.id == null) return;
-        if (this.viewport) {
-          this.viewport.focusTrajectory(this._lastWorstFlight.id);
-          this.notify(`最下位 (機体 #${this._lastWorstFlight.id}) にフォーカスしました`, "info");
-        }
-      });
-    }
-    let ensembleFleetMode = "top1";
-    if (this.dom["champ-btn-toggle-fleet"]) {
-      this.dom["champ-btn-toggle-fleet"].textContent = "表示: 1位のみ (少しずつ飛ばす ⇄)";
-      this.dom["champ-btn-toggle-fleet"].addEventListener("click", () => {
-        if (!this.viewport) return;
-        if (ensembleFleetMode === "top1") {
-          ensembleFleetMode = "stagger";
-          this.dom["champ-btn-toggle-fleet"].textContent = "表示: 少しずつ順次飛行中 (上位3機へ)";
-          this.viewport.filterEnsembleTracks("stagger");
-          this.notify("少しずつ順次軌跡を表示中...", "info");
-        } else if (ensembleFleetMode === "stagger") {
-          ensembleFleetMode = "top3";
-          this.dom["champ-btn-toggle-fleet"].textContent = "表示: 上位3機のみ (全100機へ)";
-          this.viewport.filterEnsembleTracks("top3");
-        } else if (ensembleFleetMode === "top3") {
-          ensembleFleetMode = "all";
-          this.dom["champ-btn-toggle-fleet"].textContent = "表示: 全100機 (1位のみへ戻す)";
-          this.viewport.filterEnsembleTracks("all");
-        } else {
-          ensembleFleetMode = "top1";
-          this.dom["champ-btn-toggle-fleet"].textContent = "表示: 1位のみ (少しずつ飛ばす ⇄)";
-          this.viewport.filterEnsembleTracks("top1");
-        }
-      });
-    }
+    initChampionActions(this);
   }
 
   /**
@@ -1497,73 +965,13 @@ class ConsoleApp {
   }
 
   async _detectGpu() {
-    try {
-      const gpu = await api.gpuInfo();
-      if (gpu && gpu.available) {
-        this.gpuInfo = gpu;
-        const name = gpu.device_name || "GPU";
-        const shortName = name.replace("NVIDIA GeForce ", "").replace(" Laptop GPU", "");
-        if (this.dom["top-backend"]) {
-          this.dom["top-backend"].textContent = `${gpu.backend} (${shortName})`;
-          this.dom["top-backend"].title = `物理演算: ${name} (CUDA ${gpu.cuda_version || "12.x"})\nクリックしてGPU診断・切り替えガイドを表示`;
-          this.dom["top-backend"].classList.add("gpu-active");
-        }
-      }
-    } catch (e) {
-      console.warn("GPU検出エラー:", e);
-    }
+    return detectGpu(this);
   }
 
   _openGpuModal() {
-    if (!this.dom["gpu-modal"]) return;
-    const solverGpu = this.gpuInfo;
-    const renderGpu = (this.viewport && this.viewport.gpuInfo) || { shortName: "WebGL", raw: "Unknown", isIntel: false, isNvidia: false };
-
-    // Update solver card
-    if (this.dom["modal-solver-name"]) {
-      if (solverGpu && solverGpu.available) {
-        const vramStr = solverGpu.total_memory_mb ? ` · VRAM: ${solverGpu.total_memory_mb}MB` : "";
-        this.dom["modal-solver-name"].textContent = `[OK] ${solverGpu.device_name || "GPU"} (${solverGpu.backend})`;
-        this.dom["modal-solver-desc"].textContent = `CUDA ${solverGpu.cuda_version || ""} · 物理演算(6DoF RK4)・オプティマイザ(NSGA-II)・風場計算で正常にフル稼働中${vramStr}`;
-        if (this.dom["gpu-status-solver-card"]) {
-          this.dom["gpu-status-solver-card"].className = "gpu-status-card status-ok";
-        }
-      } else {
-        this.dom["modal-solver-name"].textContent = `[CPU] CPU / NumPy (${solverGpu ? solverGpu.backend : "CPU"})`;
-        this.dom["modal-solver-desc"].textContent = "物理演算はCPU並列モードで稼働中";
-        if (this.dom["gpu-status-solver-card"]) {
-          this.dom["gpu-status-solver-card"].className = "gpu-status-card";
-        }
-      }
-    }
-
-    // Update render card
-    if (this.dom["modal-render-name"]) {
-      if (renderGpu.isNvidia) {
-        this.dom["modal-render-name"].textContent = `[OK] ${renderGpu.shortName} (NVIDIA)`;
-        this.dom["modal-render-desc"].textContent = `3D描画: ${renderGpu.raw}`;
-        if (this.dom["gpu-status-render-card"]) {
-          this.dom["gpu-status-render-card"].className = "gpu-status-card status-ok";
-        }
-        if (this.dom["gpu-warning-box"]) this.dom["gpu-warning-box"].hidden = true;
-      } else if (renderGpu.isIntel) {
-        this.dom["modal-render-name"].textContent = `[注意] ${renderGpu.shortName} (Intel 省電力)`;
-        this.dom["modal-render-desc"].textContent = `WebGL 3D描画: ${renderGpu.raw}`;
-        if (this.dom["gpu-status-render-card"]) {
-          this.dom["gpu-status-render-card"].className = "gpu-status-card status-warn";
-        }
-        if (this.dom["gpu-warning-box"]) this.dom["gpu-warning-box"].hidden = false;
-      } else {
-        this.dom["modal-render-name"].textContent = `${renderGpu.shortName}`;
-        this.dom["modal-render-desc"].textContent = `WebGL 3D描画: ${renderGpu.raw}`;
-        if (this.dom["gpu-status-render-card"]) {
-          this.dom["gpu-status-render-card"].className = "gpu-status-card";
-        }
-      }
-    }
-
-    this.dom["gpu-modal"].hidden = false;
+    return openGpuModal(this);
   }
+
 
   _bindHeader() {
     if (this.dom["btn-top-launch"]) {

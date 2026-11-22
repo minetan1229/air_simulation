@@ -17,6 +17,8 @@ import pytest
 from physics.config_schema import AircraftConfig, EnvironmentConfig, LaunchConfig, SimulationSettings
 from physics.flight_sim import FlightSimulator, quaternion_normalize
 
+pytestmark = pytest.mark.slow
+
 
 def _geodesic_deg(q1, q2) -> float:
     a = np.asarray(q1, dtype=np.float64)

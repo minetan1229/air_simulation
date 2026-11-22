@@ -1,0 +1,302 @@
+  <!-- ==================== Modals and Floating Overlays ==================== -->
+  <!-- 100機一括飛行・最高値/最下位/平均値 統計記録カード (100機シミュレーション記録HUD) -->
+  <div class="ensemble-champion-card" id="ensemble-champion-card" hidden>
+    <div class="champ-head">
+      <div class="champ-title-group">
+        <span class="champ-trophy"><img src="https://api.iconify.design/material-symbols/social-leaderboard-outline.svg?color=%23f9ab00" class="ui-icon" style="width:28px;height:28px;" alt=""></span>
+        <div>
+          <div class="champ-title">100機一斉飛行 記録・統計分析</div>
+          <div class="champ-sub" id="champ-backend-sub">GPU 並列演算 · 計 100機</div>
+        </div>
+      </div>
+      <button class="champ-close-btn" id="champ-close-btn" type="button" title="閉じる">✕</button>
+    </div>
+
+    <!-- 最高値・最下位・平均値の記録グリッド -->
+    <div class="champ-grid">
+      <!-- 🥇 最高値 (1位 最長飛距離) -->
+      <div class="champ-stat-card champ-gold">
+        <div class="champ-stat-label">
+          <img src="https://api.iconify.design/material-symbols/trophy.svg?color=%23b06000" class="ui-icon" alt="">
+          最高飛距離 (1位チャンピオン)
+          <span class="champ-promoted-tag" id="champ-promoted-tag" style="display:none;">2位繰り上げ</span>
+        </div>
+        <div class="champ-stat-value"><span class="num" id="champ-best-dist">—</span><span class="unit"> m</span></div>
+        <div class="champ-stat-extra" id="champ-best-detail">機体 #— · 初速: — · 角度: —</div>
+      </div>
+
+      <!-- 🥈 最長滞空時間 (最高値) -->
+      <div class="champ-stat-card">
+        <div class="champ-stat-label">
+          <img src="https://api.iconify.design/material-symbols/timer-outline.svg?color=%231a73e8" class="ui-icon" alt="">
+          最長滞空時間 (最高値)
+        </div>
+        <div class="champ-stat-value"><span class="num" id="champ-best-time">—</span><span class="unit"> s</span></div>
+        <div class="champ-stat-extra" id="champ-best-time-detail">機体 #— · 飛距離: —m</div>
+      </div>
+
+      <!-- ⛰️ 最高到達高度 (最高値) -->
+      <div class="champ-stat-card">
+        <div class="champ-stat-label">
+          <img src="https://api.iconify.design/material-symbols/height.svg?color=%23188038" class="ui-icon" alt="">
+          最高到達高度 (最高値)
+        </div>
+        <div class="champ-stat-value"><span class="num" id="champ-best-alt">—</span><span class="unit"> m</span></div>
+        <div class="champ-stat-extra" id="champ-best-alt-detail">機体 #—</div>
+      </div>
+
+      <!-- 📊 100機 平均飛距離 & 滞空平均 -->
+      <div class="champ-stat-card champ-avg">
+        <div class="champ-stat-label">
+          <img src="https://api.iconify.design/material-symbols/bar-chart.svg?color=%231a73e8" class="ui-icon" alt="">
+          100機 平均値の記録
+        </div>
+        <div class="champ-stat-value"><span class="num" id="champ-avg-dist">—</span><span class="unit"> m</span></div>
+        <div class="champ-stat-extra" id="champ-avg-range">平均滞空: —s (最小 —m 〜 最大 —m)</div>
+      </div>
+
+      <!-- 🔻 最低飛距離 (最下位 100位) -->
+      <div class="champ-stat-card champ-min">
+        <div class="champ-stat-label">
+          <img src="https://api.iconify.design/material-symbols/south.svg?color=%23d93025" class="ui-icon" alt="">
+          最低飛距離 (最下位 100位)
+        </div>
+        <div class="champ-stat-value"><span class="num" id="champ-worst-dist">—</span><span class="unit"> m</span></div>
+        <div class="champ-stat-extra" id="champ-worst-detail">機体 #— · 初速: — · 角度: —</div>
+      </div>
+
+      <!-- ⏱️ 最低滞空時間 (最短滞空) -->
+      <div class="champ-stat-card champ-min">
+        <div class="champ-stat-label">
+          <img src="https://api.iconify.design/material-symbols/arrow-downward.svg?color=%23d93025" class="ui-icon" alt="">
+          最短滞空時間 (最低値)
+        </div>
+        <div class="champ-stat-value"><span class="num" id="champ-worst-time">—</span><span class="unit"> s</span></div>
+        <div class="champ-stat-extra" id="champ-worst-time-detail">機体 #— · 飛距離: —m</div>
+      </div>
+    </div>
+
+    <!-- チャンピオン機 & 表示切り替えアクション -->
+    <div class="champ-actions">
+      <button class="btn btn-primary btn-sm champ-btn" id="champ-btn-adopt" type="button" title="最も飛んだ機体の初速・仰角を現在の機体設定にコピーして再現">
+        <img src="https://api.iconify.design/material-symbols/check-circle-outline.svg?color=%23ffffff" class="ui-icon" alt=""> 1位の投げ方を設定に反映
+      </button>
+      <button class="btn btn-sm champ-btn" id="champ-btn-focus" type="button" title="1位の機体の着地点・軌跡にカメラをズーム">
+        <img src="https://api.iconify.design/material-symbols/center-focus-strong.svg?color=%231a73e8" class="ui-icon" alt=""> 1位にフォーカス
+      </button>
+      <button class="btn btn-sm champ-btn champ-btn-warn" id="champ-btn-skip-top1" type="button" title="1位のデータに異常値がある場合に除外（スキップ）し、2位を繰り上げます">
+        <img src="https://api.iconify.design/material-symbols/skip-next.svg?color=%23c5221f" class="ui-icon" alt="" id="champ-icon-skip-top1"> <span id="champ-label-skip-top1">1位をスキップ (2位繰上)</span>
+      </button>
+      <button class="btn btn-sm champ-btn" id="champ-btn-focus-worst" type="button" title="最下位の機体にカメラをズームして課題を検証">
+        <img src="https://api.iconify.design/material-symbols/visibility.svg?color=%23d93025" class="ui-icon" alt=""> 最下位にフォーカス
+      </button>
+      <button class="btn btn-sm champ-btn" id="champ-btn-toggle-fleet" type="button" title="全100機表示と上位トップ3表示を切り替え">
+        <img src="https://api.iconify.design/material-symbols/layers.svg?color=%235f6368" class="ui-icon" alt=""> 表示: 全100機 ⇄ 上位3機
+      </button>
+      <button class="btn btn-sm champ-btn" id="champ-btn-focus-mean" type="button" title="代表平均機 (Mean Aircraft) の軌跡にカメラをフォーカス">
+        <img src="https://api.iconify.design/material-symbols/group-work.svg?color=%231a73e8" class="ui-icon" alt=""> 平均機にフォーカス
+      </button>
+      <button class="btn btn-sm champ-btn" id="champ-btn-download-json" type="button" title="100機シミュレーション結果を JSON で書き出す">
+        <img src="https://api.iconify.design/material-symbols/data-object.svg?color=%235f6368" class="ui-icon" alt=""> JSON
+      </button>
+      <button class="btn btn-sm champ-btn" id="champ-btn-download-csv" type="button" title="100機シミュレーション結果を CSV で書き出す">
+        <img src="https://api.iconify.design/material-symbols/table-chart.svg?color=%235f6368" class="ui-icon" alt=""> CSV
+      </button>
+    </div>
+
+    <!-- ランキング・記録テーブル (TOP & WORST) -->
+    <div class="champ-table-wrap">
+      <div class="champ-table-header-row">
+        <div class="champ-table-title">
+          <img src="https://api.iconify.design/material-symbols/trophy.svg?color=%23f9ab00" class="ui-icon" alt=""> 飛距離ランキング TOP 5 &amp; 最下位 (行クリックでその機体をフォーカス)
+          <span id="champ-skip-status-badge" class="champ-skip-badge" style="display:none;"><svg class="ui-icon" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M1 21h22L12 2 1 21zm12-3h-2v-2h2v2zm0-4h-2v-4h2v4z"/></svg>元1位スキップ中 (2位を最高記録に繰り上げ)</span>
+        </div>
+      </div>
+      <table class="champ-table">
+        <thead>
+          <tr>
+            <th>順位</th>
+            <th>機体ID</th>
+            <th>飛距離</th>
+            <th>滞空時間</th>
+            <th>最高高度</th>
+            <th>初速</th>
+            <th>仰角</th>
+          </tr>
+        </thead>
+        <tbody id="champ-leaderboard-body">
+          <!-- 動的生成 -->
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- 飛行結果サマリーモーダル (着地 / 完了時ポップアップ) -->
+  <div class="flight-result-modal" id="flight-result-modal" hidden role="dialog" aria-modal="true" aria-label="飛行結果">
+    <div class="flight-result-card">
+      <div class="flight-result-head">
+        <div class="flight-result-title-group">
+          <span class="flight-result-icon"><svg class="ui-icon" viewBox="0 0 24 24" fill="currentColor" style="width:24px;height:24px;color:var(--accent);"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/></svg></span>
+          <div>
+            <div class="flight-result-title">飛行完了 / FLIGHT COMPLETED</div>
+            <div class="flight-result-sub" id="f-res-status-sub">滑空着地完了</div>
+          </div>
+        </div>
+        <button class="flight-result-close-btn" id="f-res-btn-close" type="button" title="閉じる">✕</button>
+      </div>
+
+      <div class="flight-result-grid">
+        <div class="flight-result-item highlight">
+          <div class="f-res-label">水平飛距離</div>
+          <div class="f-res-val"><span id="f-res-dist" class="num">0.00</span> <small>m</small></div>
+        </div>
+        <div class="flight-result-item highlight">
+          <div class="f-res-label">滞空時間</div>
+          <div class="f-res-val"><span id="f-res-time" class="num">0.00</span> <small>s</small></div>
+        </div>
+        <div class="flight-result-item">
+          <div class="f-res-label">最高高度</div>
+          <div class="f-res-val"><span id="f-res-alt-max" class="num">0.00</span> <small>m</small></div>
+        </div>
+        <div class="flight-result-item">
+          <div class="f-res-label">最高速度</div>
+          <div class="f-res-val"><span id="f-res-spd-max" class="num">0.00</span> <small>m/s</small></div>
+        </div>
+      </div>
+
+      <div class="flight-result-details">
+        <div class="f-res-detail-row">
+          <span class="f-res-detail-key">平均滑空比 (L/D)</span>
+          <span class="f-res-detail-val num" id="f-res-glide">—</span>
+        </div>
+        <div class="f-res-detail-row">
+          <span class="f-res-detail-key">最大Gフォース</span>
+          <span class="f-res-detail-val num" id="f-res-gload">—</span>
+        </div>
+        <div class="f-res-detail-row">
+          <span class="f-res-detail-key">最大翼面応力</span>
+          <span class="f-res-detail-val num" id="f-res-stress">—</span>
+        </div>
+      </div>
+
+      <div class="flight-result-actions">
+        <button type="button" class="btn btn-primary" id="f-res-btn-relaunch" style="flex:1; justify-content:center; gap:6px;">
+          <svg class="ui-icon" viewBox="0 0 24 24" fill="currentColor"><path d="M12 5V1L7 6l5 5V7c3.31 0 6 2.69 6 6s-2.69 6-6 6-6-2.69-6-6H4c0 4.42 3.58 8 8 8s8-3.58 8-8-3.58-8-8-8z"/></svg> もう一度飛ばす
+        </button>
+        <button type="button" class="btn btn-outline" id="f-res-btn-dismiss" style="padding:0 16px;">
+          閉じる
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <div class="toasts" id="toasts" aria-live="polite"></div>
+
+  <div class="modal" id="help" hidden role="dialog" aria-modal="true" aria-label="操作ヘルプ">
+    <div class="modal-card">
+      <h3>操作</h3>
+      <dl class="keys">
+        <dt>Space / Enter</dt><dd>投げる / 一時停止 / 再生</dd>
+        <dt>← →</dt><dd>1 フレーム送り / 戻し</dd>
+        <dt>, .</dt><dd>速度を落とす / 上げる</dd>
+        <dt>R</dt><dd>リセット</dd>
+        <dt>V</dt><dd>視点を機体にリセット</dd>
+        <dt>T / G / F / H / P / M / C</dt><dd>軌跡 / ゴースト / 風流 / 応力 / パネル / 持ち手 / 追従</dd>
+        <dt>W</dt><dd>作業台を開閉</dd>
+        <dt>U</dt><dd>風洞モード</dd>
+        <dt>E</dt><dd>飛行ログを CSV で出力</dd>
+        <dt>?</dt><dd>この一覧</dd>
+      </dl>
+      <p class="muted">Canonical frame: +x 前方 / +y 右翼 / +z 下方。UI 内部では three.js 規約 (+y 上) へ回転して描画します。</p>
+      <div class="btn-row"><button class="btn" id="help-close" type="button">閉じる</button></div>
+    </div>
+  </div>
+
+  <div class="modal" id="gpu-modal" hidden role="dialog" aria-modal="true" aria-label="GPU 動作ステータス">
+    <div class="modal-card gpu-dialog-card">
+      <div class="gpu-dialog-header">
+        <h3><img src="https://api.iconify.design/material-symbols/electric-bolt.svg?color=%23188038" class="ui-icon" alt=""> GPU 動作ステータス &amp; 切り替えガイド</h3>
+        <button class="btn btn-icon" id="gpu-modal-close-x" type="button" aria-label="閉じる">×</button>
+      </div>
+
+      <div class="gpu-status-section">
+        <div class="gpu-status-card" id="gpu-status-solver-card">
+          <div class="gpu-status-badge">物理演算 (SOLVER)</div>
+          <div class="gpu-status-title" id="modal-solver-name">検出中...</div>
+          <div class="gpu-status-desc" id="modal-solver-desc">Python CuPy CUDA バックエンド</div>
+        </div>
+
+        <div class="gpu-status-card" id="gpu-status-render-card">
+          <div class="gpu-status-badge">3D描画 (RENDER)</div>
+          <div class="gpu-status-title" id="modal-render-name">検出中...</div>
+          <div class="gpu-status-desc" id="modal-render-desc">Three.js WebGL レンダラー</div>
+        </div>
+      </div>
+
+      <div class="gpu-action-banner" style="margin: 12px 0; display: flex; flex-direction: column; gap: 8px;">
+        <button class="btn btn-primary" id="btn-force-gpu-chrome" type="button" style="width: 100%; padding: 10px; font-weight: 600; background: #1a73e8; color: #fff;">
+          <img src="https://api.iconify.design/material-symbols/rocket-launch.svg?color=%23ffffff" class="ui-icon" alt=""> Chrome を RTX 4060 強制モードで新しく開く
+        </button>
+        <button class="btn" id="btn-force-gpu-edge" type="button" style="width: 100%; padding: 8px; font-weight: 600;">
+          <img src="https://api.iconify.design/material-symbols/electric-bolt.svg?color=%23188038" class="ui-icon" alt=""> Edge を RTX 4060 強制モードで開く (※現在EdgeはdGPUで即稼働可)
+        </button>
+        <button class="btn btn-sm" id="btn-modal-test-gpu" type="button" style="width: 100%; padding: 8px;">
+          <img src="https://api.iconify.design/material-symbols/speed.svg?color=%235f6368" class="ui-icon" alt=""> RTX 4060 物理演算テスト (100機一括並列シミュレーション)
+        </button>
+      </div>
+
+      <div class="gpu-warning-box" id="gpu-warning-box">
+        <strong><img src="https://api.iconify.design/material-symbols/warning.svg?color=%23f29900" class="ui-icon" alt=""> なぜ 3D描画 (RENDER) だけ Intel 内蔵GPUになるのか？</strong>
+        <p>Windows ノートPC (Optimus) では、バッテリー節約のためブラウザの WebGL 描画に自動で Intel 内蔵GPU が割り当てられます。<br>
+        さらに、<strong>Chrome がバックグラウンドで起動しっぱなしになっている場合、Windows の設定変更後も古い GPU プロセスが居座り続ける</strong>ため、Intel のままになってしまいます。</p>
+        <p style="margin-top: 6px; font-weight: 600; color: #1557b0;">上記の「RTX 4060 強制モードで開く」ボタンを押すか、プロジェクト内の <code>launch_gpu_render.bat</code> を実行すると、確実に RTX 4060 で描画されます。</p>
+      </div>
+
+      <div class="gpu-guide-accordion">
+        <details open>
+          <summary><strong><img src="https://api.iconify.design/material-symbols/rocket-launch.svg?color=%231a73e8" class="ui-icon" alt=""> 最短解決: launch_gpu_render.bat または PowerShell コマンド</strong></summary>
+          <div class="gpu-guide-body">
+            <p>プロジェクト直下の <code>launch_gpu_render.bat</code> をダブルクリックするか、PowerShell に以下を貼り付けて実行すると、古い常駐プロセスをリフレッシュして RTX 4060 強制フラグ付きで起動します。</p>
+            <div class="code-box">
+              <pre id="gpu-ps-command">New-Item -Path "HKCU:\Software\Microsoft\DirectX\UserGpuPreferences" -Force | Out-Null; Set-ItemProperty -Path "HKCU:\Software\Microsoft\DirectX\UserGpuPreferences" -Name "C:\Program Files\Google\Chrome\Application\chrome.exe" -Value "GpuPreference=2;AutoHDREnable=0;"; Set-ItemProperty -Path "HKCU:\Software\Microsoft\DirectX\UserGpuPreferences" -Name "C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe" -Value "GpuPreference=2;AutoHDREnable=0;"</pre>
+              <button class="btn btn-sm" id="btn-copy-gpu-cmd" type="button"><img src="https://api.iconify.design/material-symbols/content-copy.svg?color=%235f6368" class="ui-icon" alt=""> コマンドをコピー</button>
+            </div>
+            <p class="muted">※実行後、ブラウザのバックグラウンド常駐プロセスを終了して再起動すると RTX 4060 が即時適用されます。</p>
+          </div>
+        </details>
+
+        <details>
+          <summary><strong><img src="https://api.iconify.design/material-symbols/build.svg?color=%235f6368" class="ui-icon" alt=""> 手動方法①: Windows の設定画面から設定</strong></summary>
+          <div class="gpu-guide-body">
+            <ol>
+              <li>Windows の「設定」(Win + I) を開く</li>
+              <li>「システム」→「ディスプレイ」→「グラフィック」を開く</li>
+              <li>アプリ一覧から使用中のブラウザ（Google Chrome または Microsoft Edge）をクリック</li>
+              <li>「オプション」ボタンを押し、「<strong>高パフォーマンス (NVIDIA GeForce RTX 4060)</strong>」を選択して「保存」</li>
+              <li>ブラウザを再起動</li>
+            </ol>
+          </div>
+        </details>
+
+        <details>
+          <summary><strong><img src="https://api.iconify.design/material-symbols/settings.svg?color=%235f6368" class="ui-icon" alt=""> 手動方法②: NVIDIA コントロールパネルから設定</strong></summary>
+          <div class="gpu-guide-body">
+            <ol>
+              <li>デスクトップの何もない場所を右クリックし、「NVIDIA コントロールパネル」を開く</li>
+              <li>左メニューの「3D 設定の管理」を選択し、「プログラム設定」タブを開く</li>
+              <li>「1. カスタマイズするプログラムを選択する」で使用ブラウザを選択</li>
+              <li>「2. このプログラム用の優先するグラフィックスプロセッサを選択する」で「<strong>高パフォーマンス NVIDIA プロセッサ</strong>」を選択して「適用」</li>
+              <li>ブラウザを再起動</li>
+            </ol>
+          </div>
+        </details>
+      </div>
+
+      <div class="btn-row">
+        <button class="btn" id="gpu-modal-close" type="button">閉じる</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script type="module" src="static/js/app.js"></script>

@@ -1,181 +1,167 @@
-# 3D CFD ロードマップ (Issue #47)
+# 3D CFD Roadmap (Issue #47)
 
-本書は **Issue #47「[CFD Roadmap] 3D Navier–Stokes ソルバの要求仕様と段階的導入計画」** の解答であり、
-**設計文書**である。コード変更を伴わない。既存の 6DoF パネル法モデルとは **別の層** であり、
-本ロードマップは「将来 3D CFD を **追加** するならどう入れるか」を定める。
+This document answers **Issue #47 "[CFD Roadmap] 3D Navier–Stokes Solver Requirements & Phased Introduction Plan"** and is a **design document**. No code changes accompany it. It is a **separate layer** from the existing 6DoF panel method model, and defines how to add 3D CFD as a future option.
 
 ---
 
-## 0. 現在の位置づけ
+## 0. Current Positioning
 
-通常の飛行・最適化経路は係数ベースの 6DoF 空力モデル（`physics/aero_domain.py` +
-`physics/aero_kernel.py`）を使う。これとは別に、`physics/cfd/solver3d.py` と `grid3d.py` に構造格子上の圧縮性 3D Euler 有限体積ソルバと翼格子生成器がある。これは試作・検証用コードであり、通常飛行経路へ接続された Navier–Stokes CFD ではない。
+Normal flight and optimization paths use the coefficient-based 6DoF aero model (`physics/aero_domain.py` + `physics/aero_kernel.py`). Separately, `physics/cfd/solver3d.py` and `grid3d.py` contain a prototype compressible 3D Euler finite-volume solver and wing grid generator on structured grids. This is prototype/verification code, not a Navier–Stokes CFD connected to the normal flight path.
 
-- `physics/mesh_domain.py` のパネル法は **翼面パネルの*vortex / doublet*  Representations** であり、
-  Navier–Stokes の解は得ない。幾何は折れ面の多角形から作るが、流れは解かない。
-- `docs/SPECIFICATION.md` §6 の Issue #29 / #35 に書いたとおり、この区別は UI 上も明示されている。
-- したがって本ロードマップは「今のモデルを CFD に置き換える」計画ではなく、
-  **「別の解法（粘性を含む 3D Navier–Stokes CFD）を 1 つの追加モードとして持てるようにする」** ための要求仕様である。既存の Euler 試作はこの目標の達成とは区別する。
+- `physics/mesh_domain.py` panel method uses **wing panel *vortex / doublet* representations** and does not solve Navier–Stokes. Geometry is built from folded panel polygons, but the flow is not solved.
+- As stated in `docs/SPECIFICATION.md` §6 Issues #29 / #35, this distinction is also explicit in the UI.
+- Therefore this roadmap is **not** a plan to "replace the current model with CFD," but rather requirements to **enable a separate solution method (viscous 3D Navier–Stokes CFD) as an additional mode**. The existing Euler prototype is distinct from this goal.
 
-**原則**: 既存の 6DoF 経路を **壊さない**。3D CFD は **別の `model` タグ** を持ち、
-`reduced_surrogate` / `rigid_body_6dof` と同様に **機械可読に区別** される。
+**Principle**: Do **not break** the existing 6DoF path. 3D CFD will have a **separate `model` tag**, machine-readably distinguished like `reduced_surrogate` / `rigid_body_6dof`.
 
 ---
 
-## 1. 要求仕様 (Requirements)
+## 1. Requirements
 
-### 1.1 物理
+### 1.1 Physics
 
-| # | 要求 | 根拠 |
+| # | Requirement | Basis |
 |---|---|---|
-| R-1 | **圧縮性 Navier–Stokes** を解く（紙飛行機の飛翔 Mach 0.1〜0.3 では非圧縮でも可、ただし遷音速遷移を記述するには圧縮性が要る） | Issue #47 |
-| R-2 | 乱流は **RANS**（k-ε or k-ω SST）を第一段とする。LES は後段 | 計算予算（§4） |
-| R-3 | 境界条件: 機体は **移動壁**（no-slip + 機体速度）、周囲は **遠方場**（風速・乱流境界層） | `physics/wind_domain.py` の風場定義と整合させる |
-| R-4 | 熱と圧縮性を **連成** する（紙は軽量・低剛性で、加熱は機体姿勢を変える） | 空力弾性（`aeroelastic_flex` / `aeroelastic_twist`）との整合 |
-| R-5 | 剥離・後縁渦・翼端渦が **解から現れる**（モデルで与えない） | Helmbold / Hoerner では記述できない項（`docs/PHYSICS_MODELS.md` §3） |
+| R-1 | Solve **compressible Navier–Stokes** (incompressible OK for paper airplane flight Mach 0.1–0.3, but compressibility needed for transonic transition) | Issue #47 |
+| R-2 | Turbulence: **RANS** (k-ε or k-ω SST) first; LES later | Compute budget (§4) |
+| R-3 | Boundary conditions: Aircraft as **moving wall** (no-slip + aircraft velocity), far-field as **far-field** (wind speed, turbulence boundary layer) | Consistent with `physics/wind_domain.py` |
+| R-4 | **Couple** heat and compressibility (paper is lightweight/low-stiffness; heating changes aircraft attitude) | Consistent with aeroelastic (`aeroelastic_flex` / `aeroelastic_twist`) |
+| R-5 | Separation, trailing-edge vortices, wingtip vortices **emerge from solution** (not prescribed by model) | Terms Helmbold/Hoerner cannot capture (`docs/PHYSICS_MODELS.md` §3) |
 
-### 1.2 数値
+### 1.2 Numerics
 
-| # | 要求 |
+| # | Requirement |
 |---|---|
-| N-1 | **保存性**: 質量・運動量・エネルギーは監視量として **積分残差 1e-6 未満**（局所セル誤差ではなく全領域の収支） |
-| N-2 | **格子収束**: 3 段階の格子（coarse / medium / fine）で揚力係数・抗力係数の変化が **2 % 未満**。Richardson 外挿で外挿値を報告する |
-| N-3 | **時間収束**: 前進 Euler は使わない。**2 次精度陰解法**（BDF2 または Crank–Nicolson）または陽解法（RK2/3）。物理時間刻みと **CFL ≤ 1** を満たす |
-| N-4 | **陰解法の線形化**: Newton 法 + LU 分解（並列は block-CG / ILU 前置）。非線形残差が 1e-8 まで下がること |
-| N-5 | **境界層**: y+ を指定（目標 y+ ≤ 1 の境界層乱流、y+ ≈ 30 の壁関数）。粗格子では **壁関数**、細格子では **壁解決** |
-| N-6 | **再現性**: 同じ入力と乱流シードは **ビット同一** の結果を与える |
+| N-1 | **Conservation**: Mass, momentum, energy monitored as **integrated residual < 1e-6** (global balance, not local cell error) |
+| N-2 | **Grid Convergence**: 3 grid levels (coarse/medium/fine); $C_L$/$C_D$ change **< 2%**. Report Richardson extrapolated value. |
+| N-3 | **Time Convergence**: No forward Euler. **2nd-order implicit** (BDF2 or Crank–Nicolson) or explicit (RK2/3). Physical timestep with **CFL ≤ 1**. |
+| N-4 | **Implicit Linearization**: Newton + LU decomposition (parallel: block-CG / ILU preconditioner). Nonlinear residual down to 1e-8. |
+| N-5 | **Boundary Layer**: Specify y+ (target y+ ≤ 1 for wall-resolved turbulence, y+ ≈ 30 for wall functions). Coarse grids use **wall functions**, fine grids use **wall-resolved**. |
+| N-6 | **Reproducibility**: Same input and turbulence seed yields **bit-identical** results. |
 
-### 1.3 性能
+### 1.3 Performance
 
-| # | 要求 |
+| # | Requirement |
 |---|---|
-| P-1 | 1 機体の 1 飛行（10 s 物理時間）が **精度検証用に限り** 数分〜数十分で終わる |
-| P-2 | **最適化や GA には使わない**（毎評価 1 分は 1,000 個体で 16 時間）。CFD は **検証用モデル** であり、探索用の fitness は 6DoF 経路が担う |
-| P-3 | 1 回の飞行解析で **揚力・抗力・モーメント・圧力分布** を出力し、6DoF モデルと **同一の定義**（`C_L`、`C_D`、`C_m`、翼根モーメント）で比較できるようにする |
+| P-1 | 1 aircraft × 1 flight (10 s physical time) completes in **minutes to tens of minutes, for verification only** |
+| P-2 | **Do NOT use for optimization or GA** (1 min/eval = 16 hrs for 1000 individuals). CFD is a **verification model**; search fitness remains 6DoF path. |
+| P-3 | Single flight analysis outputs **lift, drag, moment, pressure distribution** comparable to 6DoF model under **same definitions** ($C_L$, $C_D$, $C_m$, wing root moment) |
 
-### 1.4 統合
+### 1.4 Integration
 
-| # | 要求 |
+| # | Requirement |
 |---|---|
-| I-1 | 既存の `physics/aero_domain.py` / `aero_kernel.py` の **呼び出し規約**（`evaluate_aero` が返す `AeroResult` のフィールド）を **壊さない** |
-| I-2 | 3D CFD 経路は **別の `model` タグ**（例 `model = "cfd_v1"`, `model_detail = "rans_ns_finite_volume"`）を持ち、UI が区別表示する |
-| I-3 | 検証結果は **台帳（`no-finish.md`）** に記録し、**不一致は隠さない** |
+| I-1 | Do **not break** existing `physics/aero_domain.py` / `aero_kernel.py` calling convention (`evaluate_aero` returns `AeroResult` fields) |
+| I-2 | 3D CFD path has **separate `model` tag** (e.g., `model = "cfd_v1"`, `model_detail = "rans_ns_finite_volume"`), UI distinguishes |
+| I-3 | Verification results recorded in **ledger (`no-finish.md`)**; **do not hide discrepancies** |
 
 ---
 
-## 2. 段階的導入計画 (Staged plan)
+## 2. Phased Introduction Plan
 
-各段階は **出口条件 (exit criteria)** を満たさなければ次へ進まない。段階を飛ばさない。
+Each stage must satisfy **exit criteria** before proceeding. No skipping stages.
 
-### 段階 0: 静的な 2D 検証 (格子・保存性の土台)
+### Stage 0: Static 2D Verification (Grid & Conservation Foundation)
 
-- **内容**: 2D 翼型（NACA 0012 系）の単一格子で圧縮性 RANS を実装。lift/drag を格子収束させる。
-- **出口条件**:
-  - N-1（保存性残差 1e-6 未満）、N-2（3 格子で 2 % 未満）
-  - 実験値（例: NACA 0012 の `C_l`–`C_d` 曲線）との差が **5 % 以内**
-  - **外部コードとの比較**: 公開済みの Navier–Stokes 解（分離プロファイルを伴う翼型ケース）との
-    `C_L` / `C_D` 差が **3 % 以内**。これが「独立検証」の最小単位
-- **成果物**: `physics/cfd/` パッケージの最初の版、検証用スクリプト `tools/check_cfd_parity.py`
+- **Content**: Implement compressible RANS on single 2D airfoil grid (NACA 0012 class). Achieve grid convergence for lift/drag.
+- **Exit Criteria**:
+  - N-1 (conservation residual < 1e-6), N-2 (3-grid < 2%)
+  - Difference from experimental data (e.g., NACA 0012 $C_l$–$C_d$ curves) **< 5%**
+  - **External Code Comparison**: $C_L$/$C_D$ difference **< 3%** vs published Navier–Stokes solutions (airfoil cases with separation profiles). This is the minimum unit of "independent verification."
+- **Deliverables**: Initial `physics/cfd/` package, verification script `tools/check_cfd_parity.py`
 
-### 段階 1: 2D 定常翼型 → 3D 定常翼
+### Stage 1: 2D Steady Airfoil → 3D Steady Wing
 
-- **内容**: 翼型コードに 3D 格子のスケーリングを追加。翼端境界条件を CH / simple。
-- **出口条件**:
-  - 迎角スイープで `C_L` が線形域で **Helmbold 傾斜の 20 % 以内**（3 次元化でHelmbold を**超えない**こと）
-  - 翼端渦が自发的に生じる（雁行渦パターンが観察可能）
-- **リスク**: 翼端境界条件の選択が結果に効く。3 条件（CH / simple / none）を **全部** 走らせて
-  ばらつきを報告する。
+- **Content**: Add 3D grid scaling to airfoil code. Wingtip boundary conditions: CH / simple.
+- **Exit Criteria**:
+  - $C_L$ in linear AoA sweep within **20% of Helmbold slope** (3D must **not exceed** Helmbold)
+  - Wingtip vortices emerge spontaneously (observable horseshoe vortex pattern)
+- **Risk**: Wingtip BC choice affects results. Must run **all 3 conditions** (CH / simple / none) and report variance.
 
-### 段階 2: 動的（移動壁）＋ 6DoF 連成
+### Stage 2: Dynamic (Moving Wall) + 6DoF Coupling
 
-- **内容**: 機体を移動壁として扱い、毎ステップ 6DoF 方程式を解く。層間（6DoF ⇔ CFD）の
-  データ交換を **双方向** にする（力・モーメントは 6DoF へ、姿勢・速度は CFD へ）。
-- **出口条件**:
-  - 同じ初期条件で **クーラージ** 評価が収束（Savitzky–Golay で外挿した値の差が 1 % 以内）
-  - 段階 1 の定常解が **準定常解** として再現される（初期過渡を除いた平均が 2 % 以内）
-  - **R-5**: 失速時の抗力増加が 6DoF モデル（Hoerner 平板）に対して **同じ符号・同じ桁** で現れる
+- **Content**: Treat aircraft as moving wall; solve 6DoF equations every step. Inter-layer (6DoF ⇔ CFD) data exchange **bidirectional** (forces/moments to 6DoF, attitude/velocity to CFD).
+- **Exit Criteria**:
+  - Coupled evaluation converges under same initial conditions (Savitzky–Golay extrapolated value difference < 1%)
+  - Stage 1 steady solution reproduced as **quasi-steady solution** (time-averaged excluding initial transient within 2%)
+  - **R-5**: Drag increase at stall appears with **same sign and order** as 6DoF model (Hoerner flat plate)
 
-### 段階 3: 乱流の影響評価
+### Stage 3: Turbulence Model Impact Assessment
 
-- **内容**: RANS の乱流モデルを 2 種類（k-ε, k-ω SST）動かし、機体形状への依存性を評価。
-- **出口条件**:
-  - 2 モデルの `C_L` 差が **5 % 以内** であり、それを超える場合は「乱流モデルの不確かさ」として
-    **台帳に記録**して、6DoF の `model_valid` 相当のフラグに反映
+- **Content**: Run 2 RANS turbulence models (k-ε, k-ω SST); evaluate airframe shape dependence.
+- **Exit Criteria**:
+  - $C_L$ difference between 2 models **< 5%**; if exceeded, record as "turbulence model uncertainty" in ledger and reflect in 6DoF `model_valid`-equivalent flag
 
-### 段階 4: 空力弾性との連成
+### Stage 4: Aeroelastic Coupling
 
-- **内容**: 紙機体の準静的たわみ（`aeroelastic_flex` / `aeroelastic_twist`）を CFD の変形格子で表現。
-- **出口条件**: 変形なし / 変形ありの `C_L` 差が **1 % 以内**（低速域では変形効果が小さいことの確認）
+- **Content**: Express paper aircraft quasi-static deflection (`aeroelastic_flex` / `aeroelastic_twist`) via CFD deforming grid.
+- **Exit Criteria**: $C_L$ difference between no-deformation / with-deformation **< 1%** (confirm deformation effect is small in low-speed regime)
 
-### 段階 5: 不確かさ量子化と公開
+### Stage 5: Uncertainty Quantification & Publication
 
-- **内容**: 乱流シード、格子、境界条件のばらつきをまとめて **不確かさバジェット** として公開。
-- **出口条件**: 6DoF モデルの不確かさと CFD の不確かさの **比較表** が台帳に載る
+- **Content**: Compile turbulence seed, grid, boundary condition variance into **uncertainty budget** for publication.
+- **Exit Criteria**: Comparison table of 6DoF model uncertainty vs CFD uncertainty in ledger.
 
 ---
 
-## 3. 検証ケース (Validation cases)
+## 3. Validation Cases
 
-| ケース | 目的 | 判定 |
+| Case | Purpose | Judgment |
 |---|---|---|
-| V-1 NACA 0012（2D、Re 3e6） | コードの基本妥当性 | 実験値と `C_L` 差 5 % 以内 |
-| V-2 平板（2D、迎角 0〜30°） | 剥離・再付着の再現 | 実験の `C_L`・`C_D` 曲線と定性一致 |
-| V-3 亜音速翼（3D、AR 4） | 翼端渦・誘導抗力 | `C_Di` が `C_L²/(πeAR)` の 20 % 以内 |
-| V-4 紙機体形状（3D、Re 1e4） | 本シミュレーターの形状 | 6DoF パネル法との `C_L` 差 20 % 以内（**差があれば記録する**） |
-| V-5 失速（迎角 12〜25°） | 剥離の再現 | 抗力増加が同符号、6DoF と桁が一致 |
+| V-1 NACA 0012 (2D, Re 3e6) | Basic code validity | $C_L$ diff < 5% vs experimental |
+| V-2 Flat Plate (2D, AoA 0–30°) | Separation & reattachment | Qualitative match to experimental $C_L$/$C_D$ curves |
+| V-3 Subsonic Wing (3D, AR 4) | Wingtip vortex, induced drag | $C_{Di}$ within 20% of $C_L^2/(\pi e AR)$ |
+| V-4 Paper Aircraft Shape (3D, Re 1e4) | This simulator's shape | $C_L$ diff < 20% vs 6DoF panel method (**record any discrepancy**) |
+| V-5 Stall (AoA 12–25°) | Separation reproduction | Drag increase same sign & order as 6DoF |
 
 ---
 
-## 4. 計算予算 (Compute budget)
+## 4. Compute Budget
 
-| 段階 | 格子数（目安） | 1 ケースの wall time | 備考 |
+| Stage | Grid Size (est.) | Wall Time / Case | Notes |
 |---|---|---|---|
-| 0 | 2D 1e5 セル | 数分〜数十分 | 1 コア相当、収束まで数百 step |
-| 1 | 3D 1e6 セル | 数時間 | クラスタ 32 コア、1 ノード |
-| 2 | 3D 1e6 セル × 数千 step | 数日 | 連成は時間刻みが支配的 |
-| 3 | 同上 × 乱流 2 モデル | 数週 | 並列実行前提 |
+| 0 | 2D 1e5 cells | Minutes–tens of mins | ~1 core equiv, hundreds of steps to converge |
+| 1 | 3D 1e6 cells | Hours | Cluster 32 cores, 1 node |
+| 2 | 3D 1e6 cells × thousands of steps | Days | Coupling dominated by timestep |
+| 3 | Same × 2 turbulence models | Weeks | Parallel execution assumed |
 
-**予算の要約**: 段階 2 以降は **個人ワークステーションでは回らない**。クラスタ利用が前提。
-段階 0〜1 のみ **再現可能に** 回す。
+**Budget Summary**: Stage 2+ **cannot run on personal workstations**. Cluster required. Only Stages 0–1 run **reproducibly**.
 
 ---
 
-## 5. 既存 6DoF モデルとの関係
+## 5. Relationship with Existing 6DoF Model
 
-| 観点 | 6DoF パネル法（現行） | 3D CFD（本書） |
+| Aspect | 6DoF Panel Method (Current) | 3D CFD (This Doc) |
 |---|---|---|
-| 役割 | **探索用**（GA / 最適化の fitness、100 機一括） | **検証用**（モデルの妥当性検証、剥離・渦の理解） |
-| 計算量 | 1 個体あたり 0.1 s 程度 | 1 個体あたり数時間 |
-| 乱流 | 等方スペクトル（A-7 の意図的維持） | RANS |
-| 剥離 | Hoerner 平板（`docs/PHYSICS_MODELS.md` §3） | 解から生える |
-| タグ | `rigid_body_6dof` | `cfd_v1`（提案） |
+| Role | **Search** (GA/optimization fitness, 100-plane batch) | **Verification** (model validity, separation/vortex understanding) |
+| Compute | ~0.1s/individual | Hours/individual |
+| Turbulence | Isotropic spectrum (intentional retention A-7) | RANS |
+| Separation | Hoerner flat plate (`docs/PHYSICS_MODELS.md` §3) | Emerges from solution |
+| Tag | `rigid_body_6dof` | `cfd_v1` (proposed) |
 
-**使い分けの原則**: **GA の fitness は 6DoF のまま**。CFD 導入は **「6DoF モデルの妥当性を
-別の解法で検査する」** ためのもので、探索を CFD に置き換える目的是本ロードマップに含めない
-（計算予算が探索を成立させないため）。
+**Usage Principle**: **GA fitness stays 6DoF**. CFD introduction is to **"inspect 6DoF model validity via another solution method,"** not to replace search with CFD (compute budget precludes this).
 
 ---
 
-## 6. リスク
+## 6. Risks
 
-| リスク | 影響 | 緩和 |
+| Risk | Impact | Mitigation |
 |---|---|---|
-| 6DoF との乖離が大きい | 「どちらが正しいか」を検証できない | 乖離を **隠さず** 台帳に記録。片方を「真」としない |
-| 計算予算 | 段階 2 が回らない | 段階 0〜1 を先に完成させる。段階 2 はクラスタ前提 |
-| コード配布の制約 | 外部ソルバに依存できない | **自前実装**（有限体積）を前提とする。外部 CFD ソフトへの依存は **しない** |
-| 実装の停滞 | 開発が止まる | 各段階の出口条件を **数値で** 定義し、満たせなければ先に文献レビューに戻る |
+| Large 6DoF discrepancy | Cannot verify "which is correct" | **Do not hide** discrepancies; record in ledger. Do not declare either "true." |
+| Compute budget | Stage 2 won't run | Complete Stages 0–1 first. Stage 2 requires cluster. |
+| Code distribution constraints | Cannot depend on external solvers | **Self-implemented** (finite volume) assumed. No dependency on external CFD software. |
+| Implementation stall | Development halts | Define exit criteria **numerically** for each stage; if unmet, return to literature review. |
 
 ---
 
-## 7. 現状の要約（2026-11-04）
+## 7. Current Status Summary (2026-11-04)
 
-- `physics/cfd/grid3d.py` は有限翼の構造格子と幾何計量を生成し、`physics/cfd/solver3d.py` は構造六面体格子上の圧縮性 Euler 方程式を Roe 数値流束・陽的 RK2 で解く試作ソルバを実装している。CFL に基づく刻み幅制御もある。
-- このソルバは粘性応力・熱伝導を持たず、壁面境界層、粘性摩擦抗力、粘性剥離、乱流・遷移を解かない。従って Navier–Stokes / RANS ソルバではない。機体壁面条件と空力係数の物理精度も、目標仕様の基準で確認済みとは扱わない。
-- 既存テストは格子正体積・面計量閉包、有限値、質量残差、局所 CFL などの数値・実装条件を検査する。実験値や独立した信頼できる CFD 解との係数比較、格子収束、物理精度の出口条件を満たした証拠ではない。段階 0・1 の出口条件は未達成として扱う。
-- したがって現状は「3D Euler の試作コードあり、妥当性検証は限定的、粘性 CFD は未実装」。GA・通常の飛行経路への接続もない。
-- 現行の `model_valid` フラグ（`physics/flight_sim.py`）は **6DoF モデルの妥当性範囲**を表すもので、Euler 試作ソルバの妥当性フラグではない。
+- `physics/cfd/grid3d.py` generates structured grids and geometric metrics for finite wings; `physics/cfd/solver3d.py` implements a prototype solver for compressible Euler equations on structured hexahedral grids using Roe numerical flux and explicit RK2 with CFL-based timestep control.
+- This solver lacks viscous stress and heat conduction; no wall boundary layer, viscous friction drag, viscous separation, turbulence/transition. Therefore it is **not** a Navier–Stokes / RANS solver. Aircraft wall conditions and aero coefficient physical accuracy do not meet target spec verification standards.
+- Existing tests check grid positive cell volumes, metric closure, finite values, mass residual, local CFL, etc. They are **not** evidence of meeting exit criteria for coefficient comparison with experimental/independent CFD solutions, grid convergence, or physical accuracy. Stages 0–1 exit criteria are unmet.
+- Current status: "3D Euler prototype code exists, limited validity verification, viscous CFD not implemented." No GA/normal flight path integration.
+- Existing `model_valid` flag (`physics/flight_sim.py`) represents **6DoF model validity range**, not Euler prototype solver validity flag.
 
 ---
 
-*関連文書: `docs/PHYSICS_MODELS.md`（6DoF モデルの正本）、`docs/SPECIFICATION.md` §1・§5
-（仕様と文献レジストリ）、`no-finish.md`（実装台帳）。*
+*Related: `docs/PHYSICS_MODELS.md` (6DoF model canonical), `docs/SPECIFICATION.md` §1·§5 (specs & literature registry), `no-finish.md` (implementation ledger).*

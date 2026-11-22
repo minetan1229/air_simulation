@@ -1,0 +1,86 @@
+      <!-- guinness dedicated sandbox pane -->
+      <div class="wb-pane" data-pane="guinness" role="tabpanel" hidden>
+        <div class="wb-col wb-col-1">
+          <h4 class="wb-h">公認ギネス記録モデル<small>OFFICIAL WORLD RECORDS</small></h4>
+          <p class="muted" style="margin: 4px 0 10px; font-size: 11px; line-height: 1.4;">
+            通常セッション（現在の機体設定や風洞）とは完全に隔離された独立システムです。ギネス公式発表の生数値（時速約100km、A4規定用紙質量等）をそのまま用いて飛行・診断します。
+          </p>
+          <div class="field">
+            <label class="field-key" for="wb-guinness-select">記録選択</label>
+            <select id="wb-guinness-select" class="inv-select" aria-label="世界記録モデル選択">
+              <option value="">-- 公式世界記録を選択 --</option>
+            </select>
+          </div>
+          <div class="inv-config-group" style="margin-top: 10px;">
+            <label class="inv-label">数値モード (NUMERICAL FIDELITY)</label>
+            <div style="display: flex; gap: 6px; margin-top: 4px;">
+              <button type="button" class="btn btn-sm btn-mode active" id="wb-guinness-btn-raw" style="flex: 1;" title="手元から上昇・下降・着地を連続計算します。実機性能の検証は未完了です。">
+                フルフライト（手元投擲）
+              </button>
+              <button type="button" class="btn btn-sm btn-mode" id="wb-guinness-btn-cal" style="flex: 1;" title="最高到達点からの定常滑空のみをシミュレーション">
+                頂点滑空のみ
+              </button>
+            </div>
+          </div>
+          <div class="btn-row" style="margin-top: 14px;">
+            <button class="btn btn-primary" id="wb-guinness-btn-fly" type="button" style="width: 100%; font-weight: 600; background: #e37400; color: #fff;">
+              <img src="https://api.iconify.design/material-symbols/trophy-outline.svg?color=%23ffffff" class="ui-icon" alt=""> 記録機体の単独飛行を計算
+            </button>
+          </div>
+          <div class="btn-row" style="margin-top: 6px;">
+            <button class="btn btn-sm" id="wb-guinness-btn-verify-matrix" type="button" style="width: 100%;">
+              全公認記録の一括検証マトリクスを取得
+            </button>
+          </div>
+        </div>
+
+        <div class="wb-col wb-col-2" style="overflow-y: auto;">
+          <h4 class="wb-h">公認諸元 &amp; 出典<small>SPECIFICATIONS &amp; PROVENANCE</small></h4>
+          <div id="wb-guinness-spec-card" style="font-size: 11px;">
+            <div class="wb-spec-callout">
+              <div class="wb-spec-callout-title" id="wb-g-name">記録を選択してください</div>
+              <div class="wb-spec-callout-sub" id="wb-g-holder">—</div>
+              <div class="wb-spec-callout-val num" id="wb-g-val">—</div>
+            </div>
+
+            <div class="metric-table" style="margin-bottom: 10px;">
+              <div class="metric-row"><span class="metric-k">計算初速</span><span class="metric-v num" id="wb-g-speed">—</span></div>
+              <div class="metric-row"><span class="metric-k">投擲角度</span><span class="metric-v num" id="wb-g-angle">—</span></div>
+              <div class="metric-row"><span class="metric-k">機体質量 (A4規約)</span><span class="metric-v num" id="wb-g-mass">—</span></div>
+              <div class="metric-row"><span class="metric-k">翼幅 / 翼面積</span><span class="metric-v num" id="wb-g-geom">—</span></div>
+              <div class="metric-row"><span class="metric-k">公認投擲フォーム</span><span class="metric-v" id="wb-g-technique">—</span></div>
+            </div>
+
+            <div class="wb-citation-card">
+              <div class="wb-citation-heading">出典・公式規約ルール</div>
+              <div id="wb-g-citation" class="wb-citation-text">—</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="wb-col wb-col-3" style="overflow-y: auto;">
+          <h4 class="wb-h">公式検証レポート<small>VERIFICATION REPORT</small></h4>
+          <div id="wb-guinness-result-panel">
+            <p class="chart-empty" id="wb-guinness-empty-msg">「ギネス公式数値で単独飛行」を実行すると、計算結果と公認記録の乖離・物理的要因（過大Gフォース・失速遷移）が表示されます。</p>
+            <div id="wb-guinness-result-content" style="display: none;">
+              <div class="inv-diag-box" style="margin-bottom: 10px;">
+                <div class="inv-diag-header">
+                  <span id="wb-g-res-badge" class="inv-badge">RESULT</span>
+                  <span id="wb-g-res-title" class="inv-diag-title">—</span>
+                </div>
+                <div id="wb-g-res-summary" class="inv-diag-desc">—</div>
+              </div>
+
+              <div class="metric-table" style="margin-bottom: 10px;">
+                <div class="metric-row"><span class="metric-k">公認値</span><span class="metric-v num" id="wb-g-res-target">—</span></div>
+                <div class="metric-row"><span class="metric-k">シミュレーション到達値</span><span class="metric-v num" id="wb-g-res-sim">—</span></div>
+                <div class="metric-row"><span class="metric-k">再現率 (比率)</span><span class="metric-v num" id="wb-g-res-ratio">—</span></div>
+                <div class="metric-row"><span class="metric-k">投擲初頭Gフォース</span><span class="metric-v num" id="wb-g-res-g">—</span></div>
+              </div>
+
+              <h4 class="wb-h" style="margin: 8px 0 4px;">物理的要因 &amp; 診断</h4>
+              <div id="wb-g-limitations-list" style="font-size: 11px; line-height: 1.4; display: flex; flex-direction: column; gap: 6px;"></div>
+            </div>
+          </div>
+        </div>
+      </div>

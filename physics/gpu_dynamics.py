@@ -391,6 +391,8 @@ class FlightParams:
     sample_wind_stages: bool = False
     apparent_active: Any = None
     has_apparent: bool = False
+    munk_active: Any = None
+    has_munk: bool = False
 
 
 def wind_batch(
@@ -639,6 +641,14 @@ def build_params(
             )
             for cfg in configs
         ),
+        munk_active=xp.asarray([
+            bool(getattr(cfg, "munk_coupling_enabled", False))
+            for cfg in configs
+        ]),
+        has_munk=any(
+            bool(getattr(cfg, "munk_coupling_enabled", False))
+            for cfg in configs
+        ),
     )
 
 
@@ -816,6 +826,19 @@ def _evaluate_state(
     ) + _restoring_moment_batch(
         xp, params, omega, coefficients["q_dyn"], speed, beta_rad
     )
+
+    if has_apparent and getattr(params, "has_munk", False):
+        # Issue #194: Kirchhoff added-mass Munk moment coupling (GPU batch)
+        u_rel = body_relative[:, 0]
+        v_rel = body_relative[:, 1]
+        w_rel = body_relative[:, 2]
+        stalled_mask = xp.asarray(coefficients.get("stalled", 0.0))
+        munk_factor = xp.where(params.munk_active, xp.where(stalled_mask > 0.5, 0.0, 1.0), 0.0)
+        munk_x = -v_rel * m_add_z * w_rel * munk_factor
+        munk_y = u_rel * m_add_z * w_rel * munk_factor
+        munk_z = xp.zeros_like(munk_x)
+        munk_moment = xp.stack((munk_x, munk_y, munk_z), axis=-1)
+        moment_body = moment_body + munk_moment
 
     if cur_mat is not None:
         angular_momentum = _contract3(xp, cur_mat, omega)
@@ -1038,6 +1061,20 @@ CAPTURE_MODE_RELAXED: int = 2
 def _is_device_module(xp: Any) -> bool:
     """True when the array module is the CUDA one."""
     return getattr(xp, "__name__", "") == "cupy"
+
+
+def release_gpu_memory_pool(xp: Any = None) -> bool:
+    """Release all free memory blocks from CuPy default pools back to the OS."""
+    try:
+        if xp is not None and not _is_device_module(xp):
+            return False
+        import cupy as cp
+
+        cp.get_default_memory_pool().free_all_blocks()
+        cp.get_default_pinned_memory_pool().free_all_blocks()
+        return True
+    except Exception:
+        return False
 
 
 def _capture_step(
@@ -1587,6 +1624,9 @@ def simulate_batch(
         density=trim_air["density_kgm3"],
     )
     trim_cm = trim_coefficients["cm"]
+
+    if _is_device_module(xp):
+        release_gpu_memory_pool(xp)
 
     return {
         "state": y,

@@ -84,18 +84,27 @@ def core_ratio_split(
         denom = max(total + remote_cores, 1)
         remote_n = max(1, round(len(cases) * remote_cores / denom))
     remote_n = min(remote_n, len(cases))
-    # Round-robin interleave so both sides see a representative slice
+
+    # Issue #192: Proportional accumulation split to strictly allocate remote_n cases
     local_cases: List[Dict[str, Any]] = []
     remote_cases: List[Dict[str, Any]] = []
     local_idx: List[int] = []
     remote_idx: List[int] = []
+    total_cases = len(cases)
+    acc = 0
     for i, case in enumerate(cases):
-        if i % max(1, round(len(cases) / max(remote_n, 1))) == 0 and len(remote_cases) < remote_n:
+        acc += remote_n
+        if acc >= total_cases and len(remote_cases) < remote_n:
+            acc -= total_cases
             remote_cases.append(case)
             remote_idx.append(i)
         else:
             local_cases.append(case)
             local_idx.append(i)
+    while len(remote_cases) < remote_n and local_cases:
+        remote_cases.append(local_cases.pop())
+        remote_idx.append(local_idx.pop())
+
     return local_cases, remote_cases, local_idx, remote_idx
 
 def remote_cores_query(cfg: Dict[str, Any], timeout: int = 10) -> int:
@@ -142,28 +151,47 @@ def _ensure_remote_root(cfg: Dict[str, Any]) -> None:
     stdout.read()
     client.close()
 
+def _sftp_mkdir_p(sftp: Any, remote_directory: str) -> None:
+    """Recursively create remote directory over SFTP (Issue #186)."""
+    parts = remote_directory.strip("/").split("/")
+    cur = ""
+    for part in parts:
+        cur += "/" + part
+        try:
+            sftp.mkdir(cur)
+        except Exception:
+            pass
+
 def _sync_tree(cfg: Dict[str, Any]) -> None:
     """Sync physics/ + tools/remote_evaluate_worker.py to remote_root (rsync if available, else SFTP)."""
     if not cfg.get("auto_sync"):
         return
     import paramiko
-    # Prefer rsync when present on both sides; otherwise walk with SFTP.
+    # Prefer rsync when present on both sides; otherwise walk with SFTP (Issue #180).
+    rsync_ok = False
     try:
         if shutil.which("rsync"):
             host = cfg["host"]
             user = cfg["user"]
             port = cfg["port"]
             dest = f"{user}@{host}:{cfg['remote_root']}/"
+            all_success = True
             for src_dir in ("physics", "tools"):
                 src = str(PROJECT_ROOT / src_dir) + "/"
                 # Exclude __pycache__ / .pyc ; --delete mirrors local exactly
-                subprocess.run(
+                res = subprocess.run(
                     ["rsync", "-az", "--delete", "--exclude=__pycache__", "--exclude=*.pyc", src, dest + src_dir + "/"],
                     check=False, timeout=120, capture_output=True,
                 )
-            return
+                if res.returncode != 0:
+                    all_success = False
+                    break
+            if all_success:
+                rsync_ok = True
+                return
     except Exception:
-        pass
+        rsync_ok = False
+
     # SFTP walk fallback
     client = paramiko.SSHClient()
     client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
@@ -175,17 +203,16 @@ def _sync_tree(cfg: Dict[str, Any]) -> None:
     for src_dir in ("physics", "tools"):
         local_root = PROJECT_ROOT / src_dir
         remote_root = f"{cfg['remote_root']}/{src_dir}"
+        _sftp_mkdir_p(sftp, remote_root)
         for path in local_root.rglob("*"):
             if "__pycache__" in path.parts or path.suffix == ".pyc":
                 continue
             rel = path.relative_to(local_root)
             remote_path = f"{remote_root}/{rel.as_posix()}"
             if path.is_dir():
-                try:
-                    sftp.mkdir(remote_path)
-                except Exception:
-                    pass
+                _sftp_mkdir_p(sftp, remote_path)
             else:
+                _sftp_mkdir_p(sftp, str(Path(remote_path).parent.as_posix()))
                 try:
                     sftp.put(str(path), remote_path)
                 except Exception:
@@ -200,35 +227,48 @@ def _remote_run(cfg: Dict[str, Any], remote_cases: List[Dict[str, Any]], process
     _sync_tree(cfg)
     batch_id = hashlib.sha1(json.dumps({"cases": remote_cases}).encode("utf-8")).hexdigest()[:12]
     local_gz = Path(tempfile.gettempdir()) / f"hybrid_cases_{batch_id}.json.gz"
+    tmp = Path(tempfile.gettempdir()) / f"hybrid_results_{batch_id}.json.gz"
     local_gz.write_bytes(gzip.compress(json.dumps(remote_cases).encode("utf-8"), mtime=0))
     remote_cases_path = f"{cfg['remote_root']}/{REMOTE_CASES_NAME}"
     remote_results_path = f"{cfg['remote_root']}/{REMOTE_RESULTS_NAME}"
     remote_worker_path = f"{cfg['remote_root']}/{WORKER_SCRIPT}"
+
     client = paramiko.SSHClient()
     client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
     kw: Dict[str, Any] = {"hostname": cfg["host"], "port": cfg["port"], "username": cfg["user"], "timeout": cfg["timeout_s"]}
     if cfg.get("password"):
         kw["password"] = cfg["password"]
-    client.connect(**kw)
-    sftp = client.open_sftp()
-    sftp.put(str(local_gz), remote_cases_path)
-    sftp.close()
-    venv_python = f"{cfg['remote_root']}/venv/bin/python"
-    py = venv_python if _file_exists(client, venv_python) else cfg["remote_python"]
-    _, stdout, _ = client.exec_command(
-        f"cd {cfg['remote_root']} && {py} {remote_worker_path} --in {remote_cases_path} --out {remote_results_path} --processes {processes}",
-        timeout=cfg["timeout_s"],
-    )
-    out, err = stdout.read().decode("utf-8", errors="replace"), b""
-    status = stdout.channel.recv_exit_status()
-    if status != 0:
-        raise RuntimeError(f"remote worker exit {status}")
-    tmp = Path(tempfile.gettempdir()) / f"hybrid_results_{batch_id}.json.gz"
-    sftp = client.open_sftp()
-    sftp.get(remote_results_path, str(tmp))
-    sftp.close()
-    client.close()
-    return json.loads(gzip.decompress(tmp.read_bytes()).decode("utf-8"))
+
+    try:
+        client.connect(**kw)
+        sftp = client.open_sftp()
+        sftp.put(str(local_gz), remote_cases_path)
+        sftp.close()
+        venv_python = f"{cfg['remote_root']}/venv/bin/python"
+        py = venv_python if _file_exists(client, venv_python) else cfg["remote_python"]
+        _, stdout, _ = client.exec_command(
+            f"cd {cfg['remote_root']} && {py} {remote_worker_path} --in {remote_cases_path} --out {remote_results_path} --processes {processes}",
+            timeout=cfg["timeout_s"],
+        )
+        out, err = stdout.read().decode("utf-8", errors="replace"), b""
+        status = stdout.channel.recv_exit_status()
+        if status != 0:
+            raise RuntimeError(f"remote worker exit {status}")
+        sftp = client.open_sftp()
+        sftp.get(remote_results_path, str(tmp))
+        sftp.close()
+        client.close()
+        return json.loads(gzip.decompress(tmp.read_bytes()).decode("utf-8"))
+    finally:
+        # Issue #187: Always clean up temporary gzip files
+        try:
+            local_gz.unlink(missing_ok=True)
+        except Exception:
+            pass
+        try:
+            tmp.unlink(missing_ok=True)
+        except Exception:
+            pass
 
 def _file_exists(client: Any, path: str) -> bool:
     try:

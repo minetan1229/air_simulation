@@ -24,9 +24,10 @@
 - **1.1 コンテキスト最小化**: 常駐は本ファイルのみ。`.agents/` 配下は必要時のみ部分抽出。ログ/ソースの全文出力禁止。`memory` MCPは検索索引（長文二重保管禁止）。
 - **1.2 テキサスの狙撃兵の誤謬排除**: 事前に仮説と反証可能な合否基準を明文化。後付け変更や偶然動作での完了認定を禁止。不一致時は仮説棄却・因果特定。値は物理的な値を使用し、意図的に調整された値（報酬ハッキング用の据置き定数）にしない。
 - **1.4 規約統治**: ユーザー明示指示・監査合意なき本ファイル改変禁止。仕様は `docs/SPECIFICATION.md`、知見は `.agents/Knowledge.md` に集約。
-- **1.5 エージェント体制（サブエージェント上限4）**: メインエージェント1つに対し**稼働するサブエージェントは最大4つ**。內訳は次のとおりで、超過時は委譲しない（既存枠の完了待つかメインへ統合）。
-  1. **必須1枠 = 監視（Monitor）エージェント**: システム稼働状態・APIレスポンス・エラー状況・レートリミットを常時監視し、異常・問題を検知したときは**即座にメインエージェントへ報告・アラート**（Discord Webhook＋応答チャンネル）。実務を兼務せず常に1枠を保持する。
-  2. **残り最大3枠 = 実務エージェント**: 実装・検索・Discord応答など担当領域を排他的に分担（境界表は `.agents/skills/subagent-delegation.md`）。
+- **1.5 エージェント体制（上限完全撤廃・無制限並列）**:
+  1. サブエージェントの生成数・同時実行数の上限を**完全に撤廃（無制限化）**する。基本編成（Watchdog、物理、折り紙、探索、トリム/評価、CLI/テスト等）および必要に応じた動的増設を無制限に許可する。
+  2. 必須1枠として**監視（Watchdog/Monitor）エージェント**を常時配置し、システム稼働状態、コード差分監査、GA失態防止を専任で担当する。
+  3. 各サブエージェントが配下に起動する **`kilocode` CLI ワーカー（モデル: `Nemotron 3 Ultra high`）の同時起動台数・生成数についても上限を完全に撤廃（無制限並列実行を許可）**する。
 - **1.6 Discord×Agent ルーティング**: 主エージェントは Antigravity。APIエラー・タイムアウト・残りレート0・429の継続失敗のいずれかで**Kilo Code（既定無料モデル）へ自動フォールバック**し、処理を中断しない。429はバックオフ後に`continue`で自動継続する。監視エージェントが切替を報告する（正本: `.agents/skills/discord-bridge-routing.md`）。
 
 ---
@@ -42,9 +43,9 @@
 - **Governance**:
   - *Zero-Placeholder*: `TODO`・`...`・空関数等の省略完全禁止。実動コードのみ記述。
   - *Single Committer*: サブエージェント委譲時もリポジトリ変更・コミットは親に一元化（`.agents/skills/subagent-delegation.md`）。
-  - *Subagent Cap*: 稼働サブエージェントは最大4（監視1必須・実務3）。上限超過の委譲は拒否する。
-  - *Branch Isolation*: `genetic-project` 開発フェーズ（自律進化研究システム構築中）では `master`/`main` へのコミット・マージ・チェリーピック・PR作成を**厳禁**。`tools/branch_guard.py` が保護ブランチ実行を停止し、テストスイート（`conftest.py`）/ `app.py` / `scripts/smoke_test.py` に組み込み済み（`PAPER_AIRCRAFT_BRANCH_GUARD=warn|off` で緩和可）。
-  - *Mission Branch Mandatory*: **すべてのミッションは開始前に専用ブランチを作成し、そのブランチ上で取り組むこと**。着手時に `mission/<slug>`（Issue番号がある場合は `mission/<slug>-<issue番号>`）を切り替え、ブランチ作成なしの作業・`master`/`main` への直接コミットを禁止。ミッション完了時のみマージする。
+  - *Subagent Cap*: 上限完全撤廃（サブエージェント無制限、配下の kilocode CLI Nemotron 3 Ultra high ワーカー無制限並列実行許可）。ただし監視（Watchdog）エージェント1枠は常時必須。
+  - *Branch Governance*: `genetic-project` 開発フェーズ完了により成果物を `master` へ統合。`master` を単一正本運用ブランチとし、ローカル・CI双方で `PAPER_AIRCRAFT_BRANCH_GUARD=warn|off` により保護を解除・運用する。
+  - *Mission Branch & Sync Mandatory*: **すべての開発・ミッション着手前に必ず GitHub リモート最新を取得（`git fetch origin` / ベースの同期）し、専用ブランチを作成してその上で取り組むこと**。着手時に `mission/<slug>`（Issue番号がある場合は `mission/<slug>-<issue番号>`）を切り替え、ブランチ作成なしの作業・直接コミットを禁止。ミッション完了時のみ master へマージする。
   - *Git & Discord*: ブランチ運用、フェーズ毎通知（`.agents/skills/notify-webhook.md`）。
 - **Critical Traps（詳細・回避策は `.agents/Knowledge.md` 参照）**:
   - *CI Runner / 文字コード*: Actions の run は `defaults: run: shell: bash` 必須。PowerShell の `Get/Set-Content` でのUTF-8破壊禁止（Python/専用ツールで編集）。
@@ -56,12 +57,12 @@
 ---
 
 ## 3. Autonomous Execution Loop (自律実行ループ)
-1. *Plan & Todo (Observe)*: 現状分析と課題・ゴールを整理し、**必ず Plan（方針・全体像）と Todo リスト（細分化された実行ステップ）を策定・明示**する。`.agents/Project.md` の Loop State 確認。残タスク無ければPhase 6へ。あれば最小サブタスク定義。
+1. *Plan & Todo (Observe)*: **GitHub最新状態の同期（必須）**。着手直前に `git fetch origin`（必要に応じてベースブランチの最新差分を pull/rebase）を行い、未解決 Issue/PR の最新現況（`python tools/check_issues.py` / `python tools/check_runs.py`）を照合する。その上で現状分析と課題・ゴールを整理し、**必ず Plan（方針・全体像）と Todo リスト（細分化された具体的タスク）を策定・明示**する。`.agents/Project.md` の Loop State 確認。残タスク無ければPhase 6へ。あれば最小サブタスク定義。
 2. *Hypothesize*: 事前仮説・合否基準を宣言。
 3. *Execute*: Todo に従って最小変更・検証を1つずつ実行（不可逆操作は先行記録、単一コミッター原則）。進捗に応じて Todo を消化・更新。
 4. *Verify*: 合否照合（`.agents/skills/verify-and-test.md`）。不一致時はロールバックしPhase 2へ（上限3回）。
 5. *Distill & Loop*: 確定事実は `.agents/Knowledge.md`、現在地は `.agents/Project.md` へ記録。残りの Todo を見直し、肥大時は `.agents/skills/loop-handover.md` 実行。
-6. *Finalize & Terminate*: Todo 完遂確認 → ローカル全通過 → 対象ブランチへマージ&push（既定は master。`genetic-project` フェーズは §2 ブランチ隔離に従い master 宛の操作を禁止）→ CI完了確認 → Issue確認クローズ後HALT。
+6. *Finalize & Terminate*: Todo 完遂確認 → ローカル全通過 → master へマージ&push → CI完了確認 → Issue確認クローズ後HALT。
 
 ## 3.1 Proactive Improvement Proposal (積極的提案ルール)
 - 現行の係数ベース準定常モデルの枠内で、数値安定性・一貫性の修正を優先しつつ、LSBヒステリシスの簡易追加・付加質量の回転項・動的減衰の強化・実験校正の導入など、現実の紙飛行機挙動に近づけるための改善案を積極的に提案せよ。
