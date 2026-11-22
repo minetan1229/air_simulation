@@ -79,10 +79,21 @@ class NelderMeadTrimOptimizer:
         e0 = 0.5 * (candidate.config.wing.elevon_left_deg + candidate.config.wing.elevon_right_deg)
         d0 = candidate.config.wing.dihedral_deg
 
-        # Form initial simplex of 3 vertices in 2D
+        # Form initial simplex of 3 vertices in 2D with adaptive step sizes
+        e_span = self.elevon_bounds[1] - self.elevon_bounds[0]
+        d_span = self.dihedral_bounds[1] - self.dihedral_bounds[0]
+        step_e = 0.10 * e_span
+        step_d = 0.10 * d_span
+
+        # Step towards domain interior if starting point is close to upper bound
+        if e0 + step_e > self.elevon_bounds[1]:
+            step_e = -step_e
+        if d0 + step_d > self.dihedral_bounds[1]:
+            step_d = -step_d
+
         v0 = (e0, d0)
-        v1 = (e0 + 1.5, d0)
-        v2 = (e0, d0 + 1.5)
+        v1 = (e0 + step_e, d0)
+        v2 = (e0, d0 + step_d)
 
         cost0, cand0 = self._evaluate_point(v0[0], v0[1], candidate)
         cost1, cand1 = self._evaluate_point(v1[0], v1[1], candidate)
