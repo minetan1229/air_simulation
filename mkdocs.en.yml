@@ -6,7 +6,7 @@ repo_name: minetan1229/air_simulation
 repo_url: https://github.com/minetan1229/air_simulation
 edit_uri: edit/master/docs/
 
-docs_dir: docs
+docs_dir: docs_en
 
 theme:
   name: material
@@ -16,17 +16,18 @@ theme:
     text: Inter
     code: JetBrains Mono
   palette:
-    - media: "(prefers-color-scheme)"
-      scheme: default
+    - scheme: default
+      primary: indigo
+      accent: indigo
       toggle:
         icon: material/brightness-7
-        name: Light / Dark
-    - media: "(prefers-color-scheme: dark)"
-      scheme: slate
+        name: Switch to dark mode
+    - scheme: slate
       primary: light blue
+      accent: indigo
       toggle:
         icon: material/brightness-4
-        name: Dark / Light
+        name: Switch to light mode
   features:
     - navigation.instant
     - navigation.instant.progress
@@ -94,7 +95,7 @@ plugins:
             show_root_heading: false
 
 nav:
-  - Home: index.en.md
+  - Home: index.md
   - Getting Started:
       - Quickstart: getting-started.md
       - User Guide: usage.md
@@ -110,6 +111,7 @@ nav:
       - OpenAPI (Swagger UI): https://github.com/minetan1229/air_simulation#api-reference
   - Development & Ops:
       - Development Guide: development.md
+      - MILCY Project Guide: MILCY_PROJECT_GUIDE.md
       - GA V2 Architecture: GA_V2_ARCHITECTURE.md
       - CFD Roadmap: CFD_ROADMAP.md
       - Paper Registry Pipeline: PAPER_REGISTRY_PIPELINE.md

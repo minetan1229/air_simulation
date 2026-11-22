@@ -1,116 +1,116 @@
-# User Guide & Operation Manual
+# ユーザーガイド・操作マニュアル (Usage Guide)
 
-This document explains simulation operation using the web browser console, parameter configuration, optimization engine execution procedures, and data I/O.
+本ドキュメントでは、Web ブラウザ上のコンソール画面を用いたシミュレーション操作、各種パラメータの設定方法、最適化エンジンの実行手順、およびデータの入出力について解説します。
 
 ---
 
-## 1. Screen Layout (Google Clean Standard)
+## 1. 画面構成 (Google Clean Standard)
 
-The screen consists of the following areas:
+画面は以下の領域で構成されています：
 
-- **Header Bar (Top Header)**: Title, wind tunnel mode toggle, data save/load/CSV export buttons
-- **Left Panel (Left Control Panel)**: Sliders for aircraft geometry, paper properties, launch conditions, atmosphere environment
-- **Center 3D Viewer (3D Viewport)**: Three.js aircraft mesh rendering, real-time stress heatmap, GPU airflow particles
-- **Bottom Time Control (Bottom Dock)**: Play/pause, speed switching, frame stepping, timeline seek bar
-- **Right Panel (Right Telemetry & Analytics)**: Flight instrument status (altitude, velocity, AoA, G-force, etc.), real-time graphs, optimization panel, 3D model management
+- **ヘッダーバー (Top Header)**: タイトル、風洞モードトグル、データ保存・読込・CSVエクスポートボタン
+- **左パネル (Left Control Panel)**: 機体形状・用紙特性・発射条件・大気環境の設定スライダー
+- **中央 3D ビューア (3D Viewport)**: Three.js による機体メッシュ描画、リアルタイム応力ヒートマップ、GPU気流パーティクル
+- **下部 タイムコントロール (Bottom Dock)**: 再生/一時停止、倍速切替、コマ送り、タイムラインシークバー
+- **右パネル (Right Telemetry & Analytics)**: 飛行計器ステータス（高度・速度・迎角・Gフォース等）、リアルタイムグラフ、最適化パネル、3Dモデル管理
 
-![UI Layout](./images/01_main_console.png)
+![UI画面構成](./images/01_main_console.png)
 
-| Virtual Wind Tunnel | 6DoF Flight Trajectory |
+| 仮想風洞実験 | 6DoF 飛行軌跡 |
 | :---: | :---: |
-| ![Wind Tunnel](./images/03_wind_tunnel_mode.png) | ![Flight Trajectory](./images/02_flight_trajectory.png) |
+| ![仮想風洞](./images/03_wind_tunnel_mode.png) | ![飛行軌跡](./images/02_flight_trajectory.png) |
 
 ---
 
-## 2. Flight Simulation Execution
+## 2. フライトシミュレーションの実行
 
-### 2.1 Parameter Adjustment
-Customize flight conditions intuitively from the left panel:
+### 2.1 パラメータの調整
+左パネルから飛行条件を直感的にカスタマイズできます：
 
-- **Aircraft Parameters**:
-  - Gross mass ($g$)
-  - Wingspan ($m$) / Wing area ($m^2$)
-  - Paper areal density ($g/m^2$) and paper bending stiffness
-  - Elevon / trim fold angle ($^\circ$)
-  - Dihedral angle ($^\circ$)
-- **Launch Conditions (Launch Config)**:
-  - Initial velocity ($m/s$)
-  - Launch elevation & azimuth angles ($^\circ$)
-  - Initial roll angle ($^\circ$)
-- **Environment & Atmosphere**:
-  - Temperature ($^\circ\text{C}$ / $\text{K}$), local pressure ($\text{hPa}$), relative humidity ($\%$)
-  - Mean wind speed ($m/s$), wind direction ($^\circ$)
-  - Turbulence intensity, thermal updrafts
+- **機体パラメータ**:
+  - 全備質量 ($g$)
+  - 翼幅 ($m$) / 翼面積 ($m^2$)
+  - 用紙坪量 ($g/m^2$) および紙の曲げ剛性
+  - エレボン・トリム折り曲げ角度 ($^\circ$)
+  - 上反角 (Dihedral angle, $^\circ$)
+- **発射条件 (Launch Config)**:
+  - 初期速度 ($m/s$)
+  - 投擲仰角・方位角 ($^\circ$)
+  - 初期ロール角 ($^\circ$)
+- **環境・大気条件**:
+  - 気温 ($^\circ\text{C}$ / $\text{K}$)、局所気圧 ($\text{hPa}$)、相対湿度 ($\%$)
+  - 平均風速 ($m/s$)、風向 ($^\circ$)
+  - 乱気流強度 (Turbulence)、熱上昇気流 (Thermal)
 
-### 2.2 Time Axis Control (Time Control)
-Freely manipulate the flight timeline using bottom dock controls:
+### 2.2 時間軸操作 (タイムコントロール)
+下部ドックのコントロールボタンで飛行時間軸を自由自在に操作できます：
 
-- **Play / Pause**: Toggle instantly with `Space` key or button
-- **Playback Speed**: `0.25x`, `0.5x`, `1.0x`, `2.0x`, `5.0x`, `10.0x`
-- **Step Forward / Backward**: Frame-by-frame ($\Delta t$) behavior verification
-- **Timeline Seek**: Drag seek bar slider to rewind/fast-forward through past~current flight states
+- **再生 / 一時停止 (Play / Pause)**: `Space` キーまたはボタンで即時切替
+- **再生倍速**: `0.25x`, `0.5x`, `1.0x`, `2.0x`, `5.0x`, `10.0x`
+- **コマ送り / コマ戻し (Step Forward / Backward)**: 1フレーム（$\Delta t$）刻みでの挙動確認
+- **タイムラインシーク**: シークバースライダーをドラッグすることで、過去〜現在の飛行状態を巻き戻し・早送り可能
 
 ---
 
-## 3. 3D Aircraft Model Import
+## 3. 3D 機体モデルのインポート
 
-Import pre-made 3D paper airplane models for aerodynamic analysis.
+既製の 3D 紙飛行機モデルを取り込んで空力解析を行うことができます。
 
-### 3.1 Supported File Formats
-- **STL** (binary / ASCII)
+### 3.1 対応ファイル形式
+- **STL** (バイナリ形式 / ASCII 形式)
 - **OBJ** (Wavefront OBJ)
 - **glTF 2.0 / GLB**
 
-### 3.2 Upload Procedure
-1. Select "**3D Models**" tab on the right.
-2. Click file selector or drag & drop 3D file into drop zone.
-3. After upload completes, the server automatically computes and reflects the following physical properties:
-   - Surface area $S$, wingspan $b$, mean chord $\bar{c}$
-   - Aspect ratio $AR$, center of gravity $x_{cg}$, inertia tensor $\mathbf{I}$
-   - Angle-of-attack characteristics via static aerodynamic panel method
+### 3.2 アップロード手順
+1. 右側タブ「**3D Models**」を選択。
+2. ファイル選択ボタンを押すか、枠内に 3D ファイルをドラッグ＆ドロップ。
+3. アップロード完了後、サーバー側で自動的に以下の物理特性が計算・反映されます：
+   - 表面積 $S$、全幅 $b$、平均翼弦 $\bar{c}$
+   - アスペクト比 $AR$、重心位置 $x_{cg}$、慣性テンソル $\mathbf{I}$
+   - 静的空力パネル分割法による迎角特性
 
 ---
 
-## 4. Multi-Objective Optimization Engine Execution
+## 4. 多目的最適化エンジンの実行
 
-Automatically search aircraft geometry and launch conditions to derive designs that fly farther and more stably.
+機体形状や投擲条件を自動探索し、より遠くへ、より安定して飛ぶ設計を導き出します。
 
-### 4.1 Algorithm Selection
-- **Nelder-Mead**: Unimodal local optimization (fast)
-- **Differential Evolution (DE)**: Global search
-- **NSGA-II**: Pareto optimal set search for multiple objectives (e.g., maximize flight distance AND minimize max stress)
-- **Surrogate**: High-speed optimization via surrogate models
+### 4.1 アルゴリズムの選択
+- **Nelder-Mead**: 単峰性の局所最適化（高速）
+- **Differential Evolution (DE)**: 大域的探索
+- **NSGA-II**: 複数目的関数（例：飛行距離最大化 と 最大応力最小化）のパレート最適解集合を探索
+- **Surrogate**: 代理モデルによる高速最適化
 
-### 4.2 Objectives
-- `max_distance`: Maximize flight distance
-- `max_flight_time`: Maximize flight time
-- `max_ld_ratio`: Maximize lift-to-drag ratio ($L/D$)
-- `min_max_stress`: Minimize max generated stress (prevent paper bending failure)
-- `max_stability`: Maximize flight stability
+### 4.2 目的関数 (Objectives)
+- `max_distance`: 飛行距離の最大化
+- `max_flight_time`: 滞空時間の最大化
+- `max_ld_ratio`: 揚抗比 ($L/D$) の最大化
+- `min_max_stress`: 最大発生応力の低減（紙の折れ曲がり防止）
+- `max_stability`: 飛行安定性の最大化
 
-### 4.3 Optimization Job Monitoring & ETA
-- Starting optimization immediately creates a background job.
-- **Progress bar**, **evaluation rate (evals/s)**, and exponentially smoothed **estimated completion time (ETA)** displayed in real-time on panel.
-- On job completion, apply obtained optimal parameters to simulator with one click.
-
----
-
-## 5. Data Save & Export
-
-- **CSV Export**:
-  Click "Export CSV" button in header to immediately download flight log (time, position $X, Y, Z$, velocity, AoA, altitude, G-force, max stress).
-- **JSON Preset**:
-  Save/restore aircraft settings and environment settings in JSON format.
+### 4.3 最適化ジョブの監視と ETA
+- 最適化を開始すると即座にバックグラウンドジョブが生成されます。
+- パネル上に**進捗バー**、**評価速度 (evals/s)**、および指数移動平均で平滑化された**推定完了時刻 (ETA)** がリアルタイム表示されます。
+- ジョブ完了後、得られた最適パラメータを1クリックでシミュレーターに適用できます。
 
 ---
 
-## 6. Related Documents
+## 5. データの保存・エクスポート
 
-- [Quick Start (docs/getting-started.md)](./getting-started.md)
-- [System Architecture (docs/architecture.md)](./architecture.md)
-- [REST API Specifications (docs/api.md)](./api.md)
-- [Troubleshooting (docs/troubleshooting.md)](./troubleshooting.md)
+- **CSV エクスポート**:
+  ヘッダーの「Export CSV」ボタンをクリックすると、飛行ログ（時間、位置 $X, Y, Z$、速度、迎角、高度、Gフォース、最大応力）を即座にダウンロードできます。
+- **JSON プリセット**:
+  機体設定や環境設定を JSON 形式で保存・復元できます。
 
 ---
 
-[Back to README](../README.md)
+## 6. 関連ドキュメント
+
+- [クイックスタート (docs/getting-started.md)](./getting-started.md)
+- [システムアーキテクチャ (docs/architecture.md)](./architecture.md)
+- [REST API 仕様書 (docs/api.md)](./api.md)
+- [トラブルシューティング (docs/troubleshooting.md)](./troubleshooting.md)
+
+---
+
+[README に戻る](../README.md)

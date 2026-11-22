@@ -1,92 +1,91 @@
-# Discord Remote Bridge Specification
+# Discord Remote Bridge 仕様 (Discord Bridge Specification)
 
-This document's canonical source is the actual behavior of `tools/discord_bridge.py` and `tools/bridge_*.py`. If code and documentation diverge, code takes precedence.
+本ドキュメントは `tools/discord_bridge.py` と `tools/bridge_*.py` の実際の振る舞いを正本とする。コードと本ドキュメントが乖離した場合はコードを正とする。
 
-## 1. Overview
+## 1. 概要
 
-A bridge that drives two agent backends and remotely operates the local `simulation/v3` workspace from Discord.
+2つのエージェントバックエンドを駆動し、Discord からローカルの `simulation/v3` ワークスペースを遠隔操作するブリッジ。
 
-| Backend | Execution | Stream Format | Conversation ID | Default Model |
+| バックエンド | 実行体 | ストリーム形式 | 会話ID | 既定モデル |
 |---|---|---|---|---|
-| `antigravity` (primary) | `agy -p <prompt> --model <m> --output-format stream-json --dangerously-skip-permissions` | NDJSON (`event`) | Conversation UUID | `gemini-3.8-flash-low` |
-| `kilo` (fallback) | `kilo run --model <provider/model> --format json --auto -- <prompt>` | NDJSON (`type`) | `ses_*` session | `kilo/kilo-auto/free` (**free**) |
+| `antigravity`（主） | `agy -p <prompt> --model <m> --output-format stream-json --dangerously-skip-permissions` | NDJSON (`event`) | 会話UUID | `gemini-3.8-flash-low` |
+| `kilo`（副・フォールバック） | `kilo run --model <provider/model> --format json --auto -- <prompt>` | NDJSON (`type`) | `ses_*` セッション | `kilo/kilo-auto/free`（**無料**） |
 
-## 2. Routing (`tools/bridge_router.py`)
+## 2. ルーティング（`tools/bridge_router.py`）
 
-1. **Primary Execution**: Execute the requested backend once, normalize NDJSON to `StreamEvent`, and stream to Discord live display.
-2. **429 Auto-Continuation**: On detection of `TooManyRequests` / `RESOURCE_EXHAUSTED` / `quota exceeded` / `out of quota` etc., **do not finalize as failure**. After exponential backoff (`base` 2s, `cap` 60s, max `BRIDGE_RATE_LIMIT_RETRIES` 3 times), resume same processing with `continue` (Antigravity: `--conversation` / `--continue`, Kilo: `--session` / `--continue`).
-   - Strong markers (`too many requests` / `resource_exhausted` / `quota exceeded` etc.) detected from all output.
-   - Weak markers (standalone `rate limit` / `429`) limited to stderr/error output to prevent false positives in normal response bodies.
-3. **Auto Fallback**: If primary backend cannot complete due to API error, timeout, zero remaining rate, or persistent 429 failure, **do not interrupt** but switch to Kilo Code free model and complete. Switch is notified to Discord response channel and Webhook (to main agent).
+1. **主実行**: 要求バックエンドを1回実行し、NDJSON を `StreamEvent` に正規化して Discord のライブ表示へ流す。
+2. **429 自動継続**: `TooManyRequests` / `RESOURCE_EXHAUSTED` / `quota exceeded` / `out of quota` 等を検出しても**失敗に確定させない**。指数バックオフ（`base` 2s, `cap` 60s, 最大 `BRIDGE_RATE_LIMIT_RETRIES` 3回）後に `continue` で同一処理を再開する（Antigravity: `--conversation` / `--continue`、Kilo: `--session` / `--continue`）。
+   - 強いマーカー（`too many requests` / `resource_exhausted` / `quota exceeded` 等）は全出力から検出。弱いマーカー（単独の `rate limit` / `429`）は stderr・エラー出力に限定し、通常の回答本文での誤検出を防ぐ。
+3. **自動フォールバック**: 主バックエンドが APIエラー・タイムアウト・残りレート0・429継続失敗のいずれかで完了不能なら、**中断せず** Kilo Code の無料モデルへ切り替えて完遂する。切替時は Discord 応答チャンネルと Webhook（メインエージェント宛）へ通知する。
 
-## 3. Rate Limits / Quota (`tools/bridge_quota.py`)
+## 3. レート制限 / クォータ（`tools/bridge_quota.py`）
 
-- Retrieval: `agy -p "/quota"` → `group⇥metric⇥N%⇥resetISO` format, `agy -p "/credits"` → remaining credits.
-- Caching: `QuotaTracker` caches for default 120s (`BRIDGE_QUOTA_TTL`).
-- Exhaustion Determination: `is_exhausted` when weekly remaining (`Weekly Limit Remaining`) ≤ 1%.
-- **Estimated Available Count**: No assumed total; calculated from measured slope of "send count vs consumption %". Returns `None` if insufficient measurements.
-- Display: `!quota` / `/quota` (dedicated embed), summary also in `/status`.
+- 取得: `agy -p "/quota"` → `group⇥metric⇥N%⇥resetISO` 形式、`agy -p "/credits"` → 残りクレジット。
+- 保持: `QuotaTracker` が既定120秒（`BRIDGE_QUOTA_TTL`）キャッシュする。
+- 枯渇判定: 週次残量（`Weekly Limit Remaining`）が 1% 以下で `is_exhausted`。
+- **推定利用可能回数**: 総量の想定値を持たず、実測した「送信回数 vs 消費%」の傾きから算出する。測定不足時は算出しない（`None`）。
+- 表示: `!quota` / `/quota`（専用 embed）、`/status` にも要約を出力。
 
-## 4. Monitor Agent (`tools/bridge_monitor.py`)
+## 4. 監視エージェント（`tools/bridge_monitor.py`）
 
-- Monitored: Host health (CPU/RAM/GPU), backend executable existence, API response latency, consecutive errors, rate limit occurrences, fallback count, quota remaining.
-- Monitor Interval: `BRIDGE_MONITOR_INTERVAL` (default 60s). Alert types: `backend_unavailable` / `consecutive_errors` / `quota_exhausted` / `fallback`.
-- Notification Destinations: Discord response channel (embed) + Discord Webhook (to main agent, via `tools/notify_discord.py`).
-- Display: `!monitor` / `/monitor`.
+- 監視対象: ホスト稼働（CPU/RAM/GPU）、バックエンド実行ファイルの有無、API応答レイテンシ、連続エラー、レート制限発生数、フォールバック回数、クォータ残量。
+- 監視間隔: `BRIDGE_MONITOR_INTERVAL`（既定60秒）。アラート種別: `backend_unavailable` / `consecutive_errors` / `quota_exhausted` / `fallback`。
+- 通知先: Discord 応答チャンネル（embed）＋ Discord Webhook（メインエージェント宛、`tools/notify_discord.py` 経由）。
+- 表示: `!monitor` / `/monitor`。
 
-## 5. Authorization & Guardrails
+## 5. 認可・ガードレール
 
-- **Authorization (is_authorized)**: If `ALLOWED_USER_IDS` is empty, **reject all users** (secure default). Empty list does NOT mean "allow all".
-- **Channel Restriction**: If `ALLOWED_CHANNEL_IDS` is set, only those channels permitted.
-- **Rate Limiting**: Per-user token bucket (default: 10 commands / 60s). Configurable via `DISCORD_RATE_LIMIT_MAX` / `DISCORD_RATE_LIMIT_WINDOW`.
-- **Prompt Length Validation**: Prompts exceeding default 4000 chars rejected (`DISCORD_MAX_PROMPT_LEN`).
-- **!chrome / /chrome URL Validation**: Only http/https allowed. Private IPs / loopback / link-local / cloud metadata blocked. Bare `localhost` hostname permitted.
-- **Single Instance Control**: Lock on loopback port (default 49372, `DISCORD_BRIDGE_LOCK_PORT`) to prevent duplicate launches.
-- **`--dangerously-skip-permissions` / `--auto`**: Bridge-side authorization (`is_authorized()`) always applied.
-- **Internal Exceptions**: Only Error ID sent to Discord. Stack traces logged to server log.
-- **Task ID Uniqueness**, **Model Name Whitelist**, **Persistent View Re-registration on Startup**.
+- **認可 (is_authorized)**: `ALLOWED_USER_IDS` が空の場合、**全ユーザーを拒否**（安全側デフォルト）。空リストは「全許可」ではない。
+- **チャンネル制限**: `ALLOWED_CHANNEL_IDS` が設定済みの場合、該当チャネルのみ許可。
+- **レート制限**: ユーザー単位のトークンバケット（既定: 10 コマンド / 60 秒）。`DISCORD_RATE_LIMIT_MAX` / `DISCORD_RATE_LIMIT_WINDOW` で変更可。
+- **プロンプト長検証**: 既定 4000 文字を超えるプロンプトは拒否（`DISCORD_MAX_PROMPT_LEN`）。
+- **!chrome / /chrome URL 検証**: http/https のみ許可。プライベート IP / ループバック / リンクローカル / クラウドメタデータをブロックリストで拒否。bare な `localhost` ホスト名は許可。
+- **単一インスタンス制御**: ループバックポート（既定 49372、`DISCORD_BRIDGE_LOCK_PORT`）をロックし、二重起動を防止。
+- **`--dangerously-skip-permissions` / `--auto`**: ブリッジ側の認可（`is_authorized()`）は常に適用される。
+- **内部例外**: Discord には Error ID のみを送出。スタックトレースはサーバーログに記録。
+- **タスク ID 一意化**、**モデル名ホワイトリスト**、**起動時永続ビュー再登録**。
 
-## 6. Command List
+## 6. コマンド一覧
 
-| Slash | Prefix | Description |
+| Slash | Prefix | 概要 |
 |---|---|---|
-| `/chat <prompt>` | `!chat <prompt>` | Execute agent (parallel, 429 auto-continue, auto-fallback) |
-| `/status` | `!status` | CPU, memory, GPU, tasks, backend, quota, monitor status |
-| `/quota` | `!quota` | Remaining rate limits (utilization, estimated available count, credits) |
-| `/monitor` | `!monitor` | Monitor agent status and alerts |
-| `/backend [antigravity\|kilo]` | `!backend` | Switch execution backend (Kilo is free model) |
-| `/models` / `/model [id]` | `!models` / `!m` | List/switch models (Antigravity / Kilo Code) |
-| `/chats` / `/resume <id>` | `!chats` / `!resume` | Conversation list / resume (both backends) |
-| `/new` | `!new` | Reset conversation context |
-| `/chrome [url]` | `!chrome` | Launch local Chrome |
-| `/abort` | `!abort` | Stop running task (🛑 reaction also works) |
+| `/chat <prompt>` | `!chat <prompt>` | エージェント実行（並列・429自動継続・自動フォールバック） |
+| `/status` | `!status` | CPU・メモリ・GPU・タスク・バックエンド・クォータ・監視状況 |
+| `/quota` | `!quota` | 残りのレート制限（利用率・推定利用可能回数・クレジット） |
+| `/monitor` | `!monitor` | 監視エージェントの稼働状況とアラート |
+| `/backend [antigravity\|kilo]` | `!backend` | 実行バックエンドの切替（Kilo は無料モデル） |
+| `/models` / `/model [id]` | `!models` / `!m` | モデルの一覧・切替（Antigravity / Kilo Code） |
+| `/chats` / `/resume <id>` | `!chats` / `!resume` | 会話一覧与会話再開（両バックエンド対応） |
+| `/new` | `!new` | 会話コンテキストのリセット |
+| `/chrome [url]` | `!chrome` | ローカル Chrome 起動 |
+| `/abort` | `!abort` | 実行中タスクの停止（🛑 リアクションでも可） |
 
-## 7. Environment Variables
+## 7. 環境変数
 
-| Variable | Default | Meaning |
+| 変数 | 既定 | 意味 |
 |---|---|---|
-| `DISCORD_BOT_TOKEN` | (required) | Bot token |
-| `ALLOWED_USER_IDS` | (empty = reject all) | Comma-separated allowed user IDs |
-| `ALLOWED_CHANNEL_IDS` | (empty = all channels) | Comma-separated allowed channel IDs |
-| `DISCORD_RATE_LIMIT_MAX` | `10` | Max commands for rate limit |
-| `DISCORD_RATE_LIMIT_WINDOW` | `60.0` | Rate limit window seconds |
-| `DISCORD_MAX_PROMPT_LEN` | `4000` | Max prompt characters |
-| `DISCORD_BRIDGE_LOCK_PORT` | `49372` | Single instance control port |
-| `DISCORD_DANGEROUS_SKIP_PERMISSIONS` | `0` | Unused (always disabled) |
-| `DEFAULT_MODEL` | `gemini-3.8-flash-low` | Default model (Antigravity) |
-| `DEFAULT_BACKEND` | `antigravity` | Default backend |
-| `FALLBACK_MODEL` | `kilo/kilo-auto/free` | Fallback model (**free**) |
-| `BRIDGE_FALLBACK_ENABLED` | `1` | Fallback enabled/disabled |
-| `BRIDGE_RATE_LIMIT_RETRIES` | `3` | Max retries for 429 auto-continue |
-| `BRIDGE_BACKOFF_BASE` / `BRIDGE_BACKOFF_CAP` | `2.0` / `60.0` | Exponential backoff base/cap seconds |
-| `BRIDGE_TASK_TIMEOUT` | `1800` | Per-task timeout seconds |
-| `BRIDGE_MONITOR_INTERVAL` | `60` | Monitor agent interval seconds |
-| `BRIDGE_MONITOR_ERROR_THRESHOLD` | `3` | Consecutive errors for alert |
-| `BRIDGE_QUOTA_TTL` | `120` | Quota cache seconds |
-| `AGY_CLI_PATH` / `KILO_CLI_PATH` | (auto-detect) | Explicit CLI executable paths |
+| `DISCORD_BOT_TOKEN` | (必須) | Bot トークン |
+| `ALLOWED_USER_IDS` | (空＝全拒否) | 許可ユーザー ID のカンマ区切り |
+| `ALLOWED_CHANNEL_IDS` | (空＝全チャネル) | 許可チャネル ID のカンマ区切り |
+| `DISCORD_RATE_LIMIT_MAX` | `10` | レート制限の最大コマンド数 |
+| `DISCORD_RATE_LIMIT_WINDOW` | `60.0` | レート制限ウィンドウ秒 |
+| `DISCORD_MAX_PROMPT_LEN` | `4000` | プロンプト最大文字数 |
+| `DISCORD_BRIDGE_LOCK_PORT` | `49372` | 単一インスタンス制御ポート |
+| `DISCORD_DANGEROUS_SKIP_PERMISSIONS` | `0` | 未使用（常に無効） |
+| `DEFAULT_MODEL` | `gemini-3.8-flash-low` | 既定モデル（Antigravity） |
+| `DEFAULT_BACKEND` | `antigravity` | 既定バックエンド |
+| `FALLBACK_MODEL` | `kilo/kilo-auto/free` | フォールバック先モデル（**無料**） |
+| `BRIDGE_FALLBACK_ENABLED` | `1` | フォールバックの有効/無効 |
+| `BRIDGE_RATE_LIMIT_RETRIES` | `3` | 429 自動継続の最大再試行回数 |
+| `BRIDGE_BACKOFF_BASE` / `BRIDGE_BACKOFF_CAP` | `2.0` / `60.0` | 指数バックオフの基底秒・上限秒 |
+| `BRIDGE_TASK_TIMEOUT` | `1800` | 1タスクのタイムアウト秒 |
+| `BRIDGE_MONITOR_INTERVAL` | `60` | 監視エージェントの監視間隔秒 |
+| `BRIDGE_MONITOR_ERROR_THRESHOLD` | `3` | 連続エラーでアラートする回数 |
+| `BRIDGE_QUOTA_TTL` | `120` | クォータのキャッシュ秒 |
+| `AGY_CLI_PATH` / `KILO_CLI_PATH` | (自動検出) | CLI 実行ファイルの明示指定 |
 
-## 8. Tests
+## 8. テスト
 
-- `tests/test_discord_bridge.py`: Unit tests for authorization logic, rate limiting, URL validation, etc.
-- `tests/test_bridge_agents.py`: Unit tests for quota parsing, rate detection, backoff, backend command generation/parsing, **429 auto-continue**, **fallback**, monitor agent.
-- No actual external network (including Discord) transmission in tests (mocks only).
+- `tests/test_discord_bridge.py`: 認可ロジック・レート制限・URL 検証等のユニットテスト。
+- `tests/test_bridge_agents.py`: クォータ解析・レート判定・バックオフ・バックエンドのコマンド生成とパース・**429自動継続**・**フォールバック**・監視エージェントのユニットテスト。
+- 外部ネットワーク（Discord 含む）への実送信はテストで行わない（モックのみ）。

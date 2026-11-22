@@ -75,6 +75,7 @@ tmp/
 *.tmp
 *.bak
 site/
+docs_en/
 output/
 .kilo/plans/
 test.svg

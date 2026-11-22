@@ -16,17 +16,18 @@ theme:
     text: Noto Sans JP
     code: JetBrains Mono
   palette:
-    - media: "(prefers-color-scheme)"
-      scheme: default
+    - scheme: default
+      primary: indigo
+      accent: indigo
       toggle:
         icon: material/brightness-7
-        name: ライト/ダーク
-    - media: "(prefers-color-scheme: dark)"
-      scheme: slate
+        name: ダークモードに切り替え
+    - scheme: slate
       primary: light blue
+      accent: indigo
       toggle:
         icon: material/brightness-4
-        name: ダーク/ライト
+        name: ライトモードに切り替え
   features:
     - navigation.instant
     - navigation.instant.progress
@@ -115,6 +116,7 @@ nav:
       - OpenAPI (Swagger UI): https://github.com/minetan1229/air_simulation#api-リファレンス
   - 開発・運用:
       - 開発ガイド: development.md
+      - milcy 実践ガイド: MILCY_PROJECT_GUIDE.md
       - GA アルゴリズム: GA_ALGORITHM.md
       - GA V2 アーキテクチャ: GA_V2_ARCHITECTURE.md
       - CFD ロードマップ: CFD_ROADMAP.md

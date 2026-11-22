@@ -45,15 +45,10 @@ jobs:
           python -m pip install --upgrade pip
           pip install mkdocs-material pymdown-extensions "mkdocstrings[python]"
 
-      - name: Build Japanese documentation
+      - name: Build documentation (Multi-language)
         env:
           NO_MKDOCS_2_WARNING: "1"
-        run: mkdocs build --config-file mkdocs.yml --site-dir site
-
-      - name: Build English documentation
-        env:
-          NO_MKDOCS_2_WARNING: "1"
-        run: mkdocs build --config-file mkdocs.en.yml --site-dir site/en
+        run: python scripts/build_docs.py
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v5

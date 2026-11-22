@@ -1,24 +1,24 @@
-# Setup Guide
+# 環境構築および導入手順 (Setup Guide)
 
-This document specifies the operating requirements, environment setup, and verification procedures for the "3D Paper Airplane High-Performance CFD Simulator".
-
----
-
-## 1. Operating Environment & Prerequisites
-
-- **Operating System**: Windows 10/11 (64-bit), Linux (Ubuntu 20.04 LTS+ recommended), macOS 12+
-- **Python**: 3.10+ (3.11.x recommended)
-- **Accelerator (GPU)**: NVIDIA GPU (CUDA 12.x / Compute Capability 5.0+)
-- **Packages**: `cupy-cuda12x>=13.0.0` (when using GPU)
-  - In environments without GPU or where CUDA initialization fails, the system **automatically transitions to CPU fallback via NumPy / `multiprocessing`** (response schema identical to GPU path). No `RuntimeError` halt on CUDA initialization failure.
-  - GPU-optimized batch path (`model = "rigid_body_6dof"`, `model_detail = "gpu_batch_rk4"`) computes 13-state RK4 rigid body model in vectorized form; GPU Monte Carlo ensemble path operates as reduced model (`model = "reduced_surrogate"`).
-- **Display Environment**: WebGL 2.0 compatible browser (Google Chrome, Microsoft Edge, Firefox, Safari)
+本ドキュメントは、「3D Paper Airplane High-Performance CFD Simulator」の動作要件、環境構築、および検証手順を規定する。
 
 ---
 
-## 2. Automated Setup Procedure
+## 1. 動作環境・必要要件 (Prerequisites)
 
-The automation scripts placed in the repository root enable single-command execution from virtual environment creation through dependency installation to CUDA device verification.
+- **オペレーティングシステム**: Windows 10/11 (64-bit), Linux (Ubuntu 20.04 LTS 以上推奨), macOS 12+
+- **Python**: 3.10 以上 (3.11.x 推奨)
+- **アクセラレータ (GPU)**: NVIDIA GPU (CUDA 12.x / Compute Capability 5.0 以上)
+- **パッケージ**: `cupy-cuda12x>=13.0.0` (GPU 利用時)
+  - GPU 非搭載または CUDA 初期化不可環境では、NumPy / `multiprocessing` による **CPU フォールバックへ自動的に移行する**（返却スキーマは GPU 経路と同一）。CUDA 初期化に失敗しても `RuntimeError` で停止しない。
+  - GPU 最適化バッチ経路 (`model = "rigid_body_6dof"`, `model_detail = "gpu_batch_rk4"`) は 13 状態 RK4 剛体モデルをベクトル化して計算し、GPU モンテカルロ・アンサンブル経路は縮約モデル (`model = "reduced_surrogate"`) として動作する。
+- **表示環境**: WebGL 2.0 対応ブラウザ (Google Chrome, Microsoft Edge, Firefox, Safari)
+
+---
+
+## 2. 自動セットアップ手順 (Automated Setup)
+
+リポジトリルートに配置された自動化スクリプトにより、仮想環境の作成から依存パッケージの導入、CUDA デバイス検証までを単一コマンドで実行可能である。
 
 ### 2.1 Windows (PowerShell)
 ```powershell
@@ -33,9 +33,9 @@ chmod +x setup.sh
 
 ---
 
-## 3. Manual Setup Procedure
+## 3. 手動セットアップ手順 (Manual Setup)
 
-### 3.1 Virtual Environment Creation & Activation
+### 3.1 仮想環境の作成と有効化
 
 **Windows:**
 ```powershell
@@ -49,46 +49,46 @@ python3 -m venv .venv
 source .venv/bin/activate
 ```
 
-### 3.2 Package Installation
-Install build tools and dependencies.
+### 3.2 パッケージのインストール
+ビルドツールおよび依存関係をインストールする。
 
 ```bash
 pip install --upgrade pip setuptools wheel
 pip install -e ".[dev]"
 ```
 
-When using the fast package installer `uv`:
+高速パッケージインストーラ `uv` を使用する場合:
 ```bash
 uv pip install -e ".[dev]"
 ```
 
 ---
 
-## 4. Environment Configuration (.env)
+## 4. 環境設定 (.env)
 
-To use external integrations (Discord Webhook, etc.), copy `.env.example` to create `.env`.
+外部連携（Discord Webhook 等）を利用する場合、`.env.example` を複製して `.env` を作成する。
 
 ```bash
 cp .env.example .env
 ```
 
-`.env` configuration items:
+`.env` 内の設定項目:
 ```env
-# Discord Webhook notification endpoint (notification processing skipped if not set)
+# Discord Webhook 通知用エンドポイント (未設定時は通知処理をスキップ)
 DISCORD_WEBHOOK_URL=https://discord.com/api/webhooks/...
 ```
 
 ---
 
-## 5. Hardware Acceleration Verification
+## 5. ハードウェアアクセラレーション検証
 
-Verify CUDA GPU is properly recognized:
+CUDA GPU が正常に認識されているかを以下のコマンドで確認する:
 
 ```bash
 python -c "import cupy as cp; print('Device Count:', cp.cuda.runtime.getDeviceCount()); print('Current Device:', cp.cuda.runtime.getDevice())"
 ```
 
-Normal output example:
+正常時出力例:
 ```text
 Device Count: 1
 Current Device: 0
@@ -96,15 +96,15 @@ Current Device: 0
 
 ---
 
-## 6. Application Launch & Verification
+## 6. アプリケーションの起動と稼働確認
 
-Start the server:
+サーバーを起動する:
 ```bash
 python app.py
 ```
 
-Open `http://127.0.0.1:5000` in a browser and verify the instrument console displays.
-Health check endpoint verification:
+ブラウザで `http://127.0.0.1:5000` を開き、計器コンソールが表示されることを確認する。
+ヘルスチェックエンドポイントによる確認:
 ```bash
 curl http://127.0.0.1:5000/api/v1/meta/health
 ```
