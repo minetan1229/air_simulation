@@ -111,6 +111,7 @@ nav:
   - 高校生向け解説:
       - 飛行機物理入門: PHYSICS_HIGH_SCHOOL.md
       - 遺伝的アルゴリズム入門: GA_HIGH_SCHOOL.md
+      - milcyアルゴリズム入門 (多様性探求AI): MILCY_FOR_HIGH_SCHOOL.md
   - API リファレンス:
       - REST API 仕様: api.md
       - OpenAPI (Swagger UI): https://github.com/minetan1229/air_simulation#api-リファレンス
