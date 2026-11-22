@@ -44,8 +44,8 @@
   - *Zero-Placeholder*: `TODO`・`...`・空関数等の省略完全禁止。実動コードのみ記述。
   - *Single Committer*: サブエージェント委譲時もリポジトリ変更・コミットは親に一元化（`.agents/skills/subagent-delegation.md`）。
   - *Subagent Cap*: 上限完全撤廃（サブエージェント無制限、配下の kilocode CLI Nemotron 3 Ultra high ワーカー無制限並列実行許可）。ただし監視（Watchdog）エージェント1枠は常時必須。
-  - *Branch Isolation*: `genetic-project` 開発フェーズ（自律進化研究システム構築中）では `master`/`main` へのコミット・マージ・チェリーピック・PR作成を**厳禁**。`tools/branch_guard.py` が保護ブランチ実行を停止し、テストスイート（`conftest.py`）/ `app.py` / `scripts/smoke_test.py` に組み込み済み（`PAPER_AIRCRAFT_BRANCH_GUARD=warn|off` で緩和可）。
-  - *Mission Branch & Sync Mandatory*: **すべての開発・ミッション着手前に必ず GitHub リモート最新を取得（`git fetch origin` / ベースの同期）し、専用ブランチを作成してその上で取り組むこと**。着手時に `mission/<slug>`（Issue番号がある場合は `mission/<slug>-<issue番号>`）を切り替え、ブランチ作成なしの作業・`master`/`main` への直接コミットを禁止。ミッション完了時のみマージする。
+  - *Branch Governance*: `genetic-project` 開発フェーズ完了により成果物を `master` へ統合。`master` を単一正本運用ブランチとし、ローカル・CI双方で `PAPER_AIRCRAFT_BRANCH_GUARD=warn|off` により保護を解除・運用する。
+  - *Mission Branch & Sync Mandatory*: **すべての開発・ミッション着手前に必ず GitHub リモート最新を取得（`git fetch origin` / ベースの同期）し、専用ブランチを作成してその上で取り組むこと**。着手時に `mission/<slug>`（Issue番号がある場合は `mission/<slug>-<issue番号>`）を切り替え、ブランチ作成なしの作業・直接コミットを禁止。ミッション完了時のみ master へマージする。
   - *Git & Discord*: ブランチ運用、フェーズ毎通知（`.agents/skills/notify-webhook.md`）。
 - **Critical Traps（詳細・回避策は `.agents/Knowledge.md` 参照）**:
   - *CI Runner / 文字コード*: Actions の run は `defaults: run: shell: bash` 必須。PowerShell の `Get/Set-Content` でのUTF-8破壊禁止（Python/専用ツールで編集）。
@@ -62,7 +62,7 @@
 3. *Execute*: Todo に従って最小変更・検証を1つずつ実行（不可逆操作は先行記録、単一コミッター原則）。進捗に応じて Todo を消化・更新。
 4. *Verify*: 合否照合（`.agents/skills/verify-and-test.md`）。不一致時はロールバックしPhase 2へ（上限3回）。
 5. *Distill & Loop*: 確定事実は `.agents/Knowledge.md`、現在地は `.agents/Project.md` へ記録。残りの Todo を見直し、肥大時は `.agents/skills/loop-handover.md` 実行。
-6. *Finalize & Terminate*: Todo 完遂確認 → ローカル全通過 → 対象ブランチへマージ&push（既定は master。`genetic-project` フェーズは §2 ブランチ隔離に従い master 宛の操作を禁止）→ CI完了確認 → Issue確認クローズ後HALT。
+6. *Finalize & Terminate*: Todo 完遂確認 → ローカル全通過 → master へマージ&push → CI完了確認 → Issue確認クローズ後HALT。
 
 ## 3.1 Proactive Improvement Proposal (積極的提案ルール)
 - 現行の係数ベース準定常モデルの枠内で、数値安定性・一貫性の修正を優先しつつ、LSBヒステリシスの簡易追加・付加質量の回転項・動的減衰の強化・実験校正の導入など、現実の紙飛行機挙動に近づけるための改善案を積極的に提案せよ。
