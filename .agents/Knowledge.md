@@ -93,6 +93,8 @@ irst_order_lag による動的ねじり/上反角追従。受動構造減衰に�
 - **God Package `physics/` の5層責務分離**: 従来の `physics/`（55ファイル）を責務別に分離。(1) `core/` (契約・スキーマ・数学基盤・規約) (2) `physics/` (純粋空力・大気・応力・6DoF運動方程式) (3) `geometry/` (折り紙・メッシュ・3D生成) (4) `optimization/` (GA・CMA-ES・MAP-Elites・自動調査) (5) `infrastructure/` (ジョブキュー・永続化・記録DB)。
 - **透過的スタブとアンスコ属性フォワーディング**: 既存143テストおよびツールの互換性を壊さないよう、`physics/` 内に `globals()[_k] = _v` を備えた re-export スタブを配置し、プライベート関数（`_planform_area_m2`, `_HALF_LENGTH` 等）を含む全属性のアクセス互換性を完全維持。
 - **milcyアルゴリズムの正規統合と文献レジストリ移行**: 旧v3非GA系列（20工程折り紙MCTS + 3D MAP-Elites + Nelder-Meadトリム + 多次元頑健性グリッド）を「milcyアルゴリズム」として再定義し、`milcy/`, `core.interfaces`, `geometry.milcy_origami`, `physics.benchmark`, `optimization.cli` に完全統合。`search/` (2,000件論文データ) を `docs/research/` 配下に体系的再配置。
-- **GA2報酬ハッキング是正とフロントエンドライフサイクル (2026-11-22)**:
-  - `default_objective` の `0.25 + 0.75*quality`（墜落機25%底上げ）を排除し物理ペナルティ化。`archive.py` の `_trim` および `runner.py` でパレート境界極値解（`math.inf`）の優先保護ガードを実装。
-  - `viewport.js` に全テクスチャ再帰解放・WebGL `forceContextLoss` を備えた完全な `dispose()` を実装。`app.js` に `_booted` / `_eventsBound` ガードを設置し二重バインドを根絶。
+## [Physics Stability & CI Infrastructure] (2026-11-22)
+- **薄翼付加質量 Munk 連成とピッチ安定性 (Issue #194, #211)**:
+  - 循環揚力・ピッチングモーメント（$C_L, C_m$）を既に持つ薄翼に対し、非循環 Kirchhoff Munk モーメント（$-v_{rel} \times P_A$）を外生付加すると前縁吸込力モーメントの相殺を欠いてピッチ発散を誘発する。Munk連成は `AircraftConfig.munk_coupling_enabled` で明示オプトイン化し、既定では有効質量／対角慣性のみの受動的定式化（Issue #131）を維持して中忠実度滑空比率（1.91x）と長期安定性を両立。CPU/GPUビットパリティを維持。
+- **論文レジストリ JSONL 追跡と CI クラッシュ防止 (Issue #213)**:
+  - `.gitignore` の `*.jsonl` 除外により脱落していた `docs/research/papers/**/*.jsonl`（40ファイル）を追跡指定（`!docs/...`）し、CI上での論文構造テスト通過（15件全パス）を保証。`tools/run_ci_tests.py` における `xdist` のオプトイン化（Issue #213）と併せて CI 堅牢性を確立。
