@@ -44,6 +44,8 @@ def extract_airframe_geometry(
             keel_length_m=0.060,
             keel_layers=4,
             step_count=step_count,
+            planform_area_m2=0.015,
+            planform_aspect_ratio=2.16,
         )
 
     if hasattr(geometry_obj, "mass_kg"):
@@ -73,6 +75,10 @@ def extract_airframe_geometry(
     safe_area = max(1.0e-5, wing_area)
     aspect_ratio = (span * span) / safe_area
 
+    # Planform (projected horizontal) area and aeronautical aspect ratio
+    planform_area = max(1.0e-5, float(getattr(geometry_obj, "planform_area_m2", span * chord * 0.52)))
+    planform_ar = (span * span) / planform_area
+
     keel_height = max(0.008, chord * 0.10)
     keel_length = max(0.030, chord * 0.50)
     keel_layers = max(2, total_layers)
@@ -100,6 +106,8 @@ def extract_airframe_geometry(
         keel_length_m=keel_length,
         keel_layers=keel_layers,
         step_count=step_count,
+        planform_area_m2=planform_area,
+        planform_aspect_ratio=planform_ar,
     )
 
 

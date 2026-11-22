@@ -149,6 +149,8 @@ class AirframeGeometry:
     keel_length_m: float
     keel_layers: int
     step_count: int
+    planform_area_m2: float = 0.0
+    planform_aspect_ratio: float = 0.0
 
     def compute_behavior_descriptor(self, stability: float = 0.5) -> BehaviorDescriptor:
         loading = self.mass_kg / max(1.0e-5, self.wing_area_m2)
@@ -165,6 +167,8 @@ class AirframeGeometry:
             "wingspan_m": self.wingspan_m,
             "chord_m": self.chord_m,
             "aspect_ratio": self.aspect_ratio,
+            "planform_area_m2": self.planform_area_m2,
+            "planform_aspect_ratio": self.planform_aspect_ratio,
             "cg_m": list(self.cg_m),
             "keel_height_m": self.keel_height_m,
             "keel_length_m": self.keel_length_m,
