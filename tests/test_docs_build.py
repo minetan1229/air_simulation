@@ -2,19 +2,25 @@
 from __future__ import annotations
 
 from pathlib import Path
-import yaml
 import pytest
 
+try:
+    import yaml
+except ImportError:
+    yaml = None
+
+pytestmark = pytest.mark.skipif(yaml is None, reason="PyYAML not installed")
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
 
-class MkDocsYamlLoader(yaml.SafeLoader):
+class MkDocsYamlLoader(yaml.SafeLoader if yaml else object):  # type: ignore[misc]
     """Custom YAML loader that ignores Python object tags like !!python/name."""
     pass
 
 
-MkDocsYamlLoader.add_multi_constructor("tag:yaml.org,2002:python/", lambda loader, suffix, node: None)
+if yaml:
+    MkDocsYamlLoader.add_multi_constructor("tag:yaml.org,2002:python/", lambda loader, suffix, node: None)
 
 
 def load_mkdocs_yaml(path: Path) -> dict:

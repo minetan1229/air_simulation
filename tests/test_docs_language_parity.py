@@ -1,6 +1,11 @@
 import re
 from pathlib import Path
-import yaml
+import pytest
+
+try:
+    import yaml
+except ImportError:
+    yaml = None
 
 JP_REGEX = re.compile(r"[\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FFF]")
 
@@ -61,6 +66,7 @@ def test_english_documentation_files_exist():
         assert len(content.strip()) > 50, f"English doc {rel_path} is empty."
 
 
+@pytest.mark.skipif(yaml is None, reason="PyYAML not installed")
 def test_mkdocs_nav_targets_exist():
     root = Path(__file__).resolve().parent.parent
 
