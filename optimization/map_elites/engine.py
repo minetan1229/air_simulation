@@ -27,11 +27,13 @@ class MAPElitesEngine:
         adapter: Optional[OrigamiAdapter] = None,
         benchmark: Optional[DeterministicFlightBenchmark] = None,
         seed: int = 42,
+        mutation_rate: float = 0.35,
     ) -> None:
         self.archive = archive or MAPElitesGridArchive()
         self.adapter = adapter or OrigamiAdapter()
         self.benchmark = benchmark or DeterministicFlightBenchmark()
         self.rng = random.Random(seed)
+        self.mutation_rate = float(mutation_rate)
 
     def bootstrap_population(self, count: int = 5, mcts_iterations: int = 30) -> None:
         """Seed the archive using high-quality MCTS skeletons."""
@@ -55,11 +57,16 @@ class MAPElitesEngine:
         self,
         iterations: int = 50,
         progress_callback: Optional[Callable[[int, float, int], None]] = None,
+        mutation_rate: Optional[float] = None,
     ) -> AircraftCandidate:
         """Execute illumination iterations and return the global best candidate."""
         # Ensure archive has at least one elite
         if not self.archive.cells:
             self.bootstrap_population(count=3)
+
+        effective_mutation_rate = (
+            float(mutation_rate) if mutation_rate is not None else self.mutation_rate
+        )
 
         for it in range(iterations):
             # 1. Select parent from existing elites
@@ -71,7 +78,7 @@ class MAPElitesEngine:
             # 2. Mutate parameters
             mutated_cfg = mutate_parametric_config(
                 parent.config,
-                mutation_rate=0.40,
+                mutation_rate=effective_mutation_rate,
                 rng=self.rng,
             )
 
