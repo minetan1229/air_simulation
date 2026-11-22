@@ -83,6 +83,7 @@ Colabノートブックでは以下がワンクリックで実行できます：
 
 ## ドキュメント
 
+- **Web版ドキュメント**: <https://minetan1229.github.io/air_simulation/> （MkDocsで自動公開）
 - **入門**: [docs/getting-started.md](docs/getting-started.md) - 環境構築・起動詳細
 - **物理・理論**: [docs/SPECIFICATION.md](docs/SPECIFICATION.md) - 技術仕様正本
 - **API**: [docs/api.md](docs/api.md) - RESTリファレンス / Swagger UI: `http://localhost:5000/docs`
