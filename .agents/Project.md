@@ -18,6 +18,6 @@
 
 ## 3. Loop State (現在のループ状態・引き継ぎメモリ)
 - **Current Phase**: Phase 6 [Finalize & Terminate]
-- **Verification Status**: Munk非連成化（ピッチ発散解消・中忠実度比率1.91x・#209/#211）、paper registry jsonl追跡、xdist opt-in & 1200sタイムアウトによるCIクラッシュ防止（#213）、MAPElitesEngine mutation_rate整合、全単体・E2Eスモーク14/14完全PASS。
-- **Branch & Safety**: `master` へ統合・プッシュ完了（`230e451`）。`genetic-project`（`527a0b5`）および PR #212 (`mission/deep-investigation-audit` - `9e95199`) へ完全同期。
-- **Next Action**: CI通過・Issueクローズの監視・完了報告。
+- **Verification Status**: Auto-Investigateの1200sタイムアウト（#214）を完全解消。適応ステップ（adaptive=True, dt_max=0.02, max_substeps=64）の適用とベースラインスコアの再利用により、1シミュレーションあたり2000回超の発散リトライ（step rejection）を0回に抑制。`tests/test_investigate.py` 実行時間を 1200s超 → 34.48s（約35倍高速化）へ短縮。全単体・E2Eスモーク14/14完全PASS。
+- **Branch & Safety**: `master` へ統合・プッシュ完了（`89655f9`）。CIパイプライン稼働中。
+- **Next Action**: CI通過・Issue #214 クローズ確認・完了報告。
