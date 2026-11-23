@@ -103,7 +103,25 @@ def load_candidate_data(json_path: Path) -> Dict[str, Any]:
         return json.load(f)
 
 
-def build_folding_instructions(config: Dict[str, Any]) -> List[Dict[str, str]]:
+def build_folding_instructions(cand_data: Dict[str, Any]) -> List[Dict[str, str]]:
+    metadata = cand_data.get("metadata", {})
+    stored_macros = metadata.get("macro_steps")
+    if stored_macros:
+        badge_map = {1: "①", 2: "②", 3: "③", 4: "④", 5: "⑤", 6: "⑥", 7: "⑦", 8: "⑧", 9: "⑨", 10: "⑩"}
+        instructions = []
+        for m in stored_macros:
+            s_idx = m.get("step_index", 1)
+            b_sym = badge_map.get(s_idx, f"({s_idx})")
+            fold_type_str = "山折り (Mountain)" if m.get("mountain", False) else "谷折り (Valley)"
+            instructions.append({
+                "step": b_sym,
+                "type": fold_type_str,
+                "title": m.get("desc", "").split("（")[0] if "（" in m.get("desc", "") else m.get("name", ""),
+                "desc": m.get("desc", ""),
+            })
+        return instructions
+
+    config = cand_data.get("config", {}) if "config" in cand_data else cand_data
     nose = config.get("nose", {})
     keel = config.get("keel", {})
     wing = config.get("wing", {})
@@ -201,7 +219,7 @@ def render_a4_printable_sheet(
     adapter = OrigamiAdapter()
     cand = adapter.compile_candidate(cfg, candidate_id=cid)
     genome = cand.raw_genome
-    instructions = build_folding_instructions(cfg_d)
+    instructions = build_folding_instructions(cand.metadata)
 
     # A4 dimensions in inches (210 x 297 mm)
     # Page 1: Printable Crease Pattern (Actual 1:1 scale for direct folding)
