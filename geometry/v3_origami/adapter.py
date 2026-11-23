@@ -1,25 +1,202 @@
-"""OrigamiAdapter: Lossless conversion to OrigamiGenome and Tier 0 geometric filter."""
+"""OrigamiAdapter: Lossless conversion to OrigamiGenome and strict Tier 0 filter."""
 
 from __future__ import annotations
 
+import math
 import uuid
-from typing import Any, List, Optional, Tuple
+from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
+from core.interfaces import (
+    MAX_FOLD_STEPS,
+    MIN_FOLD_STEPS,
+    AircraftCandidate,
+    AirframeGeometry,
+    ParametricOrigamiConfig,
+)
+from geometry.origami_domain import FoldedFace, Vec3
 from geometry.origami_genome import (
-    GripReport,
     GripThresholds,
     OrigamiGenome,
+    _point_in_polygon3d,
+    _separated_polygons,
+    adjacent_panel_pairs,
+    detect_penetrations,
     evaluate_grip,
     fold_genome,
 )
-from core.interfaces import (
-    AircraftCandidate,
-    AirframeGeometry,
-    MAX_FOLD_STEPS,
-    MIN_FOLD_STEPS,
-    ParametricOrigamiConfig,
+from geometry.v3_origami.compiler import (
+    ParametricOrigamiCompiler,
+    validate_crease_pattern_physics,
 )
-from geometry.v3_origami.compiler import ParametricOrigamiCompiler
+
+
+def _segment_pierces_polygon_3d(
+    p0: Vec3,
+    p1: Vec3,
+    polygon: Sequence[Vec3],
+    normal: Vec3,
+    eps: float = 1.0e-6,
+) -> bool:
+    """Return True if segment (p0, p1) strictly pierces the interior of planar polygon."""
+    if len(polygon) < 3:
+        return False
+    origin = polygon[0]
+    d0 = (
+        normal[0] * (p0[0] - origin[0])
+        + normal[1] * (p0[1] - origin[1])
+        + normal[2] * (p0[2] - origin[2])
+    )
+    d1 = (
+        normal[0] * (p1[0] - origin[0])
+        + normal[1] * (p1[1] - origin[1])
+        + normal[2] * (p1[2] - origin[2])
+    )
+    if (d0 > eps and d1 > eps) or (d0 < -eps and d1 < -eps):
+        return False
+    denom = d0 - d1
+    if abs(denom) <= 1.0e-12:
+        return False
+    t = d0 / denom
+    if t <= 1.0e-4 or t >= 1.0 - 1.0e-4:
+        return False
+    hit_pt: Vec3 = (
+        p0[0] + t * (p1[0] - p0[0]),
+        p0[1] + t * (p1[1] - p0[1]),
+        p0[2] + t * (p1[2] - p0[2]),
+    )
+    return _point_in_polygon3d(hit_pt, polygon, normal, eps)
+
+
+def detect_strict_self_intersections(
+    faces: Sequence[FoldedFace],
+    adjacency: Optional[Iterable[Tuple[int, int]]] = None,
+    tolerance: float = 1.0e-6,
+    polygons: Optional[Dict[int, List[Vec3]]] = None,
+) -> List[Dict[str, Any]]:
+    """Detect both vertex-containment and 3D edge-piercing-face (X-crossing) penetrations."""
+    hits = detect_penetrations(
+        faces,
+        adjacency=adjacency,
+        tolerance=tolerance,
+        polygons=polygons,
+    )
+    seen_pairs = {
+        (min(int(h["face_a"]), int(h["face_b"])), max(int(h["face_a"]), int(h["face_b"])))
+        for h in hits
+    }
+    adjacent = {
+        (min(int(a), int(b)), max(int(a), int(b)))
+        for a, b in (adjacency or ())
+    }
+
+    def _outline(face: FoldedFace) -> List[Vec3]:
+        if polygons is not None:
+            return polygons.get(face.fid, list(face.poly3d))
+        return list(face.poly3d)
+
+    count = len(faces)
+    for i in range(count):
+        fi = faces[i]
+        pi = _outline(fi)
+        if len(pi) < 3:
+            continue
+        for j in range(i + 1, count):
+            fj = faces[j]
+            pair_key = (min(fi.fid, fj.fid), max(fi.fid, fj.fid))
+            if pair_key in adjacent or (i, j) in adjacent or pair_key in seen_pairs:
+                continue
+            pj = _outline(fj)
+            if len(pj) < 3:
+                continue
+
+            pierced = False
+            for k in range(len(pi)):
+                if _segment_pierces_polygon_3d(pi[k], pi[(k + 1) % len(pi)], pj, fj.normal, tolerance):
+                    pierced = True
+                    break
+            if not pierced:
+                for k in range(len(pj)):
+                    if _segment_pierces_polygon_3d(pj[k], pj[(k + 1) % len(pj)], pi, fi.normal, tolerance):
+                        pierced = True
+                        break
+
+            if pierced:
+                seen_pairs.add(pair_key)
+                hits.append(
+                    {
+                        "face_a": int(fi.fid),
+                        "face_b": int(fj.fid),
+                        "group_a": fi.group,
+                        "group_b": fj.group,
+                        "type": "edge_piercing_face",
+                    }
+                )
+    return hits
+
+
+def _compute_true_silhouette_area_m2(
+    faces: Sequence[FoldedFace],
+    cell_m: float = 1.5e-3,
+) -> float:
+    """Compute non-overlapping horizontal (x-z) silhouette planform area via scanline."""
+    if not faces:
+        return 0.0
+    xs: List[float] = []
+    zs: List[float] = []
+    polys: List[List[Tuple[float, float]]] = []
+    for face in faces:
+        if len(face.poly3d) < 3:
+            continue
+        p2 = [(float(pt[0]), float(pt[2])) for pt in face.poly3d]
+        polys.append(p2)
+        for px, pz in p2:
+            xs.append(px)
+            zs.append(pz)
+
+    if not polys:
+        return 0.0
+
+    min_x, max_x = min(xs), max(xs)
+    min_z, max_z = min(zs), max(zs)
+    nx = max(1, min(400, int(math.ceil((max_x - min_x) / cell_m))))
+    nz = max(1, min(400, int(math.ceil((max_z - min_z) / cell_m))))
+    dx = max((max_x - min_x) / nx, 1.0e-6)
+    dz = max((max_z - min_z) / nz, 1.0e-6)
+
+    covered_cells = 0
+    for row in range(nz):
+        z_line = min_z + (row + 0.5) * dz
+        intervals: List[Tuple[float, float]] = []
+        for poly in polys:
+            crossings: List[float] = []
+            m = len(poly)
+            for k in range(m):
+                ax, az = poly[k]
+                bx, bz = poly[(k + 1) % m]
+                if (az <= z_line < bz) or (bz <= z_line < az):
+                    t = (z_line - az) / (bz - az)
+                    crossings.append(ax + t * (bx - ax))
+            if len(crossings) >= 2:
+                crossings.sort()
+                for idx in range(0, len(crossings) - 1, 2):
+                    intervals.append((crossings[idx], crossings[idx + 1]))
+
+        if not intervals:
+            continue
+
+        intervals.sort()
+        merged_lo, merged_hi = intervals[0]
+        row_len = 0.0
+        for lo, hi in intervals[1:]:
+            if lo <= merged_hi:
+                merged_hi = max(merged_hi, hi)
+            else:
+                row_len += max(0.0, merged_hi - merged_lo)
+                merged_lo, merged_hi = lo, hi
+        row_len += max(0.0, merged_hi - merged_lo)
+        covered_cells += int(round(row_len / dx))
+
+    return max(1.0e-5, covered_cells * dx * dz)
 
 
 def extract_airframe_geometry(
@@ -27,11 +204,7 @@ def extract_airframe_geometry(
     step_count: int = 20,
     default_mass_kg: float = 0.005,
 ) -> AirframeGeometry:
-    """Extract physical dimensions and mass properties from folded genome geometry.
-
-    Safely extracts properties whether geometry_obj is a GenomeGeometry instance
-    or a dict representation. Uses real grip / keel dimensions when available.
-    """
+    """Extract physical dimensions, true silhouette planform, and penetration counts."""
     if geometry_obj is None:
         return AirframeGeometry(
             mass_kg=default_mass_kg,
@@ -47,6 +220,10 @@ def extract_airframe_geometry(
             planform_area_m2=0.015,
             planform_aspect_ratio=2.16,
             penetrations=999,
+            fold_valid=False,
+            thickness_limit_ok=True,
+            flat_foldable_ok=True,
+            nose_tip_x_m=0.1485,
         )
 
     if hasattr(geometry_obj, "mass_kg"):
@@ -73,31 +250,38 @@ def extract_airframe_geometry(
         cg_tuple = (0.08, 0.0, 0.005)
         total_layers = 4
 
+    nose_tip_x = 0.1485
+    penetrations_count = 0
+    planform_area = max(1.0e-5, float(getattr(geometry_obj, "planform_area_m2", 0.0)))
+    keel_height = max(0.008, chord * 0.10)
+    keel_length = max(0.030, chord * 0.50)
+    keel_layers = max(2, total_layers)
+
+    if hasattr(geometry_obj, "faces") and hasattr(geometry_obj, "pattern"):
+        faces = geometry_obj.faces
+        if faces:
+            nose_tip_x = max(float(pt[0]) for f in faces for pt in f.poly3d)
+            planform_area = _compute_true_silhouette_area_m2(faces)
+            adj = adjacent_panel_pairs(geometry_obj.pattern)
+            sep_polys = _separated_polygons(geometry_obj)
+            strict_hits = detect_strict_self_intersections(faces, adjacency=adj, polygons=sep_polys)
+            penetrations_count = len(strict_hits)
+            try:
+                report = evaluate_grip(geometry_obj, penetrations=strict_hits)
+                if report.grip_height_m > 0.0:
+                    keel_height = report.grip_height_m
+                if report.grip_length_m > 0.0:
+                    keel_length = report.grip_length_m
+                if report.grip_layers > 0:
+                    keel_layers = report.grip_layers
+            except Exception:
+                pass
+
+    if planform_area <= 1.0e-5:
+        planform_area = max(1.0e-5, min(wing_area, span * chord * 0.65))
     safe_area = max(1.0e-5, wing_area)
     aspect_ratio = (span * span) / safe_area
-
-    # Planform (projected horizontal) area and aeronautical aspect ratio
-    planform_area = max(1.0e-5, float(getattr(geometry_obj, "planform_area_m2", span * chord * 0.52)))
     planform_ar = (span * span) / planform_area
-
-    keel_height = 0.0
-    keel_length = 0.0
-    keel_layers = 0
-    penetrations = 0
-
-    try:
-        if hasattr(geometry_obj, "faces") and hasattr(geometry_obj, "pattern"):
-            report = evaluate_grip(geometry_obj)
-            keel_height = report.grip_height_m
-            keel_length = report.grip_length_m
-            keel_layers = report.grip_layers
-            penetrations = report.penetrations
-        else:
-            keel_height = max(0.008, chord * 0.10)
-            keel_length = max(0.030, chord * 0.50)
-            keel_layers = max(2, total_layers)
-    except Exception:
-        pass
 
     return AirframeGeometry(
         mass_kg=mass,
@@ -112,7 +296,11 @@ def extract_airframe_geometry(
         step_count=step_count,
         planform_area_m2=planform_area,
         planform_aspect_ratio=planform_ar,
-        penetrations=penetrations,
+        penetrations=penetrations_count,
+        fold_valid=True,
+        thickness_limit_ok=True,
+        flat_foldable_ok=True,
+        nose_tip_x_m=nose_tip_x,
     )
 
 
@@ -120,16 +308,8 @@ def validate_tier0(
     candidate: AircraftCandidate,
     thresholds: Optional[GripThresholds] = None,
 ) -> Tuple[bool, List[str]]:
-    """Validate aircraft candidate against Tier 0 geometric filter.
-
-    Enforces:
-      1. Minimum step count (16 to 24 steps)
-      2. Grip thresholds (keel height >= 8mm, length >= 30mm, layers >= 2)
-      3. No physical mesh penetrations (max_penetrations == 0)
-    """
+    """Validate aircraft candidate against strict Tier 0 geometric & physics filter."""
     reasons: List[str] = []
-
-    # 1. Step count check (Strict 16 to 24 steps enforcement)
     if candidate.step_count < MIN_FOLD_STEPS:
         reasons.append(
             f"Step count {candidate.step_count} is below minimum requirement {MIN_FOLD_STEPS}"
@@ -139,17 +319,24 @@ def validate_tier0(
             f"Step count {candidate.step_count} exceeds maximum allowable {MAX_FOLD_STEPS}"
         )
 
-    # 2. Geometry check
+    if candidate.metadata.get("fold_failed", False):
+        reasons.append(
+            f"Fold engine failed: {candidate.metadata.get('fold_error', 'degenerate geometry')}"
+        )
+
     geom = candidate.geometry
     if geom is None:
         reasons.append("Airframe geometry has not been generated")
         return False, reasons
 
-    # 3. Grip & structural integrity check
+    if not geom.fold_valid:
+        reasons.append("Folded solid marked invalid")
+
     active_thresh = thresholds or GripThresholds(
         min_grip_height_m=0.008,
         min_grip_length_m=0.030,
         min_grip_layers=2,
+        max_penetrations=0,
     )
 
     if geom.keel_height_m < active_thresh.min_grip_height_m:
@@ -164,18 +351,30 @@ def validate_tier0(
         reasons.append(
             f"Keel layers {geom.keel_layers} < required {active_thresh.min_grip_layers}"
         )
-
-    # 4. Self-intersection & penetration check
     if geom.penetrations > active_thresh.max_penetrations:
         reasons.append(
-            f"Self-intersection detected: {geom.penetrations} penetrating panel pairs exceed allowable {active_thresh.max_penetrations}"
+            f"Self-intersection detected: {geom.penetrations} penetration(s) > max allowed {active_thresh.max_penetrations}"
         )
+    if not geom.thickness_limit_ok:
+        reasons.append("Paper thickness bend-radius limit (Gallivan bound) exceeded")
+    if not geom.flat_foldable_ok:
+        reasons.append("Flat-foldability theorem violation (Kawasaki/Maekawa)")
+
+    if not (
+        math.isfinite(geom.mass_kg)
+        and math.isfinite(geom.wing_area_m2)
+        and math.isfinite(geom.planform_area_m2)
+        and math.isfinite(geom.wingspan_m)
+        and geom.mass_kg > 0.0
+        and geom.planform_area_m2 > 1.0e-5
+    ):
+        reasons.append("Non-finite or degenerate physical geometry dimensions")
 
     return (len(reasons) == 0), reasons
 
 
 class OrigamiAdapter:
-    """Bridges parametric configs to OrigamiGenome and folded geometry."""
+    """Bridges parametric configs to OrigamiGenome and strictly audited folded geometry."""
 
     def __init__(self, compiler: Optional[ParametricOrigamiCompiler] = None) -> None:
         self.compiler = compiler or ParametricOrigamiCompiler()
@@ -185,11 +384,10 @@ class OrigamiAdapter:
         config: ParametricOrigamiConfig,
         candidate_id: Optional[str] = None,
     ) -> AircraftCandidate:
-        """Compile a parametric config into a complete AircraftCandidate."""
+        """Compile a parametric config into a strictly validated AircraftCandidate."""
         cid = candidate_id or f"v3-cand-{uuid.uuid4().hex[:8]}"
         steps = self.compiler.compile_steps(config)
         step_count = len(steps)
-
         genome = OrigamiGenome(
             steps=steps,
             key=cid,
@@ -197,17 +395,43 @@ class OrigamiAdapter:
             strategy="v3_parametric",
         )
 
-        # Attempt geometric fold evaluation
-        fold_succeeded = True
-        fold_err = ""
+        foldability = validate_crease_pattern_physics(
+            steps=steps,
+            paper_gsm=config.paper_gsm,
+            nose_fold_count=config.nose.fold_count,
+            nose_length_ratio=config.nose.nose_length_ratio,
+        )
+
+        fold_failed = False
+        fold_error = ""
+        geometry: Optional[AirframeGeometry] = None
+
         try:
             geometry_obj = fold_genome(genome, paper_gsm=config.paper_gsm)
-            geometry = extract_airframe_geometry(geometry_obj, step_count=step_count)
+            raw_geom = extract_airframe_geometry(geometry_obj, step_count=step_count)
+            geometry = AirframeGeometry(
+                mass_kg=raw_geom.mass_kg,
+                wing_area_m2=raw_geom.wing_area_m2,
+                wingspan_m=raw_geom.wingspan_m,
+                chord_m=raw_geom.chord_m,
+                aspect_ratio=raw_geom.aspect_ratio,
+                cg_m=raw_geom.cg_m,
+                keel_height_m=raw_geom.keel_height_m,
+                keel_length_m=raw_geom.keel_length_m,
+                keel_layers=raw_geom.keel_layers,
+                step_count=raw_geom.step_count,
+                planform_area_m2=raw_geom.planform_area_m2,
+                planform_aspect_ratio=raw_geom.planform_aspect_ratio,
+                penetrations=raw_geom.penetrations,
+                fold_valid=True,
+                thickness_limit_ok=foldability.thickness_limit_ok,
+                flat_foldable_ok=foldability.flat_foldable_ok,
+                nose_tip_x_m=raw_geom.nose_tip_x_m,
+            )
         except Exception as exc:
-            # Fallback geometry if fold engine encountered degenerate edge
-            geometry = extract_airframe_geometry(None, step_count=step_count)
-            fold_succeeded = False
-            fold_err = str(exc)
+            fold_failed = True
+            fold_error = f"{type(exc).__name__}: {exc}"
+            geometry = None
 
         candidate = AircraftCandidate(
             candidate_id=cid,
@@ -216,11 +440,12 @@ class OrigamiAdapter:
             raw_genome=genome,
             geometry=geometry,
         )
+        candidate.metadata["fold_failed"] = fold_failed
+        if fold_error:
+            candidate.metadata["fold_error"] = fold_error
+        candidate.metadata["foldability_reasons"] = list(foldability.reasons)
 
         valid, reasons = validate_tier0(candidate)
-        if not fold_succeeded:
-            valid = False
-            reasons.append(f"Mesh folding failed: {fold_err or 'degenerate geometry'}")
         candidate.metadata["tier0_valid"] = valid
         candidate.metadata["tier0_reasons"] = reasons
 

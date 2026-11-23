@@ -94,7 +94,10 @@ def test_adapter_attaches_macro_steps_metadata():
 
 def test_parsimony_pressure_tie_break():
     """Verify MAP-Elites grid prefers candidates with fewer steps during tie-breaks."""
-    grid = MAPElitesGridArchive(bins=(5, 5, 5))
+    grid = MAPElitesGridArchive(
+        bins=(5, 5, 5),
+        ranges=((0.0, 5.0), (0.0, 1.0), (0.0, 5.0)),
+    )
     dummy_metric = EvaluationMetric(
         speed_mps=6.0,
         flight_time_s=3.0,

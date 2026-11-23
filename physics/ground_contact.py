@@ -87,6 +87,7 @@ def compute_ground_stations(
         "alt_rtip": alt_rtip,
         "alt_keel": alt_keel,
         "alt_tail": alt_tail,
+        "keel_depth_m": keel_depth,
         "min_alt": min_alt,
     }
 
