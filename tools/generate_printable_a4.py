@@ -23,11 +23,15 @@ import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-import matplotlib
-matplotlib.use("Agg")
-import matplotlib.pyplot as plt
-import matplotlib.patches as patches
-from matplotlib import font_manager
+try:
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    import matplotlib.patches as patches
+    from matplotlib import font_manager
+    HAS_MATPLOTLIB = True
+except ImportError:
+    HAS_MATPLOTLIB = False
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(PROJECT_ROOT) not in sys.path:
@@ -44,6 +48,8 @@ from geometry.origami_genome import step_meshes
 
 # Setup Japanese Font support for Matplotlib
 def setup_japanese_font():
+    if not HAS_MATPLOTLIB:
+        return
     preferred_fonts = ["Yu Gothic", "Meiryo", "MS Gothic", "BIZ UDGothic", "TakaoPGothic", "IPAGothic"]
     available_fonts = set(f.name for f in font_manager.fontManager.ttflist)
     for f in preferred_fonts:
@@ -204,6 +210,8 @@ def render_a4_printable_sheet(
     dpi: int = 300,
 ) -> Path:
     """Generate high-resolution printable A4 paper airplane folding template."""
+    if not HAS_MATPLOTLIB:
+        raise RuntimeError("matplotlib is required to render printable A4 sheets")
     cid = cand_data.get("candidate_id", "map-elite-plane")
     cfg_d = cand_data.get("config", {})
     bench = cand_data.get("benchmark", {})
@@ -382,6 +390,8 @@ def render_a4_max_fullsize_sheet(
     Every coordinate u in [0, 1], v in [0, 1] maps exactly to the four corners of A4 paper,
     providing the maximum possible aircraft size with zero margins/wasted paper.
     """
+    if not HAS_MATPLOTLIB:
+        raise RuntimeError("matplotlib is required to render printable A4 sheets")
     cid = cand_data.get("candidate_id", "map-elite-plane")
     cfg_d = cand_data.get("config", {})
 
@@ -479,6 +489,8 @@ def render_a4_step_manual(
     dpi: int = 300,
 ) -> Path:
     """Generate accompanying A4 page with detailed step-by-step illustrated manual."""
+    if not HAS_MATPLOTLIB:
+        raise RuntimeError("matplotlib is required to render printable A4 sheets")
     cid = cand_data.get("candidate_id", "map-elite-plane")
     cfg_d = cand_data.get("config", {})
 
