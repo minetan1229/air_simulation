@@ -32,6 +32,7 @@ from core.interfaces import (
 )
 from geometry.v3_origami.adapter import OrigamiAdapter
 from geometry.origami_genome import step_meshes
+from tools.generate_printable_a4 import resolve_canonical_crease_style
 
 
 def load_elites(marathon_dir: Path) -> List[Dict[str, Any]]:
@@ -79,17 +80,19 @@ def load_elites(marathon_dir: Path) -> List[Dict[str, Any]]:
                             "indices": idx,
                         })
 
-                    # Extract 2D crease lines with mountain/valley types for vector drawing
+                    # Extract 2D crease lines with canonical mountain/valley types for vector drawing
                     crease_lines_data = []
                     for step in cand.raw_genome.steps:
                         p0, p1 = step.crease_line
+                        is_mtn, badge_num, fold_name = resolve_canonical_crease_style(step.label, step.mountain)
                         crease_lines_data.append({
                             "step": step.step_index,
                             "p0": [round(float(p0[0]), 4), round(float(p0[1]), 4)],
                             "p1": [round(float(p1[0]), 4), round(float(p1[1]), 4)],
-                            "mountain": bool(step.mountain),
+                            "mountain": bool(is_mtn),
                             "angle_deg": round(float(step.fold_angle_deg), 1),
                             "label": str(step.label),
+                            "badge": badge_num,
                         })
                 except Exception as ex:
                     print(f"[!] Warning: failed to extract folding steps for {jf.name}: {ex}")

@@ -56,6 +56,48 @@ def setup_japanese_font():
 setup_japanese_font()
 
 
+def resolve_canonical_crease_style(label: str, raw_mountain: bool = True) -> Tuple[bool, str, str]:
+    """Resolve canonical mountain/valley fold style from the perspective of flat A4 paper.
+
+    Returns:
+        (is_mountain, badge_symbol, fold_name):
+        - is_mountain: True for mountain fold (red dashed), False for valley fold (blue dash-dot)
+        - badge_symbol: e.g. '①', '②'
+        - fold_name: friendly Japanese name
+    """
+    key = str(label).lower()
+    if "body" in key:
+        return (False, "①", "センターライン谷折り")
+    elif "corner" in key:
+        # Corner triangular fold onto center line is valley fold from paper front
+        return (False, "②", "機首斜め三角折り")
+    elif "collar" in key:
+        # Collar side fold inward is valley fold from paper front
+        return (False, "③", "機首サイド襟折り")
+    elif "nose_lock" in key:
+        # Folding tip back/inward
+        return (True, "④", "先端ロック折り")
+    elif "nose_reinforce" in key or "nose_rf" in key:
+        # Nose flap reinforcement
+        return (True, "⑤", "機首補強折り")
+    elif "wing" in key and "winglet" not in key:
+        # Folding wings downward from keel forms a mountain ridge at wing crease
+        return (True, "⑥", "主翼折り下げ")
+    elif "winglet" in key:
+        # Folding wingtips upward from wing plane is valley fold
+        return (False, "⑦", "翼端ウィングレット")
+    elif "elevon" in key:
+        # Elevon upward reflex trim is valley fold
+        return (False, "⑧", "エレボントリム反り")
+    elif "trailing" in key:
+        return (False, "⑨", "後縁トリム")
+    elif "camber" in key:
+        return (True, "", "キャンバー微小折り")
+    else:
+        # Fallback to raw mountain/valley
+        return (raw_mountain, "", label)
+
+
 def load_candidate_data(json_path: Path) -> Dict[str, Any]:
     with open(json_path, "r", encoding="utf-8") as f:
         return json.load(f)
@@ -75,58 +117,58 @@ def build_folding_instructions(config: Dict[str, Any]) -> List[Dict[str, str]]:
 
     return [
         {
-            "step": "1",
+            "step": "①",
             "type": "谷折り (Valley)",
-            "title": "センターラインの谷折り",
-            "desc": "青の一点鎖線①に沿って用紙を長手方向に半分に折り、折り目をつけて開きます。",
+            "title": "センターラインの折り目付け",
+            "desc": "青の一点鎖線①に沿って用紙を長手方向に半分に谷折りし、中央にしっかり折り目をつけて開きます。",
         },
         {
-            "step": "2 & 3",
-            "type": "山折り (Mountain)",
-            "title": "機首斜め折り（左右対称）",
-            "desc": "用紙の上部左右の角を、赤の破線②③に合わせて中央線に向かって三角に折ります。",
+            "step": "②",
+            "type": "谷折り (Valley)",
+            "title": "機首斜め三角折り（左右対称）",
+            "desc": "用紙上部の左右の角を、青の一点鎖線②に合わせて中央線に向かって手前に三角に谷折りします。",
         },
         {
-            "step": "4 & 5",
-            "type": "山折り (Mountain)",
-            "title": "ノーズ襟折り（二重ロック）",
-            "desc": "赤の破線④⑤に沿って、両サイドをもう一度中央へ向けて細く折りたたみます。",
+            "step": "③",
+            "type": "谷折り (Valley)",
+            "title": "機首サイド襟折り（二重ロック）",
+            "desc": "青の一点鎖線③に沿って、両サイドをもう一度中央へ向けて細く手前に谷折りします。",
         },
         {
-            "step": "6 & 7",
+            "step": "④",
             "type": "山折り (Mountain)",
             "title": "先端ロック折り（重心前方化）",
-            "desc": "折られた機首の先端を赤の破線⑥⑦で内側へ折り返し、ノーズの剛性を高めます。",
+            "desc": "折られた機首の先端を赤の破線④で内側へ折り返し、ノーズの剛性を高めます。",
         },
         {
-            "step": "8 & 9",
+            "step": "⑤",
             "type": "山折り (Mountain)",
             "title": "機首補強折り（フラップ固定）",
-            "desc": "赤の破線⑧⑨で機首フラップをロックし、飛行時の機首開きを完全防止します。",
+            "desc": "赤の破線⑤で機首フラップをロックし、飛行時の機首開きを防止します。",
         },
         {
-            "step": "10",
+            "step": "胴体",
             "type": "山折り (Mountain)",
             "title": "胴体キール折り（裏返し二つ折り）",
-            "desc": "全体を裏返し、中心線に沿って機首が外側に出るように半分に山折りします。",
+            "desc": "全体を裏返し、中心線①に沿って機首が外側に出るように半分に山折りします。",
         },
         {
-            "step": "11 & 12",
+            "step": "⑥",
             "type": "山折り (Mountain)",
             "title": f"主翼の折り下げ（持ち手キール {keel_mm}mm）",
-            "desc": f"下部に深さ約{keel_mm}mmのキール（指の持ち手）を残し、赤の破線⑪⑫で主翼を水平に折り下げます。",
+            "desc": f"下部に深さ約{keel_mm}mmのキール（指の持ち手）を残し、赤の破線⑥で主翼を左右とも外側へ水平に山折りします。",
         },
         {
-            "step": "13 & 14",
-            "type": "山折り (Mountain)",
+            "step": "⑦",
+            "type": "谷折り (Valley)",
             "title": f"翼端ウィングレット（{winglet}° 立ち上げ）",
-            "desc": f"主翼外側の破線⑬⑭で、両端を斜め上約{winglet}度へ急角度に立ち上げます。",
+            "desc": f"主翼外側の青の一点鎖線⑦で、両端を斜め上約{winglet}度へ急角度に谷折りして立ち上げます。",
         },
         {
-            "step": "15 & 16",
+            "step": "⑧ & ⑨",
             "type": "谷折り (Valley)",
             "title": f"エレボントリム（仕上げ反り {elevon}°）",
-            "desc": f"主翼後縁（後ろ端）の青線⑮⑯を指先で約1〜2mm（{elevon}度）上向きに反らせます。",
+            "desc": f"主翼後縁（後ろ端）の青線⑧⑨を指先で約1〜2mm（{elevon}度）上向きに反らせます。",
         },
         {
             "step": "調整",
@@ -192,55 +234,30 @@ def render_a4_printable_sheet(
     ax.plot([0, 0], [0, 1], color="#94a3b8", linestyle=":", linewidth=1)
     ax.plot([1, 1], [0, 1], color="#94a3b8", linestyle=":", linewidth=1)
 
-    # Step group labels to assign friendly badge numbers
-    # Group symmetrical steps:
-    step_badges = {
-        1: ("①", "谷折り (180°)", False),
-        2: ("②", "山折り (左右斜め)", True),
-        3: ("③", "山折り (左右斜め)", True),
-        4: ("④", "ノーズ襟折り", True),
-        5: ("⑤", "ノーズ襟折り", True),
-        6: ("⑥", "ノーズ先端ロック", True),
-        7: ("⑦", "ノーズ先端ロック", True),
-        8: ("⑧", "機首補強折り", True),
-        9: ("⑨", "機首補強折り", True),
-        10: ("⑩", "キール固定ロック", True),
-        11: ("⑪", "主翼折り下げ", True),
-        12: ("⑫", "主翼折り下げ", True),
-        13: ("⑬", "ウィングレット立上げ", True),
-        14: ("⑭", "ウィングレット立上げ", True),
-        15: ("⑮", "エレボントリム反り", False),
-        16: ("⑯", "エレボントリム反り", False),
-    }
-
-    # Draw Creases
+    # Draw Creases with canonical mountain / valley styles
     for step in genome.steps:
         p0, p1 = step.crease_line
         # Coordinate map: u in [0, 1], v in [0, 1] where v=1 is nose
         x0, y0 = p0[0], p0[1]
         x1, y1 = p1[0], p1[1]
 
-        is_mtn = step.mountain
+        is_mtn, badge_num, fold_name = resolve_canonical_crease_style(step.label, step.mountain)
         color = "#dc2626" if is_mtn else "#2563eb"  # Red = mountain, Blue = valley
         ls = (0, (6, 4)) if is_mtn else (0, (3, 2, 1, 2))  # Dashed vs Dash-dot
-        lw = 2.2 if step.step_index in [1, 2, 3, 11, 12] else 1.6
+        lw = 2.2 if "body" in step.label or "wing" in step.label or "corner" in step.label else 1.6
 
         ax.plot([x0, x1], [y0, y1], color=color, linestyle=ls, linewidth=lw, zorder=3)
 
         # Label badge
-        mx = 0.5 * (x0 + x1)
-        my = 0.5 * (y0 + y1)
-
-        badge_info = step_badges.get(step.step_index)
-        if badge_info:
-            b_text, b_desc, _ = badge_info
-            # Slight offset so text doesn't overlap line directly
+        if badge_num:
+            mx = 0.5 * (x0 + x1)
+            my = 0.5 * (y0 + y1)
             off_x = 0.022 if mx < 0.5 else -0.022
             off_y = 0.015 if my > 0.5 else -0.015
 
             ax.text(
                 mx + off_x, my + off_y,
-                b_text,
+                badge_num,
                 color="#ffffff",
                 fontsize=9,
                 fontweight="bold",
@@ -373,50 +390,29 @@ def render_a4_max_fullsize_sheet(
     # Outer border (Exact A4 paper edges)
     ax.plot([0, 1, 1, 0, 0], [0, 0, 1, 1, 0], color="#94a3b8", linestyle="-", linewidth=1.5, zorder=2)
 
-    step_badges = {
-        1: "① 谷折り (180°)",
-        2: "② 山折り (斜め)",
-        3: "③ 山折り (斜め)",
-        4: "④ 襟折り",
-        5: "⑤ 襟折り",
-        6: "⑥ ノーズ固定",
-        7: "⑦ ノーズ固定",
-        8: "⑧ 機首補強",
-        9: "⑨ 機首補強",
-        10: "⑩ キールロック",
-        11: "⑪ 主翼折り下げ",
-        12: "⑫ 主翼折り下げ",
-        13: "⑬ ウィングレット",
-        14: "⑭ ウィングレット",
-        15: "⑮ エレボン反り",
-        16: "⑯ エレボン反り",
-    }
-
-    # Draw Crease Lines exactly scaled across full A4 sheet
+    # Draw Crease Lines exactly scaled across full A4 sheet with canonical styles
     for step in genome.steps:
         p0, p1 = step.crease_line
         x0, y0 = p0[0], p0[1]
         x1, y1 = p1[0], p1[1]
 
-        is_mtn = step.mountain
+        is_mtn, badge_num, fold_name = resolve_canonical_crease_style(step.label, step.mountain)
         color = "#dc2626" if is_mtn else "#2563eb"
         ls = (0, (8, 5)) if is_mtn else (0, (4, 3, 1, 3))
-        lw = 2.4 if step.step_index in [1, 2, 3, 11, 12] else 1.8
+        lw = 2.4 if "body" in step.label or "wing" in step.label or "corner" in step.label else 1.8
 
         ax.plot([x0, x1], [y0, y1], color=color, linestyle=ls, linewidth=lw, zorder=3)
 
         # Label badges on folds
-        mx = 0.5 * (x0 + x1)
-        my = 0.5 * (y0 + y1)
-        badge_text = step_badges.get(step.step_index)
-        if badge_text:
-            num = badge_text.split()[0]
+        if badge_num:
+            mx = 0.5 * (x0 + x1)
+            my = 0.5 * (y0 + y1)
             off_x = 0.02 if mx < 0.5 else -0.02
             off_y = 0.012 if my > 0.5 else -0.012
 
             ax.text(
                 mx + off_x, my + off_y,
-                num,
+                badge_num,
                 color="#ffffff",
                 fontsize=9.5,
                 fontweight="bold",
