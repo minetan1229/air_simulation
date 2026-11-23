@@ -832,8 +832,10 @@ def _evaluate_state(
         u_rel = body_relative[:, 0]
         v_rel = body_relative[:, 1]
         w_rel = body_relative[:, 2]
-        stalled_mask = xp.asarray(coefficients.get("stalled", 0.0))
-        munk_factor = xp.where(params.munk_active, xp.where(stalled_mask > 0.5, 0.0, 1.0), 0.0)
+        w_stall = aero_kernel.stall_blend_weight(
+            xp, alpha, params.aero.stall_alpha_deg, params.aero.stall_sharpness
+        )
+        munk_factor = xp.where(params.munk_active, xp.maximum(1.0 - w_stall, 0.0), 0.0)
         munk_x = -v_rel * m_add_z * w_rel * munk_factor
         munk_y = u_rel * m_add_z * w_rel * munk_factor
         munk_z = xp.zeros_like(munk_x)
