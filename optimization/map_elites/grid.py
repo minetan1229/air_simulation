@@ -87,13 +87,18 @@ class MAPElitesGridArchive:
             self.cells[bin_idx] = (score, candidate)
             self.improved_evaluations += 1
             return True
-        elif math.isclose(score, current_score, abs_tol=1e-5):
-            # Tie-break: prefer candidate with higher stability margin or aspect ratio
-            cand_s = candidate.descriptor.static_stability if candidate.descriptor else 0.5
-            curr_s = current_cand.descriptor.static_stability if current_cand.descriptor else 0.5
-            if cand_s > curr_s:
+        elif math.isclose(score, current_score, abs_tol=1e-4):
+            # Parsimony Pressure: prefer simpler design (fewer steps) for equivalent performance
+            if candidate.step_count < current_cand.step_count:
                 self.cells[bin_idx] = (score, candidate)
                 return True
+            elif candidate.step_count == current_cand.step_count:
+                # Secondary tie-break: prefer candidate with higher stability margin
+                cand_s = candidate.descriptor.static_stability if candidate.descriptor else 0.5
+                curr_s = current_cand.descriptor.static_stability if current_cand.descriptor else 0.5
+                if cand_s > curr_s:
+                    self.cells[bin_idx] = (score, candidate)
+                    return True
 
         return False
 
