@@ -152,12 +152,10 @@ def test_no_double_rebound_on_wingtip_strike():
     mac = float(sim._derived["mac_m"])
     semispan = float(sim._derived["wingspan_m"]) * 0.5
     r_world = body_to_world(q, np.array([-0.3 * mac, semispan, 0.0]))
-    v_point_pre = np.asarray(state.velocity_mps) + np.cross(
-        np.asarray(state.angular_velocity_radps), r_world
-    )
-    v_point_post = np.asarray(next_state.velocity_mps) + np.cross(
-        np.asarray(next_state.angular_velocity_radps), r_world
-    )
+    w_world_pre = body_to_world(q, np.asarray(state.angular_velocity_radps))
+    w_world_post = body_to_world(next_state.quaternion, np.asarray(next_state.angular_velocity_radps))
+    v_point_pre = np.asarray(state.velocity_mps) + np.cross(w_world_pre, r_world)
+    v_point_post = np.asarray(next_state.velocity_mps) + np.cross(w_world_post, r_world)
     assert v_point_post[2] == pytest.approx(-restitution * v_point_pre[2], rel=1e-6, abs=1e-9), (
         f"Restitution law violated at the contact point: "
         f"v_post={v_point_post[2]} vs -e*v_pre={-restitution * v_point_pre[2]}"

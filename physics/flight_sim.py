@@ -2674,6 +2674,7 @@ class FlightSimulator:
         alt_nose = stations["alt_nose"]
         alt_ltip = stations["alt_ltip"]
         alt_rtip = stations["alt_rtip"]
+        alt_keel = stations["alt_keel"]
         alt_tail = stations["alt_tail"]
         min_alt = stations["min_alt"]
 
@@ -2742,6 +2743,7 @@ class FlightSimulator:
                 alt_nose = stations["alt_nose"]
                 alt_ltip = stations["alt_ltip"]
                 alt_rtip = stations["alt_rtip"]
+                alt_keel = stations["alt_keel"]
                 alt_tail = stations["alt_tail"]
                 min_alt = stations["min_alt"]
 
@@ -2790,52 +2792,58 @@ class FlightSimulator:
         r_keel = np.array([0.0, 0.0, GROUND_KEEL_DEPTH_M], dtype=np.float64)
         r_tail = np.array([-0.7 * mac, 0.0, GROUND_KEEL_DEPTH_M], dtype=np.float64)
 
+        # Transform body rates and inertia to World (NED) frame
+        R_mat = quaternion_to_matrix(state.quaternion)
+        inertia_world_inv = R_mat @ inertia_inv @ R_mat.T
+        rates_world = R_mat @ rates
+
         def _resolve_contact(r_body: np.ndarray, e_coef: float) -> float:
-            """Resolve the impulsive contact at one station.
-
-            The contact is an impulse applied at the station.  The normal
-            impulse follows from the restitution law, the tangential impulse is
-            bounded by the Coulomb cone ``|J_t| <= mu |J_n|``, and the impulse
-            is applied as a force pair (``v += J/m``, ``omega += I^-1 (r x J)``).
-            The angular momentum about the CG is then conserved by
-            construction, so the cartwheel produced by a wingtip strike
-            emerges from the geometry and scales with the impact energy
-            instead of being injected as a constant angular rate.
-
-            Friction uses an effective mass along the tangential direction
-            ``t``: ``lever_t = r x t`` and
-            ``m_eff_t = 1/(1/m + lever_t . I^-1 . lever_t)``.  The tangential
-            impulse magnitude is ``j_t = min(mu*|J_n|, m_eff_t*|v_t|)``,
-            which analytically zeroes the contact-point tangential relative
-            speed under Coulomb saturation (``j_t = m_eff_t*|v_t|``) and is
-            otherwise limited by the Coulomb cone.  Using the normal-direction
-            ``m_eff`` for the tangential impulse under/over-brakes off-centre
-            contacts whose geometry makes tangential compliance differ from
-            normal compliance.
-            """
-            nonlocal velocity, rates
+            """Resolve the impulsive contact at one station using World-frame Delassus coupling."""
+            nonlocal velocity, rates, rates_world
             r_world = body_to_world(state.quaternion, r_body)
-            v_point = velocity + np.cross(rates, r_world)
+            v_point = velocity + np.cross(rates_world, r_world)
             v_normal = float(v_point[2])  # +z points down
             if v_normal <= 0.0:
                 return 0.0
             normal = np.array([0.0, 0.0, 1.0], dtype=np.float64)
-            lever = np.cross(r_world, normal)
-            inv_term = 1.0 / mass + float(lever @ (inertia_inv @ lever))
-            m_eff = 1.0 / max(inv_term, 1.0e-18)
-            j_normal = -(1.0 + e_coef) * m_eff * v_normal
-            impulse = np.array([0.0, 0.0, j_normal], dtype=np.float64)
             tangential = v_point - v_normal * normal
             tangential_speed = float(np.linalg.norm(tangential))
-            if tangential_speed > 1.0e-9:
-                t_dir = tangential / tangential_speed
-                lever_t = np.cross(r_world, t_dir)
-                inv_term_t = 1.0 / mass + float(lever_t @ (inertia_inv @ lever_t))
-                m_eff_t = 1.0 / max(inv_term_t, 1.0e-18)
-                j_t = min(mu * abs(j_normal), m_eff_t * tangential_speed)
-                impulse = impulse - j_t * t_dir
+            t_dir = tangential / tangential_speed if tangential_speed > 1.0e-9 else np.array([1.0, 0.0, 0.0], dtype=np.float64)
+
+            # 2x2 Delassus matrix coupling normal and tangential impulses
+            rxn = np.cross(r_world, normal)
+            k_nn = 1.0 / mass + float(rxn @ (inertia_world_inv @ rxn))
+
+            if tangential_speed <= 1.0e-9:
+                j_normal = -(1.0 + e_coef) * v_normal / k_nn
+                j_tangent = 0.0
+                t_dir = np.zeros(3, dtype=np.float64)
+            else:
+                rxt = np.cross(r_world, t_dir)
+                k_tt = 1.0 / mass + float(rxt @ (inertia_world_inv @ rxt))
+                k_nt = float(rxn @ (inertia_world_inv @ rxt))
+
+                target_dv_n = -(1.0 + e_coef) * v_normal
+                target_dv_t = -tangential_speed
+
+                det_k = max(k_nn * k_tt - k_nt * k_nt, 1.0e-18)
+                jn_stick = (k_tt * target_dv_n - k_nt * target_dv_t) / det_k
+                jt_stick = (-k_nt * target_dv_n + k_nn * target_dv_t) / det_k
+
+                if abs(jt_stick) <= mu * abs(jn_stick):
+                    j_normal = jn_stick
+                    j_tangent = jt_stick
+                else:
+                    eff_k_nn = k_nn - mu * k_nt
+                    if eff_k_nn < 1.0e-6:
+                        eff_k_nn = k_nn
+                    j_normal = target_dv_n / eff_k_nn
+                    j_tangent = -mu * abs(j_normal)
+
+            impulse = j_normal * normal + j_tangent * t_dir
             velocity = velocity + impulse / mass
-            rates = rates + inertia_inv @ np.cross(r_world, impulse)
+            rates_world = rates_world + inertia_world_inv @ np.cross(r_world, impulse)
+            rates = R_mat.T @ rates_world
             return abs(j_normal)
 
         # Check wingtip strikes before main body contact (altitude_cg > 0 but wingtip below ground)
@@ -2856,7 +2864,7 @@ class FlightSimulator:
         # where the contact point rebounds upward while vz > 0.
         def _station_v_normal(r_body: np.ndarray) -> float:
             r_world = body_to_world(state.quaternion, r_body)
-            v_point = velocity + np.cross(rates, r_world)
+            v_point = velocity + np.cross(rates_world, r_world)
             return float(v_point[2])  # +z is down; positive => into the ground
 
         impact_speed = 0.0
@@ -2865,7 +2873,7 @@ class FlightSimulator:
             (alt_ltip, r_ltip),
             (alt_rtip, r_rtip),
             (alt_tail, r_tail),
-            (altitude_cg, r_keel),  # keel acts under the CG
+            (alt_keel, r_keel),
         ):
             if station_alt <= 0.0:
                 impact_speed = max(impact_speed, max(_station_v_normal(r_body), 0.0))
@@ -3106,17 +3114,23 @@ class FlightSimulator:
             angular_rate=core["omega"],
             density_kgm3=core["air"]["density_kgm3"],
         )
-        # Flow-path rates: the rotation of the air-relative velocity vector seen
-        # from the body frame.  ``cross(v_hat, a)/V`` yields (-beta_dot, alpha_dot,
-        # 0) up to the frame convention; they are reported for the UI overlays.
+        # Flow-path rates: the exact time rates of change of alpha and beta in the body frame
         alpha_rate = 0.0
         beta_rate = 0.0
         if core["speed"] > SPEED_STAT_FLOOR_MPS:
-            path_rates = cross(
-                normalize(core["body_relative"]), world_to_body(quaternion, core["acceleration"])
-            ) / core["speed"]
-            alpha_rate = rad2deg(float(path_rates[1]))
-            beta_rate = rad2deg(-float(path_rates[0]))
+            v_b = vec3(core["body_relative"])
+            a_b = world_to_body(quaternion, core["acceleration"])
+            omega_b = vec3(core["omega"])
+            v_b_dot = a_b - np.cross(omega_b, v_b)
+            u, v, w = float(v_b[0]), float(v_b[1]), float(v_b[2])
+            udot, vdot, wdot = float(v_b_dot[0]), float(v_b_dot[1]), float(v_b_dot[2])
+            u2_w2 = u * u + w * w
+            if u2_w2 > 1.0e-12:
+                alpha_dot = (u * wdot - w * udot) / u2_w2
+                v_total = float(core["speed"])
+                beta_dot = (vdot * u2_w2 - v * (u * udot + w * wdot)) / (v_total * math.sqrt(u2_w2))
+                alpha_rate = rad2deg(alpha_dot)
+                beta_rate = rad2deg(beta_dot)
         packet: Dict[str, Any] = {
             "time_s": _finite(state.time_s),
             "position_m": [float(value) for value in state.position_m],
@@ -3392,8 +3406,9 @@ class FlightSimulator:
             previous_state = self._state
             if not self._advance(h, y0, time_s, self._derivative(y0, time_s, core), core0=core):
                 break
-            self._state = self._apply_ground_contact(self._state, previous_state, dt=h)
-            travelled += float(self._state.time_s) - time_s
+            actual_dt = float(self._state.time_s) - time_s
+            self._state = self._apply_ground_contact(self._state, previous_state, dt=actual_dt)
+            travelled += actual_dt
             used += 1
             self._diagnostics_cache = None
             self._record_sample()
