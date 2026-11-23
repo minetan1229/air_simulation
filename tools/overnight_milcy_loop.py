@@ -23,6 +23,11 @@ import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8")
+if hasattr(sys.stderr, "reconfigure"):
+    sys.stderr.reconfigure(encoding="utf-8")
+
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
@@ -108,7 +113,7 @@ def run_overnight_loop(
     base_dir.mkdir(parents=True, exist_ok=True)
 
     print("=" * 75)
-    print("  🌙 AUTONOMOUS OVERNIGHT OPTIMIZATION & CONTINUOUS IMPROVEMENT LOOP")
+    print("  [NIGHT-LOOP] AUTONOMOUS OVERNIGHT OPTIMIZATION & CONTINUOUS IMPROVEMENT")
     print(f"  Target Finish Time : {target_hour:02d}:{target_minute:02d} JST")
     print(f"  Base Output Dir    : {base_dir.resolve()}")
     print("=" * 75)
@@ -228,7 +233,7 @@ def run_overnight_loop(
         if is_new_record:
             old_score = best_overall_score
             best_overall_score = round_best_score
-            print(f"🎉 NEW RECORD! Score improved from {old_score:.4f} to {best_overall_score:.4f} ({round_champ_id})")
+            print(f"[+] NEW RECORD! Score improved from {old_score:.4f} to {best_overall_score:.4f} ({round_champ_id})")
 
             # Copy champion to global champion directory
             champ_export_dir = base_dir / "current_champion"
@@ -262,7 +267,7 @@ def run_overnight_loop(
     # Final summary after loop termination
     summary_text = (
         f"=======================================================\n"
-        f"  🏁 OVERNIGHT AUTONOMOUS LOOP COMPLETED AT 09:00 JST\n"
+        f"  [DONE] OVERNIGHT AUTONOMOUS LOOP COMPLETED AT 09:00 JST\n"
         f"  Total Rounds Run       : {round_idx - 1}\n"
         f"  Total Evaluations      : {total_evaluations}\n"
         f"  Best Composite Score   : {best_overall_score:.4f}\n"
