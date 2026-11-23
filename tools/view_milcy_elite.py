@@ -21,12 +21,24 @@ from pathlib import Path
 from typing import Any, Dict, List
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+from core.interfaces import (
+    ParametricOrigamiConfig,
+    ParametricNoseSpec,
+    ParametricKeelSpec,
+    ParametricWingSpec,
+)
+from geometry.v3_origami.adapter import OrigamiAdapter
+from geometry.origami_genome import step_meshes
 
 
 def load_elites(marathon_dir: Path) -> List[Dict[str, Any]]:
-    """Scan marathon directory and load all elite JSON/OBJ pairs."""
+    """Scan marathon directory and load all elite JSON/OBJ pairs with intermediate fold steps."""
     elites = []
     json_files = sorted(marathon_dir.glob("elite_rank*.json"))
+    adapter = OrigamiAdapter()
 
     for jf in json_files:
         try:
@@ -43,11 +55,38 @@ def load_elites(marathon_dir: Path) -> List[Dict[str, Any]]:
             rank_str = base_name.split("_")[1].replace("rank", "")
             rank = int(rank_str) if rank_str.isdigit() else 99
 
+            # Generate intermediate folding steps (Step 0: Flat sheet to Step 20: Final plane)
+            folding_steps_3d = []
+            cfg_d = data.get("config")
+            if cfg_d:
+                try:
+                    cfg = ParametricOrigamiConfig(
+                        nose=ParametricNoseSpec(**cfg_d.get("nose", {})),
+                        keel=ParametricKeelSpec(**cfg_d.get("keel", {})),
+                        wing=ParametricWingSpec(**cfg_d.get("wing", {})),
+                        paper_gsm=float(cfg_d.get("paper_gsm", 100.0)),
+                    )
+                    cand = adapter.compile_candidate(cfg, candidate_id=data.get("candidate_id", base_name))
+                    meshes = step_meshes(cand.raw_genome)
+                    for m in meshes:
+                        # Pack compact positions (rounded to 4 decimal places for size efficiency)
+                        pos = [round(float(p), 4) for p in m.get("positions", [])]
+                        idx = [int(i) for i in m.get("indices", [])]
+                        folding_steps_3d.append({
+                            "step": int(m.get("step_index", 0)),
+                            "label": str(m.get("label", f"Step {m.get('step_index', 0)}")),
+                            "positions": pos,
+                            "indices": idx,
+                        })
+                except Exception as ex:
+                    print(f"[!] Warning: failed to extract folding steps for {jf.name}: {ex}")
+
             elites.append({
                 "rank": rank,
                 "file_stem": base_name,
                 "data": data,
                 "obj_content": obj_content,
+                "folding_steps_3d": folding_steps_3d,
             })
         except Exception as e:
             print(f"[!] Warning: failed to parse {jf}: {e}")
@@ -292,6 +331,84 @@ def build_viewer_html(elites: List[Dict[str, Any]]) -> str:
       pointer-events: none;
     }}
 
+    /* 3D Folding Player & Step Banner Styling */
+    .step-banner {{
+      position: absolute;
+      top: 16px;
+      right: 16px;
+      background: rgba(15, 23, 42, 0.90);
+      backdrop-filter: blur(10px);
+      border: 1px solid #38bdf8;
+      border-radius: 8px;
+      padding: 8px 14px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      z-index: 10;
+      box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+    }}
+    .step-badge {{
+      background: #0284c7;
+      color: #ffffff;
+      padding: 3px 8px;
+      border-radius: 4px;
+      font-weight: 700;
+      font-size: 0.78rem;
+    }}
+    .step-desc {{
+      font-size: 0.85rem;
+      font-weight: 600;
+      color: #f1f5f9;
+    }}
+    .folding-player-bar {{
+      position: absolute;
+      bottom: 16px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: rgba(15, 23, 42, 0.92);
+      backdrop-filter: blur(10px);
+      border: 1px solid #334155;
+      border-radius: 10px;
+      padding: 8px 16px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      z-index: 10;
+      box-shadow: 0 6px 20px rgba(0, 0, 0, 0.6);
+      width: min(650px, 90%);
+    }}
+    .player-btn {{
+      background: #1e293b;
+      border: 1px solid #334155;
+      color: #f8fafc;
+      padding: 6px 12px;
+      border-radius: 6px;
+      font-size: 0.8rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.15s ease;
+      white-space: nowrap;
+    }}
+    .player-btn:hover {{
+      background: #334155;
+      color: var(--accent);
+      border-color: var(--accent);
+    }}
+    .player-btn.active {{
+      background: var(--accent);
+      color: #090d16;
+      border-color: var(--accent);
+    }}
+    #fold-step-slider {{
+      flex: 1;
+      height: 6px;
+      border-radius: 3px;
+      background: #334155;
+      outline: none;
+      cursor: pointer;
+      accent-color: #38bdf8;
+    }}
+
     /* Right sidebar: Spec & Folding Guide */
     .sidebar-right {{
       width: 420px;
@@ -388,7 +505,25 @@ def build_viewer_html(elites: List[Dict[str, Any]]) -> str:
         <button class="btn active" id="btn-toggle-traj">6DoF飛行軌跡</button>
         <button class="btn" id="btn-toggle-axis">姿勢軸 (NED)</button>
       </div>
+
+      <!-- 3D Folding Step Banner -->
+      <div id="folding-step-banner" class="step-banner">
+        <div class="step-badge" id="step-badge-text">Step 20 / 20</div>
+        <div class="step-desc" id="step-desc-text">完成形 3D ソリッドモデル</div>
+      </div>
+
       <div id="webgl-canvas"></div>
+
+      <!-- 3D Folding Animation Player & Step Slider Bar -->
+      <div class="folding-player-bar">
+        <button class="player-btn" id="btn-play-pause" title="折り方アニメーション再生/一時停止">▶ 再生</button>
+        <button class="player-btn" id="btn-step-prev" title="前の手順へ戻る">◀</button>
+        <input type="range" id="fold-step-slider" min="0" max="20" value="20" step="1">
+        <button class="player-btn" id="btn-step-next" title="次の手順へ進む">▶</button>
+        <button class="player-btn" id="btn-step-reset" title="平らな紙(Step 0)に戻す">↺ 平らな紙</button>
+        <button class="player-btn active" id="btn-step-finish" title="完成形へ">🏁 完成形</button>
+      </div>
+
       <div class="viewport-overlay-info">
         <strong>操作方法:</strong><br>
         左ドラッグ: 360°回転 | 右ドラッグ: 平行移動 | ホイール: ズーム
@@ -482,6 +617,29 @@ def build_viewer_html(elites: List[Dict[str, Any]]) -> str:
     let wireframeMode = false;
 
     // Parse simple OBJ
+    let currentStepIndex = 20;
+    let isPlaying = false;
+    let animationTimer = null;
+
+    // Build BufferGeometry from packed step mesh (positions + indices)
+    function buildStepGeometry(stepData) {{
+      const positions = stepData.positions;
+      const indices = stepData.indices;
+      const geometry = new THREE.BufferGeometry();
+      const posArray = new Float32Array(indices.length * 3);
+      for (let i = 0; i < indices.length; i++) {{
+        const v = indices[i];
+        posArray[i * 3] = positions[v * 3];
+        posArray[i * 3 + 1] = positions[v * 3 + 1];
+        posArray[i * 3 + 2] = positions[v * 3 + 2];
+      }}
+      geometry.setAttribute('position', new THREE.BufferAttribute(posArray, 3));
+      geometry.computeVertexNormals();
+      geometry.center();
+      return geometry;
+    }}
+
+    // Parse simple OBJ as fallback
     function parseOBJ(objText) {{
       const positions = [];
       const faces = [];
@@ -518,6 +676,71 @@ def build_viewer_html(elites: List[Dict[str, Any]]) -> str:
       geometry.computeVertexNormals();
       geometry.center();
       return geometry;
+    }}
+
+    function showFoldStep(stepIdx) {{
+      const elite = elitesData[currentEliteIndex];
+      const steps = elite.folding_steps_3d || [];
+      if (!steps.length) return;
+
+      stepIdx = Math.max(0, Math.min(stepIdx, steps.length - 1));
+      currentStepIndex = stepIdx;
+
+      // Update Slider and Banner UI
+      const slider = document.getElementById('fold-step-slider');
+      if (slider) slider.value = stepIdx;
+
+      const badge = document.getElementById('step-badge-text');
+      const desc = document.getElementById('step-desc-text');
+      const stepData = steps[stepIdx];
+
+      if (badge && desc && stepData) {{
+        badge.textContent = `Step ${{stepIdx}} / ${{steps.length - 1}}`;
+        desc.textContent = stepIdx === 0 ? "平らな紙 (A4初期状態)" : stepData.label;
+      }}
+
+      // Highlight Finish Button
+      const btnFinish = document.getElementById('btn-step-finish');
+      if (btnFinish) {{
+        btnFinish.classList.toggle('active', stepIdx === steps.length - 1);
+      }}
+
+      // Rebuild 3D Mesh for this intermediate fold step
+      while (modelGroup.children.length > 0) {{
+        modelGroup.remove(modelGroup.children[0]);
+      }}
+
+      let geometry = null;
+      if (stepIdx === steps.length - 1 && elite.obj_content) {{
+        // Use high-detail OBJ for the completed plane if available
+        geometry = parseOBJ(elite.obj_content);
+      }} else if (stepData) {{
+        geometry = buildStepGeometry(stepData);
+      }}
+
+      if (geometry) {{
+        const material = new THREE.MeshStandardMaterial({{
+          color: stepIdx === 0 ? 0xf8fafc : 0xe0f2fe,
+          roughness: 0.35,
+          metalness: 0.1,
+          side: THREE.DoubleSide,
+          wireframe: wireframeMode,
+        }});
+        currentMesh = new THREE.Mesh(geometry, material);
+        // Step mesh is in standard coordinates; rotate so wing is horizontal
+        currentMesh.rotation.x = -Math.PI / 2;
+        modelGroup.add(currentMesh);
+
+        // Add subtle wireframe overlay
+        const wireMat = new THREE.MeshBasicMaterial({{
+          color: 0x0284c7,
+          wireframe: true,
+          transparent: true,
+          opacity: 0.35,
+        }});
+        const wireOverlay = new THREE.Mesh(geometry, wireMat);
+        currentMesh.add(wireOverlay);
+      }}
     }}
 
     function buildTrajectory(elite) {{
@@ -561,30 +784,19 @@ def build_viewer_html(elites: List[Dict[str, Any]]) -> str:
         el.classList.toggle('active', i === index);
       }});
 
-      // 1. Load 3D Mesh
-      while (modelGroup.children.length > 0) {{
-        modelGroup.remove(modelGroup.children[0]);
+      // Stop any running folding animation
+      stopFoldingAnimation();
+
+      // Setup Step Slider
+      const steps = elite.folding_steps_3d || [];
+      const slider = document.getElementById('fold-step-slider');
+      if (slider) {{
+        slider.max = Math.max(0, steps.length - 1);
+        slider.value = steps.length - 1;
       }}
 
-      if (elite.obj_content) {{
-        const geometry = parseOBJ(elite.obj_content);
-        const material = new THREE.MeshStandardMaterial({{
-          color: 0xe0f2fe,
-          roughness: 0.35,
-          metalness: 0.1,
-          side: THREE.DoubleSide,
-          wireframe: wireframeMode,
-        }});
-        currentMesh = new THREE.Mesh(geometry, material);
-        // Rotate so +X is forward, +Y is wing, +Z is down
-        currentMesh.rotation.x = -Math.PI / 2;
-        modelGroup.add(currentMesh);
-
-        // Add subtle wireframe outline overlay
-        const wireMat = new THREE.MeshBasicMaterial({{ color: 0x0284c7, wireframe: true, transparent: true, opacity: 0.35 }});
-        const wireOverlay = new THREE.Mesh(geometry, wireMat);
-        currentMesh.add(wireOverlay);
-      }}
+      // Display Final Step (Step N) initially
+      showFoldStep(steps.length - 1);
 
       // Build 6DoF Trajectory Arc
       buildTrajectory(elite);
@@ -703,6 +915,80 @@ def build_viewer_html(elites: List[Dict[str, Any]]) -> str:
       `;
       card.addEventListener('click', () => renderElite(idx));
       listContainer.appendChild(card);
+    }});
+
+    // Animation Player Functions
+    function stopFoldingAnimation() {{
+      if (isPlaying) {{
+        isPlaying = false;
+        if (animationTimer) clearInterval(animationTimer);
+        animationTimer = null;
+        const btnPlay = document.getElementById('btn-play-pause');
+        if (btnPlay) {{
+          btnPlay.textContent = "▶ 再生";
+          btnPlay.classList.remove('active');
+        }}
+      }}
+    }}
+
+    function toggleFoldingAnimation() {{
+      const btnPlay = document.getElementById('btn-play-pause');
+      const elite = elitesData[currentEliteIndex];
+      const steps = elite.folding_steps_3d || [];
+      if (!steps.length) return;
+
+      if (isPlaying) {{
+        stopFoldingAnimation();
+      }} else {{
+        isPlaying = true;
+        if (btnPlay) {{
+          btnPlay.textContent = "⏸ 一時停止";
+          btnPlay.classList.add('active');
+        }}
+
+        // If at the end, restart from step 0
+        if (currentStepIndex >= steps.length - 1) {{
+          showFoldStep(0);
+        }}
+
+        animationTimer = setInterval(() => {{
+          if (currentStepIndex < steps.length - 1) {{
+            showFoldStep(currentStepIndex + 1);
+          }} else {{
+            stopFoldingAnimation();
+          }}
+        }}, 900); // 900ms per fold step for clear visual comprehension
+      }}
+    }}
+
+    // Folding Player Event Listeners
+    document.getElementById('btn-play-pause').addEventListener('click', toggleFoldingAnimation);
+
+    document.getElementById('btn-step-prev').addEventListener('click', () => {{
+      stopFoldingAnimation();
+      showFoldStep(currentStepIndex - 1);
+    }});
+
+    document.getElementById('btn-step-next').addEventListener('click', () => {{
+      stopFoldingAnimation();
+      showFoldStep(currentStepIndex + 1);
+    }});
+
+    document.getElementById('btn-step-reset').addEventListener('click', () => {{
+      stopFoldingAnimation();
+      showFoldStep(0);
+    }});
+
+    document.getElementById('btn-step-finish').addEventListener('click', () => {{
+      stopFoldingAnimation();
+      const elite = elitesData[currentEliteIndex];
+      const steps = elite.folding_steps_3d || [];
+      showFoldStep(steps.length - 1);
+    }});
+
+    document.getElementById('fold-step-slider').addEventListener('input', function() {{
+      stopFoldingAnimation();
+      showFoldStep(parseInt(this.value, 10));
     }});
 
     // Viewport Button Event Listeners
