@@ -78,8 +78,22 @@ def load_elites(marathon_dir: Path) -> List[Dict[str, Any]]:
                             "positions": pos,
                             "indices": idx,
                         })
+
+                    # Extract 2D crease lines with mountain/valley types for vector drawing
+                    crease_lines_data = []
+                    for step in cand.raw_genome.steps:
+                        p0, p1 = step.crease_line
+                        crease_lines_data.append({
+                            "step": step.step_index,
+                            "p0": [round(float(p0[0]), 4), round(float(p0[1]), 4)],
+                            "p1": [round(float(p1[0]), 4), round(float(p1[1]), 4)],
+                            "mountain": bool(step.mountain),
+                            "angle_deg": round(float(step.fold_angle_deg), 1),
+                            "label": str(step.label),
+                        })
                 except Exception as ex:
                     print(f"[!] Warning: failed to extract folding steps for {jf.name}: {ex}")
+                    crease_lines_data = []
 
             elites.append({
                 "rank": rank,
@@ -87,6 +101,7 @@ def load_elites(marathon_dir: Path) -> List[Dict[str, Any]]:
                 "data": data,
                 "obj_content": obj_content,
                 "folding_steps_3d": folding_steps_3d,
+                "crease_lines": crease_lines_data,
             })
         except Exception as e:
             print(f"[!] Warning: failed to parse {jf}: {e}")
@@ -555,6 +570,10 @@ def build_viewer_html(elites: List[Dict[str, Any]]) -> str:
 
       <div>
         <div class="section-title">🗺️ 折り線展開図（Crease Pattern）</div>
+        <div style="display: flex; gap: 8px; margin-bottom: 12px;">
+          <a class="btn" style="flex: 1; text-align: center; text-decoration: none; display: block;" href="printable_a4_pattern.png" download="printable_a4_pattern.png" target="_blank">🖨️ A4型紙 (PNG)</a>
+          <a class="btn" style="flex: 1; text-align: center; text-decoration: none; display: block;" href="printable_a4_pattern_manual.png" download="printable_a4_pattern_manual.png" target="_blank">📖 説明書 (PNG)</a>
+        </div>
         <div class="crease-container" id="crease-svg-container">
           <!-- Populated by JS -->
         </div>
@@ -883,20 +902,37 @@ def build_viewer_html(elites: List[Dict[str, Any]]) -> str:
         </div>
       `;
 
-      // 5. Crease Pattern SVG
-      document.getElementById('crease-svg-container').innerHTML = `
-        <svg viewBox="0 0 240 340" width="240" height="340" xmlns="http://www.w3.org/2000/svg" style="background: #1e293b; border-radius: 8px; border: 1px solid #334155;">
-          <rect x="10" y="10" width="220" height="320" fill="#0f172a" stroke="#64748b" stroke-width="1.5" rx="4"/>
-          <line x1="120" y1="10" x2="120" y2="330" stroke="#38bdf8" stroke-width="2" stroke-dasharray="4,3"/>
-          <polygon points="120,10 20,80 220,80" fill="none" stroke="#f97316" stroke-width="1.5" stroke-dasharray="2,2"/>
-          <line x1="20" y1="80" x2="220" y2="80" stroke="#f97316" stroke-width="1.5"/>
-          <line x1="60" y1="80" x2="35" y2="330" stroke="#a855f7" stroke-width="2"/>
-          <line x1="180" y1="80" x2="205" y2="330" stroke="#a855f7" stroke-width="2"/>
-          <line x1="30" y1="140" x2="30" y2="330" stroke="#ec4899" stroke-width="1.5" stroke-dasharray="3,3"/>
-          <line x1="210" y1="140" x2="210" y2="330" stroke="#ec4899" stroke-width="1.5" stroke-dasharray="3,3"/>
-          <text x="120" y="315" font-family="sans-serif" font-size="10" fill="#94a3b8" text-anchor="middle">折り線展開図 (A4比率)</text>
+      // 5. Crease Pattern SVG (Generated dynamically from real genome crease lines)
+      const creaseLines = elite.crease_lines || [];
+      const w = 260;
+      const h = 368;
+      const margin = 15;
+      const drawW = w - 2 * margin;
+      const drawH = h - 2 * margin;
+
+      let svgLines = `
+        <svg viewBox="0 0 ${{w}} ${{h}}" width="100%" height="auto" xmlns="http://www.w3.org/2000/svg" style="background: #1e293b; border-radius: 8px; border: 1px solid #334155; max-width: 300px;">
+          <rect x="${{margin}}" y="${{margin}}" width="${{drawW}}" height="${{drawH}}" fill="#0f172a" stroke="#64748b" stroke-width="1.5" rx="4"/>
+          <!-- Centerline -->
+          <line x1="${{w / 2}}" y1="${{margin}}" x2="${{w / 2}}" y2="${{h - margin}}" stroke="#38bdf8" stroke-width="1.5" stroke-dasharray="4,3"/>
+      `;
+
+      creaseLines.forEach(cl => {{
+        const x0 = margin + cl.p0[0] * drawW;
+        const y0 = margin + (1.0 - cl.p0[1]) * drawH; // v=1 is nose (top)
+        const x1 = margin + cl.p1[0] * drawW;
+        const y1 = margin + (1.0 - cl.p1[1]) * drawH;
+        const color = cl.mountain ? "#ef4444" : "#3b82f6"; // Red: mountain, Blue: valley
+        const dash = cl.mountain ? "5,3" : "2,2";
+        svgLines += `<line x1="${{x0.toFixed(1)}}" y1="${{y0.toFixed(1)}}" x2="${{x1.toFixed(1)}}" y2="${{y1.toFixed(1)}}" stroke="${{color}}" stroke-width="1.8" stroke-dasharray="${{dash}}"/>`;
+      }});
+
+      svgLines += `
+          <text x="${{w / 2}}" y="${{margin - 4}}" font-family="sans-serif" font-size="9" fill="#94a3b8" text-anchor="middle">▲ 機首 (NOSE)</text>
+          <text x="${{w / 2}}" y="${{h - 4}}" font-family="sans-serif" font-size="9" fill="#94a3b8" text-anchor="middle">赤破線:山折り / 青点線:谷折り (A4比率)</text>
         </svg>
       `;
+      document.getElementById('crease-svg-container').innerHTML = svgLines;
     }}
 
     // Populate Left Sidebar List
