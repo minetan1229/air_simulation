@@ -1709,9 +1709,22 @@ def gpu_batch_evaluate_cases(
 
     backend = "cupy"
     device_name = gpu_info.get("device_name")
-    return evaluate_cases_on_device(
-        cases, xp, backend=backend, device_name=device_name, progress_cb=progress_cb
-    )
+    try:
+        return evaluate_cases_on_device(
+            cases, xp, backend=backend, device_name=device_name, progress_cb=progress_cb
+        )
+    except Exception as exc:
+        log.warning(
+            "GPU evaluation failed (%s: %s); falling back to CPU rigid body batch",
+            type(exc).__name__,
+            exc,
+        )
+        try:
+            from .gpu_dynamics import release_gpu_memory_pool
+            release_gpu_memory_pool(xp)
+        except Exception:
+            pass
+        return gpu_batch_evaluate_cases(cases, progress_cb=progress_cb, force_cpu=True)
 
 
 def evaluate_cases_on_device(
@@ -1817,6 +1830,7 @@ def evaluate_cases_on_device(
         # sample of the reporting grid.
         last_x = _to_host(xp, batch.get("last_recorded_x", state[:, 0]))
         last_y = _to_host(xp, batch.get("last_recorded_y", state[:, 1]))
+        initial_host = _to_host(xp, initial)
 
         for position, index in enumerate(members):
             duration = group_durations[position]
@@ -1849,11 +1863,11 @@ def evaluate_cases_on_device(
             # backend, and the range was measured to the touchdown while the
             # path length ended at the last recorded sample -- two different
             # endpoints for one flight.
-            range_x = abs(float(last_x[position]) - float(initial[position, 0]))
-            range_y = abs(float(last_y[position]) - float(initial[position, 1]))
+            range_x = abs(float(last_x[position]) - float(initial_host[position, 0]))
+            range_y = abs(float(last_y[position]) - float(initial_host[position, 1]))
             horizontal_range = math.hypot(
-                float(last_x[position]) - float(initial[position, 0]),
-                float(last_y[position]) - float(initial[position, 1]),
+                float(last_x[position]) - float(initial_host[position, 0]),
+                float(last_y[position]) - float(initial_host[position, 1]),
             )
             entry = {
                 "distance_m": float(distance[position]),
@@ -1892,6 +1906,15 @@ def evaluate_cases_on_device(
         if progress_cb is not None:
             try:
                 progress_cb(completed, N, backend)
+            except Exception:
+                pass
+
+        # Free device memory allocated for this group
+        del batch, initial, params, initial_host
+        if backend == "cupy":
+            try:
+                from .gpu_dynamics import release_gpu_memory_pool
+                release_gpu_memory_pool(xp)
             except Exception:
                 pass
 
