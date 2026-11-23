@@ -288,7 +288,7 @@ def render_a4_printable_sheet(
     # Title & Headers outside paper area
     fig.text(
         0.5, 0.955,
-        f"milcy 実機印刷用 A4 折り図テンプレート（型紙）",
+        "milcy 実機印刷用 A4 折り図テンプレート（型紙）",
         fontsize=15,
         fontweight="bold",
         ha="center",
@@ -487,7 +487,7 @@ def render_a4_step_manual(
     # Header
     fig.text(
         0.5, 0.955,
-        f"A4実践折り方マニュアル & 機体調整ガイド",
+        "A4実践折り方マニュアル & 機体調整ガイド",
         fontsize=16,
         fontweight="bold",
         ha="center",
