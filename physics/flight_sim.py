@@ -2778,8 +2778,9 @@ class FlightSimulator:
         r_nose = np.array([0.5 * mac, 0.0, 0.0], dtype=np.float64)
         r_ltip = np.array([-0.3 * mac, -semispan, 0.0], dtype=np.float64)
         r_rtip = np.array([-0.3 * mac, semispan, 0.0], dtype=np.float64)
-        r_keel = np.array([0.0, 0.0, GROUND_KEEL_DEPTH_M], dtype=np.float64)
-        r_tail = np.array([-0.7 * mac, 0.0, GROUND_KEEL_DEPTH_M], dtype=np.float64)
+        keel_depth = max(float(self._derived.get("keel_height_m", GROUND_KEEL_DEPTH_M)), 1.0e-3)
+        r_keel = np.array([0.0, 0.0, keel_depth], dtype=np.float64)
+        r_tail = np.array([-0.7 * mac, 0.0, keel_depth], dtype=np.float64)
 
         def _resolve_contact(r_body: np.ndarray, e_coef: float) -> float:
             """Resolve the impulsive contact at one station.
@@ -2856,7 +2857,7 @@ class FlightSimulator:
             (alt_ltip, r_ltip),
             (alt_rtip, r_rtip),
             (alt_tail, r_tail),
-            (altitude_cg, r_keel),  # keel acts under the CG
+            (alt_keel, r_keel),  # keel acts under the CG
         ):
             if station_alt <= 0.0:
                 impact_speed = max(impact_speed, max(_station_v_normal(r_body), 0.0))
@@ -2886,7 +2887,7 @@ class FlightSimulator:
                     body_station = r_nose
                 else:
                     body_station = np.array(
-                        [-0.7 * mac, 0.0, GROUND_KEEL_DEPTH_M], dtype=np.float64
+                        [-0.7 * mac, 0.0, keel_depth], dtype=np.float64
                     )
                 if impact_speed > 0.0:
                     _resolve_contact(body_station, restitution)

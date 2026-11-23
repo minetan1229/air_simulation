@@ -449,13 +449,24 @@ def compile_macro_origami(
             Crease(key="nose_lock_r", p0=(0.60, tip_v), p1=(0.50, tip_v + 0.04), angle_deg=180.0, side=1, up=False, level=3, groups=("collar_r",), set_group="nose_tip_r")
         )
 
+    has_lock = bool(keel_cfg.has_lock_fold) and (float(keel_cfg.keel_depth_ratio) > 0.09 or float(keel_cfg.lock_fold_angle_deg) != 180.0)
+    lock_angle = max(90.0, min(180.0, float(keel_cfg.lock_fold_angle_deg)))
+    if has_lock:
+        lock_v = max(0.35, min(0.65, eff_nose_v - 0.14))
+        creases.append(
+            Crease(key="keel_lock_l", p0=(0.44, lock_v), p1=(0.50, lock_v + 0.03), angle_deg=lock_angle, side=1, up=True, level=2, groups=("body_l",), set_group="keel_lock_l")
+        )
+        creases.append(
+            Crease(key="keel_lock_r", p0=(0.56, lock_v), p1=(0.50, lock_v + 0.03), angle_deg=lock_angle, side=1, up=False, level=2, groups=("body_r",), set_group="keel_lock_r")
+        )
+
     creases.extend([
         Crease(key="wing_l", p0=(wing_u, 0.0), p1=(0.5, 1.0), angle_deg=wing_angle, side=1, up=True, level=0, groups=("body_l",), set_group="wing_l"),
         Crease(key="wing_r", p0=(1.0 - wing_u, 0.0), p1=(0.5, 1.0), angle_deg=wing_angle, side=-1, up=True, level=0, groups=("body_r",), set_group="wing_r"),
         Crease(key="winglet_l", p0=(winglet_u, 0.0), p1=(winglet_u, winglet_v_max), angle_deg=winglet_angle, side=1, up=True, level=0, groups=("wing_l",), set_group="winglet_l"),
         Crease(key="winglet_r", p0=(1.0 - winglet_u, 0.0), p1=(1.0 - winglet_u, winglet_v_max), angle_deg=winglet_angle, side=-1, up=True, level=0, groups=("wing_r",), set_group="winglet_r"),
-        Crease(key="elevon_l", p0=(winglet_u, elevon_v), p1=(wing_u, elevon_v), angle_deg=abs(elevon), side=-1, up=False, level=0, groups=("wing_l", "winglet_l"), set_group="elevon_l"),
-        Crease(key="elevon_r", p0=(1.0 - wing_u, elevon_v), p1=(1.0 - winglet_u, elevon_v), angle_deg=abs(elevon), side=-1, up=False, level=0, groups=("wing_r", "winglet_r"), set_group="elevon_r"),
+        Crease(key="elevon_l", p0=(winglet_u, elevon_v), p1=(wing_u, elevon_v), angle_deg=abs(elevon), side=-1, up=(elevon >= 0.0), level=0, groups=("wing_l", "winglet_l"), set_group="elevon_l"),
+        Crease(key="elevon_r", p0=(1.0 - wing_u, elevon_v), p1=(1.0 - winglet_u, elevon_v), angle_deg=abs(elevon), side=-1, up=(elevon >= 0.0), level=0, groups=("wing_r", "winglet_r"), set_group="elevon_r"),
         Crease(key="trailing_l", p0=(winglet_u, trailing_v), p1=(wing_u, trailing_v), angle_deg=15.0, side=-1, up=False, level=0, groups=("elevon_l",), set_group="trailing_l"),
         Crease(key="trailing_r", p0=(1.0 - wing_u, trailing_v), p1=(1.0 - winglet_u, trailing_v), angle_deg=15.0, side=-1, up=False, level=0, groups=("elevon_r",), set_group="trailing_r"),
     ])
