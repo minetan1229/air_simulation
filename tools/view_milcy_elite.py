@@ -483,6 +483,17 @@ def build_viewer_html(elites: List[Dict[str, Any]]) -> str:
       border-radius: 0 6px 6px 0;
       font-size: 0.82rem;
       line-height: 1.5;
+      cursor: pointer;
+      transition: all 0.15s ease;
+    }}
+    .step-item:hover {{
+      background: #253349;
+      transform: translateX(3px);
+    }}
+    .step-item.active {{
+      background: rgba(56, 189, 248, 0.15);
+      border-left: 4px solid #38bdf8;
+      box-shadow: 0 0 10px rgba(56, 189, 248, 0.2);
     }}
     .step-num {{
       font-weight: 700;
@@ -572,7 +583,21 @@ def build_viewer_html(elites: List[Dict[str, Any]]) -> str:
       </div>
 
       <div>
-        <div class="section-title">🗺️ 折り線展開図（Crease Pattern）</div>
+        <div class="section-title">🗺️ 工程別 2D折り図 ＆ 次のかたち</div>
+        <div style="font-size: 0.78rem; color: var(--text-muted); margin-bottom: 8px;">
+          下部の操作バー（◀ / ▶）と連動して、<strong style="color: #fbbf24;">「いま折る線」</strong>と<strong style="color: #38bdf8;">「折った結果の次の2D形状」</strong>を1工程ずつ確認できます。
+        </div>
+        <div style="background: #0f172a; border: 1px solid #334155; border-radius: 8px; padding: 10px; margin-bottom: 14px;">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+            <span id="step-preview-badge" style="font-size: 0.75rem; font-weight: 700; background: #0284c7; color: #fff; padding: 2px 8px; border-radius: 4px;">Step 0: 初期状態</span>
+            <span id="step-preview-action" style="font-size: 0.75rem; color: #fbbf24; font-weight: 600;">平らなA4用紙</span>
+          </div>
+          <div class="crease-container" id="step-preview-svg-container" style="min-height: 220px; display: flex; align-items: center; justify-content: center;">
+            <!-- Rendered by updateStep2DPreview() -->
+          </div>
+        </div>
+
+        <div class="section-title">🖨️ A4全折り線展開図（型紙印刷・コピー）</div>
         <div style="margin-bottom: 8px;">
           <div style="font-size: 0.72rem; color: var(--accent); margin-bottom: 4px; font-weight: 600;">✨ A4最大原寸フルサイズ（余白なし 100% 拡大）</div>
           <div style="display: flex; gap: 8px; margin-bottom: 6px;">
@@ -671,7 +696,6 @@ def build_viewer_html(elites: List[Dict[str, Any]]) -> str:
       }}
       geometry.setAttribute('position', new THREE.BufferAttribute(posArray, 3));
       geometry.computeVertexNormals();
-      geometry.center();
       return geometry;
     }}
 
@@ -710,7 +734,6 @@ def build_viewer_html(elites: List[Dict[str, Any]]) -> str:
       }}
       geometry.setAttribute('position', new THREE.BufferAttribute(posArray, 3));
       geometry.computeVertexNormals();
-      geometry.center();
       return geometry;
     }}
 
@@ -762,8 +785,7 @@ def build_viewer_html(elites: List[Dict[str, Any]]) -> str:
           wireframe: wireframeMode,
         }});
         currentMesh = new THREE.Mesh(geometry, material);
-        // Step mesh is in standard coordinates; rotate so wing is horizontal
-        currentMesh.rotation.x = -Math.PI / 2;
+        // Correct native orientation: +X forward (nose), +Y up, +/-Z wingspan
         modelGroup.add(currentMesh);
 
         // Add subtle wireframe overlay
@@ -776,6 +798,125 @@ def build_viewer_html(elites: List[Dict[str, Any]]) -> str:
         const wireOverlay = new THREE.Mesh(geometry, wireMat);
         currentMesh.add(wireOverlay);
       }}
+
+      // Update 2D Step Preview showing current fold line and next folded shape
+      updateStep2DPreview(stepIdx);
+    }}
+
+    function updateStep2DPreview(stepIdx) {{
+      const elite = elitesData[currentEliteIndex];
+      const creaseLines = elite.crease_lines || [];
+      const steps = elite.folding_steps_3d || [];
+      const badgeEl = document.getElementById('step-preview-badge');
+      const actionEl = document.getElementById('step-preview-action');
+      const containerEl = document.getElementById('step-preview-svg-container');
+      if (!containerEl) return;
+
+      const totalSteps = steps.length ? steps.length - 1 : 20;
+      if (badgeEl) badgeEl.textContent = `工程 ${{stepIdx}} / ${{totalSteps}}`;
+
+      const w = 240;
+      const h = 339; // A4 aspect ratio 1:1.414
+      const margin = 14;
+      const drawW = w - 2 * margin;
+      const drawH = h - 2 * margin;
+
+      if (stepIdx === 0) {{
+        if (actionEl) actionEl.textContent = "初期状態：平らなA4用紙を準備";
+        containerEl.innerHTML = `
+          <svg viewBox="0 0 ${{w}} ${{h}}" width="100%" height="auto" xmlns="http://www.w3.org/2000/svg" style="background: #1e293b; border-radius: 6px; border: 1px solid #334155; max-width: 240px;">
+            <rect x="${{margin}}" y="${{margin}}" width="${{drawW}}" height="${{drawH}}" fill="#f8fafc" stroke="#64748b" stroke-width="1.5" rx="3"/>
+            <text x="${{w / 2}}" y="${{margin - 4}}" font-family="sans-serif" font-size="8.5" fill="#38bdf8" text-anchor="middle" font-weight="bold">▲ 機首 (NOSE)</text>
+            <text x="${{w / 2}}" y="${{h / 2}}" font-family="sans-serif" font-size="11" fill="#475569" text-anchor="middle" font-weight="bold">平らなA4用紙</text>
+            <text x="${{w / 2}}" y="${{h / 2 + 18}}" font-family="sans-serif" font-size="9" fill="#64748b" text-anchor="middle">「▶ 次へ」で折り始めます</text>
+            <text x="${{w / 2}}" y="${{h - 4}}" font-family="sans-serif" font-size="8" fill="#94a3b8" text-anchor="middle">▼ 後縁 (TRAILING EDGE)</text>
+          </svg>
+        `;
+        return;
+      }}
+
+      // Find the crease line being folded at this step
+      // stepIdx 1 maps to creaseLines[0], stepIdx 2 to creaseLines[1], etc.
+      const currentCl = creaseLines[stepIdx - 1];
+      const isMtn = currentCl ? currentCl.mountain : false;
+      const foldTypeStr = isMtn ? "赤破線で山折り" : "青一点鎖線で谷折り";
+      const foldLabel = currentCl ? (currentCl.label || `Step ${{stepIdx}}`) : `Step ${{stepIdx}}`;
+      if (actionEl) actionEl.innerHTML = `いま折る線: <strong style="color: ${{isMtn ? '#ef4444' : '#38bdf8'}};">${{foldLabel}}（${{foldTypeStr}}）</strong>`;
+
+      // Next folded shape preview polygon from 3D step mesh (top-down 2D projection)
+      const nextStepData = steps[stepIdx];
+      let nextShapeSvg = "";
+      if (nextStepData && nextStepData.positions && nextStepData.indices) {{
+        const pos = nextStepData.positions;
+        const idxs = nextStepData.indices;
+        // Project points: X is nose(+0.1485) to tail(-0.1485) -> map to Y
+        // Z is left(+0.105) to right(-0.105) -> map to X
+        // Normalise by A4 half width (0.105m) and half length (0.1485m)
+        let triSvg = "";
+        for (let i = 0; i < idxs.length; i += 3) {{
+          const i0 = idxs[i], i1 = idxs[i+1], i2 = idxs[i+2];
+          const x0 = w/2 - (pos[i0*3 + 2] / 0.105) * (drawW / 2);
+          const y0 = margin + (0.1485 - pos[i0*3]) / 0.297 * drawH;
+          const x1 = w/2 - (pos[i1*3 + 2] / 0.105) * (drawW / 2);
+          const y1 = margin + (0.1485 - pos[i1*3]) / 0.297 * drawH;
+          const x2 = w/2 - (pos[i2*3 + 2] / 0.105) * (drawW / 2);
+          const y2 = margin + (0.1485 - pos[i2*3]) / 0.297 * drawH;
+          triSvg += `<polygon points="${{x0.toFixed(1)}},${{y0.toFixed(1)}} ${{x1.toFixed(1)}},${{y1.toFixed(1)}} ${{x2.toFixed(1)}},${{y2.toFixed(1)}}" fill="rgba(56, 189, 248, 0.22)" stroke="#38bdf8" stroke-width="0.75" stroke-linejoin="round"/>`;
+        }}
+        nextShapeSvg = triSvg;
+      }}
+
+      // Build 2D Step View SVG
+      let svg = `
+        <svg viewBox="0 0 ${{w}} ${{h}}" width="100%" height="auto" xmlns="http://www.w3.org/2000/svg" style="background: #0b1120; border-radius: 6px; border: 1px solid #334155; max-width: 240px;">
+          <!-- Ghost original paper background -->
+          <rect x="${{margin}}" y="${{margin}}" width="${{drawW}}" height="${{drawH}}" fill="#1e293b" stroke="#334155" stroke-width="1" stroke-dasharray="3,3" rx="3"/>
+
+          <!-- Next 2D Folded Shape Silhouette Overlay -->
+          ${{nextShapeSvg}}
+
+          <!-- Previous Crease Lines (faded) -->
+      `;
+
+      creaseLines.slice(0, stepIdx - 1).forEach(cl => {{
+        const x0 = margin + cl.p0[0] * drawW;
+        const y0 = margin + (1.0 - cl.p0[1]) * drawH;
+        const x1 = margin + cl.p1[0] * drawW;
+        const y1 = margin + cl.p1[1] * drawH;
+        svg += `<line x1="${{x0.toFixed(1)}}" y1="${{y0.toFixed(1)}}" x2="${{x1.toFixed(1)}}" y2="${{y1.toFixed(1)}}" stroke="#475569" stroke-width="1.2" stroke-dasharray="2,2" opacity="0.6"/>`;
+      }});
+
+      // CURRENT ACTIVE CREASE LINE (HEAVILY HIGHLIGHTED WITH PULSE)
+      if (currentCl) {{
+        const x0 = margin + currentCl.p0[0] * drawW;
+        const y0 = margin + (1.0 - currentCl.p0[1]) * drawH;
+        const x1 = margin + currentCl.p1[0] * drawW;
+        const y1 = margin + (1.0 - currentCl.p1[1]) * drawH;
+        const color = isMtn ? "#ef4444" : "#0284c7";
+        const strokeDash = isMtn ? "6,4" : "4,2,1,2";
+        const mx = (x0 + x1) / 2;
+        const my = (y0 + y1) / 2;
+
+        // Glow line behind
+        svg += `<line x1="${{x0.toFixed(1)}}" y1="${{y0.toFixed(1)}}" x2="${{x1.toFixed(1)}}" y2="${{y1.toFixed(1)}}" stroke="${{color}}" stroke-width="6" opacity="0.35"/>`;
+        // Sharp dashed line
+        svg += `<line x1="${{x0.toFixed(1)}}" y1="${{y0.toFixed(1)}}" x2="${{x1.toFixed(1)}}" y2="${{y1.toFixed(1)}}" stroke="${{color}}" stroke-width="2.6" stroke-dasharray="${{strokeDash}}"/>`;
+
+        // Badge indicator on crease line
+        svg += `
+          <circle cx="${{mx.toFixed(1)}}" cy="${{my.toFixed(1)}}" r="9" fill="${{color}}" stroke="#ffffff" stroke-width="1.5"/>
+          <text x="${{mx.toFixed(1)}}" y="${{(my + 3.5).toFixed(1)}}" font-family="sans-serif" font-size="9" fill="#ffffff" text-anchor="middle" font-weight="bold">${{stepIdx}}</text>
+        `;
+      }}
+
+      svg += `
+          <!-- Header and Legend labels -->
+          <text x="${{w / 2}}" y="${{margin - 4}}" font-family="sans-serif" font-size="8.5" fill="#38bdf8" text-anchor="middle" font-weight="bold">▲ 機首 (NOSE)</text>
+          <text x="${{w / 2}}" y="${{h - 4}}" font-family="sans-serif" font-size="8" fill="#94a3b8" text-anchor="middle">水色領域: 折った後の次のかたち (2D投影)</text>
+        </svg>
+      `;
+
+      containerEl.innerHTML = svg;
     }}
 
     function buildTrajectory(elite) {{
