@@ -619,35 +619,55 @@ def build_viewer_html(elites: List[Dict[str, Any]]) -> str:
         <div class="spec-box"><div class="spec-label">主翼投影面積</div><div class="spec-value">${{planformAreaCm2}} cm²</div></div>
       `;
 
-      // 4. Human Step-by-Step Folding Guide
+      // 4. Detailed Step-by-Step Folding Manual
       const noseFolds = cfg.nose ? cfg.nose.fold_count || 4 : 4;
-      const keelDepthMm = geom.keel_height_m ? (geom.keel_height_m * 1000).toFixed(0) : "11";
-      const wingletDeg = cfg.wing ? (cfg.wing.winglet_angle_deg || 33.5).toFixed(1) : "33.5";
+      const keelDepthMm = geom.keel_height_m ? (geom.keel_height_m * 1000).toFixed(0) : "12";
+      const wingletDeg = cfg.wing ? (cfg.wing.winglet_angle_deg || 50.3).toFixed(1) : "50.3";
+      const elevonDeg = cfg.wing ? Math.abs(cfg.wing.elevon_left_deg || 3.9).toFixed(1) : "3.9";
+      const dihedralDeg = cfg.wing ? (cfg.wing.dihedral_deg || 4.4).toFixed(1) : "4.4";
 
       document.getElementById('folding-steps-container').innerHTML = `
         <div class="step-item">
-          <div class="step-num">Step 1: センター折り</div>
-          A4用紙を縦長に置き、中心線で谷折りしてしっかり折り目をつけ、一度開きます。
+          <div class="step-num">Step 1: 中心線の谷折り（基準線）</div>
+          A4用紙を縦長に置き、左右を半分に谷折りしてしっかり爪で折り目をつけ、一度平らに開きます。
         </div>
         <div class="step-item">
-          <div class="step-num">Step 2: ノーズ多層折り (${{noseFolds}}段階 重頭化)</div>
-          先端の三角形折りを順に <strong>${{noseFolds}}回</strong> 折り込み、重心を機首前方に集約します。
+          <div class="step-num">Step 2: 上の左右の角を中心線へ折る（家の屋根）</div>
+          上の左右の角を、Step 1の中心線に合わせてきっちり45度に三角形に折ります。（屋根のような五角形になります）
         </div>
         <div class="step-item">
-          <div class="step-num">Step 3: キール成型 ＆ ロック折り</div>
-          胴体下に深さ約 <strong>${{keelDepthMm}} mm</strong> の持ち手（キール）を作り、先端ロック折りで固定します。
+          <div class="step-num">Step 3: 三角の頂点を手前へ折り下げる（封筒折り）</div>
+          上の尖った頂点を、中心線に沿って手前（下方向）へ折り下げます。（封筒のフタを閉じたような長方形＋台形になります。先端から下端までは約8.5cmあけます）
         </div>
         <div class="step-item">
-          <div class="step-num">Step 4: 主翼折り下げ ＆ 上反角調整</div>
-          水平より約 <strong>${{dihedral}}°</strong> わずかに上向き（V字）になるよう主翼を折り下げます。
+          <div class="step-num">Step 4: もう一度、上の左右を中心線へ折る</div>
+          折り下げた状態で、新しくできた上の左右の角を、再び中心線に向かって三角形に折ります。<br>
+          <span style="color: var(--accent);">※ポイント: Step 3で折り下げた三角の先端が、下から約1.5cm顔をのぞかせている状態にします。</span>
         </div>
         <div class="step-item">
-          <div class="step-num">Step 5: 翼端ウィングレット (${{wingletDeg}}°)</div>
-          左右の翼端を外側から斜め上へ約 <strong>${{wingletDeg}}°</strong> 立ち上げ、翼端渦を抑えます。
+          <div class="step-num">Step 5: ノーズロック折り（機首の固定ロック）</div>
+          下からのぞいている小さな三角形を上に折り返し、Step 4で折った左右の紙の合わせ目をガッチリ挟み込んでロックします。（飛行中に機首が開くのを防ぎます）
         </div>
         <div class="step-item">
-          <div class="step-num">Step 6: 超微細エレボントリム (${{elevon}}°)</div>
-          主翼の後縁を指先で約 <strong>${{Math.abs(parseFloat(elevon)).toFixed(1)}}° (1〜2ミリ)</strong> 軽く上へ反らせます。
+          <div class="step-num">Step 6: 胴体の二つ折り（裏返して半分に）</div>
+          機体を裏返し、Step 1の中心線に沿って山折り（機首のロックが外側に見える状態）で半分に折りたたみます。
+        </div>
+        <div class="step-item">
+          <div class="step-num">Step 7: 主翼の折り下げ（持ち手キール成型）</div>
+          胴体の下側に深さ約 <strong>${{keelDepthMm}} mm（指1本分の幅）</strong> の持ち手（キール）を残すようにして、主翼を左右とも外側へ水平に折り下げます。
+        </div>
+        <div class="step-item">
+          <div class="step-num">Step 8: 主翼の上反角（V字角度: 約 ${{dihedralDeg}}°）調整</div>
+          左右の主翼を水平よりほんのわずか（約 <strong>${{dihedralDeg}}度</strong>）上向きに持ち上げます。（正面から見て浅いV字型にすることで横揺れが自然復元します）
+        </div>
+        <div class="step-item">
+          <div class="step-num">Step 9: 翼端ウィングレット（約 ${{wingletDeg}}°）立ち上げ</div>
+          左右の主翼の外端（端から約1.5cm幅）を、斜め上へ約 <strong>${{wingletDeg}}度</strong> 急角度で折り上げます。（翼端渦を抑えて失速を防ぎます）
+        </div>
+        <div class="step-item">
+          <div class="step-num">Step 10: エレボントリム（仕上げ反り: 約 ${{elevonDeg}}°）</div>
+          主翼の後ろ端（後縁）を、指先で <strong>約 1〜2ミリ（約 ${{elevonDeg}}度）だけ軽く上向きに反らせます</strong>。<br>
+          <span style="color: var(--warning);">※このわずかな上向き反りによって、急降下せず美しい水平滑空姿勢が保たれます！</span>
         </div>
       `;
 
