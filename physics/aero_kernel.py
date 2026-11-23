@@ -1194,11 +1194,12 @@ def lift_coefficient(
     )
 
     stall_rad = _rad(xp, stall_alpha)
-    kv = xp.maximum(_finite(xp, polhamus_kv, 0.0), 0.0)
-    stall_vortex = kv * xp.square(xp.sin(stall_rad)) * xp.cos(stall_rad)
-    vortex_inc = xp.where(kv > 0.0, stall_vortex, 0.0)
-    linear_at_stall_pos = zero_lift + slope * stall_rad + vortex_inc
-    linear_at_stall_neg = zero_lift - slope * stall_rad - vortex_inc
+    linear_at_stall_pos = polhamus_attached_branch(
+        xp, stall_alpha, zero_lift, slope, polhamus_kp, polhamus_kv
+    )
+    linear_at_stall_neg = polhamus_attached_branch(
+        xp, -stall_alpha, zero_lift, slope, polhamus_kp, polhamus_kv
+    )
 
     ceiling = xp.maximum(xp.abs(_finite(xp, cl_max, 0.90)), 1.0e-6)
     attached = _clamp(xp, linear, -ceiling, ceiling)
@@ -1812,7 +1813,7 @@ def _coefficient_core(
     alpha_norm = (alpha + 180.0) % 360.0 - 180.0
     stall_alpha_val = _stall_eff
     angle = _rad(xp, alpha_norm)
-    separated_drag = 2.0 * xp.square(xp.sin(angle)) + cd0 * xp.abs(xp.cos(angle))
+    separated_drag = 2.0 * xp.square(xp.sin(angle)) + cd0 * xp.maximum(xp.cos(angle), 0.0)
     w_drag = _smoothstep01(
         xp,
         (xp.abs(alpha_norm) - stall_alpha_val)

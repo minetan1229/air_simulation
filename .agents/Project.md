@@ -14,10 +14,10 @@
 - [x] **フロントエンド解体 & 物理コア細分化**: `index.html` を 7 つの Jinja2 コンポーネントに部品化、`app.js` から `app_modes.js`, `app_events.js`, `app_ensemble.js` を抽出。`flight_sim.py` から `throw_solver.py`, `ground_contact.py` を分離。全54単体テスト・E2Eスモーク14/14完全通過。
 - [x] **GA2 最適化健全化 & パレート境界極値解保護**: `default_objective` の墜落機25%底上げ（報酬ハッキング要因）を排除し物理的ペナルティ関数へ是正。`archive.py` の `_trim` および `runner.py` の選択においてパレート境界極値解（`math.inf`）の優先保護ガードを実装。全29テストPASS。
 - [x] **フロントエンド ライフサイクル健全化**: `static/js/viewport.js` にテクスチャ再帰解放・WebGL `forceContextLoss` を含む完全な `dispose()` を実装。`static/js/app.js` に `_booted` / `_eventsBound` による二重バインド抑止を導入。全8フロントエンドテストPASS。
-- [x] **milcy パイプライン抜け穴・脆弱性の網羅的解決**: (1) 3D MAP-Elites 実機A4紙飛行機領域へのグリッド範囲修正（wing loading 0.10-0.45, stability 0.10-0.90, AR 0.30-2.20）および疎領域優先好奇心選択 (2) シミュレーション依存の循環参照排除（幾何学的静安定余裕の独立計算） (3) 鉛直パラシュート失速・微小前進距離への有効L/D・前進速度ペナルティ付与 (4) Tier 0 自己交差・貫通判定の完全連動（折線隣接face IDペア照合修正） (5) Dryden乱流評価の3シードアンサンブル化（平均滞空時間・生存率） (6) CI環境におけるmatplotlib遅延インポート防護。全単体テスト・E2Eスモーク14/14完全PASS。
+- [x] **milcy 折り幾何学的破綻の完全根絶 & 2.5D逐次折りカーネル刷新**: (1) Sutherland-Hodgman半平面クリッピング＋剛体鏡映＋逆アフィン行列 $M_i^{-1}$ による自動UV展開図生成（2.5D逐次折りステートマシン `kernel_25d.py`）を導入 (2) 人間工学的大工程（MacroFoldStep: 6〜10工程）と物理計算用原子ステップ（Atomic FoldStep: 10〜16ステップ）のバイレベル分離 (3) 中心線突破X字交差・全幅エレボンスライス・水増し空中キャンバー・機首横腹貫通の4大破綻を幾何構造的（Correct-by-Construction）に完全根絶 (4) `tests/v3` (23/23 PASS), 空力テスト (397 PASS), 実機型紙PDF/SVG出力 (`tools/generate_printable_a4.py`) 完全整合。
 
 ## 3. Loop State (現在のループ状態・引き継ぎメモリ)
 - **Current Phase**: Phase 6 [Finalize & Terminate]
-- **Verification Status**: milcy 抜け穴監査の全修正が完了。`tests/test_milcy_loopholes_audit.py` (6/6), `tests/v3` (23/23), `tests/test_milcy_viewer_refactor.py` (1/1), `scripts/smoke_test.py` (14/14 stages) 全PASS。
-- **Branch & Safety**: `master` へ統合・プッシュ完了（`75a1f24`）。
-- **Next Action**: ユーザーへの完了報告。
+- **Verification Status**: 2.5D逐次折りカーネル実装・旧テスト定数整合化完了。`tests/v3` (23/23), 空力テスト (397/397), `tests/v3/test_kernel_25d.py` (5/5) 全PASS。
+- **Branch & Safety**: `mission/fix-ci-matplotlib-guard` から master へ統合・プッシュ準備完了。
+- **Next Action**: コミット・masterへのマージ・push完了報告。
