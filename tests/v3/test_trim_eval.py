@@ -3,7 +3,7 @@
 import json
 from pathlib import Path
 import pytest
-from v3.interfaces import AircraftCandidate, ParametricOrigamiConfig
+from v3.interfaces import AircraftCandidate, ParametricOrigamiConfig, MIN_FOLD_STEPS
 from v3.origami.adapter import OrigamiAdapter
 from v3.physics.benchmark import DeterministicFlightBenchmark
 from v3.trim.nelder_mead import NelderMeadTrimOptimizer
@@ -49,7 +49,7 @@ def test_robustness_evaluator_and_export(tmp_path: Path):
     with open(json_path, "r", encoding="utf-8") as f:
         data = json.load(f)
         assert data["candidate_id"] == "eval-test"
-        assert data["step_count"] >= 16
+        assert data["step_count"] >= MIN_FOLD_STEPS
 
     with open(obj_path, "r", encoding="utf-8") as f:
         lines = f.readlines()

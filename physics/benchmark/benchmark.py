@@ -11,7 +11,13 @@ from __future__ import annotations
 import math
 from typing import Any, Dict, Optional, Tuple
 
-from physics.config_schema import AircraftConfig, EnvironmentConfig, LaunchConfig
+from physics.config_schema import (
+    AircraftConfig,
+    EnvironmentConfig,
+    LaunchConfig,
+    SimulationSettings,
+    derived_properties,
+)
 from physics.flight_sim import FlightSimulator, flight_phase_metrics
 from core.interfaces import (
     AircraftCandidate,
@@ -66,15 +72,33 @@ def _build_aircraft_config(candidate: AircraftCandidate) -> AircraftConfig:
     dihedral_deg = cfg.wing.dihedral_deg
     elevon_deg = 0.5 * (cfg.wing.elevon_left_deg + cfg.wing.elevon_right_deg)
 
-    return AircraftConfig(
+    cg_offset_x = 0.0
+    static_margin = 0.12
+    if geom:
+        chord = max(0.01, float(geom.chord_m))
+        x_from_nose = 0.1485 - float(geom.cg_m[0])
+        nominal_ac_from_nose = 0.35 * chord
+        raw_offset = x_from_nose - nominal_ac_from_nose
+        cg_offset_x = max(-0.05, min(0.05, float(raw_offset)))
+        static_margin = max(-0.20, min(0.30, float(-cg_offset_x / chord)))
+
+    ac = AircraftConfig(
         mass_kg=mass_kg,
         wing_area_m2=wing_area,
         wingspan_m=wingspan,
         aspect_ratio=aspect_ratio,
         dihedral_deg=dihedral_deg,
         elevon_deg=elevon_deg,
+        cg_offset_x=cg_offset_x,
+        static_margin=static_margin,
         low_re_enabled=True,
     )
+
+    props = derived_properties(ac)
+    ac.roll_inertia_kgm2 = props.get("roll_inertia_kgm2", ac.roll_inertia_kgm2)
+    ac.pitch_inertia_kgm2 = props.get("pitch_inertia_kgm2", ac.pitch_inertia_kgm2)
+    ac.yaw_inertia_kgm2 = props.get("yaw_inertia_kgm2", ac.yaw_inertia_kgm2)
+    return ac
 
 
 def evaluate_horizontal_glide(
@@ -86,17 +110,20 @@ def evaluate_horizontal_glide(
     """Run a single deterministic horizontal launch simulation and extract metrics."""
     launch = _build_fixed_launch_config(speed_mps)
     env = _build_environment_config()
+    settings = SimulationSettings(dt_max=dt_max, duration_s=duration_s)
 
     sim = FlightSimulator(
         aircraft=aircraft_config,
         environment=env,
         launch=launch,
+        settings=settings,
     )
 
     result = sim.simulate(duration_s=duration_s)
     sim_metrics = sim.metrics()
 
     # Extract flight history samples for phase analysis
+    samples: list = []
     try:
         samples = sim.history()
         phase_metrics = flight_phase_metrics(samples, phugoid_window_s=2.5)

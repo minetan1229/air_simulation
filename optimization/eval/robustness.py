@@ -12,6 +12,7 @@ from typing import Any, Dict, List, Optional
 
 from physics.config_schema import AircraftConfig, EnvironmentConfig, LaunchConfig
 from physics.flight_sim import FlightSimulator
+from physics.benchmark.benchmark import _build_aircraft_config
 from core.interfaces import AircraftCandidate, RobustnessReport
 
 
@@ -23,24 +24,7 @@ class RobustnessEvaluator:
 
     def evaluate_candidate(self, candidate: AircraftCandidate) -> RobustnessReport:
         """Run Dryden turbulence, jitter, and high-pitch throw stress tests."""
-        geom = candidate.geometry
-        cfg = candidate.config
-
-        mass_kg = geom.mass_kg if geom else 0.005
-        wing_area = geom.wing_area_m2 if geom else 0.015
-        wingspan = geom.wingspan_m if geom else 0.18
-        aspect_ratio = geom.aspect_ratio if geom else 2.16
-        dihedral_deg = cfg.wing.dihedral_deg
-        elevon_deg = 0.5 * (cfg.wing.elevon_left_deg + cfg.wing.elevon_right_deg)
-
-        aircraft = AircraftConfig(
-            mass_kg=mass_kg,
-            wing_area_m2=wing_area,
-            wingspan_m=wingspan,
-            aspect_ratio=aspect_ratio,
-            dihedral_deg=dihedral_deg,
-            elevon_deg=elevon_deg,
-        )
+        aircraft = _build_aircraft_config(candidate)
 
         # 1. Dryden Turbulence Ensemble Test (3 diverse turbulence realizations)
         turb_launch = LaunchConfig(
@@ -48,7 +32,9 @@ class RobustnessEvaluator:
             launch_angle_deg=0.0,
             launch_height_m=1.5,
         )
-        turb_metrics = {}
+        turb_metrics: Dict[str, Any] = {}
+        jitter_metrics: Dict[str, Any] = {}
+        climb_metrics: Dict[str, Any] = {}
         dryden_survivals = 0
         dryden_hangtimes = []
         for t_seed in (42, 101, 777):
@@ -103,8 +89,9 @@ class RobustnessEvaluator:
             climb_metrics = climb_sim.metrics()
             stalled = bool(climb_metrics.get("stalled", False))
             crashed = bool(climb_metrics.get("crashed", False))
-            high_pitch_recovered = (not crashed) and (not stalled)
-            recovery_rate = 1.0 if high_pitch_recovered else (0.5 if not crashed else 0.0)
+            diverged = bool(climb_metrics.get("diverged", False))
+            high_pitch_recovered = (not crashed) and (not stalled) and (not diverged)
+            recovery_rate = 1.0 if high_pitch_recovered else (0.5 if (not crashed and not diverged) else 0.0)
         except Exception:
             recovery_rate = 0.0
 
@@ -116,7 +103,7 @@ class RobustnessEvaluator:
 
         return RobustnessReport(
             candidate_id=candidate.candidate_id,
-            dryden_survival_rate=1.0 if dryden_survived else 0.0,
+            dryden_survival_rate=dryden_survival_rate,
             dryden_mean_hangtime_s=dryden_hangtime,
             jitter_robustness_score=jitter_score,
             high_pitch_recovery_rate=recovery_rate,
@@ -161,9 +148,11 @@ class RobustnessEvaluator:
 
             if positions and indices and len(positions) >= 9 and len(indices) >= 3:
                 # Real 3D origami vertex mesh
-                for i in range(0, len(positions), 3):
+                safe_pos_len = (len(positions) // 3) * 3
+                for i in range(0, safe_pos_len, 3):
                     f.write(f"v {positions[i]:.5f} {positions[i+1]:.5f} {positions[i+2]:.5f}\n")
-                for i in range(0, len(indices), 3):
+                safe_idx_len = (len(indices) // 3) * 3
+                for i in range(0, safe_idx_len, 3):
                     f.write(f"f {indices[i]+1} {indices[i+1]+1} {indices[i+2]+1}\n")
             else:
                 # Fallback clean triangle mesh if mesh generation unavailable

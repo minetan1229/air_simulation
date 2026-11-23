@@ -14,10 +14,10 @@
 - [x] **フロントエンド解体 & 物理コア細分化**: `index.html` を 7 つの Jinja2 コンポーネントに部品化、`app.js` から `app_modes.js`, `app_events.js`, `app_ensemble.js` を抽出。`flight_sim.py` から `throw_solver.py`, `ground_contact.py` を分離。全54単体テスト・E2Eスモーク14/14完全通過。
 - [x] **GA2 最適化健全化 & パレート境界極値解保護**: `default_objective` の墜落機25%底上げ（報酬ハッキング要因）を排除し物理的ペナルティ関数へ是正。`archive.py` の `_trim` および `runner.py` の選択においてパレート境界極値解（`math.inf`）の優先保護ガードを実装。全29テストPASS。
 - [x] **フロントエンド ライフサイクル健全化**: `static/js/viewport.js` にテクスチャ再帰解放・WebGL `forceContextLoss` を含む完全な `dispose()` を実装。`static/js/app.js` に `_booted` / `_eventsBound` による二重バインド抑止を導入。全8フロントエンドテストPASS。
-- [x] **v3（milcy）アルゴリズム強化 & 接地寸法連動**: MCTS折り紙探索パラメータ（ノーズ折り回数・テーパー・キールロック）を幾何折線（Creases）へ直接連動、3D MAP-Elitesタイブレーク導入、Nelder-Meadクランプ強化。接地ステーション高度計算に実機キール深さを動的連動。
+- [x] **milcy パイプライン抜け穴・脆弱性の網羅的解決**: (1) 3D MAP-Elites 実機A4紙飛行機領域へのグリッド範囲修正（wing loading 0.10-0.45, stability 0.10-0.90, AR 0.30-2.20）および疎領域優先好奇心選択 (2) シミュレーション依存の循環参照排除（幾何学的静安定余裕の独立計算） (3) 鉛直パラシュート失速・微小前進距離への有効L/D・前進速度ペナルティ付与 (4) Tier 0 自己交差・貫通判定の完全連動（折線隣接face IDペア照合修正） (5) Dryden乱流評価の3シードアンサンブル化（平均滞空時間・生存率） (6) CI環境におけるmatplotlib遅延インポート防護。全単体テスト・E2Eスモーク14/14完全PASS。
 
 ## 3. Loop State (現在のループ状態・引き継ぎメモリ)
 - **Current Phase**: Phase 6 [Finalize & Terminate]
-- **Verification Status**: Auto-Investigateの1200sタイムアウト（#214）を完全解消。適応ステップ（adaptive=True, dt_max=0.02, max_substeps=64）の適用とベースラインスコアの再利用により、1シミュレーションあたり2000回超の発散リトライ（step rejection）を0回に抑制。`tests/test_investigate.py` 実行時間を 1200s超 → 34.48s（約35倍高速化）へ短縮。全単体・E2Eスモーク14/14完全PASS。
-- **Branch & Safety**: `master` へ統合・プッシュ完了（`89655f9`）。CIパイプライン稼働中。
-- **Next Action**: CI通過・Issue #214 クローズ確認・完了報告。
+- **Verification Status**: milcy 抜け穴監査の全修正が完了。`tests/test_milcy_loopholes_audit.py` (6/6), `tests/v3` (23/23), `tests/test_milcy_viewer_refactor.py` (1/1), `scripts/smoke_test.py` (14/14 stages) 全PASS。
+- **Branch & Safety**: `master` へ統合・プッシュ完了（`75a1f24`）。
+- **Next Action**: ユーザーへの完了報告。
