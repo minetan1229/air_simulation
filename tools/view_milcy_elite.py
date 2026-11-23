@@ -764,6 +764,13 @@ def build_viewer_html(elites: List[Dict[str, Any]]) -> str:
         btnFinish.classList.toggle('active', stepIdx === steps.length - 1);
       }}
 
+      // Highlight corresponding manual step-item
+      document.querySelectorAll('#folding-steps-container .step-item').forEach(item => {{
+        const targetStep = parseInt(item.getAttribute('data-step'), 10);
+        // Step items represent thresholds: activate if stepIdx matches or is within its phase
+        item.classList.toggle('active', targetStep === stepIdx);
+      }});
+
       // Rebuild 3D Mesh for this intermediate fold step
       while (modelGroup.children.length > 0) {{
         modelGroup.remove(modelGroup.children[0]);
@@ -1015,49 +1022,60 @@ def build_viewer_html(elites: List[Dict[str, Any]]) -> str:
       const dihedralDeg = cfg.wing ? (cfg.wing.dihedral_deg || 4.4).toFixed(1) : "4.4";
 
       document.getElementById('folding-steps-container').innerHTML = `
-        <div class="step-item">
+        <div class="step-item" data-step="1">
           <div class="step-num">Step 1: 中心線の谷折り（基準線）</div>
           A4用紙を縦長に置き、左右を半分に谷折りしてしっかり爪で折り目をつけ、一度平らに開きます。
         </div>
-        <div class="step-item">
+        <div class="step-item" data-step="3">
           <div class="step-num">Step 2: 上の左右の角を中心線へ折る（家の屋根）</div>
           上の左右の角を、Step 1の中心線に合わせてきっちり45度に三角形に折ります。（屋根のような五角形になります）
         </div>
-        <div class="step-item">
+        <div class="step-item" data-step="5">
           <div class="step-num">Step 3: 三角の頂点を手前へ折り下げる（封筒折り）</div>
           上の尖った頂点を、中心線に沿って手前（下方向）へ折り下げます。（封筒のフタを閉じたような長方形＋台形になります。先端から下端までは約8.5cmあけます）
         </div>
-        <div class="step-item">
+        <div class="step-item" data-step="7">
           <div class="step-num">Step 4: もう一度、上の左右を中心線へ折る</div>
           折り下げた状態で、新しくできた上の左右の角を、再び中心線に向かって三角形に折ります。<br>
           <span style="color: var(--accent);">※ポイント: Step 3で折り下げた三角の先端が、下から約1.5cm顔をのぞかせている状態にします。</span>
         </div>
-        <div class="step-item">
+        <div class="step-item" data-step="9">
           <div class="step-num">Step 5: ノーズロック折り（機首の固定ロック）</div>
           下からのぞいている小さな三角形を上に折り返し、Step 4で折った左右の紙の合わせ目をガッチリ挟み込んでロックします。（飛行中に機首が開くのを防ぎます）
         </div>
-        <div class="step-item">
+        <div class="step-item" data-step="10">
           <div class="step-num">Step 6: 胴体の二つ折り（裏返して半分に）</div>
           機体を裏返し、Step 1の中心線に沿って山折り（機首のロックが外側に見える状態）で半分に折りたたみます。
         </div>
-        <div class="step-item">
+        <div class="step-item" data-step="11">
           <div class="step-num">Step 7: 主翼の折り下げ（持ち手キール成型）</div>
           胴体の下側に深さ約 <strong>${{keelDepthMm}} mm（指1本分の幅）</strong> の持ち手（キール）を残すようにして、主翼を左右とも外側へ水平に折り下げます。
         </div>
-        <div class="step-item">
-          <div class="step-num">Step 8: 主翼の上反角（V字角度: 約 ${{dihedralDeg}}°）調整</div>
-          左右の主翼を水平よりほんのわずか（約 <strong>${{dihedralDeg}}度</strong>）上向きに持ち上げます。（正面から見て浅いV字型にすることで横揺れが自然復元します）
-        </div>
-        <div class="step-item">
-          <div class="step-num">Step 9: 翼端ウィングレット（約 ${{wingletDeg}}°）立ち上げ</div>
+        <div class="step-item" data-step="13">
+          <div class="step-num">Step 8: 翼端ウィングレット（約 ${{wingletDeg}}°）立ち上げ</div>
           左右の主翼の外端（端から約1.5cm幅）を、斜め上へ約 <strong>${{wingletDeg}}度</strong> 急角度で折り上げます。（翼端渦を抑えて失速を防ぎます）
         </div>
-        <div class="step-item">
-          <div class="step-num">Step 10: エレボントリム（仕上げ反り: 約 ${{elevonDeg}}°）</div>
+        <div class="step-item" data-step="15">
+          <div class="step-num">Step 9: エレボントリム（仕上げ反り: 約 ${{elevonDeg}}°）</div>
           主翼の後ろ端（後縁）を、指先で <strong>約 1〜2ミリ（約 ${{elevonDeg}}度）だけ軽く上向きに反らせます</strong>。<br>
           <span style="color: var(--warning);">※このわずかな上向き反りによって、急降下せず美しい水平滑空姿勢が保たれます！</span>
         </div>
+        <div class="step-item" data-step="20">
+          <div class="step-num">Step 10: 主翼の上反角（V字角度: 約 ${{dihedralDeg}}°）調整</div>
+          左右の主翼を水平よりほんのわずか（約 <strong>${{dihedralDeg}}度</strong>）上向きに持ち上げます。（正面から見て浅いV字型にすることで横揺れが自然復元します）
+        </div>
       `;
+
+      // Attach click listeners to step items
+      document.querySelectorAll('#folding-steps-container .step-item').forEach(item => {{
+        item.addEventListener('click', () => {{
+          stopFoldingAnimation();
+          const targetStep = parseInt(item.getAttribute('data-step'), 10);
+          if (!isNaN(targetStep)) {{
+            showFoldStep(targetStep);
+          }}
+        }});
+      }});
 
       // 5. Crease Pattern SVG (Generated dynamically from real genome crease lines)
       const creaseLines = elite.crease_lines || [];
