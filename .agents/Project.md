@@ -18,6 +18,6 @@
 
 ## 3. Loop State (現在のループ状態・引き継ぎメモリ)
 - **Current Phase**: Phase 6 [Finalize & Terminate]
-- **Verification Status**: 2.5D逐次折りカーネル実装・旧テスト定数整合化完了。`tests/v3` (23/23), 空力テスト (397/397), `tests/v3/test_kernel_25d.py` (5/5) 全PASS。
-- **Branch & Safety**: `mission/fix-ci-matplotlib-guard` から master へ統合・プッシュ準備完了。
-- **Next Action**: コミット・masterへのマージ・push完了報告。
+- **Verification Status**: 2.5D逐次折りステートマシン（`kernel_25d.py`）、MacroStep二層構造、Tier 0幾何ゲートキーパー、Parsimony Pressureの全配備完了。`tests/v3/` (24/24), `tests/test_origami_genome.py` (28/28), E2Eスモーク (14/14ステージ) 全PASS。
+- **Branch & Safety**: `mission/correct-by-construction-25d` を `master`（`de140a2`）へマージし、リモート `origin/master` へ push 完了。CIパイプライン稼働中。
+- **Next Action**: CI通過完了確認・HALT。
