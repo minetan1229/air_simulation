@@ -2369,9 +2369,16 @@ class FlightSimulator:
                 cn_r0=base_nr,
             )
             q_dyn_ref = 0.5 * rho_val * (speed ** 2) * ref_area
-            d_l = q_dyn_ref * span * float(cl_p_nl - base_lp) * p_hat
-            d_m = q_dyn_ref * self._chord * float(cm_q_nl - base_mq) * q_hat
-            d_n = q_dyn_ref * span * float(cn_r_nl - base_nr) * r_hat
+            if is_medium_fi:
+                # In 5-strip mode, strip integration already resolves roll and yaw damping;
+                # only pitch damping delta is added to avoid double counting or anti-damping.
+                d_l = 0.0
+                d_m = q_dyn_ref * self._chord * float(cm_q_nl - base_mq) * q_hat
+                d_n = 0.0
+            else:
+                d_l = q_dyn_ref * span * float(cl_p_nl - base_lp) * p_hat
+                d_m = q_dyn_ref * self._chord * float(cm_q_nl - base_mq) * q_hat
+                d_n = q_dyn_ref * span * float(cn_r_nl - base_nr) * r_hat
             moment_body += np.array([d_l, d_m, d_n], dtype=np.float64)
 
         # Complete 6-DoF implementation of added mass and apparent inertia

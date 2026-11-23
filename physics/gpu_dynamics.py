@@ -86,8 +86,8 @@ RK4_STIFFNESS_SAFETY: float = 2.0
 DT_MIN: float = 1.0e-5
 
 # --- keel damping (mirrors physics.flight_sim) ---------------------------
-KEEL_ROLL_DAMPING: float = -0.20
-KEEL_YAW_DAMPING: float = -0.26
+KEEL_ROLL_DAMPING: float = 0.0
+KEEL_YAW_DAMPING: float = 0.0
 KEEL_DAMPING_CUTOFF_MPS: float = 0.8
 
 #: Impact speed above which the ground contact is a structural failure.
