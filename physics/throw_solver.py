@@ -329,6 +329,7 @@ def resolve_throw(
             rates = np.zeros(3, dtype=np.float64)
 
     height = _finite(cfg.launch_height_m)
+    ground_level = _finite(getattr(env, "ground_level_m", 0.0))
     raw_pos = getattr(cfg, "launch_position_m", (0.0, 0.0, 0.0))
     pos_x = _finite(raw_pos[0]) if len(raw_pos) > 0 else 0.0
     pos_y = _finite(raw_pos[1]) if len(raw_pos) > 1 else 0.0
@@ -336,7 +337,7 @@ def resolve_throw(
         [
             pos_x,
             pos_y,
-            -height,
+            -(ground_level + height),
         ],
         dtype=np.float64,
     )

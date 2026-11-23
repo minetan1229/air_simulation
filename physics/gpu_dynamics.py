@@ -287,7 +287,8 @@ def atmosphere_batch(
         t0 = max(float(env.sea_level_temperature_K), 1.0)
         p0 = max(float(env.sea_level_pressure_Pa), 1.0)
         lapse = float(env.lapse_rate_K_per_m)
-        h = altitude  # smooth extrapolation for negative altitudes consistent with atmosphere_domain
+        site_alt = float(getattr(env, "altitude_m", 0.0))
+        h = altitude + site_alt  # geometric altitude above sea level consistent with flight_sim / atmosphere_domain
         if lapse == 0.0 or t0 == 0.0:
             exp_iso = xp.clip(-gravity * h / (R_AIR * max(abs(t0), 50.0)), -700.0, 700.0)
             temperature = xp.full_like(h, t0)
@@ -1394,13 +1395,16 @@ def simulate_batch(
             crossing, xp.clip(min_alt_prev / safe_span, 0.0, 1.0), xp.zeros_like(span)
         )
         impact_time = acc["time"] + tau * size
-        # The state of the touchdown: the position, the velocity, the
-        # attitude and the body rates are interpolated, and the airframe is
-        # placed exactly on the floor (the deepest station touches it).
+        # Guard against quaternion double-cover antipodal cancellation:
+        # If dot(q_prev, q_next) < 0, negate q_next to ensure shortest path interpolation.
+        q_prev = y[:, 6:10]
+        q_next = y_next[:, 6:10]
+        dot = xp.sum(q_prev * q_next, axis=-1, keepdims=True)
+        q_next_adj = xp.where(dot < 0.0, -q_next, q_next)
         quat_interp = quaternion_normalize_batch(
             xp,
-            (1.0 - tau)[:, xp.newaxis] * y[:, 6:10]
-            + tau[:, xp.newaxis] * y_next[:, 6:10],
+            (1.0 - tau)[:, xp.newaxis] * q_prev
+            + tau[:, xp.newaxis] * q_next_adj,
         )
         position_interp = y[:, 0:3] + tau[:, xp.newaxis] * (y_next[:, 0:3] - y[:, 0:3])
         velocity_interp = y[:, 3:6] + tau[:, xp.newaxis] * (y_next[:, 3:6] - y[:, 3:6])

@@ -644,10 +644,11 @@ def evaluate_flight_surrogate(
     v_stall = math.sqrt(2.0 * mass * gravity / max(density * area * cl_max, 1.0e-9))
 
     # --- excess-speed glide height (including the throw arc) ---------------
-    excess = max(airspeed * airspeed - v_stall * v_stall, 0.0)
-    height_gain = excess / (2.0 * gravity)
-    launch_vertical = airspeed * math.sin(launch_angle)
-    throw_gain = max(launch_vertical * launch_vertical, 0.0) / (2.0 * gravity)
+    launch_vertical = airspeed * math.sin(max(launch_angle, 0.0))
+    throw_gain = (launch_vertical * launch_vertical) / (2.0 * gravity)
+    # Residual kinetic energy beyond vertical launch component converted to glide height
+    residual_kinetic_sq = max(airspeed * airspeed - launch_vertical * launch_vertical - v_stall * v_stall, 0.0)
+    height_gain = residual_kinetic_sq / (2.0 * gravity)
     usable = (height_gain + throw_gain + glide_height) * roll_factor
     usable = max(usable, 0.0)
 
@@ -659,7 +660,9 @@ def evaluate_flight_surrogate(
     horizontal_speed = airspeed * cos_gamma
     distance = max(horizontal_speed * flight_time, 0.0)
     landing_distance = max(distance + 0.5 * wind_x * flight_time, 0.0)
-    max_altitude = clamp(glide_height + height_gain + throw_gain, 0.0, 1.0e4)
+    # Max altitude cannot exceed initial height plus total kinetic energy converted to potential energy
+    vacuum_altitude_cap = glide_height + (airspeed * airspeed) / (2.0 * gravity)
+    max_altitude = clamp(min(glide_height + height_gain + throw_gain, vacuum_altitude_cap), 0.0, 1.0e4)
 
     # --- loads and structural stress --------------------------------------
     dynamic_pressure = 0.5 * density * airspeed * airspeed
@@ -1205,8 +1208,8 @@ def gpu_ensemble_simulation(
         u_y = v_rel[:, 1] / speed_safe
         u_z = v_rel[:, 2] / speed_safe
 
-        # Flight path angle gamma (positive up, so -u_z)
-        gamma = xp.arctan2(-u_z, xp.maximum(v_horiz, 1e-4))
+        # Flight path angle gamma (positive up, so -v_rel_z / v_horiz)
+        gamma = xp.arctan2(-v_rel[:, 2], xp.maximum(v_horiz, 1e-4))
         track_yaw = xp.arctan2(u_y, u_x)
 
         # Angle of attack: difference between pitch attitude and flight path angle
