@@ -297,7 +297,7 @@ def compile_macro_origami(
     keel_beta = max(1.0, min(15.0, keel_depth_ratio * 40.0))
 
     span_ratio = max(0.5, min(0.9, float(wing_cfg.wingspan_ratio)))
-    wing_u = max(0.30, min(0.48, 0.30 + 0.18 * ((span_ratio - 0.5) / 0.4)))
+    wing_u = max(0.30, min(0.48, 0.50 - 0.20 * span_ratio))
     dihedral = max(-5.0, min(15.0, float(wing_cfg.dihedral_deg)))
     elevon = 0.5 * (
         max(-10.0, min(15.0, float(wing_cfg.elevon_left_deg)))

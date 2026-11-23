@@ -1973,39 +1973,39 @@ def _coefficient_core(
     alpha_gate = xp.tanh(xp.abs(alpha) / 8.0)
     sin_a = xp.sin(_rad(xp, _clamp(xp, alpha, -90.0, 90.0)))
     pushover = -q_eff * area * chord * 0.85 * sin_a * speed_gate * alpha_gate
-    pushover_moment = xp.where(low_speed & (xp.abs(alpha) > 0.1), pushover, 0.0)
+    pushover_moment = xp.where(low_speed, pushover, 0.0)
 
     # --- low-speed cross-flow rotational damping ---------------------------
     # At low speeds / zero airspeed (speed -> 0), conventional dynamic pressure
     # q_dyn -> 0 extinguishes linear damping moments (p_hat, q_hat, r_hat).
     # Cross-flow drag of rotating surfaces through quiescent air provides
     # bluff-body rotational damping proportional to omega * |omega|:
-    #   Pitch (q): rotating chord strips c * dx
-    #   Roll  (p): rotating span strips b * dy
-    #   Yaw   (r): rotating fuselage/keel and wing drag
+    #   Pitch (q): rotating chord strips c * dx with moment arm x gives (1/32) * rho * Cd_perp * S * c^2 * |q| * q
+    #   Roll  (p): rotating span strips b * dy with moment arm y gives (1/12) * (1/2) * rho * Cd_perp * S * b^2 * |p| * p
+    #   Yaw   (r): rotating wing drag strips gives (1/16) * (1/2) * rho * Cd_perp * S * b^2 * |r| * r
     q_rate_value = _finite(xp, q_rate, 0.0)
     p_rate_value = _finite(xp, p_rate, 0.0)
     r_rate_value = _finite(xp, r_rate, 0.0)
 
     rot_damping_q = (
-        -0.5 * density * 1.2 * area * xp.square(chord) * xp.abs(q_rate_value) * q_rate_value
-        - 0.00015 * area * chord * density * q_rate_value
+        -0.5 * density * 1.2 * area * (xp.square(chord) * chord) * (1.0 / 32.0) * xp.abs(q_rate_value) * q_rate_value
+        - 0.00015 * area * xp.square(chord) * density * q_rate_value
     ) * speed_gate
     rot_damping_q = xp.where(
         low_speed & (area > 1.0e-6) & (chord > 1.0e-4), rot_damping_q, 0.0
     )
 
     rot_damping_p = (
-        -0.5 * density * 1.2 * area * xp.square(span) * (1.0 / 12.0) * xp.abs(p_rate_value) * p_rate_value
-        - 0.00015 * area * span * density * p_rate_value
+        -0.5 * density * 1.2 * area * (xp.square(span) * span) * (1.0 / 12.0) * xp.abs(p_rate_value) * p_rate_value
+        - 0.00015 * area * xp.square(span) * density * p_rate_value
     ) * speed_gate
     rot_damping_p = xp.where(
         low_speed & (area > 1.0e-6) & (span > 1.0e-4), rot_damping_p, 0.0
     )
 
     rot_damping_r = (
-        -0.5 * density * 1.2 * area * xp.square(span) * (1.0 / 16.0) * xp.abs(r_rate_value) * r_rate_value
-        - 0.00015 * area * span * density * r_rate_value
+        -0.5 * density * 1.2 * area * (xp.square(span) * span) * (1.0 / 16.0) * xp.abs(r_rate_value) * r_rate_value
+        - 0.00015 * area * xp.square(span) * density * r_rate_value
     ) * speed_gate
     rot_damping_r = xp.where(
         low_speed & (area > 1.0e-6) & (span > 1.0e-4), rot_damping_r, 0.0

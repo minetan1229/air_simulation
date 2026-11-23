@@ -36,7 +36,7 @@ def test_determinism_exact_match():
     assert res1.composite_score == pytest.approx(res2.composite_score, abs=1.0e-7)
 
 
-def test_strict_min_16_steps_enforcement():
+def test_strict_min_steps_enforcement():
     """Verify that candidates with fewer than MIN_FOLD_STEPS steps are strictly rejected by Tier 0."""
     compiler = ParametricOrigamiCompiler()
     cfg = ParametricOrigamiConfig()
@@ -46,7 +46,7 @@ def test_strict_min_16_steps_enforcement():
     adapter = OrigamiAdapter()
     cand = adapter.compile_candidate(cfg)
 
-    # Force invalid step count below minimum
+    # Force invalid step count below MIN_FOLD_STEPS
     cand.step_count = MIN_FOLD_STEPS - 1
     valid, reasons = validate_tier0(cand)
     assert valid is False

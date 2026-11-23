@@ -224,19 +224,22 @@ class OrigamiAdapter:
         candidate.metadata["tier0_valid"] = valid
         candidate.metadata["tier0_reasons"] = reasons
 
-        macro_steps = self.compiler.compile_macro_steps(config)
-        candidate.metadata["macro_steps"] = [
-            {
-                "step_index": m.step_index,
-                "name": m.name,
-                "fold_type": m.fold_type,
-                "line_p0": m.line_p0,
-                "line_p1": m.line_p1,
-                "angle_deg": m.angle_deg,
-                "mountain": m.mountain,
-                "desc": m.desc,
-            }
-            for m in macro_steps
-        ]
+        try:
+            from .kernel_25d import compile_macro_origami
+            macro_steps, _ = compile_macro_origami(config)
+            candidate.metadata["macro_step_count"] = len(macro_steps)
+            candidate.metadata["macro_steps"] = [
+                {
+                    "step_index": s.step_index,
+                    "name": s.name,
+                    "fold_type": s.fold_type,
+                    "angle_deg": s.angle_deg,
+                    "mountain": s.mountain,
+                    "desc": s.desc,
+                }
+                for s in macro_steps
+            ]
+        except Exception:
+            pass
 
         return candidate

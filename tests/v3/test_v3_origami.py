@@ -12,21 +12,20 @@ from v3.origami.mcts import MCTSOrigamiGenerator
 
 
 def test_compiler_step_count_bounds():
-    """Verify compiler always generates between MIN_FOLD_STEPS and MAX_FOLD_STEPS."""
+    """Verify compiler always generates between 16 and 24 fold steps."""
     compiler = ParametricOrigamiCompiler()
     cfg = ParametricOrigamiConfig()
     steps = compiler.compile_steps(cfg)
 
     assert MIN_FOLD_STEPS <= len(steps) <= MAX_FOLD_STEPS
-    assert len(steps) >= MIN_FOLD_STEPS
 
 
 def test_tier0_validation_enforces_step_count():
-    """Verify validate_tier0 rejects candidates with fewer than MIN_FOLD_STEPS."""
+    """Verify validate_tier0 rejects candidates with fewer than MIN_FOLD_STEPS steps."""
     adapter = OrigamiAdapter()
     candidate = adapter.compile_candidate(ParametricOrigamiConfig())
 
-    # Artificially modify step count to below MIN_FOLD_STEPS
+    # Artificially modify step count below MIN_FOLD_STEPS
     candidate.step_count = MIN_FOLD_STEPS - 1
     valid, reasons = validate_tier0(candidate)
     assert not valid
