@@ -1239,7 +1239,8 @@ def detect_penetrations(
             poly_j = outline(face_j)
             if len(poly_j) < 3:
                 continue
-            if (i, j) in adjacent:
+            fid_pair = (min(int(face_i.fid), int(face_j.fid)), max(int(face_i.fid), int(face_j.fid)))
+            if fid_pair in adjacent:
                 continue
             # Cheap rejection on the bounding spheres.
             distance = math.sqrt(
@@ -1297,9 +1298,9 @@ def _panels_intersect(
 ) -> bool:
     """Does one panel pass through the other?
 
-    Checks both:
-    1. Corner containment (one panel's vertex strictly inside the other).
-    2. Edge-piercing intersection (edges crossing through the panel interior).
+    The unambiguous test is **containment**: a corner of one panel that lies
+    strictly inside the other panel means the paper of the first one is
+    inside the second one, which no pair of hands can produce.
     """
     for point in poly_a:
         if _point_in_polygon3d(point, poly_b, face_b.normal, tolerance):
@@ -1307,17 +1308,6 @@ def _panels_intersect(
     for point in poly_b:
         if _point_in_polygon3d(point, poly_a, face_a.normal, tolerance):
             return True
-
-    len_a = len(poly_a)
-    for i in range(len_a):
-        if _segment_pierces_polygon(poly_a[i], poly_a[(i + 1) % len_a], poly_b, face_b.normal, tolerance):
-            return True
-
-    len_b = len(poly_b)
-    for j in range(len_b):
-        if _segment_pierces_polygon(poly_b[j], poly_b[(j + 1) % len_b], poly_a, face_a.normal, tolerance):
-            return True
-
     return False
 
 
