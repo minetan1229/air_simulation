@@ -50,9 +50,9 @@ def run_pipeline(
     trim_iterations: int = 15,
     grid_bins: Tuple[int, int, int] = (10, 10, 10),
     grid_ranges: Tuple[Tuple[float, float], Tuple[float, float], Tuple[float, float]] = (
-        (0.10, 0.20),
-        (0.60, 0.95),
-        (0.15, 0.45),
+        (0.10, 0.45),
+        (0.10, 0.90),
+        (0.30, 2.20),
     ),
     benchmark_duration_s: float = 6.0,
     bootstrap_count: int = 5,

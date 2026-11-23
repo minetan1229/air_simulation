@@ -25,9 +25,9 @@ class MAPElitesGridArchive:
         self,
         bins: Tuple[int, int, int] = (8, 8, 8),
         ranges: Tuple[Tuple[float, float], Tuple[float, float], Tuple[float, float]] = (
-            (0.118, 0.128),  # High-resolution wing loading range (kg/m^2) for folded A4
-            (0.70, 0.90),    # High-resolution static stability range
-            (0.215, 0.255),  # High-resolution aspect ratio range
+            (0.10, 0.45),  # Realistic wing loading range (kg/m^2) for folded A4 paper planes
+            (0.10, 0.90),  # Geometric static stability margin spectrum
+            (0.30, 2.20),  # Folded aircraft aspect ratio spectrum
         ),
     ) -> None:
         self.bins = bins
@@ -69,9 +69,7 @@ class MAPElitesGridArchive:
         desc = candidate.descriptor
         if desc is None:
             if candidate.geometry:
-                desc = candidate.geometry.compute_behavior_descriptor(
-                    stability=candidate.benchmark.low_speed.stability
-                )
+                desc = candidate.geometry.compute_behavior_descriptor()
                 candidate.descriptor = desc
             else:
                 return False
@@ -90,10 +88,10 @@ class MAPElitesGridArchive:
             self.improved_evaluations += 1
             return True
         elif math.isclose(score, current_score, abs_tol=1e-5):
-            # Tie-break: prefer candidate with higher stability or lower mass
-            cand_m = candidate.geometry.mass_kg if candidate.geometry else 1.0
-            curr_m = current_cand.geometry.mass_kg if current_cand.geometry else 1.0
-            if cand_m < curr_m:
+            # Tie-break: prefer candidate with higher stability margin or aspect ratio
+            cand_s = candidate.descriptor.static_stability if candidate.descriptor else 0.5
+            curr_s = current_cand.descriptor.static_stability if current_cand.descriptor else 0.5
+            if cand_s > curr_s:
                 self.cells[bin_idx] = (score, candidate)
                 return True
 

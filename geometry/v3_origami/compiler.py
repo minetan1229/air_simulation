@@ -82,10 +82,15 @@ class ParametricOrigamiCompiler:
         collar_r = _mirror_crease(collar_l)
 
         wing_angle = body_half + dihedral
-        wing_l_nose = _clamp(wing_u - 0.05 + taper_offset, 0.20, 0.45)
-        wing_r_nose = _clamp(1.0 - wing_u + 0.05 - taper_offset, 0.55, 0.80)
+        # Wing fold originates cleanly at nose tip (0.5, 1.0)
+        # ensuring physical foldability without slicing into multi-layered nose flank.
+        wing_l_nose = 0.5
+        wing_r_nose = 0.5
         elevon_v = 0.16
         trailing_v = 0.055
+
+        # Maximum physical extent for winglet fold: paper outer boundary at corner fold start
+        winglet_v_max = min(1.0, max(0.5, crease_l[0][1]))
 
         creases: List[Crease] = [
             Crease(key="body", p0=(0.5, 0.0), p1=(0.5, 1.0), angle_deg=body_angle, side=0, up=False, level=0, set_group_pair=("body_l", "body_r"), residual_deg=RESIDUAL_CREASE_DEG),
@@ -114,53 +119,19 @@ class ParametricOrigamiCompiler:
             )
 
         # Wings and control surfaces (folded down from keel)
+        # Bounded strictly within wing panel span to eliminate full-width slice across centerline
         wing_creases = [
             Crease(key="wing_l", p0=(wing_u, 0.0), p1=(wing_l_nose, 1.0), angle_deg=wing_angle, side=1, up=True, level=0, groups=("body_l",), set_group="wing_l"),
             Crease(key="wing_r", p0=(1.0 - wing_u, 0.0), p1=(1.0 - wing_l_nose, 1.0), angle_deg=wing_angle, side=-1, up=True, level=0, groups=("body_r",), set_group="wing_r"),
-            Crease(key="winglet_l", p0=(winglet_u, 0.0), p1=(winglet_u, 1.0), angle_deg=winglet_angle, side=1, up=True, level=0, groups=("wing_l",), set_group="winglet_l"),
-            Crease(key="winglet_r", p0=(1.0 - winglet_u, 0.0), p1=(1.0 - winglet_u, 1.0), angle_deg=winglet_angle, side=-1, up=True, level=0, groups=("wing_r",), set_group="winglet_r"),
-            Crease(key="elevon_l", p0=(0.0, elevon_v), p1=(1.0, elevon_v), angle_deg=abs(elevon), side=-1, up=False, level=0, groups=("wing_l", "winglet_l"), set_group="elevon_l"),
-            Crease(key="elevon_r", p0=(0.0, elevon_v), p1=(1.0, elevon_v), angle_deg=abs(elevon), side=-1, up=False, level=0, groups=("wing_r", "winglet_r"), set_group="elevon_r"),
-            Crease(key="trailing_l", p0=(0.0, trailing_v), p1=(0.5, trailing_v), angle_deg=15.0, side=-1, up=False, level=0, groups=("elevon_l",), set_group="trailing_l"),
-            Crease(key="trailing_r", p0=(0.5, trailing_v), p1=(1.0, trailing_v), angle_deg=15.0, side=-1, up=False, level=0, groups=("elevon_r",), set_group="trailing_r"),
+            Crease(key="winglet_l", p0=(winglet_u, 0.0), p1=(winglet_u, winglet_v_max), angle_deg=winglet_angle, side=1, up=True, level=0, groups=("wing_l",), set_group="winglet_l"),
+            Crease(key="winglet_r", p0=(1.0 - winglet_u, 0.0), p1=(1.0 - winglet_u, winglet_v_max), angle_deg=winglet_angle, side=-1, up=True, level=0, groups=("wing_r",), set_group="winglet_r"),
+            Crease(key="elevon_l", p0=(winglet_u, elevon_v), p1=(wing_u, elevon_v), angle_deg=abs(elevon), side=-1, up=False, level=0, groups=("wing_l", "winglet_l"), set_group="elevon_l"),
+            Crease(key="elevon_r", p0=(1.0 - wing_u, elevon_v), p1=(1.0 - winglet_u, elevon_v), angle_deg=abs(elevon), side=-1, up=False, level=0, groups=("wing_r", "winglet_r"), set_group="elevon_r"),
+            Crease(key="trailing_l", p0=(winglet_u, trailing_v), p1=(wing_u, trailing_v), angle_deg=15.0, side=-1, up=False, level=0, groups=("elevon_l",), set_group="trailing_l"),
+            Crease(key="trailing_r", p0=(1.0 - wing_u, trailing_v), p1=(1.0 - winglet_u, trailing_v), angle_deg=15.0, side=-1, up=False, level=0, groups=("elevon_r",), set_group="trailing_r"),
         ]
         creases.extend(wing_creases)
 
-        # Pad with aerodynamic wing camber micro-creases to reach 20 steps (between MIN 16 and MAX 24)
-        target_count = 20
-        extra_count = target_count - len(creases)
-        for i in range(extra_count):
-            u_offset = 0.16 + 0.05 * (i // 2)
-            u_l = u_offset
-            u_r = 1.0 - u_offset
-            if i % 2 == 0:
-                creases.append(
-                    Crease(
-                        key=f"camber_l_{i // 2 + 1}",
-                        p0=(u_l, 0.20),
-                        p1=(u_l, 0.85),
-                        angle_deg=2.0 + 0.5 * (i // 2),
-                        side=1,
-                        up=True,
-                        level=0,
-                        groups=("wing_l",),
-                        set_group=f"camber_l_{i // 2 + 1}",
-                    )
-                )
-            else:
-                creases.append(
-                    Crease(
-                        key=f"camber_r_{i // 2 + 1}",
-                        p0=(u_r, 0.20),
-                        p1=(u_r, 0.85),
-                        angle_deg=2.0 + 0.5 * (i // 2),
-                        side=-1,
-                        up=True,
-                        level=0,
-                        groups=("wing_r",),
-                        set_group=f"camber_r_{i // 2 + 1}",
-                    )
-                )
 
         g = genome_from_creases(creases, key="v3_origami")
         steps = list(g.steps)

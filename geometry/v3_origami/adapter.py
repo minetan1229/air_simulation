@@ -40,12 +40,13 @@ def extract_airframe_geometry(
             chord_m=0.12,
             aspect_ratio=2.16,
             cg_m=(0.08, 0.0, 0.005),
-            keel_height_m=0.012,
-            keel_length_m=0.060,
-            keel_layers=4,
+            keel_height_m=0.0,
+            keel_length_m=0.0,
+            keel_layers=0,
             step_count=step_count,
             planform_area_m2=0.015,
             planform_aspect_ratio=2.16,
+            penetrations=999,
         )
 
     if hasattr(geometry_obj, "mass_kg"):
@@ -79,19 +80,22 @@ def extract_airframe_geometry(
     planform_area = max(1.0e-5, float(getattr(geometry_obj, "planform_area_m2", span * chord * 0.52)))
     planform_ar = (span * span) / planform_area
 
-    keel_height = max(0.008, chord * 0.10)
-    keel_length = max(0.030, chord * 0.50)
-    keel_layers = max(2, total_layers)
+    keel_height = 0.0
+    keel_length = 0.0
+    keel_layers = 0
+    penetrations = 0
 
     try:
         if hasattr(geometry_obj, "faces") and hasattr(geometry_obj, "pattern"):
             report = evaluate_grip(geometry_obj)
-            if report.grip_height_m > 0.0:
-                keel_height = report.grip_height_m
-            if report.grip_length_m > 0.0:
-                keel_length = report.grip_length_m
-            if report.grip_layers > 0:
-                keel_layers = report.grip_layers
+            keel_height = report.grip_height_m
+            keel_length = report.grip_length_m
+            keel_layers = report.grip_layers
+            penetrations = report.penetrations
+        else:
+            keel_height = max(0.008, chord * 0.10)
+            keel_length = max(0.030, chord * 0.50)
+            keel_layers = max(2, total_layers)
     except Exception:
         pass
 
@@ -108,6 +112,7 @@ def extract_airframe_geometry(
         step_count=step_count,
         planform_area_m2=planform_area,
         planform_aspect_ratio=planform_ar,
+        penetrations=penetrations,
     )
 
 
@@ -160,6 +165,12 @@ def validate_tier0(
             f"Keel layers {geom.keel_layers} < required {active_thresh.min_grip_layers}"
         )
 
+    # 4. Self-intersection & penetration check
+    if geom.penetrations > active_thresh.max_penetrations:
+        reasons.append(
+            f"Self-intersection detected: {geom.penetrations} penetrating panel pairs exceed allowable {active_thresh.max_penetrations}"
+        )
+
     return (len(reasons) == 0), reasons
 
 
@@ -187,12 +198,16 @@ class OrigamiAdapter:
         )
 
         # Attempt geometric fold evaluation
+        fold_succeeded = True
+        fold_err = ""
         try:
             geometry_obj = fold_genome(genome, paper_gsm=config.paper_gsm)
             geometry = extract_airframe_geometry(geometry_obj, step_count=step_count)
-        except Exception:
+        except Exception as exc:
             # Fallback geometry if fold engine encountered degenerate edge
             geometry = extract_airframe_geometry(None, step_count=step_count)
+            fold_succeeded = False
+            fold_err = str(exc)
 
         candidate = AircraftCandidate(
             candidate_id=cid,
@@ -203,6 +218,9 @@ class OrigamiAdapter:
         )
 
         valid, reasons = validate_tier0(candidate)
+        if not fold_succeeded:
+            valid = False
+            reasons.append(f"Mesh folding failed: {fold_err or 'degenerate geometry'}")
         candidate.metadata["tier0_valid"] = valid
         candidate.metadata["tier0_reasons"] = reasons
 

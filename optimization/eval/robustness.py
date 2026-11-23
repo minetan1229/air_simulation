@@ -42,27 +42,35 @@ class RobustnessEvaluator:
             elevon_deg=elevon_deg,
         )
 
-        # 1. Dryden Turbulence Test
-        turb_env = EnvironmentConfig(
-            wind_speed=2.0,
-            gust_intensity=0.8,
-            surface_roughness_m=0.01,
-        )
+        # 1. Dryden Turbulence Ensemble Test (3 diverse turbulence realizations)
         turb_launch = LaunchConfig(
             launch_speed=8.0,
             launch_angle_deg=0.0,
             launch_height_m=1.5,
         )
-        # 1. Dryden Turbulence Test
-        try:
-            turb_sim = FlightSimulator(aircraft=aircraft, environment=turb_env, launch=turb_launch)
-            turb_sim.simulate(duration_s=self.duration_s)
-            turb_metrics = turb_sim.metrics()
-            dryden_hangtime = float(turb_metrics.get("flight_time_s", 0.0) or 0.0)
-            dryden_survived = not bool(turb_metrics.get("crashed", False) or turb_metrics.get("diverged", False))
-        except Exception:
-            dryden_hangtime = 0.0
-            dryden_survived = False
+        turb_metrics = {}
+        dryden_survivals = 0
+        dryden_hangtimes = []
+        for t_seed in (42, 101, 777):
+            turb_env = EnvironmentConfig(
+                wind_speed=2.0,
+                gust_intensity=0.8,
+                surface_roughness_m=0.01,
+                turbulence_seed=t_seed,
+            )
+            try:
+                turb_sim = FlightSimulator(aircraft=aircraft, environment=turb_env, launch=turb_launch)
+                turb_sim.simulate(duration_s=self.duration_s)
+                turb_metrics = turb_sim.metrics()
+                dryden_hangtimes.append(float(turb_metrics.get("flight_time_s", 0.0) or 0.0))
+                if not bool(turb_metrics.get("crashed", False) or turb_metrics.get("diverged", False)):
+                    dryden_survivals += 1
+            except Exception:
+                dryden_hangtimes.append(0.0)
+
+        dryden_survival_rate = dryden_survivals / 3.0
+        dryden_hangtime = sum(dryden_hangtimes) / max(1, len(dryden_hangtimes))
+        dryden_survived = dryden_survival_rate >= 0.66
 
         # 2. Throw Jitter Test (+/- 5 deg roll & yaw perturbation)
         jitter_launch = LaunchConfig(

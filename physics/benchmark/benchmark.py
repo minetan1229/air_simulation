@@ -185,11 +185,18 @@ class DeterministicFlightBenchmark:
         s_low = low_metric.deterministic_score
         s_mid = mid_metric.deterministic_score
 
-        # Composite score using harmonic mean to strictly penalize failure in either speed
+        # Composite score using harmonic mean to strictly penalize failure in either speed,
+        # with soft penalty when one speed succeeds to avoid optimizer cliff
         if s_low > 1.0e-4 and s_mid > 1.0e-4:
             composite = 2.0 * (s_low * s_mid) / (s_low + s_mid)
             valid = True
             rejection_reason = ""
+        elif s_low > 1.0e-4 or s_mid > 1.0e-4:
+            composite = 0.20 * max(s_low, s_mid)
+            valid = False
+            rejection_reason = (
+                f"Failed benchmark at one speed: low_score={s_low:.3f}, mid_score={s_mid:.3f}"
+            )
         else:
             composite = 0.0
             valid = False

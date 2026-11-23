@@ -1736,15 +1736,20 @@ def _uv_to_sheet_plane(point: Vec2) -> Tuple[float, float]:
 
 
 def _clip_line_to_rect(
-    point: Tuple[float, float], direction: Tuple[float, float]
+    point: Tuple[float, float],
+    direction: Tuple[float, float],
+    min_z: Optional[float] = None,
+    max_z: Optional[float] = None,
 ) -> Optional[Tuple[Tuple[float, float], Tuple[float, float]]]:
     """Clip a line to the sheet rectangle in the sheet plane."""
     hits: List[Tuple[float, float]] = []
+    z_lo = -_HALF_WIDTH if min_z is None else min_z
+    z_hi = _HALF_WIDTH if max_z is None else max_z
     corners = [
-        (-_HALF_LENGTH, -_HALF_WIDTH),
-        (_HALF_LENGTH, -_HALF_WIDTH),
-        (_HALF_LENGTH, _HALF_WIDTH),
-        (-_HALF_LENGTH, _HALF_WIDTH),
+        (-_HALF_LENGTH, z_lo),
+        (_HALF_LENGTH, z_lo),
+        (_HALF_LENGTH, z_hi),
+        (-_HALF_LENGTH, z_hi),
     ]
     for i in range(4):
         a = corners[i]
@@ -1795,7 +1800,7 @@ def _corner_crease(nose_v: float) -> Tuple[Vec2, Vec2]:
     corner = _uv_to_sheet_plane((0.0, 1.0))
     target = _uv_to_sheet_plane((0.5, nose_v))
     mid, direction = _perpendicular_bisector_3d(corner, target)
-    clipped = _clip_line_to_rect(mid, direction)
+    clipped = _clip_line_to_rect(mid, direction, max_z=0.0)
     if clipped is None:
         return ((0.0, 0.5), (0.5, 1.0))
     return (_sheet_plane_to_uv(clipped[0]), _sheet_plane_to_uv(clipped[1]))
@@ -1841,7 +1846,7 @@ def _collar_crease(corner_p0: Vec2, corner_p1: Vec2) -> Tuple[Vec2, Vec2]:
         bisector = (0.0, -1.0)
     else:
         bisector = (bisector[0] / norm, bisector[1] / norm)
-    clipped = _clip_line_to_rect(tip, bisector)
+    clipped = _clip_line_to_rect(tip, bisector, max_z=0.0)
     if clipped is None:
         return ((0.5, 1.0), (0.5, 0.0))
     return (_sheet_plane_to_uv(clipped[0]), _sheet_plane_to_uv(clipped[1]))

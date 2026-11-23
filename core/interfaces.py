@@ -28,9 +28,9 @@ SPEED_LOW_MPS: float = 6.0
 SPEED_MID_MPS: float = 10.0
 BENCHMARK_SPEEDS: Tuple[float, float] = (SPEED_LOW_MPS, SPEED_MID_MPS)
 
-# Minimum & Maximum step requirements for 20-fold parametric origami
-MIN_FOLD_STEPS: int = 16
-MAX_FOLD_STEPS: int = 24
+# Minimum & Maximum step requirements for parametric origami (physical fold steps)
+MIN_FOLD_STEPS: int = 6
+MAX_FOLD_STEPS: int = 16
 
 
 # ============================================================================
@@ -65,10 +65,15 @@ class EvaluationMetric:
             return 0.0
 
         ld_clamped = max(0.0, min(self.max_ld_ratio, 40.0))
+        # Distance-grounded effective L/D to prevent transient numerical spikes
+        eff_ld = max(0.1, min(ld_clamped, max(0.5, self.distance_m / 1.5), 25.0))
         glide_clamped = max(0.0, min(self.steady_glide_fraction, 1.0))
         stability_clamped = max(0.0, min(self.stability, 1.0))
+        # Forward speed check: penalize near-vertical parachuting (mean speed < 1.0 m/s)
+        mean_speed = self.distance_m / max(0.1, self.flight_time_s)
+        speed_factor = max(0.1, min(1.0, mean_speed / 2.0))
 
-        return float(self.flight_time_s * math.sqrt(ld_clamped) * glide_clamped * stability_clamped)
+        return float(self.flight_time_s * math.sqrt(eff_ld) * glide_clamped * stability_clamped * speed_factor)
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -151,13 +156,23 @@ class AirframeGeometry:
     step_count: int
     planform_area_m2: float = 0.0
     planform_aspect_ratio: float = 0.0
+    penetrations: int = 0
 
-    def compute_behavior_descriptor(self, stability: float = 0.5) -> BehaviorDescriptor:
+    def compute_behavior_descriptor(self, stability: Optional[float] = None) -> BehaviorDescriptor:
         loading = self.mass_kg / max(1.0e-5, self.wing_area_m2)
+        if stability is None:
+            chord = max(0.01, self.chord_m)
+            # Standard quarter-chord aerodynamic center approximation
+            x_ac = 0.25 * chord
+            x_cg = self.cg_m[0]
+            # Static margin: positive = stable (CG ahead of AC)
+            sm = (x_ac - x_cg) / chord
+            stability = max(0.0, min(1.0, 0.5 + sm * 2.0))
+        ar = self.planform_aspect_ratio if self.planform_aspect_ratio > 0.0 else self.aspect_ratio
         return BehaviorDescriptor(
             wing_loading_kg_m2=loading,
-            static_stability=stability,
-            aspect_ratio=self.aspect_ratio,
+            static_stability=float(stability),
+            aspect_ratio=ar,
         )
 
     def to_dict(self) -> Dict[str, Any]:
@@ -169,6 +184,7 @@ class AirframeGeometry:
             "aspect_ratio": self.aspect_ratio,
             "planform_area_m2": self.planform_area_m2,
             "planform_aspect_ratio": self.planform_aspect_ratio,
+            "penetrations": self.penetrations,
             "cg_m": list(self.cg_m),
             "keel_height_m": self.keel_height_m,
             "keel_length_m": self.keel_length_m,
