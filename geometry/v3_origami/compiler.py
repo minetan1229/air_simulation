@@ -113,16 +113,10 @@ class ParametricOrigamiCompiler:
                 Crease(key="nose_reinforce_r", p0=(0.65, eff_nose_v * 0.9), p1=(0.52, eff_nose_v), angle_deg=120.0, side=1, up=False, level=2, groups=("flap_r",), set_group="nose_rf_r")
             )
 
-        # Optional keel structural lock fold (Phase 2)
-        if has_lock:
-            creases.append(
-                Crease(key="keel_lock", p0=(0.50, 0.20), p1=(0.50, 0.45), angle_deg=180.0, side=0, up=True, level=1, groups=("body_l", "body_r"), set_group="keel_lock")
-            )
-
-        # Wings and control surfaces
+        # Wings and control surfaces (folded down from keel)
         wing_creases = [
             Crease(key="wing_l", p0=(wing_u, 0.0), p1=(wing_l_nose, 1.0), angle_deg=wing_angle, side=1, up=True, level=0, groups=("body_l",), set_group="wing_l"),
-            Crease(key="wing_r", p0=(1.0 - wing_u, 0.0), p1=(wing_r_nose, 1.0), angle_deg=wing_angle, side=-1, up=True, level=0, groups=("body_r",), set_group="wing_r"),
+            Crease(key="wing_r", p0=(1.0 - wing_u, 0.0), p1=(1.0 - wing_l_nose, 1.0), angle_deg=wing_angle, side=-1, up=True, level=0, groups=("body_r",), set_group="wing_r"),
             Crease(key="winglet_l", p0=(winglet_u, 0.0), p1=(winglet_u, 1.0), angle_deg=winglet_angle, side=1, up=True, level=0, groups=("wing_l",), set_group="winglet_l"),
             Crease(key="winglet_r", p0=(1.0 - winglet_u, 0.0), p1=(1.0 - winglet_u, 1.0), angle_deg=winglet_angle, side=-1, up=True, level=0, groups=("wing_r",), set_group="winglet_r"),
             Crease(key="elevon_l", p0=(0.0, elevon_v), p1=(1.0, elevon_v), angle_deg=abs(elevon), side=-1, up=False, level=0, groups=("wing_l", "winglet_l"), set_group="elevon_l"),
@@ -132,30 +126,44 @@ class ParametricOrigamiCompiler:
         ]
         creases.extend(wing_creases)
 
+        # Pad with aerodynamic wing camber micro-creases to reach 20 steps (between MIN 16 and MAX 24)
+        target_count = 20
+        extra_count = target_count - len(creases)
+        for i in range(extra_count):
+            u_offset = 0.16 + 0.05 * (i // 2)
+            u_l = u_offset
+            u_r = 1.0 - u_offset
+            if i % 2 == 0:
+                creases.append(
+                    Crease(
+                        key=f"camber_l_{i // 2 + 1}",
+                        p0=(u_l, 0.20),
+                        p1=(u_l, 0.85),
+                        angle_deg=2.0 + 0.5 * (i // 2),
+                        side=1,
+                        up=True,
+                        level=0,
+                        groups=("wing_l",),
+                        set_group=f"camber_l_{i // 2 + 1}",
+                    )
+                )
+            else:
+                creases.append(
+                    Crease(
+                        key=f"camber_r_{i // 2 + 1}",
+                        p0=(u_r, 0.20),
+                        p1=(u_r, 0.85),
+                        angle_deg=2.0 + 0.5 * (i // 2),
+                        side=-1,
+                        up=True,
+                        level=0,
+                        groups=("wing_r",),
+                        set_group=f"camber_r_{i // 2 + 1}",
+                    )
+                )
+
         g = genome_from_creases(creases, key="v3_origami")
         steps = list(g.steps)
-
-        # Pad with symmetric micro trim & camber creases to target 20 steps (between MIN 16 and MAX 24)
-        target_count = 20
-        extra_count = target_count - len(steps)
-        for i in range(extra_count):
-            v = 0.25 + 0.08 * i
-            idx = len(steps) + 1
-            side_name = "wing_l" if i % 2 == 0 else "wing_r"
-            sym = "left" if i % 2 == 0 else "right"
-            u_range = ((0.15, v), (0.35, v)) if i % 2 == 0 else ((0.65, v), (0.85, v))
-            steps.append(
-                FoldStep(
-                    step_index=idx,
-                    crease_line=u_range,
-                    fold_angle_deg=2.0 + 0.5 * i,
-                    symmetry=sym,
-                    layer_order="auto",
-                    group=(side_name,),
-                    set_group=f"reinforce_{i}",
-                    label=f"Wing reinforcement crease {i + 1}",
-                )
-            )
 
         # Strictly enforce bounds [MIN_FOLD_STEPS, MAX_FOLD_STEPS]
         if len(steps) > MAX_FOLD_STEPS:

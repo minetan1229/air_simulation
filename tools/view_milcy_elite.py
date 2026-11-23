@@ -570,9 +570,23 @@ def build_viewer_html(elites: List[Dict[str, Any]]) -> str:
 
       <div>
         <div class="section-title">🗺️ 折り線展開図（Crease Pattern）</div>
-        <div style="display: flex; gap: 8px; margin-bottom: 12px;">
-          <a class="btn" style="flex: 1; text-align: center; text-decoration: none; display: block;" href="printable_a4_pattern.png" download="printable_a4_pattern.png" target="_blank">🖨️ A4型紙 (PNG)</a>
-          <a class="btn" style="flex: 1; text-align: center; text-decoration: none; display: block;" href="printable_a4_pattern_manual.png" download="printable_a4_pattern_manual.png" target="_blank">📖 説明書 (PNG)</a>
+        <div style="margin-bottom: 8px;">
+          <div style="font-size: 0.72rem; color: var(--accent); margin-bottom: 4px; font-weight: 600;">✨ A4最大原寸フルサイズ（余白なし 100% 拡大）</div>
+          <div style="display: flex; gap: 8px; margin-bottom: 6px;">
+            <a class="btn" style="flex: 1; text-align: center; text-decoration: none; display: block; background: #0284c7; border-color: #38bdf8;" href="printable_a4_pattern_max_fullsize.png" download="printable_a4_pattern_max_fullsize.png" target="_blank">🖨️ A4最大型紙 (PNG)</a>
+            <button class="btn" style="flex: 1; text-align: center; border-color: #38bdf8;" id="btn-copy-pattern-max">📋 A4最大型紙をコピー</button>
+          </div>
+        </div>
+        <div style="margin-bottom: 12px;">
+          <div style="font-size: 0.72rem; color: var(--text-muted); margin-bottom: 4px; font-weight: 600;">標準枠付き型紙 & 説明書</div>
+          <div style="display: flex; gap: 8px; margin-bottom: 6px;">
+            <a class="btn" style="flex: 1; text-align: center; text-decoration: none; display: block;" href="printable_a4_pattern.png" download="printable_a4_pattern.png" target="_blank">🖨️ 標準型紙</a>
+            <a class="btn" style="flex: 1; text-align: center; text-decoration: none; display: block;" href="printable_a4_pattern_manual.png" download="printable_a4_pattern_manual.png" target="_blank">📖 説明書</a>
+          </div>
+          <div style="display: flex; gap: 8px;">
+            <button class="btn" style="flex: 1; text-align: center;" id="btn-copy-pattern">📋 標準型紙をコピー</button>
+            <button class="btn" style="flex: 1; text-align: center;" id="btn-copy-manual">📋 説明書をコピー</button>
+          </div>
         </div>
         <div class="crease-container" id="crease-svg-container">
           <!-- Populated by JS -->
@@ -730,11 +744,10 @@ def build_viewer_html(elites: List[Dict[str, Any]]) -> str:
       }}
 
       let geometry = null;
-      if (stepIdx === steps.length - 1 && elite.obj_content) {{
-        // Use high-detail OBJ for the completed plane if available
-        geometry = parseOBJ(elite.obj_content);
-      }} else if (stepData) {{
+      if (stepData && stepData.positions && stepData.positions.length > 0) {{
         geometry = buildStepGeometry(stepData);
+      }} else if (elite.obj_content) {{
+        geometry = parseOBJ(elite.obj_content);
       }}
 
       if (geometry) {{
@@ -1053,6 +1066,53 @@ def build_viewer_html(elites: List[Dict[str, Any]]) -> str:
       axesHelper.visible = !axesHelper.visible;
       this.classList.toggle('active', axesHelper.visible);
     }});
+
+    // Helper to copy image to clipboard
+    async function copyImageToClipboard(imgUrl, btn) {{
+      const origText = btn.textContent;
+      try {{
+        btn.textContent = "⏳ コピー中...";
+        btn.disabled = true;
+        const res = await fetch(imgUrl);
+        if (!res.ok) throw new Error("画像を取得できませんでした: " + res.statusText);
+        const blob = await res.blob();
+        await navigator.clipboard.write([
+          new ClipboardItem({{ [blob.type || "image/png"]: blob }})
+        ]);
+        btn.textContent = "✅ コピー完了!";
+        setTimeout(() => {{
+          btn.textContent = origText;
+          btn.disabled = false;
+        }}, 2500);
+      }} catch (err) {{
+        console.warn("ClipboardItem write failed, falling back to URL copy:", err);
+        try {{
+          await navigator.clipboard.writeText(new URL(imgUrl, window.location.href).href);
+          btn.textContent = "✅ 画像URLをコピー!";
+        }} catch (e) {{
+          btn.textContent = "❌ コピー失敗";
+        }}
+        setTimeout(() => {{
+          btn.textContent = origText;
+          btn.disabled = false;
+        }}, 2500);
+      }}
+    }}
+
+    const btnCopyPatternMax = document.getElementById('btn-copy-pattern-max');
+    if (btnCopyPatternMax) {{
+      btnCopyPatternMax.addEventListener('click', () => copyImageToClipboard('printable_a4_pattern_max_fullsize.png', btnCopyPatternMax));
+    }}
+
+    const btnCopyPattern = document.getElementById('btn-copy-pattern');
+    if (btnCopyPattern) {{
+      btnCopyPattern.addEventListener('click', () => copyImageToClipboard('printable_a4_pattern.png', btnCopyPattern));
+    }}
+
+    const btnCopyManual = document.getElementById('btn-copy-manual');
+    if (btnCopyManual) {{
+      btnCopyManual.addEventListener('click', () => copyImageToClipboard('printable_a4_pattern_manual.png', btnCopyManual));
+    }}
 
     window.addEventListener('resize', () => {{
       camera.aspect = container.clientWidth / container.clientHeight;

@@ -325,11 +325,136 @@ def render_a4_printable_sheet(
     plt.close(fig)
     print(f"[+] Successfully exported printable A4 sheet (Page 1): {out_path.resolve()}")
 
+    # Page 1-B: 1:1 Full Bleed Max Size A4 Pattern (210mm x 297mm full bleed for direct 100% borderless printing)
+    full_path = out_path.parent / f"{out_path.stem}_max_fullsize.png"
+    render_a4_max_fullsize_sheet(cand_data, full_path, dpi=dpi)
+
     # Page 2: Step-by-Step Practical Illustrated Guide (A4)
     if include_manual_page:
         guide_path = out_path.parent / f"{out_path.stem}_manual.png"
         render_a4_step_manual(cand_data, instructions, guide_path, dpi=dpi)
 
+    return out_path
+
+
+def render_a4_max_fullsize_sheet(
+    cand_data: Dict[str, Any],
+    out_path: Path,
+    dpi: int = 300,
+) -> Path:
+    """Generate 100% full-bleed maximal A4 paper aircraft sheet (exact 210mm x 297mm canvas).
+
+    Every coordinate u in [0, 1], v in [0, 1] maps exactly to the four corners of A4 paper,
+    providing the maximum possible aircraft size with zero margins/wasted paper.
+    """
+    cid = cand_data.get("candidate_id", "map-elite-plane")
+    cfg_d = cand_data.get("config", {})
+
+    cfg = ParametricOrigamiConfig(
+        nose=ParametricNoseSpec(**cfg_d.get("nose", {})),
+        keel=ParametricKeelSpec(**cfg_d.get("keel", {})),
+        wing=ParametricWingSpec(**cfg_d.get("wing", {})),
+        paper_gsm=float(cfg_d.get("paper_gsm", 100.0)),
+    )
+    adapter = OrigamiAdapter()
+    cand = adapter.compile_candidate(cfg, candidate_id=cid)
+    genome = cand.raw_genome
+
+    # Exact A4 dimensions (8.27 in x 11.69 in = 210mm x 297mm) at 300 DPI (2481 x 3507 px)
+    fig = plt.figure(figsize=(8.27, 11.69), dpi=dpi)
+    ax = fig.add_axes([0.0, 0.0, 1.0, 1.0])
+    ax.set_xlim(0.0, 1.0)
+    ax.set_ylim(0.0, 1.0)
+    ax.axis("off")
+
+    # Paper background
+    ax.fill([0, 1, 1, 0], [0, 0, 1, 1], color="#ffffff", zorder=1)
+
+    # Outer border (Exact A4 paper edges)
+    ax.plot([0, 1, 1, 0, 0], [0, 0, 1, 1, 0], color="#94a3b8", linestyle="-", linewidth=1.5, zorder=2)
+
+    step_badges = {
+        1: "① 谷折り (180°)",
+        2: "② 山折り (斜め)",
+        3: "③ 山折り (斜め)",
+        4: "④ 襟折り",
+        5: "⑤ 襟折り",
+        6: "⑥ ノーズ固定",
+        7: "⑦ ノーズ固定",
+        8: "⑧ 機首補強",
+        9: "⑨ 機首補強",
+        10: "⑩ キールロック",
+        11: "⑪ 主翼折り下げ",
+        12: "⑫ 主翼折り下げ",
+        13: "⑬ ウィングレット",
+        14: "⑭ ウィングレット",
+        15: "⑮ エレボン反り",
+        16: "⑯ エレボン反り",
+    }
+
+    # Draw Crease Lines exactly scaled across full A4 sheet
+    for step in genome.steps:
+        p0, p1 = step.crease_line
+        x0, y0 = p0[0], p0[1]
+        x1, y1 = p1[0], p1[1]
+
+        is_mtn = step.mountain
+        color = "#dc2626" if is_mtn else "#2563eb"
+        ls = (0, (8, 5)) if is_mtn else (0, (4, 3, 1, 3))
+        lw = 2.4 if step.step_index in [1, 2, 3, 11, 12] else 1.8
+
+        ax.plot([x0, x1], [y0, y1], color=color, linestyle=ls, linewidth=lw, zorder=3)
+
+        # Label badges on folds
+        mx = 0.5 * (x0 + x1)
+        my = 0.5 * (y0 + y1)
+        badge_text = step_badges.get(step.step_index)
+        if badge_text:
+            num = badge_text.split()[0]
+            off_x = 0.02 if mx < 0.5 else -0.02
+            off_y = 0.012 if my > 0.5 else -0.012
+
+            ax.text(
+                mx + off_x, my + off_y,
+                num,
+                color="#ffffff",
+                fontsize=9.5,
+                fontweight="bold",
+                ha="center",
+                va="center",
+                bbox=dict(boxstyle="circle,pad=0.28", facecolor=color, edgecolor="none", alpha=0.92),
+                zorder=5,
+            )
+
+    # Orientation badges (unobtrusive at very edges)
+    ax.text(
+        0.5, 0.988,
+        "▲ 機首先端 (NOSE)",
+        fontsize=8.5,
+        fontweight="bold",
+        color="#0284c7",
+        ha="center",
+        va="top",
+        bbox=dict(boxstyle="round,pad=0.2", facecolor="#f0f9ff", edgecolor="#bae6fd", alpha=0.85),
+        zorder=6,
+    )
+    ax.text(
+        0.5, 0.012,
+        "▼ 翼後縁 (TRAILING EDGE) | 最大A4原寸 (赤:山折り / 青:谷折り)",
+        fontsize=8.0,
+        fontweight="bold",
+        color="#64748b",
+        ha="center",
+        va="bottom",
+        bbox=dict(boxstyle="round,pad=0.2", facecolor="#f8fafc", edgecolor="#e2e8f0", alpha=0.85),
+        zorder=6,
+    )
+
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    # Save WITHOUT bbox_inches="tight" to preserve exact 8.27in x 11.69in A4 bounds
+    fig.savefig(out_path, dpi=dpi, facecolor="#ffffff")
+    plt.close(fig)
+    print(f"[+] Successfully exported full-bleed A4 max size sheet: {out_path.resolve()}")
     return out_path
 
 
