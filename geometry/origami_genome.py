@@ -1118,8 +1118,7 @@ def detect_penetrations(
             poly_j = outline(face_j)
             if len(poly_j) < 3:
                 continue
-            # Use fid-based adjacency check
-            pair = (min(face_i.fid, face_j.fid), max(face_i.fid, face_j.fid))
+pair = (min(face_i.fid, face_j.fid), max(face_i.fid, face_j.fid))
             if pair in adjacent:
                 continue
             if panels_intersect_3d(poly_i, face_i.normal, poly_j, face_j.normal, tolerance):
@@ -1132,6 +1131,55 @@ def detect_penetrations(
                     }
                 )
     return hits
+
+
+def _segment_pierces_polygon(
+    p1: Vec3,
+    p2: Vec3,
+    poly: Sequence[Vec3],
+    normal: Vec3,
+    tolerance: float,
+) -> bool:
+    """Test whether segment (p1, p2) pierces strictly through the interior of poly."""
+    if len(poly) < 3:
+        return False
+    v0 = poly[0]
+    d1 = normal[0] * (p1[0] - v0[0]) + normal[1] * (p1[1] - v0[1]) + normal[2] * (p1[2] - v0[2])
+    d2 = normal[0] * (p2[0] - v0[0]) + normal[1] * (p2[1] - v0[1]) + normal[2] * (p2[2] - v0[2])
+    if (d1 > tolerance and d2 < -tolerance) or (d1 < -tolerance and d2 > tolerance):
+        denom = d1 - d2
+        if abs(denom) > 1.0e-12:
+            t = d1 / denom
+            if 1.0e-5 < t < 1.0 - 1.0e-5:
+                pierce_pt: Vec3 = (
+                    p1[0] + t * (p2[0] - p1[0]),
+                    p1[1] + t * (p2[1] - p1[1]),
+                    p1[2] + t * (p2[2] - p1[2]),
+                )
+                return _point_in_polygon3d(pierce_pt, poly, normal, tolerance)
+    return False
+
+
+def _panels_intersect(
+    face_a: FoldedFace,
+    face_b: FoldedFace,
+    poly_a: Sequence[Vec3],
+    poly_b: Sequence[Vec3],
+    tolerance: float,
+) -> bool:
+    """Does one panel pass through the other?
+
+    The unambiguous test is **containment**: a corner of one panel that lies
+    strictly inside the other panel means the paper of the first one is
+    inside the second one, which no pair of hands can produce.
+    """
+    for point in poly_a:
+        if _point_in_polygon3d(point, poly_b, face_b.normal, tolerance):
+            return True
+    for point in poly_b:
+        if _point_in_polygon3d(point, poly_a, face_a.normal, tolerance):
+            return True
+    return False
 
 
 def _centroid(points: Sequence[Vec3]) -> Vec3:

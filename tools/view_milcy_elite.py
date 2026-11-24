@@ -459,6 +459,39 @@ def build_viewer_html(elites: List[Dict[str, Any]]) -> str:
       justify-content: center;
       margin-top: 10px;
     }}
+    /* Accessibility & Focus Rings */
+    button:focus-visible, a:focus-visible, input[type="range"]:focus-visible {{
+      outline: 2px solid var(--accent);
+      outline-offset: 2px;
+    }}
+    /* Responsive Layout Breakpoints */
+    @media (max-width: 1200px) {{
+      .sidebar-left {{ width: 230px; }}
+      .sidebar-right {{ width: 360px; }}
+    }}
+    @media (max-width: 960px) {{
+      .main-container {{
+        flex-direction: column;
+        height: auto;
+        overflow-y: auto;
+      }}
+      .sidebar-left, .sidebar-right {{
+        width: 100%;
+        max-height: 280px;
+        border-right: none;
+        border-left: none;
+        border-bottom: 1px solid var(--border);
+      }}
+      .viewport-container {{
+        min-height: 500px;
+        height: 60vh;
+      }}
+      .folding-player-bar {{
+        width: 95%;
+        padding: 6px 10px;
+        gap: 8px;
+      }}
+    }}
   </style>
 </head>
 <body>
@@ -585,16 +618,37 @@ def build_viewer_html(elites: List[Dict[str, Any]]) -> str:
     const container = document.getElementById('webgl-canvas');
     const scene = new THREE.Scene();
     scene.background = new THREE.Color(0x070b14);
-    scene.fog = new THREE.FogExp2(0x070b14, 0.4);
+    scene.fog = new THREE.Fog(0x070b14, 0.8, 6.0);
 
     const camera = new THREE.PerspectiveCamera(45, container.clientWidth / container.clientHeight, 0.01, 100);
     camera.position.set(0.3, 0.25, 0.4);
 
-    const renderer = new THREE.WebGLRenderer({{ antialias: true }});
+    const renderer = new THREE.WebGLRenderer({{ antialias: true, powerPreference: 'high-performance' }});
     renderer.setSize(container.clientWidth, container.clientHeight);
-    renderer.setPixelRatio(window.devicePixelRatio);
-    renderer.shadowMap.enabled = true;
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    renderer.shadowMap.enabled = false; // Disable expensive and unused shadow maps
     container.appendChild(renderer.domElement);
+
+    // Recursive GPU Resource Disposal to eliminate WebGL memory leaks
+    function disposeHierarchy(obj) {{
+      if (!obj) return;
+      if (obj.geometry) {{
+        obj.geometry.dispose();
+      }}
+      if (obj.material) {{
+        if (Array.isArray(obj.material)) {{
+          obj.material.forEach(m => m.dispose && m.dispose());
+        }} else if (obj.material.dispose) {{
+          obj.material.dispose();
+        }}
+      }}
+      if (obj.children && obj.children.length > 0) {{
+        for (let i = obj.children.length - 1; i >= 0; i--) {{
+          disposeHierarchy(obj.children[i]);
+          obj.remove(obj.children[i]);
+        }}
+      }}
+    }}
 
     const controls = new THREE.OrbitControls(camera, renderer.domElement);
     controls.enableDamping = true;
@@ -718,38 +772,25 @@ def build_viewer_html(elites: List[Dict[str, Any]]) -> str:
         btnFinish.classList.toggle('active', stepIdx === steps.length - 1);
       }}
 
-      // Highlight corresponding manual step-item
+      // Highlight nearest active manual step item
+      let activeItem = null;
+      let maxMatchedStep = -1;
       document.querySelectorAll('#folding-steps-container .step-item').forEach(item => {{
         const targetStep = parseInt(item.getAttribute('data-step'), 10);
-        // Step items represent thresholds: activate if stepIdx matches or is within its phase
-        item.classList.toggle('active', targetStep === stepIdx);
+        if (!isNaN(targetStep) && targetStep <= stepIdx && targetStep > maxMatchedStep) {{
+          maxMatchedStep = targetStep;
+          activeItem = item;
+        }}
+        item.classList.remove('active');
       }});
+      if (activeItem) {{
+        activeItem.classList.add('active');
+      }}
 
-      // Rebuild 3D Mesh for this intermediate fold step
+      // Rebuild 3D Mesh for this intermediate fold step (with GPU resource cleanup)
       while (modelGroup.children.length > 0) {{
         const child = modelGroup.children[0];
-        // Dispose of geometry and materials to prevent WebGL memory leak
-        if (child.geometry) {{
-          child.geometry.dispose();
-        }}
-        if (child.material) {{
-          if (Array.isArray(child.material)) {{
-            child.material.forEach(mat => mat.dispose());
-          }} else {{
-            child.material.dispose();
-          }}
-        }}
-        // Recursively dispose children (like wireframe overlay)
-        child.traverse((obj) => {{
-          if (obj.geometry) obj.geometry.dispose();
-          if (obj.material) {{
-            if (Array.isArray(obj.material)) {{
-              obj.material.forEach(mat => mat.dispose());
-            }} else {{
-              obj.material.dispose();
-            }}
-          }}
-        }});
+        disposeHierarchy(child);
         modelGroup.remove(child);
       }}
 
@@ -904,26 +945,47 @@ def build_viewer_html(elites: List[Dict[str, Any]]) -> str:
     }}
 
     function buildTrajectory(elite) {{
-      if (trajectoryLine) scene.remove(trajectoryLine);
-      const points = [];
-      // Approximate 6DoF horizontal glide arc
+      if (trajectoryLine) {{
+        disposeHierarchy(trajectoryLine);
+        scene.remove(trajectoryLine);
+        trajectoryLine = null;
+      }}
       const b = elite.data.benchmark || {{}};
       const mid = b.mid_speed || {{}};
-      const dist = mid.distance_m || 4.5;
-      const maxAlt = mid.max_altitude_m || 1.95;
-      const duration = mid.flight_time_s || 2.4;
+      const dist = mid.distance_m || 5.0;
+      const maxAlt = mid.max_altitude_m || 2.0;
+      const flightTime = mid.flight_time_s || 2.5;
+      const maxLD = mid.max_ld_ratio || (dist / Math.max(0.1, maxAlt));
 
-      const nSamples = 60;
+      const points = [];
+      const nSamples = 80;
+      const launchHeight = Math.min(maxAlt, 1.8); // Launch altitude (m)
+      const scale = 0.08; // Physical meters to viewport scale
+
+      // Physics-grounded glide slope calculation:
+      // Balanced glide trajectory: z(x) = h0 - x / (L/D) with smooth launch transition
       for (let i = 0; i <= nSamples; i++) {{
         const t = i / nSamples;
-        const x = (t * dist * 0.05) - 0.1; // scale down for viewport
-        const y = (Math.sin(t * Math.PI) * (maxAlt - 1.5) * 0.2) + (1.0 - t) * 0.08 - 0.05;
-        const z = Math.sin(t * 2.0) * 0.015;
-        points.push(new THREE.Vector3(x, y, z));
+        const forwardM = t * dist;
+        // Glide descent profile: initial pitch-stabilization transition, then steady descent to ground
+        const transition = Math.sin(Math.min(1.0, t * 4.0) * (Math.PI / 2));
+        const glideDrop = (forwardM / Math.max(1.0, maxLD));
+        const currentAlt = Math.max(0.0, launchHeight - glideDrop * transition);
+
+        // Three.js Coordinate mapping (+X: flight path forward, +Y: vertical altitude above floor, Z: 0.0 centerline)
+        const posX = (forwardM * scale) - 0.15;
+        const posY = (currentAlt * scale) - 0.1; // -0.1 matches gridHelper.position.y
+        const posZ = 0.0; // Steady longitudinal flight without fake lateral wobble
+        points.push(new THREE.Vector3(posX, posY, posZ));
       }}
 
       const geom = new THREE.BufferGeometry().setFromPoints(points);
-      const mat = new THREE.LineBasicMaterial({{ color: 0x38bdf8, linewidth: 2, transparent: true, opacity: 0.8 }});
+      const mat = new THREE.LineBasicMaterial({{
+        color: 0x38bdf8,
+        linewidth: 2,
+        transparent: true,
+        opacity: 0.85
+      }});
       trajectoryLine = new THREE.Line(geom, mat);
       scene.add(trajectoryLine);
     }}
@@ -991,68 +1053,53 @@ def build_viewer_html(elites: List[Dict[str, Any]]) -> str:
         <div class="spec-box"><div class="spec-label">主翼投影面積</div><div class="spec-value">${{planformAreaCm2}} cm²</div></div>
       `;
 
-      // 4. Detailed Step-by-Step Folding Manual
-      const noseFolds = cfg.nose ? cfg.nose.fold_count || 4 : 4;
+      // 4. Detailed Step-by-Step Folding Manual (Dynamically populated per elite genome)
       const keelDepthMm = geom.keel_height_m ? (geom.keel_height_m * 1000).toFixed(0) : "12";
       const wingletDeg = cfg.wing ? (cfg.wing.winglet_angle_deg || 50.3).toFixed(1) : "50.3";
       const elevonDeg = cfg.wing ? Math.abs(cfg.wing.elevon_left_deg || 3.9).toFixed(1) : "3.9";
       const dihedralDeg = cfg.wing ? (cfg.wing.dihedral_deg || 4.4).toFixed(1) : "4.4";
 
-      document.getElementById('folding-steps-container').innerHTML = `
-        <div class="step-item" data-step="1">
-          <div class="step-num">Step 1: 中心線の谷折り（基準線）</div>
-          A4用紙を縦長に置き、左右を半分に谷折りしてしっかり爪で折り目をつけ、一度平らに開きます。
-        </div>
-        <div class="step-item" data-step="3">
-          <div class="step-num">Step 2: 上の左右の角を中心線へ折る（家の屋根）</div>
-          上の左右の角を、Step 1の中心線に合わせてきっちり45度に三角形に折ります。（屋根のような五角形になります）
-        </div>
-        <div class="step-item" data-step="5">
-          <div class="step-num">Step 3: 三角の頂点を手前へ折り下げる（封筒折り）</div>
-          上の尖った頂点を、中心線に沿って手前（下方向）へ折り下げます。（封筒のフタを閉じたような長方形＋台形になります。先端から下端までは約8.5cmあけます）
-        </div>
-        <div class="step-item" data-step="7">
-          <div class="step-num">Step 4: もう一度、上の左右を中心線へ折る</div>
-          折り下げた状態で、新しくできた上の左右の角を、再び中心線に向かって三角形に折ります。<br>
-          <span style="color: var(--accent);">※ポイント: Step 3で折り下げた三角の先端が、下から約1.5cm顔をのぞかせている状態にします。</span>
-        </div>
-        <div class="step-item" data-step="9">
-          <div class="step-num">Step 5: ノーズロック折り（機首の固定ロック）</div>
-          下からのぞいている小さな三角形を上に折り返し、Step 4で折った左右の紙の合わせ目をガッチリ挟み込んでロックします。（飛行中に機首が開くのを防ぎます）
-        </div>
-        <div class="step-item" data-step="10">
-          <div class="step-num">Step 6: 胴体の二つ折り（裏返して半分に）</div>
-          機体を裏返し、Step 1の中心線に沿って山折り（機首のロックが外側に見える状態）で半分に折りたたみます。
-        </div>
-        <div class="step-item" data-step="11">
-          <div class="step-num">Step 7: 主翼の折り下げ（持ち手キール成型）</div>
-          胴体の下側に深さ約 <strong>${{keelDepthMm}} mm（指1本分の幅）</strong> の持ち手（キール）を残すようにして、主翼を左右とも外側へ水平に折り下げます。
-        </div>
-        <div class="step-item" data-step="13">
-          <div class="step-num">Step 8: 翼端ウィングレット（約 ${{wingletDeg}}°）立ち上げ</div>
-          左右の主翼の外端（端から約1.5cm幅）を、斜め上へ約 <strong>${{wingletDeg}}度</strong> 急角度で折り上げます。（翼端渦を抑えて失速を防ぎます）
-        </div>
-        <div class="step-item" data-step="15">
-          <div class="step-num">Step 9: エレボントリム（仕上げ反り: 約 ${{elevonDeg}}°）</div>
-          主翼の後ろ端（後縁）を、指先で <strong>約 1〜2ミリ（約 ${{elevonDeg}}度）だけ軽く上向きに反らせます</strong>。<br>
-          <span style="color: var(--warning);">※このわずかな上向き反りによって、急降下せず美しい水平滑空姿勢が保たれます！</span>
-        </div>
-        <div class="step-item" data-step="20">
-          <div class="step-num">Step 10: 主翼の上反角（V字角度: 約 ${{dihedralDeg}}°）調整</div>
-          左右の主翼を水平よりほんのわずか（約 <strong>${{dihedralDeg}}度</strong>）上向きに持ち上げます。（正面から見て浅いV字型にすることで横揺れが自然復元します）
-        </div>
-      `;
+      const manualSteps = elite.folding_steps_3d || [];
+      const creaseData = elite.crease_lines || [];
+      let manualHTML = '';
 
-      // Attach click listeners to step items
-      document.querySelectorAll('#folding-steps-container .step-item').forEach(item => {{
-        item.addEventListener('click', () => {{
-          stopFoldingAnimation();
-          const targetStep = parseInt(item.getAttribute('data-step'), 10);
-          if (!isNaN(targetStep)) {{
-            showFoldStep(targetStep);
+      if (manualSteps.length > 0) {{
+        manualHTML += `
+          <div class="step-item active" data-step="0">
+            <div class="step-num">Step 0: 初期状態（A4用紙）</div>
+            A4用紙（縦297mm × 横210mm）を平らに置き、基準とします。
+          </div>
+        `;
+        for (let s = 1; s < manualSteps.length; s++) {{
+          const stepData = manualSteps[s];
+          const cl = creaseData[s - 1];
+          const mtnText = cl ? (cl.mountain ? "【山折り】" : "【谷折り】") : "";
+          const angleText = cl && cl.angle_deg ? ` (約 ${{Math.abs(cl.angle_deg)}}°)` : "";
+          const stepLabel = stepData.label || (cl ? cl.label : `工程 ${{s}}`);
+
+          let note = "";
+          const key = stepLabel.toLowerCase();
+          if (key.includes("wing") && !key.includes("winglet")) {{
+            note = `<br><span style="color: var(--accent);">※持ち手キール深さ約 ${{keelDepthMm}} mm を残して主翼を水平に折り下げます。</span>`;
+          }} else if (key.includes("winglet")) {{
+            note = `<br><span style="color: var(--accent);">※左右翼端を約 ${{wingletDeg}}° 上向きに折り上げて翼端渦を抑制します。</span>`;
+          }} else if (key.includes("elevon")) {{
+            note = `<br><span style="color: var(--warning);">※主翼後縁を約 ${{elevonDeg}}° 軽く反らせて水平滑空姿勢を安定化します。</span>`;
+          }} else if (s === manualSteps.length - 1) {{
+            note = `<br><span style="color: var(--success);">※正面から見て浅いV字型（上反角 約 ${{dihedralDeg}}°）に整えて完成形とします。</span>`;
           }}
-        }});
-      }});
+
+          manualHTML += `
+            <div class="step-item" data-step="${{s}}">
+              <div class="step-num">Step ${{s}}: ${{stepLabel}} ${{mtnText}}${{angleText}}</div>
+              工程 ${{s}} の折り目をつけます。${{note}}
+            </div>
+          `;
+        }}
+      }} else {{
+        manualHTML = `<div class="step-item" data-step="0"><div class="step-num">手順なし</div>折り手順データが存在しません。</div>`;
+      }}
+      document.getElementById('folding-steps-container').innerHTML = manualHTML;
 
       // 5. Crease Pattern SVG (Generated dynamically from real genome crease lines)
       const creaseLines = elite.crease_lines || [];
@@ -1174,9 +1221,29 @@ def build_viewer_html(elites: List[Dict[str, Any]]) -> str:
       showFoldStep(steps.length - 1);
     }});
 
+    // Delegated click listener for folding step manual items (Registered ONCE)
+    const stepsContainer = document.getElementById('folding-steps-container');
+    if (stepsContainer) {{
+      stepsContainer.addEventListener('click', (e) => {{
+        const item = e.target.closest('.step-item');
+        if (!item) return;
+        stopFoldingAnimation();
+        const targetStep = parseInt(item.getAttribute('data-step'), 10);
+        if (!isNaN(targetStep)) {{
+          showFoldStep(targetStep);
+        }}
+      }});
+    }}
+
+    // Debounced slider handler to eliminate rapid UI jank
+    let sliderDebounceTimer = null;
     document.getElementById('fold-step-slider').addEventListener('input', function() {{
       stopFoldingAnimation();
-      showFoldStep(parseInt(this.value, 10));
+      const val = parseInt(this.value, 10);
+      if (sliderDebounceTimer) clearTimeout(sliderDebounceTimer);
+      sliderDebounceTimer = setTimeout(() => {{
+        showFoldStep(val);
+      }}, 30);
     }});
 
     // Viewport Button Event Listeners
@@ -1206,9 +1273,17 @@ def build_viewer_html(elites: List[Dict[str, Any]]) -> str:
       this.classList.toggle('active', axesHelper.visible);
     }});
 
-    // Helper to copy image to clipboard
+    // Helper to copy image to clipboard with robust file:// protocol fallback
     async function copyImageToClipboard(imgUrl, btn) {{
       const origText = btn.textContent;
+      if (window.location.protocol === 'file:') {{
+        btn.textContent = "ℹ️ 上のDLボタン推奨";
+        alert("【お知らせ】\nローカル環境 (file://) ではブラウザのセキュリティ制限によりクリップボード書き込みが遮断されます。\nすぐ上の『🖨️ A4最大型紙 (PNG)』等のリンクから直接ダウンロード・保存してご利用ください。");
+        setTimeout(() => {{
+          btn.textContent = origText;
+        }}, 3500);
+        return;
+      }}
       try {{
         btn.textContent = "⏳ コピー中...";
         btn.disabled = true;

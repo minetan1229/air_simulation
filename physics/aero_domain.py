@@ -1247,6 +1247,7 @@ def evaluate_aero(
         mach=float(mach_value),
         stall_margin=float(stall_margin),
         stalled=stalled,
+        w_stall=float(coefficients.get("w_stall", 0.0)),
         cd_min=float(minima["cd_min"]),
         alpha_ld_max_deg=float(minima["alpha_ld_max_deg"]),
         circulation_m2ps=float(gamma),

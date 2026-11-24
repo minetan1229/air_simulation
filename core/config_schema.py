@@ -257,6 +257,7 @@ class AircraftConfig:
     taper_ratio: float = 0.70
     dihedral_deg: float = 5.0
     aspect_ratio: float = 0.0  # 0 -> derived as b^2 / S
+    keel_height_m: float = 0.015  # folded ventral keel depth (m) coupled to ground contact
 
     # --- folds & trim ----------------------------------------------------
     fold_leading_deg: float = 0.0
@@ -435,6 +436,7 @@ class AircraftConfig:
             taper_ratio=clamp(self.taper_ratio, *AIRCRAFT_RANGES["taper_ratio"]),
             dihedral_deg=clamp(self.dihedral_deg, *AIRCRAFT_RANGES["dihedral_deg"]),
             aspect_ratio=clamp(self.aspect_ratio, *AIRCRAFT_RANGES["aspect_ratio"]),
+            keel_height_m=clamp(self.keel_height_m, *AIRCRAFT_RANGES.get("keel_height_m", (0.001, 0.15))),
             fold_leading_deg=clamp(self.fold_leading_deg, *AIRCRAFT_RANGES["fold_leading_deg"]),
             fold_trailing_deg=clamp(self.fold_trailing_deg, *AIRCRAFT_RANGES["fold_trailing_deg"]),
             fold_tip_deg=clamp(self.fold_tip_deg, *AIRCRAFT_RANGES["fold_tip_deg"]),
@@ -1163,6 +1165,7 @@ class AeroResult:
     mach: float = 0.0
     stall_margin: float = 0.0
     stalled: bool = False
+    w_stall: float = 0.0
     cd_min: float = 0.0
     alpha_ld_max_deg: float = 0.0
     circulation_m2ps: float = 0.0
@@ -1513,6 +1516,7 @@ def derived_properties(cfg: AircraftConfig) -> Dict[str, float]:
         "wingspan_m": span,
         "wing_area_m2": area,
         "aspect_ratio": aspect,
+        "keel_height_m": clamp(float(cfg.keel_height_m), 0.001, 0.15),
         "mean_chord_m": mean_chord,
         "mac_m": mac,
         "taper_ratio": taper,
@@ -1577,6 +1581,7 @@ AIRCRAFT_RANGES: Dict[str, Tuple[float, float]] = {
     "taper_ratio": (0.01, 2.0),
     "dihedral_deg": (-45.0, 45.0),
     "aspect_ratio": (0.0, 30.0),
+    "keel_height_m": (0.001, 0.15),
     "fold_leading_deg": (-90.0, 90.0),
     "fold_trailing_deg": (-90.0, 90.0),
     "fold_tip_deg": (-90.0, 90.0),

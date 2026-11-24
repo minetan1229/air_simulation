@@ -252,9 +252,19 @@ def _finish_mesh(
     vertices = pool.array()
     if faces:
         cleaned: List[Tuple[int, int, int]] = []
+        n_vert = len(vertices)
         for tri in faces:
             i0, i1, i2 = int(tri[0]), int(tri[1]), int(tri[2])
+            if not (0 <= i0 < n_vert and 0 <= i1 < n_vert and 0 <= i2 < n_vert):
+                continue
             if i0 == i1 or i1 == i2 or i0 == i2:
+                continue
+            p0 = vertices[i0]
+            p1 = vertices[i1]
+            p2 = vertices[i2]
+            # Cross product norm for collinearity / degenerate zero area check
+            cross = np.cross(p1 - p0, p2 - p0)
+            if np.linalg.norm(cross) <= 1e-12:
                 continue
             cleaned.append((i0, i1, i2))
         if cleaned:

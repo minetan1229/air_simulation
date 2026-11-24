@@ -525,8 +525,10 @@ def helmbold_cl_alpha(aspect_ratio: float, taper_ratio: float) -> float:
     slope error that silently changed the trim angle whenever a GPU was
     present.
     """
-    aspect = max(float(aspect_ratio), 1.0e-3)
-    taper = clamp(float(taper_ratio), 0.01, 1.0)
+    raw_ar = float(aspect_ratio)
+    aspect = max(raw_ar if math.isfinite(raw_ar) else 1.0e-3, 1.0e-3)
+    raw_taper = float(taper_ratio)
+    taper = clamp(raw_taper if math.isfinite(raw_taper) else 1.0, 0.01, 1.0)
     denominator = 2.0 + math.sqrt(aspect * aspect * (1.0 + taper) + 4.0 * aspect / math.pi)
     return 2.0 * math.pi * aspect / denominator
 
@@ -620,16 +622,17 @@ def stall_blend_weight(
     alpha = _finite(xp, alpha_deg, 0.0)
     stall_alpha = xp.abs(_finite(xp, stall_alpha_deg, 14.0))
     offset = xp.abs(alpha) - stall_alpha
-    floor = 0.5 ** int(order)
-    base = _logistic(xp, xp.maximum(xp.abs(_finite(xp, sharpness, 1.4)), 1.0e-6) * offset) ** int(order)
+    ord_val = max(int(order), 1)
+    floor = 0.5 ** ord_val
+    base = _logistic(xp, xp.maximum(xp.abs(_finite(xp, sharpness, 1.4)), 1.0e-6) * offset) ** ord_val
     weight = (base - floor) / (1.0 - floor)
     return xp.where(offset > 0.0, _clamp(xp, weight, 0.0, 1.0), 0.0)
 
 
 def flat_plate_lift_coefficient(xp: Any, alpha_deg: Any) -> Any:
-    """Hoerner fully separated flat-plate lift ``2 sin(a) cos^2(a)``."""
+    """Hoerner fully separated flat-plate lift ``2 sin(a) cos(a) |cos(a)|``."""
     angle = _rad(xp, _finite(xp, alpha_deg, 0.0))
-    return 2.0 * xp.sin(angle) * xp.cos(angle) * xp.cos(angle)
+    return 2.0 * xp.sin(angle) * xp.cos(angle) * xp.abs(xp.cos(angle))
 
 
 def post_stall_lift_coefficient(
@@ -974,11 +977,13 @@ def lsb_dynamic_stall_hysteresis(
 
     k_red = xp.sqrt(xp.maximum((xp.abs(adot_rad) * c) / (2.0 * v), 0.0))
     f_re = _clamp(xp, xp.sqrt(1.0e4 / re), 0.2, 2.0) * _clamp(xp, 1.0 + _finite(xp, low_re_lsb_gain, 0.15) * _log_Re(xp, reynolds), 0.9, 1.35)
-    delta_reatt = _clamp(xp, delta_alpha0_deg * xp.sqrt(2.0e4 / re), 0.5, 6.0)
+    d_a0 = xp.maximum(_finite(xp, delta_alpha0_deg, 2.5), 0.0)
+    delta_reatt = _clamp(xp, d_a0 * xp.sqrt(2.0e4 / re), 0.5, 6.0)
 
     shift_up = k_lsb * k_red * f_re * (180.0 / math.pi)
     shift_down = -(delta_reatt + k_reatt * k_red * f_re * (180.0 / math.pi))
-    delta_shift = xp.where(adot >= 0.0, shift_up, shift_down)
+    w_up = 0.5 * (1.0 + xp.tanh(adot / 1.0))
+    delta_shift = (1.0 - w_up) * shift_down + w_up * shift_up
 
     # Turbulence suppression factor (Hoffmann 1991: LSB loop collapses under freestream turbulence)
     tu = xp.maximum(_finite(xp, turbulence_intensity, 0.0), 0.0)
@@ -988,7 +993,7 @@ def lsb_dynamic_stall_hysteresis(
     is_prev = _flag_array(xp, is_stalled_prev)
     eff_stall = xp.where(
         is_prev,
-        a_stall_0 + xp.minimum(delta_shift, -0.5),
+        a_stall_0 + xp.minimum(delta_shift, -0.5 * tu_factor),
         a_stall_0 + xp.maximum(delta_shift, 0.0),
     )
     eff_stall = _clamp(xp, eff_stall, a_stall_0 - 8.0, a_stall_0 + 10.0)
@@ -1198,11 +1203,12 @@ def lift_coefficient(
     )
 
     stall_rad = _rad(xp, stall_alpha)
-    kv = xp.maximum(_finite(xp, polhamus_kv, 0.0), 0.0)
-    stall_vortex = kv * xp.square(xp.sin(stall_rad)) * xp.cos(stall_rad)
-    vortex_inc = xp.where(kv > 0.0, stall_vortex, 0.0)
-    linear_at_stall_pos = zero_lift + slope * stall_rad + vortex_inc
-    linear_at_stall_neg = zero_lift - slope * stall_rad - vortex_inc
+    linear_at_stall_pos = polhamus_attached_branch(
+        xp, stall_alpha, zero_lift, slope, polhamus_kp, polhamus_kv
+    )
+    linear_at_stall_neg = polhamus_attached_branch(
+        xp, -stall_alpha, zero_lift, slope, polhamus_kp, polhamus_kv
+    )
 
     ceiling = xp.maximum(xp.abs(_finite(xp, cl_max, 0.90)), 1.0e-6)
     attached = _clamp(xp, linear, -ceiling, ceiling)
@@ -1295,9 +1301,12 @@ def drag_coefficient(
     # Vortex:    Delta C_D,v = |C_L,v * tan(alpha)| = K_v * sin^2(alpha) * |sin(alpha)|
     kv_val = xp.maximum(_finite(xp, polhamus_kv, 0.0), 0.0)
     vortex_cd = polhamus_vortex_drag(xp, alpha_deg, kv_val)
+    alpha_rad_drag = _rad(xp, alpha_deg)
+    sin_a_drag = xp.sin(alpha_rad_drag)
+    vortex_sign_drag = xp.where(sin_a_drag >= 0.0, _f64(xp, 1.0), _f64(xp, -1.0))
     cl_vortex = xp.where(
         kv_val > 0.0,
-        kv_val * xp.square(xp.sin(_rad(xp, alpha_deg))) * xp.cos(_rad(xp, alpha_deg)) * xp.where(_rad(xp, alpha_deg) >= 0.0, _f64(xp, 1.0), _f64(xp, -1.0)),
+        kv_val * xp.square(sin_a_drag) * xp.cos(alpha_rad_drag) * vortex_sign_drag,
         _f64(xp, 0.0),
     )
     cl_pot = xp.where(kv_val > 0.0, cl - cl_vortex, cl)
@@ -1308,7 +1317,7 @@ def drag_coefficient(
     alpha = (_finite(xp, alpha_deg, 0.0) + 180.0) % 360.0 - 180.0
     stall_alpha = xp.abs(_finite(xp, stall_alpha_deg, 14.0))
     angle = _rad(xp, alpha)
-    separated_drag = 2.0 * xp.square(xp.sin(angle)) + parasite * xp.abs(xp.cos(angle))
+    separated_drag = 2.0 * xp.square(xp.sin(angle)) + parasite * xp.maximum(xp.cos(angle), 0.0)
 
     weight = _smoothstep01(
         xp,
@@ -1418,16 +1427,16 @@ def center_of_pressure_fraction(
        Hoerner (Fluid-Dynamic Lift, 1975) and low-Re flat plate experiments (e.g. Pelletier &
        Mueller 2000, Sunada et al. 2002).
 
-    3. Transition & Continuity (:math:`C^1` smoothstep):
+    3. Transition & Continuity (:math:`C^2` smootherstep):
        The transition between attached flow (:math:`0.25`) and separated flow (:math:`0.50`)
-       is governed by a cubic Hermite smoothstep polynomial:
+       is governed by a quintic smootherstep polynomial (Perlin 2002):
        .. math::
-           S(u) = 3 u^2 - 2 u^3, \quad u = \mathrm{clamp}(|\alpha| / \alpha_{\mathrm{stall}}, 0, 1)
+           S(u) = 6 u^5 - 15 u^4 + 10 u^3, \quad u = \mathrm{clamp}(|\alpha| / \alpha_{\mathrm{stall}}, 0, 1)
 
-       - Monotonicity: :math:`S'(u) = 6 u (1 - u) \ge 0` for all :math:`u \in [0, 1]`.
-       - Boundary conditions & :math:`C^1` continuity:
-         :math:`S(0) = 0, \quad S'(0) = 0`, ensuring :math:`\left.\frac{d(x_{cp}/c)}{d\alpha}\right|_{\alpha=0} = 0`.
-         :math:`S(1) = 1, \quad S'(1) = 0`, ensuring :math:`\left.\frac{d(x_{cp}/c)}{d\alpha}\right|_{\alpha=\alpha_{\mathrm{stall}}} = 0`.
+       - Monotonicity: :math:`S'(u) = 30 u^2 (1 - u)^2 \ge 0` for all :math:`u \in [0, 1]`.
+       - Boundary conditions & :math:`C^2` continuity:
+         :math:`S(0) = 0, \quad S'(0) = 0, \quad S''(0) = 0`, ensuring :math:`\left.\frac{d(x_{cp}/c)}{d\alpha}\right|_{\alpha=0} = 0`.
+         :math:`S(1) = 1, \quad S'(1) = 0, \quad S''(1) = 0`, ensuring :math:`\left.\frac{d(x_{cp}/c)}{d\alpha}\right|_{\alpha=\alpha_{\mathrm{stall}}} = 0`.
        - Symmetry: :math:`x_{cp}(-\alpha) = x_{cp}(\alpha)`.
        - Pitch stability coupling:
          The aft shift produces a stabilizing pitch increment :math:`\Delta C_m = -(x_{cp} - 0.25 c)/c \cdot C_L`,
@@ -1642,6 +1651,7 @@ _COEFFICIENT_KEYS: Tuple[str, ...] = (
     "yawing_nm",
     "stall_margin",
     "stalled",
+    "w_stall",
     "ground_ratio",
     "cp_x_m",
     "polar_constant",
@@ -1796,9 +1806,12 @@ def _coefficient_core(
     cd0 = parasite_drag_coefficient(xp, cd0, reynolds, re_cd0_exponent) * _interp(_clamp(xp, 1.0 + _finite(xp, low_re_cd0_gain, 0.03) * _x, 1.0, 1.12)) + te_fold["dcd"]
     kv_core = xp.maximum(_finite(xp, polhamus_kv, 0.0), 0.0)
     vortex_cd_core = polhamus_vortex_drag(xp, alpha, kv_core)
+    alpha_rad_core = _rad(xp, alpha)
+    sin_a_core = xp.sin(alpha_rad_core)
+    vortex_sign_core = xp.where(sin_a_core >= 0.0, _f64(xp, 1.0), _f64(xp, -1.0))
     cl_vortex_core = xp.where(
         kv_core > 0.0,
-        kv_core * xp.square(xp.sin(_rad(xp, alpha))) * xp.cos(_rad(xp, alpha)) * xp.where(_rad(xp, alpha) >= 0.0, _f64(xp, 1.0), _f64(xp, -1.0)),
+        kv_core * xp.square(sin_a_core) * xp.cos(alpha_rad_core) * vortex_sign_core,
         _f64(xp, 0.0),
     )
     cl_pot_core = xp.where(kv_core > 0.0, cl - cl_vortex_core * lift_scale, cl)
@@ -1810,7 +1823,7 @@ def _coefficient_core(
     alpha_norm = (alpha + 180.0) % 360.0 - 180.0
     stall_alpha_val = _stall_eff
     angle = _rad(xp, alpha_norm)
-    separated_drag = 2.0 * xp.square(xp.sin(angle)) + cd0 * xp.abs(xp.cos(angle))
+    separated_drag = 2.0 * xp.square(xp.sin(angle)) + cd0 * xp.maximum(xp.cos(angle), 0.0)
     w_drag = _smoothstep01(
         xp,
         (xp.abs(alpha_norm) - stall_alpha_val)
@@ -1944,9 +1957,12 @@ def _coefficient_core(
     )
     cp_x = cp_fraction * chord
     cp_gain = xp.maximum(cp_shift_gain, 0.0)
+    # Pitching moment from center of pressure shift is driven by normal force
+    # C_N = C_L * cos(alpha) + C_D * sin(alpha), ensuring restoring torque persists at alpha = 90 deg.
+    c_n = cl * xp.cos(_rad(xp, alpha)) + cd * xp.sin(_rad(xp, alpha))
     cm = cm + xp.where(
         cp_gain > 0.0,
-        -_safe_div(xp, cp_x - 0.25 * chord, chord, 0.0) * cl,
+        -_safe_div(xp, cp_x - 0.25 * chord, chord, 0.0) * c_n,
         0.0,
     )
 
@@ -1970,7 +1986,7 @@ def _coefficient_core(
     alpha_gate = xp.tanh(xp.abs(alpha) / 8.0)
     sin_a = xp.sin(_rad(xp, _clamp(xp, alpha, -90.0, 90.0)))
     pushover = -q_eff * area * chord * 0.85 * sin_a * speed_gate * alpha_gate
-    pushover_moment = xp.where(low_speed & (xp.abs(alpha) > 0.1), pushover, 0.0)
+    pushover_moment = xp.where(low_speed, pushover, 0.0)
 
     # --- low-speed cross-flow rotational damping ---------------------------
     # At low speeds / zero airspeed (speed -> 0), conventional dynamic pressure
@@ -1980,29 +1996,38 @@ def _coefficient_core(
     #   Pitch (q): rotating chord strips c * dx
     #   Roll  (p): rotating span strips b * dy
     #   Yaw   (r): rotating fuselage/keel and wing drag
+    # Cross-flow drag of rotating bluff surfaces (Hoerner 1965):
+    # Integral of differential drag dF = 0.5 * rho * Cd * (omega * r)^2 * dA times arm r
+    # yields rotational damping moment:
+    #   Pitch (q): M_q = -0.5 * rho * Cd * S * (c^3 / 32) * |q| * q
+    #   Roll  (p): M_p = -0.5 * rho * Cd * S * (b^3 / 32) * |p| * p
+    #   Yaw   (r): M_r = -0.5 * rho * Cd * S * (b^3 / 32) * |r| * r
+    # with consistent units [kg/m^3 * m^2 * m^3 * s^-2 = N m].
     q_rate_value = _finite(xp, q_rate, 0.0)
     p_rate_value = _finite(xp, p_rate, 0.0)
     r_rate_value = _finite(xp, r_rate, 0.0)
 
+    cd_cross = 1.2
+    v_floor = 0.1
     rot_damping_q = (
-        -0.5 * density * 1.2 * area * xp.square(chord) * xp.abs(q_rate_value) * q_rate_value
-        - 0.00015 * area * chord * density * q_rate_value
+        -0.5 * density * cd_cross * area * xp.power(chord, 3) * (1.0 / 32.0) * xp.abs(q_rate_value) * q_rate_value
+        - 0.5 * density * v_floor * area * xp.square(chord) * 0.10 * q_rate_value
     ) * speed_gate
     rot_damping_q = xp.where(
         low_speed & (area > 1.0e-6) & (chord > 1.0e-4), rot_damping_q, 0.0
     )
 
     rot_damping_p = (
-        -0.5 * density * 1.2 * area * xp.square(span) * (1.0 / 12.0) * xp.abs(p_rate_value) * p_rate_value
-        - 0.00015 * area * span * density * p_rate_value
+        -0.5 * density * cd_cross * area * xp.power(span, 3) * (1.0 / 32.0) * xp.abs(p_rate_value) * p_rate_value
+        - 0.5 * density * v_floor * area * xp.square(span) * 0.10 * p_rate_value
     ) * speed_gate
     rot_damping_p = xp.where(
         low_speed & (area > 1.0e-6) & (span > 1.0e-4), rot_damping_p, 0.0
     )
 
     rot_damping_r = (
-        -0.5 * density * 1.2 * area * xp.square(span) * (1.0 / 16.0) * xp.abs(r_rate_value) * r_rate_value
-        - 0.00015 * area * span * density * r_rate_value
+        -0.5 * density * cd_cross * area * xp.power(span, 3) * (1.0 / 32.0) * xp.abs(r_rate_value) * r_rate_value
+        - 0.5 * density * v_floor * area * xp.square(span) * 0.10 * r_rate_value
     ) * speed_gate
     rot_damping_r = xp.where(
         low_speed & (area > 1.0e-6) & (span > 1.0e-4), rot_damping_r, 0.0
@@ -2055,6 +2080,7 @@ def _coefficient_core(
         yawing_nm,
         stall_margin,
         stalled,
+        w_stall,
         ground_ratio,
         cp_x,
         polar,

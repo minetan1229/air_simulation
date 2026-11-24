@@ -23,11 +23,15 @@ import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-import matplotlib
-matplotlib.use("Agg")
-import matplotlib.pyplot as plt
-import matplotlib.patches as patches
-from matplotlib import font_manager
+try:
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    import matplotlib.patches as patches
+    from matplotlib import font_manager
+    HAS_MATPLOTLIB = True
+except ImportError:
+    HAS_MATPLOTLIB = False
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(PROJECT_ROOT) not in sys.path:
@@ -44,6 +48,8 @@ from geometry.origami_genome import step_meshes
 
 # Setup Japanese Font support for Matplotlib
 def setup_japanese_font():
+    if not HAS_MATPLOTLIB:
+        return
     preferred_fonts = ["Yu Gothic", "Meiryo", "MS Gothic", "BIZ UDGothic", "TakaoPGothic", "IPAGothic"]
     available_fonts = set(f.name for f in font_manager.fontManager.ttflist)
     for f in preferred_fonts:
@@ -103,7 +109,25 @@ def load_candidate_data(json_path: Path) -> Dict[str, Any]:
         return json.load(f)
 
 
-def build_folding_instructions(config: Dict[str, Any]) -> List[Dict[str, str]]:
+def build_folding_instructions(cand_data: Dict[str, Any]) -> List[Dict[str, str]]:
+    metadata = cand_data.get("metadata", {})
+    stored_macros = metadata.get("macro_steps")
+    if stored_macros:
+        badge_map = {1: "①", 2: "②", 3: "③", 4: "④", 5: "⑤", 6: "⑥", 7: "⑦", 8: "⑧", 9: "⑨", 10: "⑩"}
+        instructions = []
+        for m in stored_macros:
+            s_idx = m.get("step_index", 1)
+            b_sym = badge_map.get(s_idx, f"({s_idx})")
+            fold_type_str = "山折り (Mountain)" if m.get("mountain", False) else "谷折り (Valley)"
+            instructions.append({
+                "step": b_sym,
+                "type": fold_type_str,
+                "title": m.get("desc", "").split("（")[0] if "（" in m.get("desc", "") else m.get("name", ""),
+                "desc": m.get("desc", ""),
+            })
+        return instructions
+
+    config = cand_data.get("config", {}) if "config" in cand_data else cand_data
     nose = config.get("nose", {})
     keel = config.get("keel", {})
     wing = config.get("wing", {})
@@ -186,6 +210,8 @@ def render_a4_printable_sheet(
     dpi: int = 300,
 ) -> Path:
     """Generate high-resolution printable A4 paper airplane folding template."""
+    if not HAS_MATPLOTLIB:
+        raise RuntimeError("matplotlib is required to render printable A4 sheets")
     cid = cand_data.get("candidate_id", "map-elite-plane")
     cfg_d = cand_data.get("config", {})
     bench = cand_data.get("benchmark", {})
@@ -201,7 +227,7 @@ def render_a4_printable_sheet(
     adapter = OrigamiAdapter()
     cand = adapter.compile_candidate(cfg, candidate_id=cid)
     genome = cand.raw_genome
-    instructions = build_folding_instructions(cfg_d)
+    instructions = build_folding_instructions(cand.metadata)
 
     # A4 dimensions in inches (210 x 297 mm)
     # Page 1: Printable Crease Pattern (Actual 1:1 scale for direct folding)
@@ -270,7 +296,7 @@ def render_a4_printable_sheet(
     # Title & Headers outside paper area
     fig.text(
         0.5, 0.955,
-        f"milcy 実機印刷用 A4 折り図テンプレート（型紙）",
+        "milcy 実機印刷用 A4 折り図テンプレート（型紙）",
         fontsize=15,
         fontweight="bold",
         ha="center",
@@ -364,6 +390,8 @@ def render_a4_max_fullsize_sheet(
     Every coordinate u in [0, 1], v in [0, 1] maps exactly to the four corners of A4 paper,
     providing the maximum possible aircraft size with zero margins/wasted paper.
     """
+    if not HAS_MATPLOTLIB:
+        raise RuntimeError("matplotlib is required to render printable A4 sheets")
     cid = cand_data.get("candidate_id", "map-elite-plane")
     cfg_d = cand_data.get("config", {})
 
@@ -461,6 +489,8 @@ def render_a4_step_manual(
     dpi: int = 300,
 ) -> Path:
     """Generate accompanying A4 page with detailed step-by-step illustrated manual."""
+    if not HAS_MATPLOTLIB:
+        raise RuntimeError("matplotlib is required to render printable A4 sheets")
     cid = cand_data.get("candidate_id", "map-elite-plane")
     cfg_d = cand_data.get("config", {})
 
@@ -469,7 +499,7 @@ def render_a4_step_manual(
     # Header
     fig.text(
         0.5, 0.955,
-        f"A4実践折り方マニュアル & 機体調整ガイド",
+        "A4実践折り方マニュアル & 機体調整ガイド",
         fontsize=16,
         fontweight="bold",
         ha="center",

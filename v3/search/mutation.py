@@ -56,11 +56,11 @@ def mutate_parametric_config(
     keel = parent.keel
     new_keel_depth = keel.keel_depth_ratio
     if r.random() < mutation_rate:
-        new_keel_depth = _clamp(keel.keel_depth_ratio + r.gauss(0.0, 0.02), 0.06, 0.14)
+        new_keel_depth = _clamp(keel.keel_depth_ratio + r.gauss(0.0, 0.005), 0.06, 0.14)
 
     new_keel_offset = keel.crease_offset_u
     if r.random() < mutation_rate:
-        new_keel_offset = _clamp(keel.crease_offset_u + r.gauss(0.0, 0.01), 0.48, 0.52)
+        new_keel_offset = _clamp(keel.crease_offset_u + r.gauss(0.0, 0.002), 0.48, 0.52)
 
     mutated_keel = ParametricKeelSpec(
         keel_depth_ratio=new_keel_depth,

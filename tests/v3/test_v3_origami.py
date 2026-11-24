@@ -18,19 +18,18 @@ def test_compiler_step_count_bounds():
     steps = compiler.compile_steps(cfg)
 
     assert MIN_FOLD_STEPS <= len(steps) <= MAX_FOLD_STEPS
-    assert len(steps) >= 16
 
 
 def test_tier0_validation_enforces_step_count():
-    """Verify validate_tier0 rejects candidates with fewer than 16 steps."""
+    """Verify validate_tier0 rejects candidates with fewer than MIN_FOLD_STEPS steps."""
     adapter = OrigamiAdapter()
     candidate = adapter.compile_candidate(ParametricOrigamiConfig())
 
-    # Artificially modify step count to 12
-    candidate.step_count = 12
+    # Artificially modify step count below MIN_FOLD_STEPS
+    candidate.step_count = MIN_FOLD_STEPS - 1
     valid, reasons = validate_tier0(candidate)
     assert not valid
-    assert any("below minimum requirement 16" in r for r in reasons)
+    assert any(f"below minimum requirement {MIN_FOLD_STEPS}" in r for r in reasons)
 
 
 def test_adapter_produces_compliant_candidate():
@@ -38,7 +37,7 @@ def test_adapter_produces_compliant_candidate():
     adapter = OrigamiAdapter()
     candidate = adapter.compile_candidate(ParametricOrigamiConfig())
 
-    assert candidate.step_count >= 16
+    assert candidate.step_count >= MIN_FOLD_STEPS
     assert candidate.geometry is not None
     assert candidate.geometry.keel_height_m >= 0.008
     assert candidate.geometry.keel_length_m >= 0.030

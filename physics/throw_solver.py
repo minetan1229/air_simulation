@@ -24,7 +24,7 @@ from core.config_schema import (
     safe_div,
     throw_style,
 )
-from core.geometry_utils import quaternion_from_euler
+from core.geometry_utils import body_to_world, quaternion_from_euler
 from physics.ground_contact import compute_ground_stations
 
 
@@ -253,21 +253,21 @@ def resolve_throw(
             warnings.append(
                 f"release speed clamped to {MAX_RELEASE_SPEED_MPS:g} m/s (hand impulse too large)"
             )
-        # The impulsive hand pushes along the force direction, which sits
-        # ``throw_force_pitch_deg`` / ``throw_force_yaw_deg`` above the nose
-        # axis, so it is that direction -- not the nominal flight path -- that
-        # the airframe leaves the hand along.
-        velocity_pitch_deg = flight_pitch_deg + rad2deg(pitch_tilt)
-        velocity_yaw_deg = flight_yaw_deg + rad2deg(yaw_tilt)
+        # The impulsive hand pushes along the force direction in body frame:
+        # Transform direction_body to world frame via the airframe attitude quaternion
+        velocity = speed * body_to_world(quaternion, direction_body)
+        v_h = math.hypot(velocity[0], velocity[1])
+        velocity_pitch_deg = rad2deg(math.atan2(-velocity[2], max(v_h, 1e-9)))
+        velocity_yaw_deg = rad2deg(math.atan2(velocity[1], velocity[0]))
     else:
         speed = abs(_finite(cfg.launch_speed))
         velocity_pitch_deg = flight_pitch_deg
         velocity_yaw_deg = flight_yaw_deg
-    velocity = _velocity_from_elevation_azimuth(speed, velocity_pitch_deg, velocity_yaw_deg)
+        velocity = _velocity_from_elevation_azimuth(speed, velocity_pitch_deg, velocity_yaw_deg)
 
     # --- release rotation ------------------------------------------------
     grip_z_val = getattr(cfg, "throw_grip_z", getattr(cfg, "grip_z", None))
-    grip_z = 0.015 if grip_z_val is None else _finite(grip_z_val, 0.015)
+    grip_z = 0.015 if grip_z_val is None else float(grip_z_val)
     grip = np.array(
         [
             _finite(cfg.throw_grip_x) * mac + _finite(air.cg_offset_x),
@@ -329,6 +329,7 @@ def resolve_throw(
             rates = np.zeros(3, dtype=np.float64)
 
     height = _finite(cfg.launch_height_m)
+    ground_level = _finite(getattr(env, "ground_level_m", 0.0))
     raw_pos = getattr(cfg, "launch_position_m", (0.0, 0.0, 0.0))
     pos_x = _finite(raw_pos[0]) if len(raw_pos) > 0 else 0.0
     pos_y = _finite(raw_pos[1]) if len(raw_pos) > 1 else 0.0
@@ -336,7 +337,7 @@ def resolve_throw(
         [
             pos_x,
             pos_y,
-            -height,
+            -(ground_level + height),
         ],
         dtype=np.float64,
     )

@@ -35,11 +35,13 @@ and therefore *not* the NED simulator frame; the renderer applies the
 
 from __future__ import annotations
 
+import logging
 import math
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from geometry.validation_fixes import cluster_signed_depth
+logger = logging.getLogger(__name__)
 
 Vec2 = Tuple[float, float]
 Vec3 = Tuple[float, float, float]
@@ -1075,13 +1077,19 @@ class _MeshBuilder:
         return index
 
     def triangle(self, a: int, b: int, c: int) -> None:
+        n_pos = len(self.positions)
+        if not (0 <= a < n_pos and 0 <= b < n_pos and 0 <= c < n_pos):
+            return
         if a == b or b == c or a == c:
             return
-        if _same_point3(self.positions[a], self.positions[b], 1e-12):
+        pa = self.positions[a]
+        pb = self.positions[b]
+        pc = self.positions[c]
+        if _same_point3(pa, pb, 1e-12) or _same_point3(pb, pc, 1e-12) or _same_point3(pa, pc, 1e-12):
             return
-        if _same_point3(self.positions[b], self.positions[c], 1e-12):
-            return
-        if _same_point3(self.positions[a], self.positions[c], 1e-12):
+        # Reject collinear degenerate triangle (zero or near-zero cross-product area)
+        cross = _cross3(_sub3(pb, pa), _sub3(pc, pa))
+        if _len3(cross) <= 1e-12:
             return
         self.indices.append((a, b, c))
 
@@ -1738,15 +1746,20 @@ def _uv_to_sheet_plane(point: Vec2) -> Tuple[float, float]:
 
 
 def _clip_line_to_rect(
-    point: Tuple[float, float], direction: Tuple[float, float]
+    point: Tuple[float, float],
+    direction: Tuple[float, float],
+    min_z: Optional[float] = None,
+    max_z: Optional[float] = None,
 ) -> Optional[Tuple[Tuple[float, float], Tuple[float, float]]]:
     """Clip a line to the sheet rectangle in the sheet plane."""
     hits: List[Tuple[float, float]] = []
+    z_lo = -_HALF_WIDTH if min_z is None else min_z
+    z_hi = _HALF_WIDTH if max_z is None else max_z
     corners = [
-        (-_HALF_LENGTH, -_HALF_WIDTH),
-        (_HALF_LENGTH, -_HALF_WIDTH),
-        (_HALF_LENGTH, _HALF_WIDTH),
-        (-_HALF_LENGTH, _HALF_WIDTH),
+        (-_HALF_LENGTH, z_lo),
+        (_HALF_LENGTH, z_lo),
+        (_HALF_LENGTH, z_hi),
+        (-_HALF_LENGTH, z_hi),
     ]
     for i in range(4):
         a = corners[i]
@@ -1797,7 +1810,7 @@ def _corner_crease(nose_v: float) -> Tuple[Vec2, Vec2]:
     corner = _uv_to_sheet_plane((0.0, 1.0))
     target = _uv_to_sheet_plane((0.5, nose_v))
     mid, direction = _perpendicular_bisector_3d(corner, target)
-    clipped = _clip_line_to_rect(mid, direction)
+    clipped = _clip_line_to_rect(mid, direction, max_z=0.0)
     if clipped is None:
         return ((0.0, 0.5), (0.5, 1.0))
     return (_sheet_plane_to_uv(clipped[0]), _sheet_plane_to_uv(clipped[1]))
@@ -1843,7 +1856,7 @@ def _collar_crease(corner_p0: Vec2, corner_p1: Vec2) -> Tuple[Vec2, Vec2]:
         bisector = (0.0, -1.0)
     else:
         bisector = (bisector[0] / norm, bisector[1] / norm)
-    clipped = _clip_line_to_rect(tip, bisector)
+    clipped = _clip_line_to_rect(tip, bisector, max_z=0.0)
     if clipped is None:
         return ((0.5, 1.0), (0.5, 0.0))
     return (_sheet_plane_to_uv(clipped[0]), _sheet_plane_to_uv(clipped[1]))
@@ -2360,9 +2373,16 @@ def apply_aero_parameters(cfg: Any, params: Optional[Dict[str, float]] = None, a
     updates["dihedral_deg"] = aero["dihedral_eff_deg"]
     try:
         return dataclasses.replace(cfg, **updates)  # type: ignore[arg-type]
-    except Exception:
+    except Exception as exc1:
         try:
             cfg2 = cfg.__class__(**{**vars(cfg), **updates})  # type: ignore[call-arg]
             return cfg2
-        except Exception:
+        except Exception as exc2:
+            logger.warning(
+                "apply_aero_parameters failed to update config of type %s (%s, %s); returning unmodified config",
+                type(cfg).__name__,
+                exc1,
+                exc2,
+                exc_info=True,
+            )
             return cfg

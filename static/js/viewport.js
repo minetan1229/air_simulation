@@ -2130,49 +2130,62 @@ export class Viewport {
 
   _loop() {
     if (!this.running) return;
-    this.frameHandle = requestAnimationFrame(this._loop);
-    const dt = Math.min(this.clock.getDelta(), 0.1);
-    this.elapsed += dt;
+    try {
+      const dt = Math.min(this.clock.getDelta(), 0.1);
+      this.elapsed += dt;
 
-    const isFleetActive = Boolean(this.fleetMesh && this.fleetPlaying && this.cameraMode && this.cameraMode !== "reset" && this.cameraMode !== "fixed");
-    if (this.follow && !isFleetActive) {
-      // Stiff enough that the airframe stays framed at 6 m/s, soft enough to
-      // absorb the 30-60 Hz position updates without visible stair-stepping.
-      this.followTarget.lerp(this.lastPose, Math.min(1, dt * 25));
-      const offset = this._followOffset || (this._followOffset = new THREE.Vector3());
-      offset.copy(this.camera.position).sub(this.controls.target);
-      this.controls.target.copy(this.followTarget);
-      this.camera.position.copy(this.followTarget).add(offset);
-    }
+      const isFleetActive = Boolean(this.fleetMesh && this.fleetPlaying && this.cameraMode && this.cameraMode !== "reset" && this.cameraMode !== "fixed");
+      if (this.follow && !isFleetActive) {
+        // Stiff enough that the airframe stays framed at 6 m/s, soft enough to
+        // absorb the 30-60 Hz position updates without visible stair-stepping.
+        this.followTarget.lerp(this.lastPose, Math.min(1, dt * 25));
+        const offset = this._followOffset || (this._followOffset = new THREE.Vector3());
+        offset.copy(this.camera.position).sub(this.controls.target);
+        this.controls.target.copy(this.followTarget);
+        this.camera.position.copy(this.followTarget).add(offset);
+      }
 
-    if (this.tunnelMode) {
-      this._updateTunnelDynamics(dt);
-    }
+      if (this.tunnelMode) {
+        this._updateTunnelDynamics(dt);
+      }
 
-    if (this.fleetMesh && this.fleetPlaying) {
-      this._updateFleet(dt);
-    }
-    this._updateCameraMode(dt);
+      if (this.fleetMesh && this.fleetPlaying) {
+        this._updateFleet(dt);
+      }
+      this._updateCameraMode(dt);
 
-    this.particles.update(dt, this.elapsed);
-    if (this.keyLight && this.airframeGroup) {
-      const px = this.airframeGroup.position.x;
-      const pz = this.airframeGroup.position.z;
-      this.keyLight.position.set(px - 2.0, 5.0, pz + 3.0);
-      this.keyLight.target.position.set(px, 0, pz);
-      this.keyLight.target.updateMatrixWorld();
-    }
-    this.controls.update();
-    this.renderer.render(this.scene, this.camera);
+      this.particles.update(dt, this.elapsed);
+      if (this.keyLight && this.airframeGroup) {
+        const px = this.airframeGroup.position.x;
+        const pz = this.airframeGroup.position.z;
+        this.keyLight.position.set(px - 2.0, 5.0, pz + 3.0);
+        this.keyLight.target.position.set(px, 0, pz);
+        this.keyLight.target.updateMatrixWorld();
+      }
+      this.controls.update();
+      this.renderer.render(this.scene, this.camera);
 
-    this.frameTimes.push(dt);
-    if (this.frameTimes.length > 40) this.frameTimes.shift();
-    if (this.elapsed - this.lastStats > 0.5) {
-      this.lastStats = this.elapsed;
-      const mean = this.frameTimes.reduce((a, b) => a + b, 0) / Math.max(this.frameTimes.length, 1);
-      const fps = mean > 0 ? 1 / mean : 0;
-      this._adaptParticles(fps);
-      this.onStats({ fps, elapsed: this.elapsed, particles: this.particles.activeCount, gpu: this.gpuInfo });
+      this.frameTimes.push(dt);
+      if (this.frameTimes.length > 40) this.frameTimes.shift();
+      if (this.elapsed - this.lastStats > 0.5) {
+        this.lastStats = this.elapsed;
+        const mean = this.frameTimes.reduce((a, b) => a + b, 0) / Math.max(this.frameTimes.length, 1);
+        const fps = mean > 0 ? 1 / mean : 0;
+        this._adaptParticles(fps);
+        this.onStats({ fps, elapsed: this.elapsed, particles: this.particles.activeCount, gpu: this.gpuInfo });
+      }
+      this._consecutiveLoopErrors = 0;
+    } catch (err) {
+      this._consecutiveLoopErrors = (this._consecutiveLoopErrors || 0) + 1;
+      console.error("Viewport render loop error:", err);
+      if (this._consecutiveLoopErrors > 10) {
+        console.error("Halting viewport render loop due to repeated errors");
+        this.running = false;
+      }
+    } finally {
+      if (this.running) {
+        this.frameHandle = requestAnimationFrame(this._loop);
+      }
     }
   }
 

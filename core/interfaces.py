@@ -28,9 +28,9 @@ SPEED_LOW_MPS: float = 6.0
 SPEED_MID_MPS: float = 10.0
 BENCHMARK_SPEEDS: Tuple[float, float] = (SPEED_LOW_MPS, SPEED_MID_MPS)
 
-# Minimum & Maximum step requirements for 20-fold parametric origami
-MIN_FOLD_STEPS: int = 16
-MAX_FOLD_STEPS: int = 24
+# Minimum & Maximum step requirements for parametric origami (physical fold steps)
+MIN_FOLD_STEPS: int = 6
+MAX_FOLD_STEPS: int = 16
 
 
 # ============================================================================
@@ -51,24 +51,52 @@ class EvaluationMetric:
     crashed: bool
     diverged: bool
     status: str
+    bounce_count: int = 0
+    max_abs_roll_deg: float = 0.0
+    ground_skim_fraction: float = 0.0
 
     @property
     def deterministic_score(self) -> float:
-        """Deterministic hang-time & glide efficiency score.
-
-        Score = T_air * sqrt(max_ld_ratio) * steady_glide_fraction * stability
-        Guarded against zoom-climb stalls and ground-bounce exploits.
-        """
+        """Deterministic hang-time & glide efficiency score with continuous anti-cheat penalties."""
         if self.crashed or self.diverged or self.status in ("failed", "diverged", "error"):
+            return 0.0
+        if not (
+            math.isfinite(self.flight_time_s)
+            and math.isfinite(self.max_ld_ratio)
+            and math.isfinite(self.steady_glide_fraction)
+            and math.isfinite(self.stability)
+        ):
             return 0.0
         if self.flight_time_s <= 0.0 or self.max_ld_ratio <= 0.0:
             return 0.0
 
         ld_clamped = max(0.0, min(self.max_ld_ratio, 40.0))
+        eff_ld = max(0.1, min(ld_clamped, max(0.5, self.distance_m / 1.5), 25.0))
         glide_clamped = max(0.0, min(self.steady_glide_fraction, 1.0))
         stability_clamped = max(0.0, min(self.stability, 1.0))
 
-        return float(self.flight_time_s * math.sqrt(ld_clamped) * glide_clamped * stability_clamped)
+        mean_speed = self.distance_m / max(0.1, self.flight_time_s)
+        speed_factor = max(0.1, min(1.0, mean_speed / 2.0))
+
+        bounces = max(0, int(self.bounce_count))
+        bounce_penalty = 1.0 / (1.0 + 2.0 * bounces)
+
+        excess_roll = max(0.0, abs(float(self.max_abs_roll_deg)) - 45.0)
+        attitude_penalty = math.exp(-excess_roll / 30.0)
+
+        skim = max(0.0, min(1.0, float(self.ground_skim_fraction)))
+        skim_penalty = math.exp(-3.0 * max(0.0, skim - 0.15))
+
+        return float(
+            self.flight_time_s
+            * math.sqrt(eff_ld)
+            * glide_clamped
+            * stability_clamped
+            * speed_factor
+            * bounce_penalty
+            * attitude_penalty
+            * skim_penalty
+        )
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -83,6 +111,9 @@ class EvaluationMetric:
             "crashed": self.crashed,
             "diverged": self.diverged,
             "status": self.status,
+            "bounce_count": self.bounce_count,
+            "max_abs_roll_deg": self.max_abs_roll_deg,
+            "ground_skim_fraction": self.ground_skim_fraction,
             "deterministic_score": self.deterministic_score,
         }
 
@@ -127,6 +158,15 @@ class BehaviorDescriptor:
     def as_tuple(self) -> Tuple[float, float, float]:
         return (self.wing_loading_kg_m2, self.static_stability, self.aspect_ratio)
 
+    def is_finite(self) -> bool:
+        return (
+            math.isfinite(self.wing_loading_kg_m2)
+            and math.isfinite(self.static_stability)
+            and math.isfinite(self.aspect_ratio)
+            and self.wing_loading_kg_m2 > 0.0
+            and self.aspect_ratio > 0.0
+        )
+
     def to_dict(self) -> Dict[str, float]:
         return {
             "wing_loading_kg_m2": self.wing_loading_kg_m2,
@@ -151,13 +191,28 @@ class AirframeGeometry:
     step_count: int
     planform_area_m2: float = 0.0
     planform_aspect_ratio: float = 0.0
+    penetrations: int = 0
+    fold_valid: bool = True
+    thickness_limit_ok: bool = True
+    flat_foldable_ok: bool = True
+    nose_tip_x_m: float = 0.1485
 
-    def compute_behavior_descriptor(self, stability: float = 0.5) -> BehaviorDescriptor:
-        loading = self.mass_kg / max(1.0e-5, self.wing_area_m2)
+    def compute_behavior_descriptor(
+        self,
+        stability: float = 0.5,
+        use_planform: bool = False,
+    ) -> BehaviorDescriptor:
+        if use_planform and self.planform_area_m2 > 1.0e-5:
+            area = self.planform_area_m2
+            ar = self.planform_aspect_ratio if self.planform_aspect_ratio > 0.0 else (self.wingspan_m ** 2) / area
+        else:
+            area = max(1.0e-5, self.wing_area_m2)
+            ar = self.aspect_ratio
+        loading = self.mass_kg / area
         return BehaviorDescriptor(
             wing_loading_kg_m2=loading,
-            static_stability=stability,
-            aspect_ratio=self.aspect_ratio,
+            static_stability=max(0.0, min(1.0, float(stability))),
+            aspect_ratio=ar,
         )
 
     def to_dict(self) -> Dict[str, Any]:
@@ -169,6 +224,7 @@ class AirframeGeometry:
             "aspect_ratio": self.aspect_ratio,
             "planform_area_m2": self.planform_area_m2,
             "planform_aspect_ratio": self.planform_aspect_ratio,
+            "penetrations": self.penetrations,
             "cg_m": list(self.cg_m),
             "keel_height_m": self.keel_height_m,
             "keel_length_m": self.keel_length_m,

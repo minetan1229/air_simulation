@@ -25,9 +25,9 @@ class MAPElitesGridArchive:
         self,
         bins: Tuple[int, int, int] = (8, 8, 8),
         ranges: Tuple[Tuple[float, float], Tuple[float, float], Tuple[float, float]] = (
-            (0.118, 0.128),  # High-resolution wing loading range (kg/m^2) for folded A4
-            (0.70, 0.90),    # High-resolution static stability range
-            (0.215, 0.255),  # High-resolution aspect ratio range
+            (0.10, 0.45),  # Realistic wing loading range (kg/m^2) for folded A4 paper planes
+            (0.10, 0.90),  # Geometric static stability margin spectrum
+            (0.30, 2.20),  # Folded aircraft aspect ratio spectrum
         ),
     ) -> None:
         self.bins = bins
@@ -73,9 +73,7 @@ class MAPElitesGridArchive:
         desc = candidate.descriptor
         if desc is None:
             if candidate.geometry:
-                desc = candidate.geometry.compute_behavior_descriptor(
-                    stability=candidate.benchmark.low_speed.stability
-                )
+                desc = candidate.geometry.compute_behavior_descriptor()
                 candidate.descriptor = desc
             else:
                 return False
@@ -83,10 +81,27 @@ class MAPElitesGridArchive:
         score = candidate.benchmark.composite_score
         bin_idx = self.get_bin_index(desc)
 
-        if bin_idx not in self.cells or score > self.cells[bin_idx][0]:
+        if bin_idx not in self.cells:
             self.cells[bin_idx] = (score, candidate)
             self.improved_evaluations += 1
             return True
+
+        current_score, current_cand = self.cells[bin_idx]
+        if score > current_score:
+            self.cells[bin_idx] = (score, candidate)
+            self.improved_evaluations += 1
+            return True
+        elif math.isclose(score, current_score, abs_tol=1e-4):
+            # Parsimony Pressure: prefer simpler design (fewer steps) for equivalent performance
+            if candidate.step_count < current_cand.step_count:
+                self.cells[bin_idx] = (score, candidate)
+                return True
+            elif candidate.step_count == current_cand.step_count:
+                cand_s = candidate.descriptor.static_stability if candidate.descriptor else 0.5
+                curr_s = current_cand.descriptor.static_stability if current_cand.descriptor else 0.5
+                if cand_s > curr_s:
+                    self.cells[bin_idx] = (score, candidate)
+                    return True
 
         return False
 

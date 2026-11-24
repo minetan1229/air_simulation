@@ -63,26 +63,31 @@ def compute_ground_stations(
     r_nose = np.array([0.5 * mac, 0.0, 0.0], dtype=np.float64)
     r_ltip = np.array([-0.3 * mac, -semispan, 0.0], dtype=np.float64)
     r_rtip = np.array([-0.3 * mac, semispan, 0.0], dtype=np.float64)
+    r_keel = np.array([0.0, 0.0, keel_depth], dtype=np.float64)
     r_tail = np.array([-0.7 * mac, 0.0, keel_depth], dtype=np.float64)
 
     q = quaternion
     z_nose = z_cg + float(body_to_world(q, r_nose)[2])
     z_ltip = z_cg + float(body_to_world(q, r_ltip)[2])
     z_rtip = z_cg + float(body_to_world(q, r_rtip)[2])
+    z_keel = z_cg + float(body_to_world(q, r_keel)[2])
     z_tail = z_cg + float(body_to_world(q, r_tail)[2])
 
     alt_nose = -z_nose - ground
     alt_ltip = -z_ltip - ground
     alt_rtip = -z_rtip - ground
+    alt_keel = -z_keel - ground
     alt_tail = -z_tail - ground
 
-    min_alt = min(altitude_cg, alt_nose, alt_ltip, alt_rtip, alt_tail)
+    min_alt = min(altitude_cg, alt_nose, alt_ltip, alt_rtip, alt_keel, alt_tail)
     return {
         "altitude_cg": altitude_cg,
         "alt_nose": alt_nose,
         "alt_ltip": alt_ltip,
         "alt_rtip": alt_rtip,
+        "alt_keel": alt_keel,
         "alt_tail": alt_tail,
+        "keel_depth_m": keel_depth,
         "min_alt": min_alt,
     }
 

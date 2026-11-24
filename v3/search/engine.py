@@ -69,11 +69,31 @@ class MAPElitesEngine:
         )
 
         for it in range(iterations):
-            # 1. Select parent from existing elites
+            # 1. Select parent from existing elites with curiosity / sparse-niche bias
             elites = self.archive.get_elites()
-            parent = self.rng.choice(elites) if elites else None
-            if parent is None:
+            if not elites:
                 continue
+            if len(elites) <= 2 or self.rng.random() < 0.25:
+                parent = self.rng.choice(elites)
+            else:
+                coords = [
+                    self.archive.get_bin_index(e.descriptor)
+                    for e in elites
+                    if e.descriptor is not None
+                ]
+                if len(coords) == len(elites):
+                    weights = []
+                    for c in coords:
+                        crowding = sum(
+                            1
+                            for o in coords
+                            if abs(c[0] - o[0]) <= 1 and abs(c[1] - o[1]) <= 1 and abs(c[2] - o[2]) <= 1
+                        )
+                        weights.append(1.0 / float(crowding))
+                    total_w = sum(weights)
+                    parent = self.rng.choices(elites, weights=weights, k=1)[0] if total_w > 0.0 else self.rng.choice(elites)
+                else:
+                    parent = self.rng.choice(elites)
 
             # 2. Mutate parameters
             mutated_cfg = mutate_parametric_config(

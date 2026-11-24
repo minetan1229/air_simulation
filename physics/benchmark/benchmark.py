@@ -11,7 +11,13 @@ from __future__ import annotations
 import math
 from typing import Any, Dict, Optional, Tuple
 
-from physics.config_schema import AircraftConfig, EnvironmentConfig, LaunchConfig, SimulationSettings
+from physics.config_schema import (
+    AircraftConfig,
+    EnvironmentConfig,
+    LaunchConfig,
+    SimulationSettings,
+    derived_properties,
+)
 from physics.flight_sim import FlightSimulator, flight_phase_metrics
 from core.interfaces import (
     AircraftCandidate,
@@ -66,39 +72,33 @@ def _build_aircraft_config(candidate: AircraftCandidate) -> AircraftConfig:
     dihedral_deg = cfg.wing.dihedral_deg
     elevon_deg = 0.5 * (cfg.wing.elevon_left_deg + cfg.wing.elevon_right_deg)
 
-    # Origami-derived properties
     cg_offset_x = 0.0
     static_margin = 0.12
-    roll_inertia = 0.0
-    pitch_inertia = 0.0
-    yaw_inertia = 0.0
-    low_re_enabled = True
-
     if geom:
-        # CG offset: extract x from cg_m (NED: x forward, so cg_m[0] is forward position)
-        # Positive cg_offset_x means aft CG; nose-heavy = negative offset
-        cg_offset_x = -float(geom.cg_m[0]) if len(geom.cg_m) >= 1 else 0.0
-        # Static margin from geometry if available, else default
-        static_margin = float(getattr(geom, "static_margin", 0.12))
-        # Inertia from geometry
-        roll_inertia = float(getattr(geom, "roll_inertia_kgm2", 0.0))
-        pitch_inertia = float(getattr(geom, "pitch_inertia_kgm2", 0.0))
-        yaw_inertia = float(getattr(geom, "yaw_inertia_kgm2", 0.0))
+        chord = max(0.01, float(geom.chord_m))
+        x_from_nose = 0.1485 - float(geom.cg_m[0])
+        nominal_ac_from_nose = 0.35 * chord
+        raw_offset = x_from_nose - nominal_ac_from_nose
+        cg_offset_x = max(-0.05, min(0.05, float(raw_offset)))
+        static_margin = max(-0.20, min(0.30, float(-cg_offset_x / chord)))
 
-    return AircraftConfig(
+    ac = AircraftConfig(
         mass_kg=mass_kg,
         wing_area_m2=wing_area,
         wingspan_m=wingspan,
         aspect_ratio=aspect_ratio,
         dihedral_deg=dihedral_deg,
         elevon_deg=elevon_deg,
-        low_re_enabled=low_re_enabled,
         cg_offset_x=cg_offset_x,
         static_margin=static_margin,
-        roll_inertia_kgm2=roll_inertia,
-        pitch_inertia_kgm2=pitch_inertia,
-        yaw_inertia_kgm2=yaw_inertia,
+        low_re_enabled=True,
     )
+
+    props = derived_properties(ac)
+    ac.roll_inertia_kgm2 = props.get("roll_inertia_kgm2", ac.roll_inertia_kgm2)
+    ac.pitch_inertia_kgm2 = props.get("pitch_inertia_kgm2", ac.pitch_inertia_kgm2)
+    ac.yaw_inertia_kgm2 = props.get("yaw_inertia_kgm2", ac.yaw_inertia_kgm2)
+    return ac
 
 
 def evaluate_horizontal_glide(
@@ -123,7 +123,7 @@ def evaluate_horizontal_glide(
     sim_metrics = sim.metrics()
 
     # Extract flight history samples for phase analysis
-    samples = []
+    samples: list = []
     try:
         samples = sim.history()
         phase_metrics = flight_phase_metrics(samples, phugoid_window_s=2.5)
@@ -212,11 +212,18 @@ class DeterministicFlightBenchmark:
         s_low = low_metric.deterministic_score
         s_mid = mid_metric.deterministic_score
 
-        # Composite score using harmonic mean to strictly penalize failure in either speed
+        # Composite score using harmonic mean to strictly penalize failure in either speed,
+        # with soft penalty when one speed succeeds to avoid optimizer cliff
         if s_low > 1.0e-4 and s_mid > 1.0e-4:
             composite = 2.0 * (s_low * s_mid) / (s_low + s_mid)
             valid = True
             rejection_reason = ""
+        elif s_low > 1.0e-4 or s_mid > 1.0e-4:
+            composite = 0.20 * max(s_low, s_mid)
+            valid = False
+            rejection_reason = (
+                f"Failed benchmark at one speed: low_score={s_low:.3f}, mid_score={s_mid:.3f}"
+            )
         else:
             composite = 0.0
             valid = False
