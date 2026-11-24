@@ -1508,10 +1508,13 @@ def _unpack(y: np.ndarray, time_s: float) -> StateVector:
 
 def _state_is_finite(state: StateVector) -> bool:
     """True when every component of the state is a finite number."""
-    for vector in (state.position_m, state.velocity_mps, state.quaternion, state.angular_velocity_radps):
+    for vector in (state.position_m, state.velocity_mps, state.angular_velocity_radps):
         for value in vec3(vector):
             if not math.isfinite(float(value)):
                 return False
+    for val in state.quaternion:
+        if not math.isfinite(float(val)):
+            return False
     return math.isfinite(float(state.time_s))
 
 
@@ -2372,6 +2375,16 @@ class FlightSimulator:
             d_l = q_dyn_ref * span * float(cl_p_nl - base_lp) * p_hat
             d_m = q_dyn_ref * self._chord * float(cm_q_nl - base_mq) * q_hat
             d_n = q_dyn_ref * span * float(cn_r_nl - base_nr) * r_hat
+            # When 5-strip integration is active, strips already capture differential
+            # stall loss. Ensure dynamic damping increment never acts as anti-damping
+            # (injecting positive rotational work).
+            if is_medium_fi:
+                if d_l * omega[0] > 0.0:
+                    d_l = 0.0
+                if d_m * omega[1] > 0.0:
+                    d_m = 0.0
+                if d_n * omega[2] > 0.0:
+                    d_n = 0.0
             moment_body += np.array([d_l, d_m, d_n], dtype=np.float64)
 
         # Complete 6-DoF implementation of added mass and apparent inertia
@@ -2395,10 +2408,18 @@ class FlightSimulator:
             m_add_z = float(added["added_mass_z_kg"])
             m_eff_z = self._mass + m_add_z
             gravity_body = world_to_body(quaternion, gravity_world)
-            a_body = (force_body / self._mass) + gravity_body
-            # Equivalence principle: gravity accelerates the body and the ambient fluid equally
-            # (zero relative acceleration), so added mass resists only fluid aerodynamic forces.
-            a_body[2] = gravity_body[2] + (force_body[2] / m_eff_z)
+            # Kirchhoff added-mass fluid Coriolis translational force:
+            # P_A = [0, 0, m_add_z * w_rel]
+            # F_coriolis = - omega x P_A = [-q * m_add_z * w_rel, p * m_add_z * w_rel, 0]
+            # When apparent mass is active, total momentum M_eff dv/dt = F_aero + m g_b - omega x (M_eff v_b)
+            # Normal motion accelerates both airplane and surrounding fluid relative to stationary air:
+            w_rel_app = float(body_relative[2])
+            f_cor_x = -float(omega[1]) * m_add_z * w_rel_app
+            f_cor_y = float(omega[0]) * m_add_z * w_rel_app
+            a_body = np.zeros(3, dtype=np.float64)
+            a_body[0] = (force_body[0] + f_cor_x) / self._mass + gravity_body[0]
+            a_body[1] = (force_body[1] + f_cor_y) / self._mass + gravity_body[1]
+            a_body[2] = (force_body[2] + self._mass * gravity_body[2]) / m_eff_z
             acceleration = body_to_world(quaternion, a_body)
 
             eff_inertia = np.copy(self._inertia)
@@ -2411,7 +2432,7 @@ class FlightSimulator:
             # Munk moment: M_munk = - v_rel x P_A = [-v_rel * m_add_z * w_rel, u_rel * m_add_z * w_rel, 0]
             # Coupled passively inside generalized angular acceleration (Euler's equations).
             # Smoothly rolled off post-stall where potential flow suction breaks down.
-            w_stall_val = float(result.get("w_stall", 0.0)) if isinstance(result, dict) else 0.0
+            w_stall_val = float(getattr(result, "w_stall", 0.0) if hasattr(result, "w_stall") else (result.get("w_stall", 0.0) if isinstance(result, dict) else 0.0))
             munk_active = bool(getattr(self.aircraft, "munk_coupling_enabled", False))
             munk_factor = max(1.0 - w_stall_val, 0.0) if munk_active else 0.0
             u_rel = float(body_relative[0])
@@ -2782,52 +2803,63 @@ class FlightSimulator:
         r_keel = np.array([0.0, 0.0, keel_depth], dtype=np.float64)
         r_tail = np.array([-0.7 * mac, 0.0, keel_depth], dtype=np.float64)
 
+        # Transform body inertia and angular velocity to world frame
+        # R is body_to_world rotation matrix
+        R_bw = quaternion_to_matrix(state.quaternion)
+        inertia_world = R_bw @ inertia @ R_bw.T
+        inertia_world_inv = R_bw @ inertia_inv @ R_bw.T
+        omega_world = R_bw @ rates
+
         def _resolve_contact(r_body: np.ndarray, e_coef: float) -> float:
-            """Resolve the impulsive contact at one station.
+            """Resolve impulsive contact at one station with exact coordinate frame consistency.
 
-            The contact is an impulse applied at the station.  The normal
-            impulse follows from the restitution law, the tangential impulse is
-            bounded by the Coulomb cone ``|J_t| <= mu |J_n|``, and the impulse
-            is applied as a force pair (``v += J/m``, ``omega += I^-1 (r x J)``).
-            The angular momentum about the CG is then conserved by
-            construction, so the cartwheel produced by a wingtip strike
-            emerges from the geometry and scales with the impact energy
-            instead of being injected as a constant angular rate.
-
-            Friction uses an effective mass along the tangential direction
-            ``t``: ``lever_t = r x t`` and
-            ``m_eff_t = 1/(1/m + lever_t . I^-1 . lever_t)``.  The tangential
-            impulse magnitude is ``j_t = min(mu*|J_n|, m_eff_t*|v_t|)``,
-            which analytically zeroes the contact-point tangential relative
-            speed under Coulomb saturation (``j_t = m_eff_t*|v_t|``) and is
-            otherwise limited by the Coulomb cone.  Using the normal-direction
-            ``m_eff`` for the tangential impulse under/over-brakes off-centre
-            contacts whose geometry makes tangential compliance differ from
-            normal compliance.
+            r_world is in world frame. Contact normal and tangential impulses are computed in
+            world frame using the world-frame Delassus tensor:
+                K = (1/m)*I_3 - [r_world]_x * I_world^-1 * [r_world]_x
+            The resulting impulse J_world updates velocity in world frame: v += J_world / m,
+            and updates angular velocity in body frame via:
+                omega_body += I_body^-1 * (r_body x J_body)
+            where J_body = R_bw^T * J_world.
             """
-            nonlocal velocity, rates
-            r_world = body_to_world(state.quaternion, r_body)
-            v_point = velocity + np.cross(rates, r_world)
+            nonlocal velocity, rates, omega_world
+            r_world = R_bw @ r_body
+            v_point = velocity + np.cross(omega_world, r_world)
             v_normal = float(v_point[2])  # +z points down
             if v_normal <= 0.0:
                 return 0.0
-            normal = np.array([0.0, 0.0, 1.0], dtype=np.float64)
-            lever = np.cross(r_world, normal)
-            inv_term = 1.0 / mass + float(lever @ (inertia_inv @ lever))
-            m_eff = 1.0 / max(inv_term, 1.0e-18)
-            j_normal = -(1.0 + e_coef) * m_eff * v_normal
+
+            # Delassus matrix K at the contact point in world frame
+            # K_ij = (1/m)*delta_ij - [r_world]_x * I_world^-1 * [r_world]_x
+            r_cross = np.array([
+                [0.0, -r_world[2], r_world[1]],
+                [r_world[2], 0.0, -r_world[0]],
+                [-r_world[1], r_world[0], 0.0],
+            ], dtype=np.float64)
+            K = (1.0 / mass) * np.eye(3, dtype=np.float64) - (r_cross @ inertia_world_inv @ r_cross)
+
+            # Normal effective mass: m_eff_n = 1 / K_zz
+            inv_k_zz = float(K[2, 2])
+            m_eff_n = 1.0 / max(inv_k_zz, 1.0e-18)
+            j_normal = -(1.0 + e_coef) * m_eff_n * v_normal
             impulse = np.array([0.0, 0.0, j_normal], dtype=np.float64)
+
+            # Tangential friction
+            normal = np.array([0.0, 0.0, 1.0], dtype=np.float64)
             tangential = v_point - v_normal * normal
             tangential_speed = float(np.linalg.norm(tangential))
             if tangential_speed > 1.0e-9:
                 t_dir = tangential / tangential_speed
-                lever_t = np.cross(r_world, t_dir)
-                inv_term_t = 1.0 / mass + float(lever_t @ (inertia_inv @ lever_t))
+                # Effective compliance along tangential direction
+                inv_term_t = float(t_dir @ (K @ t_dir))
                 m_eff_t = 1.0 / max(inv_term_t, 1.0e-18)
                 j_t = min(mu * abs(j_normal), m_eff_t * tangential_speed)
                 impulse = impulse - j_t * t_dir
+
             velocity = velocity + impulse / mass
-            rates = rates + inertia_inv @ np.cross(r_world, impulse)
+            # Update body rates via body-frame impulse and body lever arm
+            impulse_body = R_bw.T @ impulse
+            rates = rates + inertia_inv @ np.cross(r_body, impulse_body)
+            omega_world = R_bw @ rates
             return abs(j_normal)
 
         # Check wingtip strikes before main body contact (altitude_cg > 0 but wingtip below ground)
@@ -2848,7 +2880,7 @@ class FlightSimulator:
         # where the contact point rebounds upward while vz > 0.
         def _station_v_normal(r_body: np.ndarray) -> float:
             r_world = body_to_world(state.quaternion, r_body)
-            v_point = velocity + np.cross(rates, r_world)
+            v_point = velocity + np.cross(omega_world, r_world)
             return float(v_point[2])  # +z is down; positive => into the ground
 
         impact_speed = 0.0
@@ -2889,9 +2921,11 @@ class FlightSimulator:
                     body_station = np.array(
                         [-0.7 * mac, 0.0, keel_depth], dtype=np.float64
                     )
+                resolved_impulse = 0.0
                 if impact_speed > 0.0:
-                    _resolve_contact(body_station, restitution)
-                self._bounce_count += 1
+                    resolved_impulse = _resolve_contact(body_station, restitution)
+                if impact_speed > 0.05 and resolved_impulse > 0.0:
+                    self._bounce_count += 1
                 grav = max(abs(_finite(self.environment.gravity)), 1.0e-9)
                 d_stop = max(
                     _finite(getattr(self.settings, "ground_crush_stroke_m", 0.031), 0.031), 1.0e-6
@@ -2948,8 +2982,7 @@ class FlightSimulator:
             else:
                 # Sliding friction: Coulomb deceleration ``a = mu g`` over the
                 # contact interval, so the tangential speed decreases
-                # monotonically towards zero instead of being multiplied by a
-                # magic factor that ignored the normal force.
+                # monotonically towards zero.
                 grav = max(abs(_finite(self.environment.gravity)), 1.0e-9)
                 if dt is not None and dt > 0.0:
                     h_contact = float(dt)
@@ -3098,17 +3131,27 @@ class FlightSimulator:
             angular_rate=core["omega"],
             density_kgm3=core["air"]["density_kgm3"],
         )
-        # Flow-path rates: the rotation of the air-relative velocity vector seen
-        # from the body frame.  ``cross(v_hat, a)/V`` yields (-beta_dot, alpha_dot,
-        # 0) up to the frame convention; they are reported for the UI overlays.
+        # Flow-path rates: exact time derivatives of angle of attack (alpha) and sideslip (beta).
+        # In body frame, relative flow velocity v_b differentiates as:
+        #   dv_b/dt = a_b - omega_b x v_b
+        # where a_b = world_to_body(quaternion, a_world).
         alpha_rate = 0.0
         beta_rate = 0.0
         if core["speed"] > SPEED_STAT_FLOOR_MPS:
-            path_rates = cross(
-                normalize(core["body_relative"]), world_to_body(quaternion, core["acceleration"])
-            ) / core["speed"]
-            alpha_rate = rad2deg(float(path_rates[1]))
-            beta_rate = rad2deg(-float(path_rates[0]))
+            v_b = core["body_relative"]
+            u, v, w = float(v_b[0]), float(v_b[1]), float(v_b[2])
+            a_b = world_to_body(quaternion, core["acceleration"])
+            omega_b = np.asarray(core["omega"], dtype=np.float64)
+            dv_b = a_b - np.cross(omega_b, v_b)
+            u_dot, v_dot, w_dot = float(dv_b[0]), float(dv_b[1]), float(dv_b[2])
+            u2_w2 = u * u + w * w
+            if u2_w2 > 1.0e-8:
+                alpha_rate = rad2deg((u * w_dot - w * u_dot) / u2_w2)
+            v_total = float(core["speed"])
+            v_total_dot = float(np.dot(v_b, dv_b)) / v_total
+            denom_beta = v_total * math.sqrt(max(v_total * v_total - v * v, 1.0e-8))
+            if denom_beta > 1.0e-8:
+                beta_rate = rad2deg((v_dot * v_total - v * v_total_dot) / denom_beta)
         packet: Dict[str, Any] = {
             "time_s": _finite(state.time_s),
             "position_m": [float(value) for value in state.position_m],

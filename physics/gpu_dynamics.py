@@ -200,25 +200,30 @@ def _invert_3x3_batch(xp: Any, matrix: Any) -> Any:
     """Analytic vectorised inversion of an ``(N, 3, 3)`` matrix batch.
 
     Written without cuBLAS / NumPy inv to permit CUDA graph capture without
-    device synchronisation or host copies.
+    device synchronisation or host copies. Scaled by the maximum element per
+    matrix so that tiny determinants (such as paper-airplane inertia ~1e-16)
+    do not underflow to safe_det fallback.
     """
-    a = matrix[:, 0, 0]
-    b = matrix[:, 0, 1]
-    c = matrix[:, 0, 2]
-    d = matrix[:, 1, 0]
-    e = matrix[:, 1, 1]
-    f = matrix[:, 1, 2]
-    g = matrix[:, 2, 0]
-    h = matrix[:, 2, 1]
-    k = matrix[:, 2, 2]
+    scale = xp.maximum(xp.max(xp.abs(matrix), axis=(1, 2)), 1.0e-30)
+    m = matrix / scale[:, xp.newaxis, xp.newaxis]
+
+    a = m[:, 0, 0]
+    b = m[:, 0, 1]
+    c = m[:, 0, 2]
+    d = m[:, 1, 0]
+    e = m[:, 1, 1]
+    f = m[:, 1, 2]
+    g = m[:, 2, 0]
+    h = m[:, 2, 1]
+    k = m[:, 2, 2]
 
     a_adj = e * k - f * h
     b_adj = -(d * k - f * g)
     c_adj = d * h - e * g
 
-    det = a * a_adj + b * b_adj + c * c_adj
-    safe_det = xp.where(xp.abs(det) > 1.0e-15, det, xp.ones_like(det))
-    inv_det = 1.0 / safe_det
+    det_scaled = a * a_adj + b * b_adj + c * c_adj
+    safe_det = xp.where(xp.abs(det_scaled) > 1.0e-12, det_scaled, xp.ones_like(det_scaled))
+    inv_factor = 1.0 / (scale * safe_det)
 
     d_adj = -(b * k - c * h)
     e_adj = a * k - c * g
@@ -230,9 +235,9 @@ def _invert_3x3_batch(xp: Any, matrix: Any) -> Any:
 
     return xp.stack(
         (
-            xp.stack((a_adj * inv_det, d_adj * inv_det, g_adj * inv_det), axis=-1),
-            xp.stack((b_adj * inv_det, e_adj * inv_det, h_adj * inv_det), axis=-1),
-            xp.stack((c_adj * inv_det, f_adj * inv_det, k_adj * inv_det), axis=-1),
+            xp.stack((a_adj * inv_factor, d_adj * inv_factor, g_adj * inv_factor), axis=-1),
+            xp.stack((b_adj * inv_factor, e_adj * inv_factor, h_adj * inv_factor), axis=-1),
+            xp.stack((c_adj * inv_factor, f_adj * inv_factor, k_adj * inv_factor), axis=-1),
         ),
         axis=1,
     )
@@ -287,8 +292,7 @@ def atmosphere_batch(
         t0 = max(float(env.sea_level_temperature_K), 1.0)
         p0 = max(float(env.sea_level_pressure_Pa), 1.0)
         lapse = float(env.lapse_rate_K_per_m)
-        site_alt = float(getattr(env, "altitude_m", 0.0))
-        h = altitude + site_alt  # geometric altitude above sea level consistent with flight_sim / atmosphere_domain
+        h = altitude + float(getattr(env, "altitude_m", 0.0))  # ASL = AGL + site elevation
         if lapse == 0.0 or t0 == 0.0:
             exp_iso = xp.clip(-gravity * h / (R_AIR * max(abs(t0), 50.0)), -700.0, 700.0)
             temperature = xp.full_like(h, t0)
@@ -790,12 +794,16 @@ def _evaluate_state(
         m_add_z = added["added_mass_z_kg"]
         m_eff_z = params.mass + m_add_z
         gravity_body = world_to_body_batch(xp, rotation, gravity_world)
-        a_body = (force_body / params.mass[:, xp.newaxis]) + gravity_body
-        # Equivalence principle: gravity accelerates the body and the ambient fluid equally
-        # (zero relative acceleration), so added mass resists only fluid aerodynamic forces.
-        a_body_2_app = gravity_body[:, 2] + (force_body[:, 2] / m_eff_z)
-        a_body_z = xp.where(params.apparent_active, a_body_2_app, a_body[:, 2])
-        a_body = xp.stack((a_body[:, 0], a_body[:, 1], a_body_z), axis=-1)
+        w_rel_app = body_relative[:, 2]
+        f_cor_x = -omega[:, 1] * m_add_z * w_rel_app
+        f_cor_y = omega[:, 0] * m_add_z * w_rel_app
+        a_body_0 = (force_body[:, 0] + f_cor_x) / params.mass + gravity_body[:, 0]
+        a_body_1 = (force_body[:, 1] + f_cor_y) / params.mass + gravity_body[:, 1]
+        a_body_2_app = (force_body[:, 2] + params.mass * gravity_body[:, 2]) / m_eff_z
+        a_body_0 = xp.where(params.apparent_active, a_body_0, (force_body[:, 0] / params.mass) + gravity_body[:, 0])
+        a_body_1 = xp.where(params.apparent_active, a_body_1, (force_body[:, 1] / params.mass) + gravity_body[:, 1])
+        a_body_z = xp.where(params.apparent_active, a_body_2_app, (force_body[:, 2] / params.mass) + gravity_body[:, 2])
+        a_body = xp.stack((a_body_0, a_body_1, a_body_z), axis=-1)
         acceleration = body_to_world_batch(xp, rotation, a_body)
 
         eff_inertia_mat = xp.copy(params.inertia_matrix)
@@ -833,10 +841,8 @@ def _evaluate_state(
         u_rel = body_relative[:, 0]
         v_rel = body_relative[:, 1]
         w_rel = body_relative[:, 2]
-        w_stall = aero_kernel.stall_blend_weight(
-            xp, alpha, params.aero.stall_alpha_deg, params.aero.stall_sharpness
-        )
-        munk_factor = xp.where(params.munk_active, xp.maximum(1.0 - w_stall, 0.0), 0.0)
+        w_stall_val = xp.asarray(coefficients.get("w_stall", 0.0))
+        munk_factor = xp.where(params.munk_active, xp.maximum(1.0 - w_stall_val, 0.0), 0.0)
         munk_x = -v_rel * m_add_z * w_rel * munk_factor
         munk_y = u_rel * m_add_z * w_rel * munk_factor
         munk_z = xp.zeros_like(munk_x)
@@ -1395,16 +1401,17 @@ def simulate_batch(
             crossing, xp.clip(min_alt_prev / safe_span, 0.0, 1.0), xp.zeros_like(span)
         )
         impact_time = acc["time"] + tau * size
-        # Guard against quaternion double-cover antipodal cancellation:
-        # If dot(q_prev, q_next) < 0, negate q_next to ensure shortest path interpolation.
-        q_prev = y[:, 6:10]
+        # The state of the touchdown: the position, the velocity, the
+        # attitude and the body rates are interpolated, and the airframe is
+        # placed exactly on the floor (the deepest station touches it).
+        q_curr = y[:, 6:10]
         q_next = y_next[:, 6:10]
-        dot = xp.sum(q_prev * q_next, axis=-1, keepdims=True)
-        q_next_adj = xp.where(dot < 0.0, -q_next, q_next)
+        dot_q = xp.sum(q_curr * q_next, axis=-1, keepdims=True)
+        q_next_aligned = xp.where(dot_q < 0.0, -q_next, q_next)
         quat_interp = quaternion_normalize_batch(
             xp,
-            (1.0 - tau)[:, xp.newaxis] * q_prev
-            + tau[:, xp.newaxis] * q_next_adj,
+            (1.0 - tau)[:, xp.newaxis] * q_curr
+            + tau[:, xp.newaxis] * q_next_aligned,
         )
         position_interp = y[:, 0:3] + tau[:, xp.newaxis] * (y_next[:, 0:3] - y[:, 0:3])
         velocity_interp = y[:, 3:6] + tau[:, xp.newaxis] * (y_next[:, 3:6] - y[:, 3:6])

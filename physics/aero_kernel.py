@@ -621,9 +621,9 @@ def stall_blend_weight(
 
 
 def flat_plate_lift_coefficient(xp: Any, alpha_deg: Any) -> Any:
-    """Hoerner fully separated flat-plate lift ``2 sin(a) cos^2(a)``."""
+    """Hoerner fully separated flat-plate lift ``2 sin(a) cos(a) |cos(a)|``."""
     angle = _rad(xp, _finite(xp, alpha_deg, 0.0))
-    return 2.0 * xp.sin(angle) * xp.cos(angle) * xp.cos(angle)
+    return 2.0 * xp.sin(angle) * xp.cos(angle) * xp.abs(xp.cos(angle))
 
 
 def post_stall_lift_coefficient(
@@ -1642,6 +1642,7 @@ _COEFFICIENT_KEYS: Tuple[str, ...] = (
     "yawing_nm",
     "stall_margin",
     "stalled",
+    "w_stall",
     "ground_ratio",
     "cp_x_m",
     "polar_constant",
@@ -1947,9 +1948,12 @@ def _coefficient_core(
     )
     cp_x = cp_fraction * chord
     cp_gain = xp.maximum(cp_shift_gain, 0.0)
+    # Pitching moment from center of pressure shift is driven by normal force
+    # C_N = C_L * cos(alpha) + C_D * sin(alpha), ensuring restoring torque persists at alpha = 90 deg.
+    c_n = cl * xp.cos(_rad(xp, alpha)) + cd * xp.sin(_rad(xp, alpha))
     cm = cm + xp.where(
         cp_gain > 0.0,
-        -_safe_div(xp, cp_x - 0.25 * chord, chord, 0.0) * cl,
+        -_safe_div(xp, cp_x - 0.25 * chord, chord, 0.0) * c_n,
         0.0,
     )
 
@@ -1980,32 +1984,41 @@ def _coefficient_core(
     # q_dyn -> 0 extinguishes linear damping moments (p_hat, q_hat, r_hat).
     # Cross-flow drag of rotating surfaces through quiescent air provides
     # bluff-body rotational damping proportional to omega * |omega|:
-    #   Pitch (q): rotating chord strips c * dx with moment arm x gives (1/32) * rho * Cd_perp * S * c^2 * |q| * q
-    #   Roll  (p): rotating span strips b * dy with moment arm y gives (1/12) * (1/2) * rho * Cd_perp * S * b^2 * |p| * p
-    #   Yaw   (r): rotating wing drag strips gives (1/16) * (1/2) * rho * Cd_perp * S * b^2 * |r| * r
+    #   Pitch (q): rotating chord strips c * dx
+    #   Roll  (p): rotating span strips b * dy
+    #   Yaw   (r): rotating fuselage/keel and wing drag
+    # Cross-flow drag of rotating bluff surfaces (Hoerner 1965):
+    # Integral of differential drag dF = 0.5 * rho * Cd * (omega * r)^2 * dA times arm r
+    # yields rotational damping moment:
+    #   Pitch (q): M_q = -0.5 * rho * Cd * S * (c^3 / 32) * |q| * q
+    #   Roll  (p): M_p = -0.5 * rho * Cd * S * (b^3 / 32) * |p| * p
+    #   Yaw   (r): M_r = -0.5 * rho * Cd * S * (b^3 / 32) * |r| * r
+    # with consistent units [kg/m^3 * m^2 * m^3 * s^-2 = N m].
     q_rate_value = _finite(xp, q_rate, 0.0)
     p_rate_value = _finite(xp, p_rate, 0.0)
     r_rate_value = _finite(xp, r_rate, 0.0)
 
+    cd_cross = 1.2
+    v_floor = 0.1
     rot_damping_q = (
-        -0.5 * density * 1.2 * area * (xp.square(chord) * chord) * (1.0 / 32.0) * xp.abs(q_rate_value) * q_rate_value
-        - 0.00015 * area * xp.square(chord) * density * q_rate_value
+        -0.5 * density * cd_cross * area * xp.power(chord, 3) * (1.0 / 32.0) * xp.abs(q_rate_value) * q_rate_value
+        - 0.5 * density * v_floor * area * xp.square(chord) * 0.10 * q_rate_value
     ) * speed_gate
     rot_damping_q = xp.where(
         low_speed & (area > 1.0e-6) & (chord > 1.0e-4), rot_damping_q, 0.0
     )
 
     rot_damping_p = (
-        -0.5 * density * 1.2 * area * (xp.square(span) * span) * (1.0 / 12.0) * xp.abs(p_rate_value) * p_rate_value
-        - 0.00015 * area * xp.square(span) * density * p_rate_value
+        -0.5 * density * cd_cross * area * xp.power(span, 3) * (1.0 / 32.0) * xp.abs(p_rate_value) * p_rate_value
+        - 0.5 * density * v_floor * area * xp.square(span) * 0.10 * p_rate_value
     ) * speed_gate
     rot_damping_p = xp.where(
         low_speed & (area > 1.0e-6) & (span > 1.0e-4), rot_damping_p, 0.0
     )
 
     rot_damping_r = (
-        -0.5 * density * 1.2 * area * (xp.square(span) * span) * (1.0 / 16.0) * xp.abs(r_rate_value) * r_rate_value
-        - 0.00015 * area * xp.square(span) * density * r_rate_value
+        -0.5 * density * cd_cross * area * xp.power(span, 3) * (1.0 / 32.0) * xp.abs(r_rate_value) * r_rate_value
+        - 0.5 * density * v_floor * area * xp.square(span) * 0.10 * r_rate_value
     ) * speed_gate
     rot_damping_r = xp.where(
         low_speed & (area > 1.0e-6) & (span > 1.0e-4), rot_damping_r, 0.0
@@ -2058,6 +2071,7 @@ def _coefficient_core(
         yawing_nm,
         stall_margin,
         stalled,
+        w_stall,
         ground_ratio,
         cp_x,
         polar,

@@ -640,16 +640,18 @@ def evaluate_flight_surrogate(
     launch_angle = deg2rad(clamp(float(lau.launch_angle_deg), -30.0, 60.0))
     roll = deg2rad(clamp(float(lau.launch_roll_deg), -90.0, 90.0))
     roll_factor = max(math.cos(roll), 0.15)
-    airspeed = max(launch_speed + wind_x, 0.0)
+    # Wind is positive along +x (tail wind blows in +x, head wind blows in -x)
+    # Ground launch is in +x direction. Airspeed = ground_speed - wind_x.
+    airspeed = max(launch_speed - wind_x, 0.0)
     v_stall = math.sqrt(2.0 * mass * gravity / max(density * area * cl_max, 1.0e-9))
 
-    # --- excess-speed glide height (including the throw arc) ---------------
-    launch_vertical = airspeed * math.sin(max(launch_angle, 0.0))
-    throw_gain = (launch_vertical * launch_vertical) / (2.0 * gravity)
-    # Residual kinetic energy beyond vertical launch component converted to glide height
-    residual_kinetic_sq = max(airspeed * airspeed - launch_vertical * launch_vertical - v_stall * v_stall, 0.0)
-    height_gain = residual_kinetic_sq / (2.0 * gravity)
-    usable = (height_gain + throw_gain + glide_height) * roll_factor
+    # Kinetic energy above stall provides climb potential up to excess / (2 g).
+    # launch_vertical component is already part of total launch velocity kinetic energy;
+    # combining them directly without exceeding total kinetic energy bound:
+    excess = max(airspeed * airspeed - v_stall * v_stall, 0.0)
+    height_gain = excess / (2.0 * gravity)
+    # Usable glide height bounded by vacuum ballistic potential
+    usable = (height_gain + glide_height) * roll_factor
     usable = max(usable, 0.0)
 
     # --- glide time and range ---------------------------------------------
@@ -660,9 +662,8 @@ def evaluate_flight_surrogate(
     horizontal_speed = airspeed * cos_gamma
     distance = max(horizontal_speed * flight_time, 0.0)
     landing_distance = max(distance + 0.5 * wind_x * flight_time, 0.0)
-    # Max altitude cannot exceed initial height plus total kinetic energy converted to potential energy
     vacuum_altitude_cap = glide_height + (airspeed * airspeed) / (2.0 * gravity)
-    max_altitude = clamp(min(glide_height + height_gain + throw_gain, vacuum_altitude_cap), 0.0, 1.0e4)
+    max_altitude = clamp(min(glide_height + height_gain, vacuum_altitude_cap), 0.0, 1.0e4)
 
     # --- loads and structural stress --------------------------------------
     dynamic_pressure = 0.5 * density * airspeed * airspeed
@@ -1208,7 +1209,7 @@ def gpu_ensemble_simulation(
         u_y = v_rel[:, 1] / speed_safe
         u_z = v_rel[:, 2] / speed_safe
 
-        # Flight path angle gamma (positive up, so -v_rel_z / v_horiz)
+        # Flight path angle gamma (positive up, so -v_rel_z vs v_horiz)
         gamma = xp.arctan2(-v_rel[:, 2], xp.maximum(v_horiz, 1e-4))
         track_yaw = xp.arctan2(u_y, u_x)
 

@@ -314,55 +314,64 @@ def wind_force_to_body(relative_velocity: ArrayLike, drag: float, side: float, l
         return np.zeros(3)
     drag_axis = velocity / speed
     vx = float(velocity[0])
-    vy = float(velocity[1])
     vz = float(velocity[2])
     horizontal = math.hypot(vx, vz)
-    ratio = horizontal / speed
 
-    if horizontal > 1.0e-12:
-        az_axis = np.array([vz, 0.0, -vx]) / horizontal
-    else:
-        az_axis = np.array([0.0, 0.0, -1.0])
-
-    down = np.array([0.0, 0.0, -1.0])
-    pole_raw = down - float(down @ drag_axis) * drag_axis
+    down = np.array([0.0, 0.0, -1.0], dtype=np.float64)
+    pole_raw = down - float(np.dot(down, drag_axis)) * drag_axis
     pole_norm = float(np.linalg.norm(pole_raw))
     if pole_norm > 1.0e-12:
         pole_axis = pole_raw / pole_norm
     else:
-        # Down vector is parallel to drag axis (|vz| / speed == 1).
-        # Fall back to body x-axis so that pole_axis is strictly orthogonal to drag_axis.
         ref_x = -1.0 if drag_axis[2] < 0.0 else 1.0
-        ref = np.array([ref_x, 0.0, 0.0])
-        ref_raw = ref - float(ref @ drag_axis) * drag_axis
+        ref = np.array([ref_x, 0.0, 0.0], dtype=np.float64)
+        ref_raw = ref - float(np.dot(ref, drag_axis)) * drag_axis
         ref_norm = float(np.linalg.norm(ref_raw))
-        pole_axis = ref_raw / ref_norm if ref_norm > 1.0e-12 else np.array([0.0, 1.0, 0.0])
+        pole_axis = ref_raw / ref_norm if ref_norm > 1.0e-12 else np.array([0.0, 1.0, 0.0], dtype=np.float64)
 
-    t = min(max(ratio, 0.0), 1.0)
-    if t <= 0.0:
-        lift_axis = pole_axis
-    elif t >= 1.0:
-        lift_axis = az_axis
+    if horizontal > 1.0e-12:
+        az_axis = np.array([vz / horizontal, 0.0, -vx / horizontal], dtype=np.float64)
     else:
+        az_axis = np.array([0.0, 0.0, -1.0], dtype=np.float64)
+
+    ratio = horizontal / speed
+    ratio_thresh = 0.01
+    if ratio >= ratio_thresh:
+        lift_axis = az_axis
+    elif ratio <= 0.0:
+        lift_axis = pole_axis
+    else:
+        s = ratio / ratio_thresh
+        t = s * s * (3.0 - 2.0 * s)
         dot_pg = float(np.dot(pole_axis, az_axis))
         if dot_pg > 0.9999:
             lift_axis = az_axis
         elif dot_pg < -0.9999:
             perp = cross(drag_axis, pole_axis)
             perp_norm = float(np.linalg.norm(perp))
-            perp = perp / perp_norm if perp_norm > 1.0e-12 else np.array([1.0, 0.0, 0.0])
+            perp = perp / perp_norm if perp_norm > 1.0e-12 else np.array([1.0, 0.0, 0.0], dtype=np.float64)
             angle = math.pi * t
             lift_axis = pole_axis * math.cos(angle) + perp * math.sin(angle)
         else:
             theta = math.acos(max(-1.0, min(1.0, dot_pg)))
-            s = math.sin(theta)
-            lift_axis = (pole_axis * math.sin((1.0 - t) * theta)
-                         + az_axis * math.sin(t * theta)) / s
+            sin_th = math.sin(theta)
+            lift_axis = (pole_axis * math.sin((1.0 - t) * theta) + az_axis * math.sin(t * theta)) / sin_th
+
+    # Enforce strict numerical orthogonality against drag_axis via Gram-Schmidt
+    lift_axis = lift_axis - float(np.dot(lift_axis, drag_axis)) * drag_axis
+    norm_l = float(np.linalg.norm(lift_axis))
+    if norm_l > 1.0e-12:
+        lift_axis = lift_axis / norm_l
+    else:
+        fallback = np.array([1.0, 0.0, 0.0], dtype=np.float64)
+        fallback = fallback - float(np.dot(fallback, drag_axis)) * drag_axis
+        norm_fb = float(np.linalg.norm(fallback))
+        lift_axis = fallback / norm_fb if norm_fb > 1.0e-12 else np.array([0.0, 0.0, -1.0], dtype=np.float64)
 
     side_axis = cross(drag_axis, lift_axis)
     side_norm = float(np.linalg.norm(side_axis))
     if side_norm <= 1.0e-12:
-        side_axis = np.array([1.0, 0.0, 0.0])
+        side_axis = np.array([0.0, 1.0, 0.0], dtype=np.float64)
     else:
         side_axis = side_axis / side_norm
     return -float(drag) * drag_axis + float(side) * side_axis + float(lift) * lift_axis

@@ -1165,6 +1165,7 @@ class AeroResult:
     mach: float = 0.0
     stall_margin: float = 0.0
     stalled: bool = False
+    w_stall: float = 0.0
     cd_min: float = 0.0
     alpha_ld_max_deg: float = 0.0
     circulation_m2ps: float = 0.0
