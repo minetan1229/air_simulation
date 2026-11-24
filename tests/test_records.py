@@ -338,3 +338,51 @@ def test_guinness_simulate_rejects_out_of_bounds_or_non_finite_duration(invalid_
     assert response.status_code == 400
     assert "duration_s" in response.json.get("error", "").lower() or "duration_s" in response.json.get("message", "").lower()
 
+
+def test_records_domain_airframe_trim_alpha_override_does_not_raise():
+    """Ensure trim_alpha_deg in overrides does not leak into AircraftConfig and crash."""
+    from infrastructure.records_domain import _airframe
+    airframe = _airframe(trim_alpha_deg=3.5, wingspan_m=0.25)
+    assert isinstance(airframe, dict)
+    assert "trim_alpha_deg" not in airframe
+    assert "elevon_deg" in airframe
+    assert isinstance(airframe["elevon_deg"], float)
+
+
+def test_release_speed_for_apex_bracket_expansion_and_nan_guards():
+    """Ensure release_speed_for_apex expands bracket for high target apex and guards NaN."""
+    import math
+    from infrastructure.records_domain import release_speed_for_apex, _drag_apex, a4_mass_kg, energy_budget
+
+    # Non-finite inputs return 0.0 safely
+    assert release_speed_for_apex(float("nan"), 10.0, 45.0, 0.01) == 0.0
+    assert release_speed_for_apex(0.005, float("nan"), 45.0, 0.01) == 0.0
+    assert _drag_apex(0.005, float("nan"), 45.0, 0.01, 0.02, 9.8, 1.225) == 0.0
+    assert _drag_apex(0.005, -5.0, 45.0, 0.01, 0.02, 9.8, 1.225) == 0.0
+    assert a4_mass_kg(float("nan")) == 0.0
+
+    eb = energy_budget(0.005, 20.0, 45.0)
+    assert eb["kinetic_energy_j"] > 0.0
+    assert math.isfinite(eb["drag_reachable_apex_m"])
+
+    # High apex target under drag requires bracket expansion beyond simple seed
+    target_apex = 12.0
+    speed = release_speed_for_apex(
+        mass_kg=0.005,
+        apex_m=target_apex,
+        launch_angle_deg=80.0,
+        reference_area_m2=0.015,
+        cd=0.03,
+    )
+    assert speed > 0.0
+    computed_apex = _drag_apex(
+        mass_kg=0.005,
+        release_speed_mps=speed,
+        launch_angle_deg=80.0,
+        area_m2=0.015,
+        cd=0.03,
+        gravity=9.80665,
+        density=1.225,
+    )
+    assert math.isclose(computed_apex, target_apex, rel_tol=1e-2)
+

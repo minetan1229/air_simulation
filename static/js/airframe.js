@@ -53,6 +53,11 @@ export function airframeSummary(cfg) {
   };
 }
 
+function getKeelHalfWidth(geom, sIdx) {
+  const span = Number.isFinite(geom?.span) ? Math.max(0, geom.span) : 0.2;
+  return Math.min(0.005, span * (sIdx === 0 ? 0.008 : 0.015));
+}
+
 /**
  * Surface sampler for one wing side.
  * `s` runs 0 (keel root junction) .. 1 (tip), `t` runs 0 (leading edge) .. 1 (trailing edge).
@@ -84,7 +89,7 @@ function makeWingSampler(cfg, side) {
   const tipStart = sIdx === 2 ? 0.78 : (sIdx === 0 ? 0.88 : 0.82);
 
   // Keel root half-width (real paper airplanes have a folded spine thickness)
-  const keelHalfWidth = Math.min(0.005, geom.span * 0.015);
+  const keelHalfWidth = getKeelHalfWidth(geom, sIdx);
 
   const chordAt = (s) => geom.rootChord + (geom.tipChord - geom.rootChord) * s;
   const leX = (s) => geom.rootChord - sweep * s * semispan;
@@ -121,7 +126,8 @@ function makeWingSampler(cfg, side) {
   };
 
   return (s, t) => {
-    const f = Math.min(Math.max(s, 0), 1) * SPAN_SEGMENTS;
+    const sClamped = Number.isFinite(s) ? Math.min(Math.max(s, 0), 1) : 0;
+    const f = sClamped * SPAN_SEGMENTS;
     const i = Math.min(SPAN_SEGMENTS - 1, Math.floor(f));
     const w = f - i;
     const a = station(i);
@@ -131,7 +137,7 @@ function makeWingSampler(cfg, side) {
     const z0 = a.z + (b.z - a.z) * w;
     const chord = a.chord + (b.chord - a.chord) * w;
 
-    const tc = Math.min(Math.max(t, 0), 1);
+    const tc = Number.isFinite(t) ? Math.min(Math.max(t, 0), 1) : 0;
     // Trailing edge extends in the -X direction (from nose x0 toward tail)
     let x = x0 - tc * chord;
     let y = y0;
@@ -172,7 +178,7 @@ function makeRealisticKeelSampler(cfg, side) {
   const baseDepthRatio = sIdx === 2 ? 0.26 : (sIdx === 1 ? 0.24 : 0.32);
   const height = geom.rootChord * (baseDepthRatio + 0.30 * Math.sin((centreFold * Math.PI) / 180));
   const leFold = ((Number(cfg.fold_leading_deg) || 0) * Math.PI) / 180;
-  const keelHalfWidth = Math.min(0.005, geom.span * (sIdx === 0 ? 0.008 : 0.015));
+  const keelHalfWidth = getKeelHalfWidth(geom, sIdx);
 
 
   return (s, t) => {
@@ -274,20 +280,24 @@ function makeUnderWingTuckSampler(cfg, side) {
 }
 
 function pushSurface(target, sampler, spanSegments, chordSegments, flip = false, uvOffset = [0, 0], isLeftWing = false) {
+  const nSpan = Math.max(1, Math.floor(spanSegments) || 1);
+  const nChord = Math.max(1, Math.floor(chordSegments) || 1);
+  const uOff = (Array.isArray(uvOffset) && Number.isFinite(uvOffset[0])) ? uvOffset[0] : 0;
+  const vOff = (Array.isArray(uvOffset) && Number.isFinite(uvOffset[1])) ? uvOffset[1] : 0;
   const base = target.positions.length / 3;
-  for (let i = 0; i <= spanSegments; i += 1) {
-    const s = i / spanSegments;
-    const uSpan = isLeftWing ? (1.0 - s) * 0.5 : 0.5 + s * 0.5;
-    for (let j = 0; j <= chordSegments; j += 1) {
-      const t = j / chordSegments;
+  for (let i = 0; i <= nSpan; i += 1) {
+    const s = i / nSpan;
+    const uSpan = (isLeftWing ? (1.0 - s) * 0.5 : 0.5 + s * 0.5) + uOff;
+    for (let j = 0; j <= nChord; j += 1) {
+      const t = j / nChord;
       const p = sampler(s, t);
       target.positions.push(p[0], p[1], p[2]);
-      target.uvs.push(uSpan, t);
+      target.uvs.push(uSpan, t + vOff);
     }
   }
-  const row = chordSegments + 1;
-  for (let i = 0; i < spanSegments; i += 1) {
-    for (let j = 0; j < chordSegments; j += 1) {
+  const row = nChord + 1;
+  for (let i = 0; i < nSpan; i += 1) {
+    for (let j = 0; j < nChord; j += 1) {
       const a = base + i * row + j;
       const b = a + 1;
       const c = a + row;
@@ -456,9 +466,13 @@ export function buildPanelLines(cfg) {
   for (let j = 0; j <= CHORD_SEGMENTS; j += 1) {
     const t = j / CHORD_SEGMENTS;
     for (const sampler of [samplerRight, samplerLeft]) {
-      const p0 = sampler(0, t);
-      const p1 = sampler(1, t);
-      positions.push(p0[0], p0[1], p0[2], p1[0], p1[1], p1[2]);
+      for (let i = 0; i < SPAN_SEGMENTS; i += 1) {
+        const s0 = i / SPAN_SEGMENTS;
+        const s1 = (i + 1) / SPAN_SEGMENTS;
+        const p0 = sampler(s0, t);
+        const p1 = sampler(s1, t);
+        positions.push(p0[0], p0[1], p0[2], p1[0], p1[1], p1[2]);
+      }
     }
   }
   const geometry = new THREE.BufferGeometry();
@@ -528,8 +542,8 @@ function sampleGrid(grid, u, v, axes) {
   const colCount = (rows[0] || []).length;
   if (!colCount) return 0;
 
-  const spanFrac = Math.min(Math.max(u, 0), 1);
-  const chordFrac = Math.min(Math.max(v, 0), 1);
+  const spanFrac = Number.isFinite(u) ? Math.min(Math.max(u, 0), 1) : 0;
+  const chordFrac = Number.isFinite(v) ? Math.min(Math.max(v, 0), 1) : 0;
   const rowsAreSpanwise = axes ? axes.rowsAreSpanwise : rowsWalkSpanwise(grid, rows);
 
   const rowExtent = rowCount - 1;

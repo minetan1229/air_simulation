@@ -628,8 +628,6 @@ class RecordPreset:
             recipe = self.calibration if self.calibration is not None else self.throw
         elif flight_mode == "full_flight":
             recipe = self.throw
-        elif calibrated and self.calibration is not None and not self.has_apex_glide:
-            recipe = self.calibration
         elif calibrated and self.calibration is not None:
             recipe = self.calibration
         else:
@@ -660,7 +658,7 @@ class RecordPreset:
         An explicit start mode is independent of calibration-source selection.
         Omitting the mode preserves the historical calibrated flag behavior.
         """
-        recipe, _ = self.flight_selection(calibrated, flight_mode)
+        recipe, details = self.flight_selection(calibrated, flight_mode)
         source = as_dict(base) if base is not None else {}
         source.update(self.launch)
         # The airframe is trimmed for RECORD_TRIM_ALPHA_DEG, so the hand has to
@@ -751,7 +749,8 @@ class RecordPreset:
 # --------------------------------------------------------------------------
 def a4_mass_kg(gsm: float) -> float:
     """Mass of a one-sheet A4 airframe at ``gsm`` g/m^2 (kilograms)."""
-    return max(float(gsm), 0.0) * A4_SHEET_AREA_M2 / 1000.0
+    val = float(gsm) if math.isfinite(gsm) else 0.0
+    return max(val, 0.0) * A4_SHEET_AREA_M2 / 1000.0
 
 
 def gwr_compliance(aircraft: Any) -> Dict[str, Any]:
@@ -764,9 +763,12 @@ def gwr_compliance(aircraft: Any) -> Dict[str, Any]:
         **(aircraft or {})
     )
     derived = derived_properties(cfg)
-    mass = derived["mass_kg"]
-    sheet = max(float(cfg.sheet_area_m2), 1.0e-9)
-    gsm = float(cfg.paper_gsm)
+    raw_mass = derived.get("mass_kg", 0.0)
+    mass = float(raw_mass) if math.isfinite(raw_mass) else 0.0
+    raw_sheet = float(getattr(cfg, "sheet_area_m2", 0.0))
+    sheet = max(raw_sheet if math.isfinite(raw_sheet) else 0.0, 1.0e-9)
+    raw_gsm = float(getattr(cfg, "paper_gsm", 0.0))
+    gsm = raw_gsm if math.isfinite(raw_gsm) else 0.0
     # The sheet mass that the declared grammage implies, and the grammage that
     # the declared sheet would need to reach the declared mass.
     implied_gsm = mass / sheet * 1000.0
@@ -835,10 +837,14 @@ def energy_budget(
     6 g glider thrown at 25 m/s is roughly a third of the ideal one.  Reporting
     both is the difference between explaining a 31 s flight and hand-waving it.
     """
-    mass = max(float(mass_kg), 1.0e-9)
-    speed = max(float(release_speed_mps), 0.0)
-    g = abs(float(gravity)) or 9.80665
-    gamma = math.radians(clamp(float(launch_angle_deg), -90.0, 90.0))
+    raw_mass = float(mass_kg) if math.isfinite(mass_kg) else 1.0e-9
+    mass = max(raw_mass, 1.0e-9)
+    raw_speed = float(release_speed_mps) if math.isfinite(release_speed_mps) else 0.0
+    speed = max(raw_speed, 0.0)
+    raw_g = float(gravity) if math.isfinite(gravity) else 9.80665
+    g = abs(raw_g) if abs(raw_g) > 1.0e-6 else 9.80665
+    raw_angle = float(launch_angle_deg) if math.isfinite(launch_angle_deg) else 0.0
+    gamma = math.radians(clamp(raw_angle, -90.0, 90.0))
     vertical = speed * math.sin(gamma)
     ideal_apex = vertical * vertical / (2.0 * g) if vertical > 0.0 else 0.0
     reference_cd = 0.02
@@ -852,7 +858,7 @@ def energy_budget(
         "reference_cd": reference_cd,
         "reference_area_m2": reference_area,
         "drag_reachable_apex_m": 0.0 if vertical <= 0.0 else _drag_apex(
-            mass, speed, launch_angle_deg, reference_area, reference_cd, g, density
+            mass, speed, raw_angle, reference_area, reference_cd, g, density
         ),
         "drag_free_speed_for_apex_mps": (
             0.0 if vertical <= 0.0 else math.sqrt(2.0 * g * ideal_apex) / math.sin(gamma)
@@ -870,8 +876,14 @@ def _drag_apex(
     density: float,
 ) -> float:
     """Apex actually reached by a vertical launch, integrating the drag decay."""
+    if not (math.isfinite(mass_kg) and math.isfinite(release_speed_mps) and math.isfinite(launch_angle_deg)):
+        return 0.0
+    if not (math.isfinite(area_m2) and math.isfinite(cd) and math.isfinite(gravity) and math.isfinite(density)):
+        return 0.0
+    if release_speed_mps <= 0.0:
+        return 0.0
     mass = max(float(mass_kg), 1.0e-9)
-    g = abs(float(gravity)) or 9.80665
+    g = abs(float(gravity)) if abs(float(gravity)) > 1.0e-6 else 9.80665
     sin_gamma = math.sin(math.radians(clamp(float(launch_angle_deg), -90.0, 90.0)))
     if sin_gamma <= 1.0e-6:
         return 0.0
@@ -885,7 +897,7 @@ def _drag_apex(
         total_speed = max(vz / sin_gamma, 1.0e-6)
         vz += (-g - drag_k * total_speed * vz) * dt
         height += vz * dt
-        if vz <= 0.0 and height > 0.0:
+        if vz <= 0.0:
             break
     return max(height, 0.0)
 
@@ -913,28 +925,42 @@ def release_speed_for_apex(
     below the release height (a zero-gravity case), which keeps the optimiser
     from driving the release speed negative.
     """
+    if not (math.isfinite(mass_kg) and math.isfinite(apex_m) and math.isfinite(launch_angle_deg)):
+        return 0.0
+    if not (math.isfinite(reference_area_m2) and math.isfinite(cd) and math.isfinite(gravity) and math.isfinite(density)):
+        return 0.0
     mass = max(float(mass_kg), 1.0e-9)
     height = max(float(apex_m), 0.0)
     area = max(float(reference_area_m2), 1.0e-9)
-    g = abs(float(gravity)) or 9.80665
+    g = abs(float(gravity)) if abs(float(gravity)) > 1.0e-6 else 9.80665
     sin_gamma = math.sin(math.radians(clamp(float(launch_angle_deg), -90.0, 90.0)))
     if sin_gamma <= 1.0e-6 or height <= 0.0:
         return 0.0
     drag_k = max(float(density), 0.0) * max(float(cd), 0.0) * area / (2.0 * mass)
 
     def apex_for(speed: float) -> float:
+        if speed <= 0.0:
+            return 0.0
         vz = speed * sin_gamma
         h = 0.0
         for _ in range(6000):
             total_speed = max(vz / sin_gamma, 1.0e-6)
             vz += (-g - drag_k * total_speed * vz) * 2.0e-3
             h += vz * 2.0e-3
-            if vz <= 0.0 and h > 0.0:
+            if vz <= 0.0:
                 break
-        return h
+        return max(h, 0.0)
 
     low = 0.0
-    high = 4.0 * math.sqrt(2.0 * g * height) / sin_gamma
+    v_vac = math.sqrt(2.0 * g * height) / sin_gamma
+    high = max(10.0, 4.0 * v_vac)
+    # Expand bracket if high is insufficient (high drag or extreme target height)
+    max_high = max(high, 1000.0)
+    while apex_for(high) < height and high < max_high:
+        high *= 2.0
+        if high >= max_high:
+            break
+
     for _ in range(max(int(iterations), 1)):
         mid = 0.5 * (low + high)
         if apex_for(mid) < height:
@@ -1031,11 +1057,13 @@ def _airframe(**overrides: Any) -> Dict[str, Any]:
     ``launch.release_pitch_deg = RECORD_TRIM_ALPHA_DEG``; :meth:`RecordPreset.launch_config`
     injects it from this constant, so the two can never disagree.
     """
-    payload = _finalise(_competition_airframe(**overrides))
-    if "elevon_deg" in overrides:
+    clean_overrides = dict(overrides)
+    has_explicit_elevon = "elevon_deg" in clean_overrides
+    trim_alpha = float(clean_overrides.pop("trim_alpha_deg", RECORD_TRIM_ALPHA_DEG))
+    payload = _finalise(_competition_airframe(**clean_overrides))
+    if has_explicit_elevon:
         # An explicitly requested deflection wins over the trim solve.
         return payload
-    trim_alpha = float(overrides.pop("trim_alpha_deg", RECORD_TRIM_ALPHA_DEG))
     payload["elevon_deg"] = round(elevon_for_trim_deg(payload, trim_alpha), 6)
     return payload
 

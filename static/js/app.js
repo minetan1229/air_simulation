@@ -104,6 +104,7 @@ class ConsoleApp {
     this._polarDebounced = debounce(() => this.refreshPolar(), 340);
     this._skipFirstRank = false;
     this._lastEnsembleResult = null;
+    this._actionGeneration = 0;
   }
 
   /* ---------------------------------------------------------------- boot */
@@ -2259,9 +2260,14 @@ class ConsoleApp {
   }
 
   _onMetrics(metrics) {
-    this.dom["tp-flight"].textContent = fmt(metrics.flight_time_s, 2);
-    this.dom["tp-dist"].textContent = fmt(metrics.distance_m, 2);
-    this.dom["tp-flight"].title = `頂点後 ${fmt(metrics.post_apogee_time_s || 0, 2)}秒 / 最長安定滑空 ${fmt(metrics.stable_glide_duration_s || 0, 2)}秒`;
+    if (!metrics) return;
+    if (this.dom["tp-flight"]) {
+      this.dom["tp-flight"].textContent = fmt(metrics.flight_time_s, 2);
+      this.dom["tp-flight"].title = `頂点後 ${fmt(metrics.post_apogee_time_s || 0, 2)}秒 / 最長安定滑空 ${fmt(metrics.stable_glide_duration_s || 0, 2)}秒`;
+    }
+    if (this.dom["tp-dist"]) {
+      this.dom["tp-dist"].textContent = fmt(metrics.distance_m, 2);
+    }
   }
 
   _onEnded(frame) {
@@ -2363,20 +2369,25 @@ class ConsoleApp {
           const file = fileInput.files[0];
           this.notify(`3Dモデル ${file.name} を読み込み中...`, "info");
           if (this.meshPanel) {
-            await this.meshPanel.importFile(file);
-            if (optCustom) {
-              optCustom.hidden = false;
-              const opt = document.createElement("option");
-              opt.value = `custom_${file.name}`;
-              opt.textContent = `3D: ${file.name}`;
-              optCustom.appendChild(opt);
-              sel.value = opt.value;
-              this._updateUnifiedAircraftCard({
-                badge: "3Dモデル",
-                metric: "カスタム",
-                title: file.name,
-                desc: "3Dモデルデータから物理量（翼面積、スパン、アスペクト比、重心）が自動抽出され適用されています。",
-              });
+            try {
+              await this.meshPanel.importFile(file);
+              if (optCustom) {
+                optCustom.hidden = false;
+                const opt = document.createElement("option");
+                opt.value = `custom_${file.name}`;
+                opt.textContent = `3D: ${file.name}`;
+                optCustom.appendChild(opt);
+                sel.value = opt.value;
+                this._updateUnifiedAircraftCard({
+                  badge: "3Dモデル",
+                  metric: "カスタム",
+                  title: file.name,
+                  desc: "3Dモデルデータから物理量（翼面積、スパン、アスペクト比、重心）が自動抽出され適用されています。",
+                });
+              }
+            } catch (err) {
+              console.error("Failed to import 3D file:", err);
+              this.notify(`3Dモデルの読込に失敗しました: ${this._describe(err)}`, "error");
             }
           }
         }
@@ -2407,12 +2418,14 @@ class ConsoleApp {
     // 3. 機体選択イベント (投げ方は変更せず、機体形状・重量・トリムのみ適用)
     sel.addEventListener("change", async () => {
       const val = sel.value;
+      const gen = ++this._actionGeneration;
       if (val.startsWith("record_")) {
         const key = val.replace("record_", "");
         const p = this.recordPresetsMap?.get(key);
         if (p) {
           await this._guard(async () => {
             const res = await api.recordApply({ key, throw_only: false, calibrated: true, flight_mode: this.recordFlightMode || "full_flight" });
+            if (gen !== this._actionGeneration) return;
             if (res.ok) {
               this.store.adopt(res);
               this.panels.sync();
@@ -2430,44 +2443,50 @@ class ConsoleApp {
           });
         }
       } else if (val === "preset_glider") {
-        this._applyStandardPreset({
-          name: "Paper Glider",
-          shape_flag: 1,
-          wingspan_m: 0.20,
-          wing_area_m2: 0.015,
-          mass_kg: 0.005,
-          paper_gsm: 100.0,
-          aspect_ratio: 2.67,
-          taper_ratio: 0.70,
-          dihedral_deg: 5.0,
-          elevon_deg: 2.0,
-        }, "標準機", "AR 2.67", "ペーパーグライダー", "高アスペクト比で安定した滑空性能を持つ標準モデルです。");
+        await this._guard(async () => {
+          await this._applyStandardPreset({
+            name: "Paper Glider",
+            shape_flag: 1,
+            wingspan_m: 0.20,
+            wing_area_m2: 0.015,
+            mass_kg: 0.005,
+            paper_gsm: 100.0,
+            aspect_ratio: 2.67,
+            taper_ratio: 0.70,
+            dihedral_deg: 5.0,
+            elevon_deg: 2.0,
+          }, "標準機", "AR 2.67", "ペーパーグライダー", "高アスペクト比で安定した滑空性能を持つ標準モデルです。");
+        });
       } else if (val === "preset_dart") {
-        this._applyStandardPreset({
-          name: "Dart High-Speed",
-          shape_flag: 0,
-          wingspan_m: 0.12,
-          wing_area_m2: 0.009,
-          mass_kg: 0.006,
-          paper_gsm: 120.0,
-          aspect_ratio: 1.60,
-          taper_ratio: 0.35,
-          dihedral_deg: 2.0,
-          elevon_deg: 1.0,
-        }, "高速ダーツ", "AR 1.60", "高速ダーツ機", "後退角が大きく空気抵抗を極限まで低減したスピード重視モデルです。");
+        await this._guard(async () => {
+          await this._applyStandardPreset({
+            name: "Dart High-Speed",
+            shape_flag: 0,
+            wingspan_m: 0.12,
+            wing_area_m2: 0.009,
+            mass_kg: 0.006,
+            paper_gsm: 120.0,
+            aspect_ratio: 1.60,
+            taper_ratio: 0.35,
+            dihedral_deg: 2.0,
+            elevon_deg: 1.0,
+          }, "高速ダーツ", "AR 1.60", "高速ダーツ機", "後退角が大きく空気抵抗を極限まで低減したスピード重視モデルです。");
+        });
       } else if (val === "preset_wide") {
-        this._applyStandardPreset({
-          name: "Wide-Body Glider",
-          shape_flag: 2,
-          wingspan_m: 0.26,
-          wing_area_m2: 0.024,
-          mass_kg: 0.0045,
-          paper_gsm: 80.0,
-          aspect_ratio: 2.82,
-          taper_ratio: 0.85,
-          dihedral_deg: 6.5,
-          elevon_deg: 2.5,
-        }, "広翼型", "AR 2.82", "広翼型グライダー", "軽量・低翼面荷重で微風でも長時間滞空できるグライダーモデルです。");
+        await this._guard(async () => {
+          await this._applyStandardPreset({
+            name: "Wide-Body Glider",
+            shape_flag: 2,
+            wingspan_m: 0.26,
+            wing_area_m2: 0.024,
+            mass_kg: 0.0045,
+            paper_gsm: 80.0,
+            aspect_ratio: 2.82,
+            taper_ratio: 0.85,
+            dihedral_deg: 6.5,
+            elevon_deg: 2.5,
+          }, "広翼型", "AR 2.82", "広翼型グライダー", "軽量・低翼面荷重で微風でも長時間滞空できるグライダーモデルです。");
+        });
       }
     });
   }
@@ -2523,8 +2542,11 @@ class ConsoleApp {
         btnCal.classList.add("active");
         btnRaw.classList.remove("active");
         if (this.selectedRecordPreset) {
+          const gen = ++this._actionGeneration;
           this._updateRecordSpecsDisplay();
-          await this._applyRecordPreset(false);
+          await this._guard(async () => {
+            await this._applyRecordPreset(false);
+          });
         }
       });
 
@@ -2534,8 +2556,11 @@ class ConsoleApp {
         btnRaw.classList.add("active");
         btnCal.classList.remove("active");
         if (this.selectedRecordPreset) {
+          const gen = ++this._actionGeneration;
           this._updateRecordSpecsDisplay();
-          await this._applyRecordPreset(false);
+          await this._guard(async () => {
+            await this._applyRecordPreset(false);
+          });
         }
       });
     }
@@ -2561,9 +2586,13 @@ class ConsoleApp {
           if (this.dom["record-card"]) this.dom["record-card"].style.display = "none";
           return;
         }
-        await this._showRecordDetails(key);
-        // Instant 1-click apply and launch for immediate seamless record flight experience
-        await this._applyRecordPreset(false);
+        const gen = ++this._actionGeneration;
+        await this._guard(async () => {
+          await this._showRecordDetails(key);
+          if (gen !== this._actionGeneration) return;
+          // Instant 1-click apply and launch for immediate seamless record flight experience
+          await this._applyRecordPreset(false);
+        });
       });
 
       // Initialize dedicated Guinness Studio workbench pane
@@ -2634,12 +2663,14 @@ class ConsoleApp {
   }
 
   async _loadGuinnessStudioPreset(key) {
+    const gen = ++this._actionGeneration;
     try {
       const p = await api.recordPreset(key);
+      if (gen !== this._actionGeneration) return;
       this.studioGuinnessPreset = p;
       this._updateGuinnessStudioSpecs();
     } catch (err) {
-      this.notify(`ギネス諸元の読込失敗: ${err.message}`, "error");
+      this.notify(`ギネス諸元の読込失敗: ${this._describe(err)}`, "error");
     }
   }
 
@@ -2960,16 +2991,20 @@ class ConsoleApp {
     }
     this.store.set("environment", "wind_tunnel_enabled", this.tunnelMode, "mode");
     this._updatePill(this.tunnelMode ? "風洞" : "待機", this.tunnelMode ? "tunnel" : "idle");
+    const gen = ++this._actionGeneration;
     if (this.tunnelMode) {
       this._guard(async () => {
         await api.atmosphere(this.store.data.environment);
+        if (gen !== this._actionGeneration) return;
         await this._updateTrim();
+        if (gen !== this._actionGeneration) return;
         await this.transport._pollWind();
         await this.transport._pollStress();
       });
     } else {
       this._guard(async () => {
         await this.transport._pollWind();
+        if (gen !== this._actionGeneration) return;
         await this.transport._pollStress();
       });
     }
@@ -2977,7 +3012,9 @@ class ConsoleApp {
 
   _updateModes() {
     this.setTunnel(Boolean(this.store.get("environment", "wind_tunnel_enabled")));
-    this.dom["flow-backend"].textContent = `flow: ${this.viewport ? this.viewport.particleBackend() : "—"}`;
+    if (this.dom["flow-backend"]) {
+      this.dom["flow-backend"].textContent = `flow: ${this.viewport ? this.viewport.particleBackend() : "—"}`;
+    }
   }
 
   async _adoptServerAirframe() {
@@ -2998,7 +3035,10 @@ class ConsoleApp {
     if (!host) return;
     const node = make("div", { class: "toast", "data-tone": tone, text: message });
     host.append(node);
-    setTimeout(() => node.remove(), tone === "error" ? 7000 : 3800);
+    const timer = setTimeout(() => {
+      node.remove();
+    }, tone === "error" ? 7000 : 3800);
+    node._dismissTimer = timer;
   }
 }
 
@@ -3031,9 +3071,10 @@ window.consoleApp = app;
 app.boot().catch((error) => {
   console.error(error);
   const host = document.getElementById("toasts");
+  const msg = error?.message ?? String(error);
   if (host) {
     host.append(
-      make("div", { class: "toast", "data-tone": "error", text: `初期化に失敗しました: ${error.message}` })
+      make("div", { class: "toast", "data-tone": "error", text: `初期化に失敗しました: ${msg}` })
     );
   }
 });
