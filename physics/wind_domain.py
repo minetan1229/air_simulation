@@ -1180,8 +1180,6 @@ def wind_field(
         raise ValueError("bounds_min and bounds_max must both hold exactly three values")
     if not (np.all(np.isfinite(lo)) and np.all(np.isfinite(hi))):
         raise ValueError("bounds_min and bounds_max must contain only finite numbers")
-    if np.any(lo > hi):
-        raise ValueError("bounds_min must not exceed bounds_max on any axis")
     shape, echoed_resolution = _parse_resolution(resolution)
     nx, ny, nz = shape
     backend_name, backend_requested = _resolve_backend(backend)
