@@ -413,6 +413,8 @@ class OrigamiAdapter:
         config: ParametricOrigamiConfig,
         candidate_id: Optional[str] = None,
         raise_on_failure: bool = False,
+        include_macro: bool = True,
+        **kwargs: Any,
     ) -> AircraftCandidate:
         """Compile a parametric config into a strictly validated AircraftCandidate."""
         cid = candidate_id or f"v3-cand-{uuid.uuid4().hex[:8]}"

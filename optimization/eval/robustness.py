@@ -40,7 +40,6 @@ class RobustnessEvaluator:
     def evaluate_candidate(self, candidate: AircraftCandidate) -> RobustnessReport:
         """Run Dryden turbulence, jitter, and high-pitch throw stress tests with Monte Carlo."""
         # 折り紙ジオメトリ由来の完全な AircraftConfig を構築（CG/慣性欠落を解消）
-        from physics.benchmark.benchmark import _build_aircraft_config
         aircraft = _build_aircraft_config(candidate)
         geom = candidate.geometry
         keel_height_m = geom.keel_height_m if geom else 0.015

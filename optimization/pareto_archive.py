@@ -175,7 +175,7 @@ class ParetoArchiveManager:
             del self._archive[:to_remove]
             return
 
-        removed_indices = set()
+        removed_indices: Set[int] = set()
         # Traverse fronts from the worst (last) forward
         for front in reversed(fronts):
             if len(removed_indices) >= to_remove:
