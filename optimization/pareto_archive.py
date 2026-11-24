@@ -139,7 +139,7 @@ class ParetoArchiveManager:
         physics: Optional[Dict[str, Any]] = None,
     ) -> None:
         """Add an evaluated vector and its objective values to the archive.
-        
+
         Rejects infeasible candidates and those with non-finite objective values.
         Trims archive to max_size if specified.
         """
@@ -147,17 +147,17 @@ class ParetoArchiveManager:
         obj_values = {k: float(v) for k, v in objectives.items()}
         if not all(math.isfinite(v) for v in obj_values.values()):
             return
-        
+
         # infeasible チェック
         if obj_values.get("infeasible", False):
             return
-        
+
         self._archive.append((
             [float(v) for v in vector],
             obj_values,
             dict(physics or {})
         ))
-        
+
         # 容量制御
         if self.max_size is not None and len(self._archive) > self.max_size:
             self._trim_archive()
@@ -173,7 +173,7 @@ class ParetoArchiveManager:
                 # フロントが空の場合、古い順に削除
                 self._archive.pop(0)
                 continue
-            
+
             # 最後のフロントから削除
             last_front = fronts[-1]
             if len(last_front) == 1:
