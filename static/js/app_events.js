@@ -84,39 +84,3 @@ export function openGpuModal(app) {
 
   app.dom["gpu-modal"].hidden = false;
 }
-
-/**
- * Bind global keyboard shortcuts.
- */
-export function bindKeyboardShortcuts(app) {
-  const actions = {
-    Enter: () => app._launchFlight(),
-    " ": () => app.transport.togglePlay(),
-    u: () => app._flip("btn-top-tunnel"),
-    r: () => app.transport.seek(0),
-    m: () => app._flip("btn-wb-toggle"),
-    "?": () => {
-      app.dom["help"].hidden = !app.dom["help"].hidden;
-    },
-  };
-
-  window.addEventListener("keydown", (event) => {
-    const helpOpen = app.dom["help"] && !app.dom["help"].hidden;
-    const gpuOpen = app.dom["gpu-modal"] && !app.dom["gpu-modal"].hidden;
-    if (helpOpen || gpuOpen) {
-      if (event.key === "Escape") {
-        if (helpOpen) app.dom["help"].hidden = true;
-        if (gpuOpen) app.dom["gpu-modal"].hidden = true;
-      }
-      return;
-    }
-    const tag = event.target && event.target.tagName;
-    if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
-    if (tag === "BUTTON" && (event.key === " " || event.key === "Enter")) return;
-    if (event.ctrlKey || event.metaKey || event.altKey) return;
-    const action = actions[event.key];
-    if (!action) return;
-    event.preventDefault();
-    action();
-  });
-}

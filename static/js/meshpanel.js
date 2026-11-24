@@ -247,6 +247,23 @@ export class MeshPanel {
       return [axis[forwardSource], axis[upSource], axis[spanSource]];
     };
 
+    // Dispose original materials before replacing them
+    const originalMaterials = new Set();
+    object.traverse((node) => {
+      if (node.isMesh && node.material) {
+        const mats = Array.isArray(node.material) ? node.material : [node.material];
+        for (const mat of mats) {
+          if (mat && !originalMaterials.has(mat)) {
+            originalMaterials.add(mat);
+          }
+        }
+      }
+    });
+    // Dispose original materials to prevent leaks
+    for (const mat of originalMaterials) {
+      mat.dispose?.();
+    }
+
     object.traverse((node) => {
       if (!node.isMesh) return;
       node.geometry.computeVertexNormals();
@@ -383,6 +400,19 @@ export class MeshPanel {
     } catch (error) {
       this.notify(`上書きに失敗しました: ${error.message}`, "error");
     }
+  }
+
+  dispose() {
+    // Clean up metrics table event listeners
+    if (this.dom?.metrics) {
+      const host = this.dom.metrics;
+      // Remove all event listeners by replacing the innerHTML
+      host.innerHTML = "";
+    }
+    // Clean up object reference
+    this.object = null;
+    this.metrics = null;
+    this.overrides = {};
   }
 
   /* ------------------------------------------------------------- loaders */

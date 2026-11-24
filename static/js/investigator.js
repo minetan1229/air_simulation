@@ -9,6 +9,7 @@
  */
 
 import { clockFmt, clear, fmt, make, sig } from "./lib.js";
+import { ResilientPoller } from "./resilient_poller.js";
 
 const POLL_INTERVAL_MS = 600;
 
@@ -95,80 +96,92 @@ export class InvestigatorPanel {
   }
 
   _startPolling() {
-    if (this.pollTimer) clearInterval(this.pollTimer);
-    this.pollTimer = setInterval(() => this._poll(), POLL_INTERVAL_MS);
+    this._poller = new ResilientPoller(
+      async (signal) => {
+        if (!this.jobId) return false;
+
+        try {
+          const snap = await this.api.investigateStatus(this.jobId);
+          const pct = Math.min(100, Math.max(0, snap.progress || 0));
+
+          if (this.dom.progFill) {
+            this.dom.progFill.style.width = `${pct}%`;
+          }
+          if (this.dom.progText) {
+            this.dom.progText.textContent = `${Math.round(pct)}%`;
+          }
+          if (this.dom.statusText) {
+            this.dom.statusText.textContent = snap.message || "飛行シミュレーション中...";
+          }
+
+          const etaClock = snap.completion_clock || (snap.eta_seconds ? clockFmt(snap.eta_seconds) : "—");
+          const etaLeft = snap.eta_display ? `残 ${snap.eta_display}` : (snap.eta_seconds ? `残 ${clockFmt(snap.eta_seconds)}` : "評価中");
+          if (this.dom.etaClock) this.dom.etaClock.textContent = etaClock;
+          if (this.dom.etaLeft) this.dom.etaLeft.textContent = etaLeft;
+          if (this.setGlobalEta && snap.status === "running") {
+            this.setGlobalEta({
+              clock: etaClock,
+              left: etaLeft,
+              active: true,
+              title: `Auto調査中: ${snap.message || ""} (完了予定: ${etaClock})`,
+            });
+          }
+
+          if (snap.status === "completed") {
+            const doneClock = snap.finished_at ? snap.finished_at.slice(11, 19) : (snap.completion_clock || "完了");
+            const doneLeft = snap.elapsed_display ? `所要 ${snap.elapsed_display}` : "完了";
+            if (this.dom.etaClock) this.dom.etaClock.textContent = doneClock;
+            if (this.dom.etaLeft) this.dom.etaLeft.textContent = doneLeft;
+            if (this.setGlobalEta) {
+              this.setGlobalEta({
+                clock: doneClock,
+                left: doneLeft,
+                active: false,
+                title: `Auto調査完了 (${doneLeft})`,
+              });
+            }
+            await this._fetchResult();
+            return false; // Stop polling
+          } else if (snap.status === "failed" || snap.status === "cancelled") {
+            this.jobId = null;
+            if (this.dom.run) this.dom.run.disabled = false;
+            if (this.dom.cancel) this.dom.cancel.disabled = true;
+            if (this.dom.etaClock) this.dom.etaClock.textContent = snap.status === "failed" ? "失敗" : "中断";
+            if (this.dom.etaLeft) this.dom.etaLeft.textContent = snap.status === "failed" ? "エラー" : "中止";
+            if (this.setGlobalEta) {
+              this.setGlobalEta({ clock: snap.status === "failed" ? "エラー" : "中断", left: snap.status, active: false });
+            }
+            if (snap.status === "failed" && this.onError) {
+              this.onError({
+                title: "Auto調査シミュレーションエラー",
+                message: snap.message || "調査中にシミュレーションエラーが発生しました",
+                hint: "機体設定値を確認し、再度調査をお試しください。",
+                badge: "INV_FAIL",
+              });
+            }
+            this.notify(`調査が${snap.status === "failed" ? "失敗" : "中断"}しました: ${snap.message || ""}`, "warn");
+            return false; // Stop polling
+          }
+        } catch (err) {
+          console.warn("Investigate poll error:", err);
+          throw err;
+        }
+        return true; // Continue polling
+      },
+      {
+        intervalMs: POLL_INTERVAL_MS,
+        maxBackoffMs: 15000,
+        maxRetries: 10,
+        onFatal: (err) => {
+          this.notify(`Auto調査ステータス取得で致命的エラー: ${err.message}`, "error");
+        }
+      }
+    );
+    this._poller.start();
   }
 
   async _poll() {
-    if (!this.jobId) return;
-
-    try {
-      const snap = await this.api.investigateStatus(this.jobId);
-      const pct = Math.min(100, Math.max(0, snap.progress || 0));
-
-      if (this.dom.progFill) {
-        this.dom.progFill.style.width = `${pct}%`;
-      }
-      if (this.dom.progText) {
-        this.dom.progText.textContent = `${Math.round(pct)}%`;
-      }
-      if (this.dom.statusText) {
-        this.dom.statusText.textContent = snap.message || "飛行シミュレーション中...";
-      }
-
-      const etaClock = snap.completion_clock || (snap.eta_seconds ? clockFmt(snap.eta_seconds) : "—");
-      const etaLeft = snap.eta_display ? `残 ${snap.eta_display}` : (snap.eta_seconds ? `残 ${clockFmt(snap.eta_seconds)}` : "評価中");
-      if (this.dom.etaClock) this.dom.etaClock.textContent = etaClock;
-      if (this.dom.etaLeft) this.dom.etaLeft.textContent = etaLeft;
-      if (this.setGlobalEta && snap.status === "running") {
-        this.setGlobalEta({
-          clock: etaClock,
-          left: etaLeft,
-          active: true,
-          title: `Auto調査中: ${snap.message || ""} (完了予定: ${etaClock})`,
-        });
-      }
-
-      if (snap.status === "completed") {
-        clearInterval(this.pollTimer);
-        this.pollTimer = 0;
-        const doneClock = snap.finished_at ? snap.finished_at.slice(11, 19) : (snap.completion_clock || "完了");
-        const doneLeft = snap.elapsed_display ? `所要 ${snap.elapsed_display}` : "完了";
-        if (this.dom.etaClock) this.dom.etaClock.textContent = doneClock;
-        if (this.dom.etaLeft) this.dom.etaLeft.textContent = doneLeft;
-        if (this.setGlobalEta) {
-          this.setGlobalEta({
-            clock: doneClock,
-            left: doneLeft,
-            active: false,
-            title: `Auto調査完了 (${doneLeft})`,
-          });
-        }
-        await this._fetchResult();
-      } else if (snap.status === "failed" || snap.status === "cancelled") {
-        clearInterval(this.pollTimer);
-        this.pollTimer = 0;
-        this.jobId = null;
-        if (this.dom.run) this.dom.run.disabled = false;
-        if (this.dom.cancel) this.dom.cancel.disabled = true;
-        if (this.dom.etaClock) this.dom.etaClock.textContent = snap.status === "failed" ? "失敗" : "中断";
-        if (this.dom.etaLeft) this.dom.etaLeft.textContent = snap.status === "failed" ? "エラー" : "中止";
-        if (this.setGlobalEta) {
-          this.setGlobalEta({ clock: snap.status === "failed" ? "エラー" : "中断", left: snap.status, active: false });
-        }
-        if (snap.status === "failed" && this.onError) {
-          this.onError({
-            title: "Auto調査シミュレーションエラー",
-            message: snap.message || "調査中にシミュレーションエラーが発生しました",
-            hint: "機体設定値を確認し、再度調査をお試しください。",
-            badge: "INV_FAIL",
-          });
-        }
-        this.notify(`調査が${snap.status === "failed" ? "失敗" : "中断"}しました: ${snap.message || ""}`, "warn");
-      }
-    } catch (err) {
-      console.warn("Investigate poll error:", err);
-    }
+    // Kept for backward compatibility (not used with ResilientPoller)
   }
 
   async _fetchResult() {
@@ -197,6 +210,9 @@ export class InvestigatorPanel {
       this.notify("調査を中断しました", "info");
     } catch (err) {
       console.warn("Cancel failed:", err);
+    } finally {
+      this._poller?.stop();
+      this._poller = null;
     }
   }
 

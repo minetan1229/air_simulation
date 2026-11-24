@@ -1,5 +1,6 @@
 # Configuration for milcy Algorithm (formerly v3) 3D MAP-Elites Autonomous Research Framework
 # Production deterministic configuration tuned for high-resolution illumination
+# Grid ranges calibrated to empirical origami distribution (WL: 0.179-0.222, AR: 0.597-0.698)
 
 search:
   seed: 42
@@ -10,9 +11,9 @@ search:
 
 grid:
   bins: [10, 10, 10]  # 1,000 behavior niches
-  wing_loading_range: [0.10, 0.45]
-  stability_range: [0.10, 0.90]
-  aspect_ratio_range: [0.30, 2.20]
+  wing_loading_range: [0.15, 0.25]
+  stability_range: [0.60, 0.95]
+  aspect_ratio_range: [0.55, 0.75]
 
 benchmark:
   low_speed_mps: 6.0

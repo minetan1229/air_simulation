@@ -206,25 +206,7 @@ def extract_airframe_geometry(
 ) -> AirframeGeometry:
     """Extract physical dimensions, true silhouette planform, and penetration counts."""
     if geometry_obj is None:
-        return AirframeGeometry(
-            mass_kg=default_mass_kg,
-            wing_area_m2=0.015,
-            wingspan_m=0.18,
-            chord_m=0.12,
-            aspect_ratio=2.16,
-            cg_m=(0.08, 0.0, 0.005),
-            keel_height_m=0.0,
-            keel_length_m=0.0,
-            keel_layers=0,
-            step_count=step_count,
-            planform_area_m2=0.015,
-            planform_aspect_ratio=2.16,
-            penetrations=999,
-            fold_valid=False,
-            thickness_limit_ok=True,
-            flat_foldable_ok=True,
-            nose_tip_x_m=0.1485,
-        )
+        raise ValueError("geometry_obj is None - fold evaluation failed or was not attempted")
 
     if hasattr(geometry_obj, "mass_kg"):
         mass = float(getattr(geometry_obj, "mass_kg", default_mass_kg))
@@ -243,12 +225,7 @@ def extract_airframe_geometry(
         cg_tuple = (float(cg[0]), float(cg[1]), float(cg[2]))
         total_layers = int(geometry_obj.get("max_layers", 4))
     else:
-        mass = default_mass_kg
-        wing_area = 0.015
-        span = 0.18
-        chord = 0.12
-        cg_tuple = (0.08, 0.0, 0.005)
-        total_layers = 4
+        raise ValueError(f"Unexpected geometry_obj type: {type(geometry_obj)}")
 
     nose_tip_x = 0.1485
     penetrations_count = 0
@@ -319,11 +296,6 @@ def validate_tier0(
             f"Step count {candidate.step_count} exceeds maximum allowable {MAX_FOLD_STEPS}"
         )
 
-    if candidate.metadata.get("fold_failed", False):
-        reasons.append(
-            f"Fold engine failed: {candidate.metadata.get('fold_error', 'degenerate geometry')}"
-        )
-
     geom = candidate.geometry
     if geom is None:
         reasons.append("Airframe geometry has not been generated")
@@ -370,6 +342,21 @@ def validate_tier0(
     ):
         reasons.append("Non-finite or degenerate physical geometry dimensions")
 
+    # 4. Mesh penetration check (self-intersection)
+    # Use the penetration count from the grip report if available
+    if candidate.raw_genome is not None:
+        try:
+            geometry_obj = fold_genome(candidate.raw_genome, paper_gsm=candidate.config.paper_gsm)
+            report = evaluate_grip(geometry_obj)
+            if report.penetrations > 0:
+                reasons.append(
+                    f"Mesh self-penetration detected: {report.penetrations} face pairs intersect"
+                )
+        except Exception:
+            # If fold evaluation fails, don't block on penetration check
+            # (the candidate will be marked invalid by other checks)
+            pass
+
     return (len(reasons) == 0), reasons
 
 
@@ -402,36 +389,14 @@ class OrigamiAdapter:
             nose_length_ratio=config.nose.nose_length_ratio,
         )
 
-        fold_failed = False
-        fold_error = ""
         geometry: Optional[AirframeGeometry] = None
 
         try:
             geometry_obj = fold_genome(genome, paper_gsm=config.paper_gsm)
-            raw_geom = extract_airframe_geometry(geometry_obj, step_count=step_count)
-            geometry = AirframeGeometry(
-                mass_kg=raw_geom.mass_kg,
-                wing_area_m2=raw_geom.wing_area_m2,
-                wingspan_m=raw_geom.wingspan_m,
-                chord_m=raw_geom.chord_m,
-                aspect_ratio=raw_geom.aspect_ratio,
-                cg_m=raw_geom.cg_m,
-                keel_height_m=raw_geom.keel_height_m,
-                keel_length_m=raw_geom.keel_length_m,
-                keel_layers=raw_geom.keel_layers,
-                step_count=raw_geom.step_count,
-                planform_area_m2=raw_geom.planform_area_m2,
-                planform_aspect_ratio=raw_geom.planform_aspect_ratio,
-                penetrations=raw_geom.penetrations,
-                fold_valid=True,
-                thickness_limit_ok=foldability.thickness_limit_ok,
-                flat_foldable_ok=foldability.flat_foldable_ok,
-                nose_tip_x_m=raw_geom.nose_tip_x_m,
-            )
-        except Exception as exc:
-            fold_failed = True
-            fold_error = f"{type(exc).__name__}: {exc}"
-            geometry = None
+            geometry = extract_airframe_geometry(geometry_obj, step_count=step_count)
+        except Exception as e:
+            # Do not fall back to dummy geometry - propagate failure
+            raise RuntimeError(f"Fold evaluation failed for {cid}: {e}") from e
 
         candidate = AircraftCandidate(
             candidate_id=cid,
@@ -440,9 +405,6 @@ class OrigamiAdapter:
             raw_genome=genome,
             geometry=geometry,
         )
-        candidate.metadata["fold_failed"] = fold_failed
-        if fold_error:
-            candidate.metadata["fold_error"] = fold_error
         candidate.metadata["foldability_reasons"] = list(foldability.reasons)
 
         valid, reasons = validate_tier0(candidate)

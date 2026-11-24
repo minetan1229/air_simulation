@@ -23,6 +23,8 @@ import {
   createPanelMaterial,
 } from "./airframe.js";
 import { WindParticles } from "./flowfield.js";
+import { WebGLResourceManager } from "./gl_resource_manager.js";
+import { TrajectoryLineBuffer } from "./trajectory_buffer.js";
 
 const _root = typeof document !== "undefined" ? getComputedStyle(document.documentElement) : null;
 const _cssColor = (name, fallback) => (_root ? (_root.getPropertyValue(name).trim() || fallback) : fallback);
@@ -107,7 +109,7 @@ export class Viewport {
           powerPreference: "high-performance",
           antialias: true,
           alpha: false,
-          preserveDrawingBuffer: true,
+          preserveDrawingBuffer: false,
           failIfMajorPerformanceCaveat: false,
           desynchronized: true,
         }) ||
@@ -115,7 +117,7 @@ export class Viewport {
           powerPreference: "high-performance",
           antialias: true,
           alpha: false,
-          preserveDrawingBuffer: true,
+          preserveDrawingBuffer: false,
         });
     } catch {
       // Fall back to Three.js internal context creation
@@ -127,7 +129,7 @@ export class Viewport {
       antialias: true,
       alpha: false,
       powerPreference: "high-performance",
-      preserveDrawingBuffer: true,
+      preserveDrawingBuffer: false,
     });
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
@@ -146,9 +148,20 @@ export class Viewport {
     this.controls.dampingFactor = 0.08;
     this.controls.minDistance = 0.04;
     this.controls.maxDistance = 120;
-    this.controls.maxPolarAngle = Math.PI * 0.85; // Allow viewing from underneath the aircraft/paper
+    this.controls.maxPolarAngle = Math.PI * 0.85;
     this.controls.screenSpacePanning = true;
     this.controls.target.set(0.12, 0.08, 0);
+
+    // WebGL resource manager for context loss recovery and shared texture protection
+    this._resourceManager = new WebGLResourceManager(this.renderer, canvas, {
+      onContextLost: () => {
+        this.running = false;
+      },
+      onContextRestored: () => {
+        this.running = true;
+        this._rebuildAfterContextRestored();
+      }
+    });
 
     this._buildEnvironment();
     this._buildAirframe();
@@ -228,12 +241,16 @@ export class Viewport {
       }).catch(() => {});
     }
 
-    this.canvas = canvas;
     this._onContextLost = (event) => {
       event.preventDefault();
       this.running = false;
     };
+    this._onContextRestored = (event) => {
+      this.running = true;
+      this._rebuildAfterContextRestored();
+    };
     canvas.addEventListener("webglcontextlost", this._onContextLost);
+    canvas.addEventListener("webglcontextrestored", this._onContextRestored);
   }
 
   _detectGpuRenderer() {
@@ -371,7 +388,7 @@ export class Viewport {
     this.airframeGroup.name = "airframe";
     this.scene.add(this.airframeGroup);
 
-    this.airframeMaterial = createAirframeMaterial();
+    this.airframeMaterial = createAirframeMaterial(this._resourceManager);
     this.airframeMesh = null;
     this.edgeLines = null;
     this.panelLines = null;
@@ -449,8 +466,10 @@ export class Viewport {
     this.researchGroup.add(this.cgMarker);
 
     // Grip / keel region: a translucent slab over the pinchable section.
+    const keelBoxGeometry = new THREE.BoxGeometry(1, 1, 1);
+    this._keelBoxGeometry = keelBoxGeometry; // Store for disposal
     this.keelMarker = new THREE.Mesh(
-      new THREE.BoxGeometry(1, 1, 1),
+      keelBoxGeometry,
       new THREE.MeshBasicMaterial({
         color: 0xf29900, transparent: true, opacity: 0.22, depthWrite: false, side: THREE.DoubleSide,
       })
@@ -460,7 +479,7 @@ export class Viewport {
 
     // Edge frame of the grip region so the slab reads as a marked volume.
     this.keelFrame = new THREE.LineSegments(
-      new THREE.EdgesGeometry(new THREE.BoxGeometry(1, 1, 1)),
+      new THREE.EdgesGeometry(keelBoxGeometry),
       new THREE.LineBasicMaterial({ color: 0xe37400, transparent: true, opacity: 0.9 })
     );
     this.keelFrame.visible = false;
@@ -723,23 +742,8 @@ export class Viewport {
   }
 
   _buildTracks() {
-    this.trackGeometry = new THREE.BufferGeometry();
-    this.trackPositions = new Float32Array(TRACK_CAPACITY * 3);
-    this.trackColors = new Float32Array(TRACK_CAPACITY * 3);
-    this.trackGeometry.setAttribute(
-      "position",
-      new THREE.BufferAttribute(this.trackPositions, 3).setUsage(THREE.DynamicDrawUsage)
-    );
-    this.trackGeometry.setAttribute(
-      "color",
-      new THREE.BufferAttribute(this.trackColors, 3).setUsage(THREE.DynamicDrawUsage)
-    );
-    this.trackGeometry.setDrawRange(0, 0);
-    this.trackLine = new THREE.Line(
-      this.trackGeometry,
-      new THREE.LineBasicMaterial({ vertexColors: true, linewidth: 2 })
-    );
-    this.trackLine.frustumCulled = false;
+    this._trackBuffer = new TrajectoryLineBuffer(TRACK_CAPACITY, heatColour);
+    this.trackLine = this._trackBuffer.line;
     this.scene.add(this.trackLine);
 
     // High-visibility turquoise/cyan ghost track
@@ -1194,84 +1198,39 @@ export class Viewport {
     const x = p[0];
     const y = -p[2];
     const z = p[1];
-    const count = this.trackPoints.length;
-    if (count > 0) {
-      const last = this.trackPoints[count - 1];
-      const moved = Math.hypot(x - last[0], y - last[1], z - last[2]);
-      if (moved < 0.006) return;
-    }
     const stress = Number(sample.max_stress_index) || 0;
-    if (count >= TRACK_CAPACITY) {
-      this.trackPoints.shift();
-      this.trackPoints.push([x, y, z, stress]);
-      this._writeTrack();
-      return;
-    }
-    this.trackPoints.push([x, y, z, stress]);
-    const idx = count;
-    const positions = this.trackGeometry.attributes.position;
-    const colors = this.trackGeometry.attributes.color;
-    positions.array[idx * 3] = x;
-    positions.array[idx * 3 + 1] = y;
-    positions.array[idx * 3 + 2] = z;
-    const index = Math.min(Math.max(stress, 0), 1);
-    const [r, g, b] = heatColour(index);
-    colors.array[idx * 3] = r / 255;
-    colors.array[idx * 3 + 1] = g / 255;
-    colors.array[idx * 3 + 2] = b / 255;
-    positions.needsUpdate = true;
-    colors.needsUpdate = true;
-    this.trackGeometry.setDrawRange(0, idx + 1);
-  }
-
-  _writeTrack() {
-    const count = this.trackPoints.length;
-    const positions = this.trackGeometry.attributes.position;
-    const colors = this.trackGeometry.attributes.color;
-    const start = Math.max(0, count - TRACK_CAPACITY);
-    for (let i = 0; i < count; i += 1) {
-      const p = this.trackPoints[i];
-      positions.array[i * 3] = p[0];
-      positions.array[i * 3 + 1] = p[1];
-      positions.array[i * 3 + 2] = p[2];
-      const index = Math.min(Math.max((p[3] ?? 0) || 0, 0), 1);
-      const [r, g, b] = heatColour(index);
-      colors.array[i * 3] = r / 255;
-      colors.array[i * 3 + 1] = g / 255;
-      colors.array[i * 3 + 2] = b / 255;
-    }
-    positions.needsUpdate = true;
-    colors.needsUpdate = true;
-    this.trackGeometry.setDrawRange(start, count - start);
-    this.trackGeometry.computeBoundingSphere();
+    this._trackBuffer.append(x, y, z, stress);
   }
 
   clearTrack() {
-    this.trackPoints = [];
-    this.trackGeometry.setDrawRange(0, 0);
+    this._trackBuffer.clear();
   }
 
   /** Move the finished track into the ghost slot before a new flight. */
   archiveTrack() {
-    if (this.trackPoints.length < 4) {
+    if (this._trackBuffer.count < 4) {
       this.clearTrack();
       return;
     }
     const attribute = this.ghostGeometry.attributes.position;
-    const count = Math.min(this.trackPoints.length, TRACK_CAPACITY);
-    const start = this.trackPoints.length - count;
+    const count = Math.min(this._trackBuffer.count, TRACK_CAPACITY);
+    const positions = this._trackBuffer.positions;
     for (let i = 0; i < count; i += 1) {
-      const p = this.trackPoints[start + i];
-      attribute.array[i * 3] = p[0];
-      attribute.array[i * 3 + 1] = p[1];
-      attribute.array[i * 3 + 2] = p[2];
+      attribute.array[i * 3] = positions[i * 3];
+      attribute.array[i * 3 + 1] = positions[i * 3 + 1];
+      attribute.array[i * 3 + 2] = positions[i * 3 + 2];
     }
     attribute.needsUpdate = true;
     this.ghostGeometry.setDrawRange(0, count);
     this.ghostGeometry.computeBoundingSphere();
 
     // Place the ghost landing marker at the last point of the previous trajectory
-    const lastP = this.trackPoints[this.trackPoints.length - 1];
+    const lastIdx = (this._trackBuffer.count - 1) * 3;
+    const lastP = [
+      this._trackBuffer.positions[lastIdx],
+      this._trackBuffer.positions[lastIdx + 1],
+      this._trackBuffer.positions[lastIdx + 2]
+    ];
     if (lastP && this.ghostMarkerGroup) {
       this.ghostMarkerGroup.position.set(lastP[0], 0.005, lastP[2]);
       this.ghostMarkerGroup.visible = Boolean(this.ghostLine.visible);
@@ -1289,6 +1248,14 @@ export class Viewport {
   setTrackVisible(visible) {
     this.trackVisible = Boolean(visible);
     this.trackLine.visible = this.trackVisible && !this.researchPresentation;
+  }
+
+  /**
+   * Bulk set track from history array (for replay scrubbing).
+   * Uses single GPU upload via TrajectoryLineBuffer.setFromHistory.
+   */
+  setTrackFromHistory(samples, endIndex) {
+    this._trackBuffer.setFromHistory(samples, endIndex);
   }
 
   setGhostVisible(visible) {
@@ -1681,100 +1648,17 @@ export class Viewport {
     });
   }
 
-  /* ------------------------------------------------ 100-plane Swarm GPU Instancing */
-  setEnsembleFleet(trajectories, skipFirst = false) {
-    this.clearFleet();
-    if (!trajectories || !trajectories.length) return;
-
-    this.fleetTrajectories = trajectories;
-    const count = trajectories.length;
-
-    // Use current airframe geometry or synthesize fallback
-    const geo = (this.airframeMesh && this.airframeMesh.geometry)
-      ? this.airframeMesh.geometry.clone()
-      : buildAirframeGeometry({});
-
-    // Instanced material with custom paper roughness
-    const mat = createAirframeMaterial();
-    mat.vertexColors = false;
-    mat.roughness = 0.85;
-
-    this.fleetMesh = new THREE.InstancedMesh(geo, mat, count);
-    this.fleetMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
-
-    let maxT = 0;
-
-    const sorted = [...trajectories].sort((a, b) => (Number(b.landing_distance_m) || 0) - (Number(a.landing_distance_m) || 0));
-    const skippedId = (skipFirst && sorted.length > 1) ? sorted[0].id : null;
-    const effectiveSorted = (skipFirst && sorted.length > 1) ? sorted.slice(1) : sorted;
-
-    const bestId = effectiveSorted.length ? effectiveSorted[0].id : null;
-    const worstId = effectiveSorted.length ? effectiveSorted[effectiveSorted.length - 1].id : null;
-
-    let leadIdx = 0;
-    const foundLead = trajectories.findIndex((t) => t.id === bestId);
-    if (foundLead >= 0) leadIdx = foundLead;
-
-    const dummy = new THREE.Object3D();
-    const color = new THREE.Color();
-
-    trajectories.forEach((tr, i) => {
-      const pts = tr.points || [];
-      const tFlight = Number(tr.flight_time_s) || (pts.length * 0.02);
-      if (tFlight > maxT && tr.id !== skippedId) maxT = tFlight;
-
-      // Color coding: 1st=Gold, 2nd=Silver, 3rd=Bronze, Worst=Red, Others=Pastel blue/green
-      if (tr.id === skippedId) {
-        color.setHex(0x5f6368); // Skipped muted gray
-      } else if (tr.id === bestId) {
-        color.setHex(0xffb300); // 1st Gold (最高値)
-      } else if (tr.id === worstId) {
-        color.setHex(0xe53935); // Worst Red (最低値)
-      } else if (effectiveSorted[1] && tr.id === effectiveSorted[1].id) {
-        color.setHex(0xb0bec5); // 2nd Silver
-      } else if (effectiveSorted[2] && tr.id === effectiveSorted[2].id) {
-        color.setHex(0xcd7f32); // 3rd Bronze
-      } else {
-        const hue = 0.52 + ((i % 12) / 12) * 0.18;
-        color.setHSL(hue, 0.70, 0.60);
-      }
-      this.fleetMesh.setColorAt(i, color);
-
-      if (pts.length > 0) {
-        const p0 = pts[0];
-        dummy.position.set(Number(p0.x) || 0, Number(p0.z) || 1.8, Number(p0.y) || 0);
-        if (tr.id === skippedId) {
-          dummy.scale.setScalar(0.000001);
-        } else {
-          dummy.scale.setScalar(1.0);
-        }
-        dummy.updateMatrix();
-        this.fleetMesh.setMatrixAt(i, dummy.matrix);
-      }
-    });
-
-    if (this.fleetMesh.instanceColor) this.fleetMesh.instanceColor.needsUpdate = true;
-    this.fleetMesh.instanceMatrix.needsUpdate = true;
-
-    this.fleetDuration = Math.max(maxT, 1.0);
-    this.fleetLeadIndex = leadIdx;
-    this.fleetTime = 0;
-    this.fleetPlaying = true;
-
-    this.scene.add(this.fleetMesh);
-  }
-
+/* ------------------------------------------------ 100-plane Swarm GPU Instancing */
   clearFleet() {
     if (this.fleetMesh) {
       this.scene.remove(this.fleetMesh);
-      if (this.fleetMesh.geometry) this.fleetMesh.geometry.dispose();
-      if (this.fleetMesh.material) this.fleetMesh.material.dispose();
+      this.fleetMesh.dispose();
       this.fleetMesh = null;
     }
     if (this.meanMesh) {
       this.scene.remove(this.meanMesh);
       if (this.meanMesh.geometry) this.meanMesh.geometry.dispose();
-      if (this.meanMesh.material) this.meanMesh.material.dispose();
+      if (this.meanMesh.material) this._resourceManager?.disposeMaterial(this.meanMesh.material);
       this.meanMesh = null;
     }
     this.fleetTrajectories = [];
@@ -1797,7 +1681,7 @@ export class Viewport {
       : buildAirframeGeometry({});
 
     // Instanced material with custom paper roughness
-    const mat = createAirframeMaterial();
+    const mat = createAirframeMaterial(this._resourceManager);
     mat.vertexColors = false;
     mat.roughness = 0.85;
 
@@ -2339,6 +2223,10 @@ export class Viewport {
       this.canvas.removeEventListener("webglcontextlost", this._onContextLost);
       this._onContextLost = null;
     }
+    if (this._onContextRestored && this.canvas) {
+      this.canvas.removeEventListener("webglcontextrestored", this._onContextRestored);
+      this._onContextRestored = null;
+    }
     if (this.controls) {
       this.controls.dispose();
       this.controls = null;
@@ -2347,34 +2235,38 @@ export class Viewport {
       this.particles.dispose();
       this.particles = null;
     }
+    if (this._trackBuffer) {
+      this._trackBuffer.dispose();
+      this._trackBuffer = null;
+    }
     if (this.airframeMaterial) {
-      disposeMaterial(this.airframeMaterial);
+      this._resourceManager?.disposeMaterial(this.airframeMaterial);
       this.airframeMaterial = null;
     }
     if (this.origamiMaterial) {
-      disposeMaterial(this.origamiMaterial);
+      this._resourceManager?.disposeMaterial(this.origamiMaterial);
       this.origamiMaterial = null;
-    }
-    if (this.trackGeometry) {
-      this.trackGeometry.dispose();
-      this.trackGeometry = null;
     }
     if (this.ghostGeometry) {
       this.ghostGeometry.dispose();
       this.ghostGeometry = null;
     }
-    if (this.trackLine?.material) {
-      disposeMaterial(this.trackLine.material);
-    }
     if (this.ghostLine?.material) {
-      disposeMaterial(this.ghostLine.material);
+      this._resourceManager?.disposeMaterial(this.ghostLine.material);
     }
     if (this.keelMarker?.geometry) this.keelMarker.geometry.dispose();
-    if (this.keelMarker?.material) disposeMaterial(this.keelMarker.material);
+    if (this.keelMarker?.material) this._resourceManager?.disposeMaterial(this.keelMarker.material);
     if (this.keelFrame?.geometry) this.keelFrame.geometry.dispose();
-    if (this.keelFrame?.material) disposeMaterial(this.keelFrame.material);
+    if (this.keelFrame?.material) this._resourceManager?.disposeMaterial(this.keelFrame.material);
+    if (this._keelBoxGeometry) {
+      this._keelBoxGeometry.dispose();
+      this._keelBoxGeometry = null;
+    }
     
-    if (this.scene) {
+    if (this._resourceManager) {
+      this._resourceManager.disposeAll(this.scene);
+      this._resourceManager = null;
+    } else if (this.scene) {
       disposeTree(this.scene);
       this.scene = null;
     }
@@ -2389,8 +2281,30 @@ export class Viewport {
 
     this.canvas = null;
     this.camera = null;
-    this.trackPoints = [];
-    this.ghostPoints = [];
+  }
+
+  _rebuildAfterContextRestored() {
+    // Rebuild scene resources after WebGL context restoration
+    this._buildEnvironment();
+    this._buildAirframe();
+    this._buildTracks();
+    this._buildWindTunnel();
+    
+    // Re-create fleet if it was active
+    if (this.fleetTrajectories.length) {
+      this.setEnsembleFleet(this.fleetTrajectories, this._skipFirstRank, this._meanTrajectoryData);
+    }
+    
+    // Re-create ensemble tracks if they were active
+    if (this._ensembleGroup) {
+      this.setEnsembleTracks(this._ensembleTrajectories, this._skipFirstRank, this._meanTrajectoryData);
+      this.filterEnsembleTracks(this._ensembleMode || "all");
+    }
+    
+    // Restore particle field if it was set
+    if (this.particles && this.particles.field && this.particles.field.ready) {
+      this.particles.setField(this.particles.field);
+    }
   }
 }
 

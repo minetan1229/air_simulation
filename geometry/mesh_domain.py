@@ -1170,14 +1170,13 @@ def _axis_sign_fix(axis: np.ndarray) -> np.ndarray:
 def principal_axes(vertices: np.ndarray) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
     """PCA frame ``(span, chord, normal)`` for a point cloud.
 
-    * ``span``  = eigenvector of the largest eigenvalue (the wingspan direction).
-    * ``chord`` = eigenvector of the second eigenvalue; if that eigenvalue is
-      degenerate with the third one, the world axis least aligned with ``span``
-      is used so the result is reproducible.
+    * ``span``  = principal axis with larger extent in the horizontal (XY) plane.
+    * ``chord`` = the other horizontal principal axis.
     * ``normal`` = ``span x chord`` (right handed completion).
 
-    Both basis vectors get a deterministic sign (largest component positive),
-    so repeated calls on identical input return identical frames.
+    This correctly handles low-aspect-ratio aircraft (e.g., darts) where the
+    chord extent exceeds the span extent: the horizontal-plane projection is
+    used to disambiguate, so the span is always the lateral (Y) direction.
     """
     verts = np.asarray(vertices, dtype=np.float64)
     if verts.ndim != 2 or verts.shape[0] == 0:
@@ -1185,28 +1184,53 @@ def principal_axes(vertices: np.ndarray) -> Tuple[np.ndarray, np.ndarray, np.nda
     points = verts[:, :3]
     centre = np.mean(points, axis=0)
     centred = points - centre
-    covariance = (centred.T @ centred) / max(1, points.shape[0])
-    eigenvalues, eigenvectors = np.linalg.eigh(covariance)
-    order = np.argsort(eigenvalues)[::-1]
-    eigenvalues = eigenvalues[order]
-    vectors = eigenvectors[:, order]
 
-    span = _axis_sign_fix(vectors[:, 0])
-    if abs(eigenvalues[1] - eigenvalues[2]) <= 1.0e-12 * max(float(eigenvalues[0]), 1.0e-30):
-        candidates = np.eye(3, dtype=np.float64)
-        candidates = candidates[np.argsort(-np.abs(candidates @ span))]
-        chord = candidates[0]
-        chord = chord - float(np.dot(chord, span)) * span
-        chord = _axis_sign_fix(chord)
+    # Project onto horizontal plane (XY) to identify span vs chord
+    # In FRD: X=forward, Y=right(span), Z=down. Horizontal plane is XY.
+    xy = centred[:, :2]  # X, Y
+    if xy.shape[0] >= 2:
+        cov_xy = (xy.T @ xy) / max(1, xy.shape[0])
+        eigvals_xy, eigvecs_xy = np.linalg.eigh(cov_xy)
+        order_xy = np.argsort(eigvals_xy)[::-1]
+        eigvals_xy = eigvals_xy[order_xy]
+        eigvecs_xy = eigvecs_xy[:, order_xy]
+        # First PC in XY plane is span (larger extent = wingspan)
+        span_xy = eigvecs_xy[:, 0]
+        chord_xy = eigvecs_xy[:, 1]
+        span_dir = np.array([span_xy[0], span_xy[1], 0.0])
+        chord_dir = np.array([chord_xy[0], chord_xy[1], 0.0])
     else:
-        chord = _axis_sign_fix(vectors[:, 1])
-    normal = np.cross(span, chord)
+        # Degenerate: fall back to 3D PCA
+        covariance = (centred.T @ centred) / max(1, points.shape[0])
+        eigenvalues, eigenvectors = np.linalg.eigh(covariance)
+        order = np.argsort(eigenvalues)[::-1]
+        eigenvalues = eigenvalues[order]
+        vectors = eigenvectors[:, order]
+        # Find the most vertical axis (normal)
+        z_axis = np.array([0.0, 0.0, 1.0])
+        dots = np.abs(vectors.T @ z_axis)
+        normal_idx = int(np.argmax(dots))
+        horiz_indices = [i for i in range(3) if i != normal_idx]
+        # Larger eigenvalue among horizontal = span
+        if eigenvalues[horiz_indices[0]] >= eigenvalues[horiz_indices[1]]:
+            span_dir = vectors[:, horiz_indices[0]]
+            chord_dir = vectors[:, horiz_indices[1]]
+        else:
+            span_dir = vectors[:, horiz_indices[1]]
+            chord_dir = vectors[:, horiz_indices[0]]
+
+    span_dir = _axis_sign_fix(span_dir)
+    chord_dir = _axis_sign_fix(chord_dir)
+    normal = np.cross(span_dir, chord_dir)
     norm_len = float(np.linalg.norm(normal))
     if norm_len < _EPS:
-        normal = _axis_sign_fix(np.cross(span, np.eye(3)[int(np.argmin(np.abs(span)))]))
+        normal = _axis_sign_fix(np.cross(span_dir, np.eye(3)[int(np.argmin(np.abs(span_dir)))]))
     else:
         normal = normal / norm_len
-    return span, chord, normal
+    # Ensure right-handed: span x chord = normal
+    if np.dot(np.cross(span_dir, chord_dir), normal) < 0:
+        chord_dir = -chord_dir
+    return span_dir, chord_dir, normal
 
 
 def _percentile_extent(values: np.ndarray, low: float = 5.0, high: float = 95.0) -> float:

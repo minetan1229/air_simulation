@@ -818,22 +818,26 @@ def effective_paper_stiffness(cfg: AircraftConfig) -> float:
 
     Real paper has Machine Direction (MD) and Cross Direction (CD) with Young's
     modulus ratio E_MD / E_CD ~ 1.5..2.2 (``cfg.paper_anisotropy_ratio``, default 1.8).
-    Using ellipse interpolation:
-        E(theta) = E_MD / sqrt(cos(theta)^2 + (E_MD/E_CD)^2 * sin(theta)^2)
-    where theta = cfg.paper_grain_angle_deg (0 deg = MD longitudinal, 90 deg = CD transverse).
+    Uses the full 4th-order compliance tensor transformation (Classical Lamination Theory):
+        1/E(phi) = cos^4(phi)/E_MD + (1/G_12 - 2*nu_12/E_MD)*sin^2(phi)*cos^2(phi) + sin^4(phi)/E_CD
+
+    where phi is the angle between the spanwise (bending) direction and the MD direction.
+    Since grain_angle_deg=0 means MD along fuselage (x-axis), and wing bending acts
+    along the span (z-axis in origami frame, y-axis in FRD), phi = grain_angle_deg + 90 deg.
 
     Returns an effective stiffness value scaled relative to isotropic stiffness:
-        effective_stiffness = cfg.paper_stiffness * (E(theta) / E_MD)
+        effective_stiffness = cfg.paper_stiffness * (E_span / E_MD)
     clamped to >= 0.0.
     """
-    base_stiffness = max(_finite_or(float(cfg.paper_stiffness), 0.35), 0.0)
-    theta_rad = deg2rad(_finite_or(float(cfg.paper_grain_angle_deg), 0.0))
-    ratio = max(_finite_or(float(cfg.paper_anisotropy_ratio), 1.8), 1.0)
+    from geometry.validation_fixes import orthotropic_spanwise_modulus
 
-    cos_t = math.cos(theta_rad)
-    sin_t = math.sin(theta_rad)
-    denom = math.sqrt(cos_t * cos_t + (ratio * ratio) * (sin_t * sin_t))
-    anisotropy_factor = 1.0 / max(denom, _EPS)
+    base_stiffness = max(_finite_or(float(cfg.paper_stiffness), 0.35), 0.0)
+    e_md_pa = 4.0e9  # Typical paper MD Young's modulus [Pa]
+    anisotropy_ratio = max(_finite_or(float(cfg.paper_anisotropy_ratio), 1.8), 1.0)
+    grain_angle_deg = _finite_or(float(cfg.paper_grain_angle_deg), 0.0)
+
+    e_span = orthotropic_spanwise_modulus(e_md_pa, anisotropy_ratio, grain_angle_deg)
+    anisotropy_factor = e_span / e_md_pa
     return max(base_stiffness * anisotropy_factor, 0.0)
 
 

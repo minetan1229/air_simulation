@@ -257,6 +257,8 @@ class NelderMeadTrimOptimizer:
             candidate.config = final_cand.config
             candidate.geometry = final_cand.geometry
             candidate.benchmark = final_cand.benchmark
+            candidate.raw_genome = final_cand.raw_genome
+            candidate.descriptor = final_cand.descriptor
 
         return TrimResult(
             candidate_id=candidate.candidate_id,

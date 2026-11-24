@@ -50,11 +50,12 @@ def run_pipeline(
     trim_iterations: int = 15,
     grid_bins: Tuple[int, int, int] = (10, 10, 10),
     grid_ranges: Tuple[Tuple[float, float], Tuple[float, float], Tuple[float, float]] = (
-        (0.10, 0.45),
-        (0.10, 0.90),
-        (0.30, 2.20),
+        (0.15, 0.25),
+        (0.60, 0.95),
+        (0.55, 0.75),
     ),
     benchmark_duration_s: float = 6.0,
+    benchmark_dt_max: float = 0.02,
     bootstrap_count: int = 5,
     mcts_iterations: int = 30,
     elevon_bounds: Tuple[float, float] = (-4.0, 8.0),
@@ -76,13 +77,14 @@ def run_pipeline(
     print(f"  Grid Bins             : {grid_bins} ({grid_bins[0]*grid_bins[1]*grid_bins[2]} niches)")
     print(f"  Grid Ranges           : {grid_ranges}")
     print(f"  Benchmark Duration    : {benchmark_duration_s}s")
+    print(f"  Benchmark dt_max      : {benchmark_dt_max}")
     print(f"  Trim Optimization     : {trim_iterations} iterations")
     print(f"  Output Directory      : {out_path.resolve()}")
     print("=" * 70)
 
     # Initialize subsystems
     adapter = OrigamiAdapter()
-    benchmark = DeterministicFlightBenchmark(duration_s=benchmark_duration_s)
+    benchmark = DeterministicFlightBenchmark(duration_s=benchmark_duration_s, dt_max=benchmark_dt_max)
     grid = MAPElitesGridArchive(bins=grid_bins, ranges=grid_ranges)
     engine = MAPElitesEngine(
         archive=grid,
@@ -98,7 +100,7 @@ def run_pipeline(
         elevon_bounds=elevon_bounds,
         dihedral_bounds=dihedral_bounds,
     )
-    evaluator = RobustnessEvaluator(duration_s=benchmark_duration_s)
+    evaluator = RobustnessEvaluator(duration_s=benchmark_duration_s, dt_max=benchmark_dt_max)
 
     # Stage 1: MCTS Bootstrap
     print("\n[Stage 1] Bootstrapping 20-step origami skeletons with MCTS...")
@@ -109,28 +111,27 @@ def run_pipeline(
 
     # Stage 2: 3D MAP-Elites Illumination
     print("\n[Stage 2] Running 3D MAP-Elites illumination search...")
-    jsonl_file = open(jsonl_log_path, "w", encoding="utf-8")
+    with open(jsonl_log_path, "w", encoding="utf-8") as jsonl_file:
 
-    def progress(it: int, score: float, niches: int) -> None:
-        cov = grid.coverage() * 100.0
-        sys.stdout.write(
-            f"\r  Iteration {it:04d}/{iterations} | Niches: {niches:03d} ({cov:.1f}%) | Best Score: {score:.3f}"
-        )
-        sys.stdout.flush()
+        def progress(it: int, score: float, niches: int) -> None:
+            cov = grid.coverage() * 100.0
+            sys.stdout.write(
+                f"\r  Iteration {it:04d}/{iterations} | Niches: {niches:03d} ({cov:.1f}%) | Best Score: {score:.3f}"
+            )
+            sys.stdout.flush()
 
-        # Log to JSONL
-        entry = {
-            "iteration": it,
-            "niches_filled": niches,
-            "coverage_pct": cov,
-            "best_score": score,
-            "timestamp": time.time(),
-        }
-        jsonl_file.write(json.dumps(entry) + "\n")
-        jsonl_file.flush()
+            # Log to JSONL
+            entry = {
+                "iteration": it,
+                "niches_filled": niches,
+                "coverage_pct": cov,
+                "best_score": score,
+                "timestamp": time.time(),
+            }
+            jsonl_file.write(json.dumps(entry) + "\n")
+            jsonl_file.flush()
 
-    engine.run_iterations(iterations=iterations, progress_callback=progress)
-    jsonl_file.close()
+        engine.run_iterations(iterations=iterations, progress_callback=progress)
     print("\n  MAP-Elites illumination completed.")
 
     # Stage 3: Nelder-Mead Precision Trim Optimization
@@ -183,7 +184,7 @@ def main() -> None:
         "--pipeline",
         type=str,
         default="milcy",
-        choices=["milcy", "milkcy", "v3", "map_elites"],
+        choices=["milcy", "v3", "map_elites"],
         help="Algorithm identifier (default: milcy)",
     )
     parser.add_argument(
@@ -215,10 +216,10 @@ def main() -> None:
     bench_cfg = cfg.get("benchmark", {})
     eval_cfg = cfg.get("evaluation", {})
 
-    iters = args.iterations or int(search_cfg.get("map_elites_iterations", 50))
+    iters = args.iterations if args.iterations is not None else int(search_cfg.get("map_elites_iterations", 50))
     seed = args.seed if args.seed is not None else int(search_cfg.get("seed", 42))
     out_dir = args.output_dir or str(eval_cfg.get("output_dir", "output/v3"))
-    top_k = args.top_k or int(eval_cfg.get("top_k_export", 3))
+    top_k = args.top_k if args.top_k is not None else int(eval_cfg.get("top_k_export", 3))
 
     raw_bins = grid_cfg.get("bins", [10, 10, 10])
     grid_bins = (int(raw_bins[0]), int(raw_bins[1]), int(raw_bins[2])) if len(raw_bins) >= 3 else (10, 10, 10)
@@ -233,6 +234,7 @@ def main() -> None:
     )
 
     bench_duration = float(bench_cfg.get("duration_s", 6.0))
+    bench_dt_max = float(bench_cfg.get("dt_max", 0.02))
     boot_count = int(search_cfg.get("bootstrap_count", 5))
     mcts_iters = int(search_cfg.get("mcts_iterations", 30))
     mut_rate = float(search_cfg.get("mutation_rate", 0.35))
@@ -253,6 +255,7 @@ def main() -> None:
         grid_bins=grid_bins,
         grid_ranges=grid_ranges,
         benchmark_duration_s=bench_duration,
+        benchmark_dt_max=bench_dt_max,
         bootstrap_count=boot_count,
         mcts_iterations=mcts_iters,
         elevon_bounds=e_bounds,

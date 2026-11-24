@@ -1,4 +1,10 @@
-"""3D MAP-Elites grid archive for behavior-space illumination."""
+"""3D MAP-Elites grid archive for behavior-space illumination.
+
+Behavior Descriptors (3D):
+  1. Wing loading (kg/m^2): [0.10, 0.45] (realistic range for folded A4 paper planes)
+  2. Static stability margin: [0.10, 0.90] (geometric static stability spectrum)
+  3. Aspect ratio: [0.30, 2.20] (folded aircraft aspect ratio spectrum)
+"""
 from __future__ import annotations
 
 import math
@@ -8,6 +14,9 @@ from core.interfaces import AircraftCandidate, BehaviorDescriptor
 
 
 def _clamp(v: float, low: float, high: float) -> float:
+    # Guard against NaN - reject non-finite values
+    if not math.isfinite(v):
+        raise ValueError(f"Non-finite value {v} passed to _clamp")
     return max(low, min(high, v))
 
 
@@ -16,7 +25,7 @@ class MAPElitesGridArchive:
 
     def __init__(
         self,
-        bins: Tuple[int, int, int] = (8, 8, 8),
+        bins: Tuple[int, int, int] = (6, 6, 4),
         ranges: Tuple[Tuple[float, float], Tuple[float, float], Tuple[float, float]] = (
             (0.10, 0.45),  # Realistic wing loading range (kg/m^2) for folded A4 paper planes
             (0.10, 0.90),  # Geometric static stability margin spectrum

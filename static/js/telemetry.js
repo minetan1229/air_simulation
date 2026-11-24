@@ -346,6 +346,17 @@ export class StripChart {
       z_m: NaN,
     };
   }
+
+  dispose() {
+    if (this._observer) {
+      this._observer.disconnect();
+      this._observer = null;
+    }
+    // Event listeners are on canvas which will be GC'd when canvas is removed
+    this.canvas = null;
+    this.ctx = null;
+    this.ring = null;
+  }
 }
 
 /* -------------------------------------------------------------- polar plot */
@@ -531,5 +542,16 @@ export class PolarChart {
     ctx.fillText("C_L →", right, bottom + 4);
     ctx.textAlign = "left";
     ctx.fillText("L/D →", right + 6, top - 10);
+  }
+
+  dispose() {
+    if (this._observer) {
+      this._observer.disconnect();
+      this._observer = null;
+    }
+    this.canvas = null;
+    this.ctx = null;
+    this.payload = null;
+    this.operating = null;
   }
 }

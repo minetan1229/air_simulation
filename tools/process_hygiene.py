@@ -24,6 +24,7 @@ import argparse
 import json
 import os
 import re
+import signal
 import subprocess
 import sys
 import time
@@ -105,6 +106,7 @@ class Proc:
     cmd: str
     started: str
     exe: str = ""
+    state: str = ""
 
     @property
     def lower_cmd(self) -> str:
@@ -227,7 +229,10 @@ def _procfs_entries() -> list[dict]:
             raw = (proc_dir / "cmdline").read_bytes()
             cmd = raw.replace(b"\x00", b" ").decode("utf-8", "replace").strip()
             stat = (proc_dir / "stat").read_text()
-            ppid = int(stat.rsplit(")", 1)[1].split()[1])
+            fields = stat.rsplit(")", 1)[1].split()
+            ppid = int(fields[1])
+            state = fields[0]
+            starttime = fields[19]
             exe = os.readlink(str(proc_dir / "exe")) if (proc_dir / "exe").exists() else ""
         except (OSError, ValueError):
             continue
@@ -238,8 +243,9 @@ def _procfs_entries() -> list[dict]:
                 "ppid": ppid,
                 "name": name,
                 "cmd": cmd,
-                "started": "",
+                "started": starttime,
                 "exe": exe,
+                "state": state,
             }
         )
     return entries
@@ -492,6 +498,7 @@ def collect(keep_pids: set[int], keep_since: str | None) -> tuple[list[Proc], se
             cmd=str(r.get("cmd") or ""),
             started=str(r.get("started") or ""),
             exe=str(r.get("exe") or ""),
+            state=str(r.get("state") or ""),
         )
         for r in raw
     ]
@@ -648,16 +655,75 @@ def _short(cmd: str, width: int = 96) -> str:
     return cmd if len(cmd) <= width else cmd[: width - 3] + "..."
 
 
+def _read_linux_stat_meta(pid: int) -> tuple[str, int, str] | None:
+    """(state, ppid, starttime_ticks) を返す。取得不可なら None."""
+    try:
+        stat = Path(f"/proc/{pid}/stat").read_text()
+        fields = stat.rsplit(")", 1)[1].split()
+        return fields[0], int(fields[1]), fields[19]  # state, ppid, starttime
+    except (OSError, ValueError, IndexError):
+        return None
+
+
+def _terminate_linux(pid: int, tree: bool, expected_starttime: str = "", grace_s: float = 2.0) -> tuple[bool, str]:
+    meta = _read_linux_stat_meta(pid)
+    if meta is None:
+        return True, "already exited"
+    state, _ppid, starttime = meta
+    if state == "Z":
+        return False, "zombie process (parent must reap)"
+    if expected_starttime and starttime != expected_starttime:
+        return False, "pid reused (starttime mismatch)"
+
+    targets = [pid]
+    if tree:
+        # 子孫PIDを幅優先で収集し、子→親の順で停止
+        children: dict[int, list[int]] = {}
+        for p in Path("/proc").iterdir():
+            if p.name.isdigit():
+                m = _read_linux_stat_meta(int(p.name))
+                if m and m[0] != "Z":
+                    children.setdefault(m[1], []).append(int(p.name))
+        queue = [pid]
+        while queue:
+            cur = queue.pop(0)
+            for ch in children.get(cur, []):
+                targets.append(ch)
+                queue.append(ch)
+        targets.reverse()
+
+    for tpid in targets:
+        try:
+            os.kill(tpid, signal.SIGTERM)
+        except OSError:
+            pass
+
+    deadline = time.monotonic() + grace_s
+    while time.monotonic() < deadline:
+        alive = [p for p in targets if (m := _read_linux_stat_meta(p)) and m[0] != "Z"]
+        if not alive:
+            return True, f"SIGTERM ok ({len(targets)} procs)"
+        time.sleep(0.1)
+
+    for tpid in alive:
+        try:
+            os.kill(tpid, signal.SIGKILL)
+        except OSError:
+            pass
+    return True, f"SIGKILL escalated ({len(alive)}/{len(targets)} procs)"
+
+
+def _terminate_windows(pid: int, tree: bool) -> tuple[bool, str]:
+    cmd = ["taskkill", "/PID", str(pid), "/F"] + (["/T"] if tree else [])
+    out = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+    return out.returncode == 0, (out.stdout or out.stderr).strip()
+
+
 def _terminate(pid: int, tree: bool) -> tuple[bool, str]:
     if IS_WINDOWS:
-        cmd = ["taskkill", "/PID", str(pid), "/F"] + (["/T"] if tree else [])
-        out = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
-        return out.returncode == 0, (out.stdout or out.stderr).strip()
-    try:
-        os.kill(pid, 15)
-        return True, "SIGTERM"
-    except OSError as exc:
-        return False, str(exc)
+        return _terminate_windows(pid, tree)
+    expected_starttime = ""
+    return _terminate_linux(pid, tree, expected_starttime=expected_starttime)
 
 
 def _ancestor_pids(procs: list[Proc], pid: int) -> set[int]:
@@ -691,6 +757,7 @@ def apply(verdicts: list[Verdict], dry_run: bool) -> dict:
         if dry_run:
             results.append({"pid": v.proc.pid, "mode": "TREE", "ok": True, "detail": _short(v.proc.cmd, 60)})
             continue
+        expected_starttime = v.proc.started if not IS_WINDOWS else ""
         ok, detail = _terminate(v.proc.pid, tree=True)
         results.append({"pid": v.proc.pid, "mode": "TREE", "ok": ok, "detail": detail[:120]})
     if not dry_run:
@@ -699,6 +766,7 @@ def apply(verdicts: list[Verdict], dry_run: bool) -> dict:
         for v in stops:
             if v.proc.pid in handled:
                 continue
+            expected_starttime = v.proc.started if not IS_WINDOWS else ""
             ok, detail = _terminate(v.proc.pid, tree=False)
             results.append({"pid": v.proc.pid, "mode": "SINGLE", "ok": ok, "detail": detail[:120]})
     return {

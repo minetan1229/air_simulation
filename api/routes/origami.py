@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import math
 import random
+import threading
 import time
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -47,6 +48,7 @@ _ANGLE_MAX_DEG = 360.0
 #: ``(timestamp, payload)``.  Entries older than the TTL are recomputed and
 #: the cache is capped so it can never grow without bound.
 _MESH_CACHE: Dict[Tuple[Any, ...], Tuple[float, Dict[str, Any]]] = {}
+_MESH_CACHE_LOCK = threading.RLock()
 _MESH_CACHE_TTL_SEC = 60.0
 _MESH_CACHE_MAX_ENTRIES = 128
 
@@ -174,9 +176,10 @@ def origami_mesh():
         wingspan,
     )
     now = time.time()
-    entry = _MESH_CACHE.get(cache_key)
-    if entry is not None and now - entry[0] <= _MESH_CACHE_TTL_SEC:
-        return jsonify(entry[1])
+    with _MESH_CACHE_LOCK:
+        entry = _MESH_CACHE.get(cache_key)
+        if entry is not None and now - entry[0] <= _MESH_CACHE_TTL_SEC:
+            return jsonify(entry[1])
 
     mesh = origami.build_mesh(archetype, alpha, params, scale)
     # Stage 2 of the 2-stage fit: measure the generated real span and re-scale
@@ -193,10 +196,11 @@ def origami_mesh():
                 mesh.scale = scale * fit
     out = origami.mesh_payload(mesh)
 
-    if len(_MESH_CACHE) >= _MESH_CACHE_MAX_ENTRIES:
-        oldest = min(_MESH_CACHE.items(), key=lambda item: item[1][0])
-        del _MESH_CACHE[oldest[0]]
-    _MESH_CACHE[cache_key] = (now, out)
+    with _MESH_CACHE_LOCK:
+        if len(_MESH_CACHE) >= _MESH_CACHE_MAX_ENTRIES:
+            oldest = min(_MESH_CACHE.items(), key=lambda item: item[1][0])
+            del _MESH_CACHE[oldest[0]]
+        _MESH_CACHE[cache_key] = (now, out)
     return jsonify(out)
 
 

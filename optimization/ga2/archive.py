@@ -561,20 +561,23 @@ class ParetoFront:
                 range(n_points),
                 key=lambda idx: direction * self._points[idx][1][obj_idx],
             )
-            # Boundary (extreme) points get infinite distance
-            distances[sorted_indices[0]] = math.inf
-            distances[sorted_indices[-1]] = math.inf
-
             min_val = direction * self._points[sorted_indices[0]][1][obj_idx]
             max_val = direction * self._points[sorted_indices[-1]][1][obj_idx]
             span = max_val - min_val
 
-            if span > 0.0:
-                for rank in range(1, n_points - 1):
-                    prev_val = direction * self._points[sorted_indices[rank - 1]][1][obj_idx]
-                    next_val = direction * self._points[sorted_indices[rank + 1]][1][obj_idx]
-                    distances[sorted_indices[rank]] += (next_val - prev_val) / span
+            if span <= 1.0e-12:
+                continue  # 同値次元で無関係な先頭/末尾を極値扱いしない
 
+            # 最良端点（最大 directed 値）と最小端点を保護
+            distances[sorted_indices[0]] = math.inf
+            distances[sorted_indices[-1]] = math.inf
+            for rank in range(1, n_points - 1):
+                idx = sorted_indices[rank]
+                if math.isinf(distances[idx]):
+                    continue
+                prev_val = direction * self._points[sorted_indices[rank - 1]][1][obj_idx]
+                next_val = direction * self._points[sorted_indices[rank + 1]][1][obj_idx]
+                distances[idx] += (next_val - prev_val) / span
         return distances
 
     def _trim(self) -> None:
@@ -598,17 +601,24 @@ class ParetoFront:
                 worst_index = finite_candidates[0][2]
             else:
                 # All points are extreme; fall back to dropping the point with lowest normalized score
-                scores = self._normalised_scores()
-                worst_index = 0
-                worst_score = scores[0] if scores else 0.0
-                worst_key = self._points[0][0]
-                for idx in range(1, len(self._points)):
-                    s = scores[idx] if idx < len(scores) else 0.0
-                    k = self._points[idx][0]
-                    if s < worst_score or (s == worst_score and k > worst_key):
-                        worst_index = idx
-                        worst_score = s
-                        worst_key = k
+                # but protect the true extreme solutions (anchors) in each objective
+                protected = set()
+                n_obj = len(self._objective_names)
+                for m in range(n_obj):
+                    d = self._direction_vector[m]
+                    best_idx = max(range(len(self._points)), key=lambda i: d * self._points[i][1][m])
+                    protected.add(best_idx)
+                candidates = [i for i in range(len(self._points)) if i not in protected] or list(range(len(self._points)))
+                # 正規化目的空間で最も近い他点との距離が最小の点を選択
+                lows = [min(self._points[i][1][m] for i in range(len(self._points))) for m in range(n_obj)]
+                spans = [max(1.0e-12, max(self._points[i][1][m] for i in range(len(self._points))) - lows[m]) for m in range(n_obj)]
+                norm_pts = [[(self._points[i][1][m] - lows[m]) / spans[m] for m in range(n_obj)] for i in range(len(self._points))]
+                worst_index = min(
+                    candidates,
+                    key=lambda i: min(
+                        math.dist(norm_pts[i], norm_pts[j]) for j in range(len(self._points)) if j != i
+                    ),
+                )
 
             self._points.pop(worst_index)
 

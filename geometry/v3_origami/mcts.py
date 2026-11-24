@@ -75,7 +75,7 @@ class MCTSOrigamiGenerator:
         self.adapter = adapter or OrigamiAdapter()
         self.rng = random.Random(seed)
 
-    def evaluate_leaf_geometry(self, config: ParametricOrigamiConfig) -> GeometricStaticScore:
+    def evaluate_leaf_geometry(self, config: ParametricOrigamiConfig) -> Tuple[GeometricStaticScore, Optional[AircraftCandidate]]:
         """Fast geometric non-6DoF evaluation for MCTS rollout/leaf."""
         candidate = self.adapter.compile_candidate(config)
         valid, reasons = validate_tier0(candidate)
@@ -87,7 +87,7 @@ class MCTSOrigamiGenerator:
                 wing_loading_score=0.0,
                 tier0_passed=False,
                 rejection_reasons=tuple(reasons),
-            )
+            ), None
 
         geom = candidate.geometry
 
@@ -122,25 +122,32 @@ class MCTSOrigamiGenerator:
             wing_loading_score=loading_score,
             tier0_passed=True,
             rejection_reasons=(),
-        )
+        ), candidate
 
     def _expand_node(self, node: MCTSNode, visited_keys: Optional[Set[Tuple[Any, ...]]] = None) -> None:
         """Expand node with bidirectional symmetric actions preserving all fields."""
         base = node.config
 
         raw_variations: List[Tuple[str, ParametricOrigamiConfig]] = [
+            # Phase 1 Nose variations
             ("nose_more_folds", replace(base, nose=replace(base.nose, fold_count=min(6, base.nose.fold_count + 1)))),
             ("nose_fewer_folds", replace(base, nose=replace(base.nose, fold_count=max(3, base.nose.fold_count - 1)))),
             ("nose_sharper_taper", replace(base, nose=replace(base.nose, taper_ratio=max(0.45, base.nose.taper_ratio - 0.08)))),
             ("nose_wider_taper", replace(base, nose=replace(base.nose, taper_ratio=min(0.85, base.nose.taper_ratio + 0.08)))),
             ("nose_extended", replace(base, nose=replace(base.nose, nose_length_ratio=min(0.35, base.nose.nose_length_ratio + 0.03)))),
             ("nose_shortened", replace(base, nose=replace(base.nose, nose_length_ratio=max(0.20, base.nose.nose_length_ratio - 0.03)))),
+            # Phase 2 Keel variations
             ("keel_deeper_locked", replace(base, keel=replace(base.keel, keel_depth_ratio=min(0.14, base.keel.keel_depth_ratio + 0.02), has_lock_fold=True))),
             ("keel_shallower", replace(base, keel=replace(base.keel, keel_depth_ratio=max(0.06, base.keel.keel_depth_ratio - 0.02)))),
+            # Phase 3 Wing variations
             ("wing_higher_aspect", replace(base, wing=replace(base.wing, wingspan_ratio=min(0.88, base.wing.wingspan_ratio + 0.06)))),
             ("wing_lower_aspect", replace(base, wing=replace(base.wing, wingspan_ratio=max(0.55, base.wing.wingspan_ratio - 0.06)))),
             ("wing_more_dihedral", replace(base, wing=replace(base.wing, dihedral_deg=min(8.0, base.wing.dihedral_deg + 1.5)))),
             ("wing_less_dihedral", replace(base, wing=replace(base.wing, dihedral_deg=max(0.0, base.wing.dihedral_deg - 1.5)))),
+            # Additional wing variations from our branch
+            ("wing_left_elevon_up", replace(base, wing=replace(base.wing, elevon_left_deg=min(15.0, base.wing.elevon_left_deg + 2.0)))),
+            ("wing_right_elevon_up", replace(base, wing=replace(base.wing, elevon_right_deg=min(15.0, base.wing.elevon_right_deg + 2.0)))),
+            ("wing_lower_dihedral", replace(base, wing=replace(base.wing, dihedral_deg=max(-5.0, base.wing.dihedral_deg - 2.0)))),
         ]
 
         for desc, cfg in raw_variations:
@@ -172,11 +179,11 @@ class MCTSOrigamiGenerator:
                 if curr.children:
                     curr = self.rng.choice(curr.children)
 
-            score = self.evaluate_leaf_geometry(curr.config)
+            # 3. Simulation / Geometric Rollout
+            score, cand = self.evaluate_leaf_geometry(curr.config)
             value = score.total_value
 
-            if score.tier0_passed:
-                cand = self.adapter.compile_candidate(curr.config)
+            if score.tier0_passed and cand is not None:
                 best_candidates.append((value, cand))
 
             p: Optional[MCTSNode] = curr

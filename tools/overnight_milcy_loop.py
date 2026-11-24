@@ -112,9 +112,15 @@ def run_overnight_loop(
     base_dir = PROJECT_ROOT / base_output_dir
     base_dir.mkdir(parents=True, exist_ok=True)
 
+    # Compute absolute target datetime in JST
+    now_jst_start = get_current_jst()
+    target_dt = now_jst_start.replace(hour=target_hour, minute=target_minute, second=0, microsecond=0)
+    if target_dt <= now_jst_start:
+        target_dt += datetime.timedelta(days=1)
+
     print("=" * 75)
     print("  [NIGHT-LOOP] AUTONOMOUS OVERNIGHT OPTIMIZATION & CONTINUOUS IMPROVEMENT")
-    print(f"  Target Finish Time : {target_hour:02d}:{target_minute:02d} JST")
+    print(f"  Target Finish Time : {target_hour:02d}:{target_minute:02d} JST (absolute: {target_dt.strftime('%Y-%m-%d %H:%M:%S JST')})")
     print(f"  Base Output Dir    : {base_dir.resolve()}")
     print("=" * 75)
 
@@ -133,26 +139,19 @@ def run_overnight_loop(
     round_idx = 1
     total_evaluations = 0
 
-    # Compute target termination datetime (if current time is past target, set to tomorrow)
-    start_jst = get_current_jst()
-    target_dt = start_jst.replace(hour=target_hour, minute=target_minute, second=0, microsecond=0)
-    if start_jst >= target_dt:
-        target_dt += datetime.timedelta(days=1)
-    print(f"[*] Target completion datetime: {target_dt.strftime('%Y-%m-%d %H:%M:%S JST')}")
-
     notify_discord(
         "info",
         "🌙 milcy 夜通し自律最適化ループ起動",
-        f"{target_dt.strftime('%H:%M JST')} 完了目標 | 基準最高スコア {best_overall_score:.4f} | GPU加速稼働中",
+        f"09:00 JST 完了目標 | 基準最高スコア {best_overall_score:.4f} | GPU加速稼働中",
     )
 
     while True:
         now_jst = get_current_jst()
         print(f"\n>>> [Round {round_idx}] Current Time: {now_jst.strftime('%H:%M:%S JST')}")
 
-        # Check termination condition: reached target datetime JST
+        # Check termination condition: reached absolute target datetime JST
         if now_jst >= target_dt:
-            print(f"[*] Reached target time ({target_dt.strftime('%H:%M:%S JST')}). Concluding overnight loop.")
+            print(f"[*] Reached target time ({target_dt.strftime('%Y-%m-%d %H:%M:%S JST')}). Concluding overnight loop.")
             break
 
         # Adaptive search parameters per round

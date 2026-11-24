@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import atexit
 import logging
 import os
 import subprocess
@@ -269,6 +270,8 @@ def system_gpu():
 
 _LAST_BROWSER_LAUNCH: float = 0.0
 _BROWSER_LAUNCH_LOCK = threading.Lock()
+_BROWSER_PROCESSES: list[subprocess.Popen] = []
+_BROWSER_PROCESSES_LOCK = threading.Lock()
 
 
 @meta_bp.post("/api/v1/system/force-gpu-render")
@@ -343,7 +346,10 @@ def force_gpu_render():
                 "http://127.0.0.1:5000/",
             ]
             try:
-                subprocess.Popen(flags)
+                proc = subprocess.Popen(flags, start_new_session=True)
+                # Track the process for cleanup
+                with _BROWSER_PROCESSES_LOCK:
+                    _BROWSER_PROCESSES.append(proc)
                 launched = True
             except Exception:
                 log.exception("force_gpu_render failed to launch browser process")
@@ -357,3 +363,19 @@ def force_gpu_render():
         "gpu_preference": 2,
         "preference_name": "High Performance (NVIDIA dGPU)",
     })
+
+
+def _cleanup_browser_processes() -> None:
+    """Wait for any tracked browser processes to exit (avoids zombie processes on POSIX)."""
+    with _BROWSER_PROCESSES_LOCK:
+        procs = list(_BROWSER_PROCESSES)
+        _BROWSER_PROCESSES.clear()
+    for proc in procs:
+        try:
+            if proc.poll() is None:
+                proc.wait(timeout=2.0)
+        except Exception:
+            pass
+
+
+atexit.register(_cleanup_browser_processes)

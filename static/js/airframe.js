@@ -603,7 +603,7 @@ let sharedPaperTexture = null;
  * Creates an authentic micro-fiber bump texture on an HTML canvas,
  * giving the procedural airframe the tactile realism of real origami bond paper.
  */
-function getPaperTextures() {
+function getPaperTextures(resourceManager = null) {
   if (typeof document === "undefined") return { map: null };
   if (!sharedPaperTexture) {
     try {
@@ -652,17 +652,25 @@ function getPaperTextures() {
         sharedPaperTexture.wrapS = THREE.RepeatWrapping;
         sharedPaperTexture.wrapT = THREE.RepeatWrapping;
         sharedPaperTexture.repeat.set(8, 8);
+        
+        // Register with resource manager to protect from accidental disposal
+        if (resourceManager) {
+          resourceManager.registerSharedTexture(sharedPaperTexture);
+        }
       }
     } catch (e) {
       // Graceful fallback for non-browser/headless environments
       sharedPaperTexture = null;
     }
+  } else if (resourceManager) {
+    // Ensure already-created texture is registered
+    resourceManager.registerSharedTexture(sharedPaperTexture);
   }
   return { map: sharedPaperTexture };
 }
 
-export function createAirframeMaterial() {
-  const { map } = getPaperTextures();
+export function createAirframeMaterial(resourceManager = null) {
+  const { map } = getPaperTextures(resourceManager);
   return new THREE.MeshStandardMaterial({
     color: 0xffffff,
     vertexColors: true,

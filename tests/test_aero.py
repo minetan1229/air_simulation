@@ -485,25 +485,44 @@ def test_drag_polar_contract_and_extremes(cfg: AircraftConfig) -> None:
 # ==========================================================================
 # 6. Ground effect
 # ==========================================================================
+
+SIGMA_MIN = 0.20
+HB_EFF_MIN = 0.05
+
+def _expected_ground_effect_factor(height: float, span: float, sigma_min: float = SIGMA_MIN, hb_eff_min: float = HB_EFF_MIN) -> float:
+    """Compute expected ground effect factor with sigma_min floor and hb_eff minimum."""
+    if height < 0:
+        height = 0.0
+    hb_eff = max(height / span, hb_eff_min)
+    ratio = 16.0 * hb_eff ** 2
+    wieselsberger = ratio / (1.0 + ratio)
+    return sigma_min + (1.0 - sigma_min) * wieselsberger
+
+
 def test_ground_effect_factor_bounds_and_unity_at_height() -> None:
     span = 0.24
-    assert ground_effect_factor(0.0, span) == pytest.approx(0.0, abs=1e-15)
+    expected_zero = _expected_ground_effect_factor(0.0, span)
+    assert ground_effect_factor(0.0, span) == pytest.approx(expected_zero, abs=1e-15)
     for height in (0.01, 0.1, 0.5, 1.0, 5.0, 25.0):
         value = ground_effect_factor(height, span)
-        assert 0.0 < value <= 1.0
+        assert SIGMA_MIN < value <= 1.0
     assert ground_effect_factor(1.0e8, span) == 1.0
 
 
 def test_ground_effect_factor_increases_with_height() -> None:
     span = 0.24
-    values = [ground_effect_factor(height, span) for height in (0.01, 0.05, 0.2, 0.6, 1.5)]
+    # For h/b > 0.05, should be strictly increasing
+    values = [ground_effect_factor(height, span) for height in (0.05 * span, 0.1 * span, 0.5 * span, 1.0 * span, 2.0 * span)]
     assert all(later > earlier for earlier, later in zip(values, values[1:]))
+    # Below 0.05, should plateau
+    values_plateau = [ground_effect_factor(height, span) for height in (0.0, 0.01 * span, 0.02 * span, 0.03 * span, 0.04 * span)]
+    assert all(abs(later - earlier) < 1e-12 for earlier, later in zip(values_plateau, values_plateau[1:]))
 
 
 def test_ground_effect_factor_matches_closed_form_and_disables_to_free_air() -> None:
     span, height = 0.3, 0.12
-    ratio = 16.0 * (height / span) ** 2
-    assert ground_effect_factor(height, span) == pytest.approx(ratio / (1.0 + ratio), rel=1e-12)
+    expected = _expected_ground_effect_factor(height, span)
+    assert ground_effect_factor(height, span) == pytest.approx(expected, rel=1e-12)
     # The value *multiplies* the free-air induced drag, so switching the model
     # off must return the free-air multiplier 1.0, never 0.0 (which would delete
     # the induced-drag term altogether).
@@ -521,6 +540,8 @@ def test_ground_effect_reduces_induced_drag_only(cfg: AircraftConfig) -> None:
     # 1e8 m is far enough for the ground-effect factor to saturate at exactly 1
     assert high - parasite == pytest.approx(induced_free, rel=1e-12)
     factor = ground_effect_factor(0.02, derived_properties(cfg)["ref_span_m"])
+    expected_factor = _expected_ground_effect_factor(0.02, derived_properties(cfg)["ref_span_m"])
+    assert factor == pytest.approx(expected_factor, rel=1e-12)
     assert low - parasite == pytest.approx(induced_free * factor, rel=1e-12)
 
 

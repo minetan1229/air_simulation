@@ -550,25 +550,34 @@ def prandtl_glauert(xp: Any, mach: Any) -> Any:
 # --------------------------------------------------------------------------
 # 2. Ground effect, parasite drag, wave drag
 # --------------------------------------------------------------------------
-def ground_effect_factor(xp: Any, height_m: Any, span_m: Any, enabled: Any = True) -> Any:
-    """Induced-drag retention factor ``sigma = 16 (h/b)^2 / (1 + 16 (h/b)^2)`` (Wieselsberger 1922).
+def ground_effect_factor(
+    xp: Any, height_m: Any, span_m: Any, enabled: Any = True, sigma_min: float = 0.20
+) -> Any:
+    """Induced-drag retention factor ``sigma = 16 (h/b)^2 / (1 + 16 (h/b)^2)`` (Wieselsberger 1922)
+    with a viscous/boundary-layer floor ``sigma_min``.
 
     The multiplier applies directly to the free-air induced drag coefficient:
     ``C_Di(h) = sigma * C_Di_free_air = sigma * (C_L^2 / (pi * e * AR))``.
 
     Boundary and Asymptotic Characteristics:
     - At high clearance (free air, ``h / b >> 1``): ``sigma -> 1.0`` (no ground-effect reduction).
-    - As ground clearance decreases (``h / b -> 0``): ``sigma`` monotonically decreases towards 0.0.
-    - At ground contact / zero clearance (``h = 0``): ``sigma = 0.0`` cleanly without singularity.
+    - As ground clearance decreases (``h / b -> 0``): ``sigma`` monotonically decreases towards ``sigma_min``.
+    - At ground contact / zero clearance (``h = 0``): ``sigma = sigma_min`` (not zero, to account for
+      tip vortex viscous dissipation and ground boundary-layer interference).
     - When disabled (``enabled = False``): returns ``1.0`` (retaining full free-air polar).
     - Non-negative inputs: safe guarding against negative heights (clamped to 0) and small spans.
+    - Effective minimum height-to-span ratio ``(h/b)_eff = max(h/b, 0.05)`` prevents
+      singular induced-drag collapse at zero clearance.
     """
     enabled = _flag_array(xp, enabled)
     height = xp.maximum(_finite(xp, height_m, 0.0), 0.0)
     span = xp.maximum(_finite(xp, span_m, 0.2), 1.0e-9)
-    ratio = 16.0 * xp.square(height / span)
+    hb_eff = xp.maximum(height / span, 0.05)
+    ratio = 16.0 * xp.square(hb_eff)
     ratio = xp.where(xp.isfinite(ratio), ratio, 1.0)
-    factor = ratio / (1.0 + ratio)
+    wieselsberger = ratio / (1.0 + ratio)
+    sigma_min = _f64(xp, float(sigma_min))
+    factor = sigma_min + (1.0 - sigma_min) * wieselsberger
     return xp.where(enabled, factor, 1.0)
 
 

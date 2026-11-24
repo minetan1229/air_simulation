@@ -163,6 +163,8 @@ INFEASIBLE_SCORE: float = -1.0e12
 #: 0 m flights.  They must never become incumbent / Pareto members (AGENTS.md
 #: §2: no relabelling).  ``timeout`` is *not* infeasible: it means the flight
 #: ran the full budget without landing, i.e. a long legitimate flight.
+#: ``crashed`` (impact) and ``degenerate`` (invalid geometry) are also infeasible
+#: because they represent failed evaluations, not successful flights.
 INFEASIBLE_STATUSES: Tuple[str, ...] = (
     "error",
     "failed",
@@ -170,6 +172,8 @@ INFEASIBLE_STATUSES: Tuple[str, ...] = (
     "stalled",
     "time-limit",
     "no-launch",
+    "crashed",
+    "degenerate",
 )
 
 #: Maximum number of final candidates that are re-verified in the reference
@@ -181,7 +185,12 @@ MAX_REVALIDATED_CANDIDATES: int = 3
 
 def is_infeasible_flight(flight: Dict[str, Any]) -> bool:
     """``True`` when the flight payload reports a failed evaluation."""
-    return str(flight.get("status", "unknown")) in INFEASIBLE_STATUSES
+    status = str(flight.get("status", "unknown")).lower()
+    if status in INFEASIBLE_STATUSES:
+        return True
+    if bool(flight.get("crashed", False)) or bool(flight.get("diverged", False)):
+        return True
+    return False
 
 
 #: Worst-case value of every objective, substituted for a design whose

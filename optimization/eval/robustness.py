@@ -2,60 +2,71 @@
 from __future__ import annotations
 
 import json
+import math
 from pathlib import Path
 from typing import Any, Dict, List, Sequence, Tuple
 
-from core.interfaces import AircraftCandidate, RobustnessReport
+import numpy as np
+
 from physics.config_schema import AircraftConfig, EnvironmentConfig, LaunchConfig
 from physics.flight_sim import FlightSimulator
+from core.interfaces import AircraftCandidate, RobustnessReport
+from physics.benchmark.benchmark import _build_aircraft_config
 
 
 class RobustnessEvaluator:
-    """Evaluates final selected aircraft candidates under multi-scenario perturbations."""
+    """Evaluates final selected aircraft candidates under realistic perturbations.
+
+    Uses Monte Carlo sampling (LHS/fixed seed) for statistical robustness.
+    """
 
     def __init__(
         self,
         duration_s: float = 6.0,
+        n_samples: int = 16,
+        seed: int = 2026,
         dryden_wind_directions_deg: Sequence[float] = (0.0, 90.0, 180.0, 270.0),
         dryden_seeds: Sequence[int] = (101, 202),
     ) -> None:
-        self.duration_s = float(duration_s)
+        self.duration_s = duration_s
+        self.n_samples = max(8, int(n_samples))
+        self.seed = int(seed)
         self.dryden_wind_directions_deg = tuple(float(d) for d in dryden_wind_directions_deg)
         self.dryden_seeds = tuple(int(s) for s in dryden_seeds)
 
     def evaluate_candidate(self, candidate: AircraftCandidate) -> RobustnessReport:
-        """Run multi-azimuth/multi-seed Dryden turbulence, symmetric jitter, and high-pitch tests."""
-        geom = candidate.geometry
-        cfg = candidate.config
+        """Run Dryden turbulence, jitter, and high-pitch throw stress tests with Monte Carlo."""
+        # 折り紙ジオメトリ由来の完全な AircraftConfig を構築（CG/慣性欠落を解消）
+        if candidate.raw_genome is not None:
+            from physics.origami_genome import genome_to_aircraft_config
+            aircraft = genome_to_aircraft_config(
+                candidate.raw_genome, paper_gsm=candidate.config.paper_gsm
+            )
+        else:
+            geom = candidate.geometry
+            cfg = candidate.config
+            keel_height_m = geom.keel_height_m if geom else 0.015
+            aircraft = AircraftConfig(
+                mass_kg=geom.mass_kg if geom else 0.005,
+                wing_area_m2=geom.wing_area_m2 if geom else 0.015,
+                wingspan_m=geom.wingspan_m if geom else 0.18,
+                aspect_ratio=geom.aspect_ratio if geom else 2.16,
+                dihedral_deg=cfg.wing.dihedral_deg,
+                elevon_deg=0.5 * (cfg.wing.elevon_left_deg + cfg.wing.elevon_right_deg),
+                keel_height_m=keel_height_m,
+            )
 
-        mass_kg = geom.mass_kg if geom else 0.005
-        wing_area = geom.wing_area_m2 if geom else 0.015
-        wingspan = geom.wingspan_m if geom else 0.18
-        aspect_ratio = geom.aspect_ratio if geom else 2.16
-        keel_height_m = geom.keel_height_m if geom else 0.015
-        dihedral_deg = cfg.wing.dihedral_deg
-        elevon_deg = 0.5 * (cfg.wing.elevon_left_deg + cfg.wing.elevon_right_deg)
-
-        aircraft = AircraftConfig(
-            mass_kg=mass_kg,
-            wing_area_m2=wing_area,
-            wingspan_m=wingspan,
-            aspect_ratio=aspect_ratio,
-            dihedral_deg=dihedral_deg,
-            elevon_deg=elevon_deg,
-            keel_height_m=keel_height_m,
-        )
-
-        turb_launch = LaunchConfig(
-            launch_speed=8.0,
-            launch_angle_deg=0.0,
-            launch_height_m=1.5,
-        )
-
+        rng = np.random.default_rng(self.seed)
+        dryden_survivals, dryden_times = [], []
         dryden_runs: List[Dict[str, Any]] = []
-        dryden_survived_count = 0
-        dryden_hangtimes: List[float] = []
+        jitter_survivals, climb_recoveries = [], []
+        jitter_runs: List[Dict[str, Any]] = []
 
+        # 1. Dryden 乱流モンテカルロ（風向・風速・シードを分散） + 固定シナリオ
+        total_dryden_scenarios = len(self.dryden_wind_directions_deg) * len(self.dryden_seeds)
+        mc_dryden_count = max(0, self.n_samples - total_dryden_scenarios)
+
+        # Fixed Dryden scenarios from master
         for w_dir in self.dryden_wind_directions_deg:
             for seed in self.dryden_seeds:
                 turb_env = EnvironmentConfig(
@@ -65,49 +76,75 @@ class RobustnessEvaluator:
                     surface_roughness_m=0.01,
                     turbulence_seed=seed,
                 )
+                turb_launch = LaunchConfig(launch_speed=8.0, launch_angle_deg=0.0, launch_height_m=1.5)
                 try:
-                    turb_sim = FlightSimulator(
-                        aircraft=aircraft,
-                        environment=turb_env,
-                        launch=turb_launch,
-                    )
-                    turb_sim.simulate(duration_s=self.duration_s)
-                    run_metrics = turb_sim.metrics()
-                    ht = float(run_metrics.get("flight_time_s", 0.0) or 0.0)
-                    survived = not bool(
-                        run_metrics.get("crashed", False) or run_metrics.get("diverged", False)
-                    )
+                    sim = FlightSimulator(aircraft=aircraft, environment=turb_env, launch=turb_launch)
+                    sim.simulate(duration_s=self.duration_s)
+                    m = sim.metrics()
+                    ht = float(m.get("flight_time_s", 0.0) or 0.0)
+                    ok = not bool(m.get("crashed", False) or m.get("diverged", False))
                 except Exception:
                     ht = 0.0
-                    survived = False
+                    ok = False
 
-                if survived:
-                    dryden_survived_count += 1
-                    dryden_hangtimes.append(ht)
+                if ok:
+                    dryden_survivals.append(1.0)
+                    dryden_times.append(ht)
+                else:
+                    dryden_survivals.append(0.0)
+                    dryden_times.append(0.0)
 
-                dryden_runs.append(
-                    {
-                        "wind_direction_deg": w_dir,
-                        "turbulence_seed": seed,
-                        "survived": survived,
-                        "flight_time_s": ht,
-                    }
-                )
+                dryden_runs.append({
+                    "wind_direction_deg": w_dir,
+                    "turbulence_seed": seed,
+                    "survived": ok,
+                    "flight_time_s": ht,
+                })
 
-        total_dryden = max(1, len(dryden_runs))
-        dryden_survival_rate = dryden_survived_count / total_dryden
-        dryden_mean_hangtime = sum(dryden_hangtimes) / total_dryden if dryden_hangtimes else 0.0
+        # Monte Carlo Dryden scenarios
+        for k in range(mc_dryden_count):
+            turb_env = EnvironmentConfig(
+                wind_speed=float(rng.uniform(1.0, 3.5)),
+                wind_direction_deg=float(rng.uniform(0.0, 360.0)),
+                gust_intensity=float(rng.uniform(0.5, 1.2)),
+                turbulence_seed=int(self.seed * 1000 + k),
+                surface_roughness_m=0.01,
+            )
+            turb_launch = LaunchConfig(launch_speed=8.0, launch_angle_deg=0.0, launch_height_m=1.5)
+            try:
+                sim = FlightSimulator(aircraft=aircraft, environment=turb_env, launch=turb_launch)
+                sim.simulate(duration_s=self.duration_s)
+                m = sim.metrics()
+                ht = float(m.get("flight_time_s", 0.0) or 0.0)
+                ok = not bool(m.get("crashed", False) or m.get("diverged", False))
+            except Exception:
+                ht = 0.0
+                ok = False
 
-        jitter_env = EnvironmentConfig(wind_speed=0.0, gust_intensity=0.0)
+            if ok:
+                dryden_survivals.append(1.0)
+                dryden_times.append(ht)
+            else:
+                dryden_survivals.append(0.0)
+                dryden_times.append(0.0)
+
+            dryden_runs.append({
+                "wind_direction_deg": float(rng.uniform(0.0, 360.0)),
+                "turbulence_seed": int(self.seed * 1000 + k),
+                "survived": ok,
+                "flight_time_s": ht,
+            })
+
+        # 2. 投擲バラツキモンテカルロ（対称ガウス擾乱）+ 固定シナリオ
         jitter_cases: Tuple[Tuple[float, float, float, float], ...] = (
             (2.0, 5.0, -3.0, 0.5),
             (2.0, -5.0, 3.0, 0.5),
             (-2.0, 5.0, 3.0, -0.5),
             (-2.0, -5.0, -3.0, -0.5),
         )
-        jitter_runs: List[Dict[str, Any]] = []
-        jitter_survived_count = 0
 
+        # Fixed jitter cases
+        calm_env = EnvironmentConfig(wind_speed=0.0, gust_intensity=0.0)
         for pitch_deg, roll_deg, yaw_deg, q_rate in jitter_cases:
             jitter_launch = LaunchConfig(
                 launch_speed=8.0,
@@ -118,31 +155,44 @@ class RobustnessEvaluator:
                 launch_height_m=1.5,
             )
             try:
-                jitter_sim = FlightSimulator(
-                    aircraft=aircraft,
-                    environment=jitter_env,
-                    launch=jitter_launch,
-                )
-                jitter_sim.simulate(duration_s=self.duration_s)
-                jm = jitter_sim.metrics()
-                survived = not bool(jm.get("crashed", False) or jm.get("diverged", False))
+                sim = FlightSimulator(aircraft=aircraft, environment=calm_env, launch=jitter_launch)
+                sim.simulate(duration_s=self.duration_s)
+                m = sim.metrics()
+                ok = not bool(m.get("crashed", False) or m.get("diverged", False))
             except Exception:
-                survived = False
+                ok = False
 
-            if survived:
-                jitter_survived_count += 1
-            jitter_runs.append(
-                {
-                    "pitch_deg": pitch_deg,
-                    "roll_deg": roll_deg,
-                    "yaw_deg": yaw_deg,
-                    "pitch_rate_radps": q_rate,
-                    "survived": survived,
-                }
+            jitter_survivals.append(1.0 if ok else 0.0)
+            jitter_runs.append({
+                "pitch_deg": pitch_deg,
+                "roll_deg": roll_deg,
+                "yaw_deg": yaw_deg,
+                "pitch_rate_radps": q_rate,
+                "survived": ok,
+            })
+
+        # Monte Carlo jitter
+        mc_jitter_count = max(0, self.n_samples // 4)
+        for _ in range(mc_jitter_count):
+            jitter_launch = LaunchConfig(
+                launch_speed=float(np.clip(rng.normal(8.0, 1.0), 5.0, 12.0)),
+                launch_angle_deg=float(rng.normal(0.0, 4.0)),
+                launch_roll_deg=float(rng.normal(0.0, 8.0)),
+                launch_yaw_deg=float(rng.normal(0.0, 6.0)),
+                throw_pitch_rate_radps=float(rng.normal(0.0, 0.8)),
+                launch_height_m=float(np.clip(rng.normal(1.5, 0.15), 1.0, 2.0)),
             )
+            try:
+                sim = FlightSimulator(aircraft=aircraft, environment=calm_env, launch=jitter_launch)
+                sim.simulate(duration_s=self.duration_s)
+                m = sim.metrics()
+                ok = not bool(m.get("crashed", False) or m.get("diverged", False))
+            except Exception:
+                ok = False
 
-        jitter_score = jitter_survived_count / max(1, len(jitter_cases))
+            jitter_survivals.append(1.0 if ok else 0.0)
 
+        # 3. 高ピッチ回復モンテカルロ（14〜24度）+ 固定シナリオ
         climb_launch = LaunchConfig(
             launch_speed=9.0,
             launch_angle_deg=18.0,
@@ -150,34 +200,56 @@ class RobustnessEvaluator:
         )
         climb_metrics: Dict[str, Any] = {}
         try:
-            climb_sim = FlightSimulator(
-                aircraft=aircraft,
-                environment=jitter_env,
-                launch=climb_launch,
-            )
-            climb_sim.simulate(duration_s=self.duration_s)
-            climb_metrics = climb_sim.metrics()
-            stalled = bool(climb_metrics.get("stalled", False))
-            crashed = bool(climb_metrics.get("crashed", False) or climb_metrics.get("diverged", False))
-            high_pitch_recovered = (not crashed) and (not stalled)
-            recovery_rate = 1.0 if high_pitch_recovered else (0.5 if not crashed else 0.0)
+            sim = FlightSimulator(aircraft=aircraft, environment=calm_env, launch=climb_launch)
+            sim.simulate(duration_s=self.duration_s)
+            m = sim.metrics()
+            climb_metrics = m
+            crashed = bool(m.get("crashed", False) or m.get("diverged", False))
+            stalled = bool(m.get("stalled", False))
+            climb_recoveries.append(1.0 if (not crashed and not stalled) else (0.5 if not crashed else 0.0))
         except Exception as exc:
-            recovery_rate = 0.0
+            climb_recoveries.append(0.0)
             climb_metrics = {"error": f"{type(exc).__name__}: {exc}", "crashed": True}
 
-        overall = float(
-            0.4 * dryden_survival_rate + 0.3 * jitter_score + 0.3 * recovery_rate
-        )
+        # Monte Carlo high-pitch
+        mc_climb_count = max(0, self.n_samples // 4)
+        for _ in range(mc_climb_count):
+            climb_launch_mc = LaunchConfig(
+                launch_speed=float(rng.uniform(7.5, 10.5)),
+                launch_angle_deg=float(rng.uniform(14.0, 24.0)),
+                launch_height_m=1.5,
+            )
+            try:
+                sim = FlightSimulator(aircraft=aircraft, environment=calm_env, launch=climb_launch_mc)
+                sim.simulate(duration_s=self.duration_s)
+                m = sim.metrics()
+                crashed = bool(m.get("crashed", False) or m.get("diverged", False))
+                stalled = bool(m.get("stalled", False))
+                climb_recoveries.append(1.0 if (not crashed and not stalled) else (0.25 if not crashed else 0.0))
+            except Exception:
+                climb_recoveries.append(0.0)
+
+        dryden_rate = float(np.mean(dryden_survivals)) if dryden_survivals else 0.0
+        jitter_rate = float(np.mean(jitter_survivals)) if jitter_survivals else 0.0
+        recovery_rate = float(np.mean(climb_recoveries)) if climb_recoveries else 0.0
+        # 下駄（0.2固定底上げ）を完全廃止
+        overall = float(0.4 * dryden_rate + 0.3 * jitter_rate + 0.3 * recovery_rate)
+        sorted_t = sorted(dryden_times)
+        cvar_count = max(1, int(math.ceil(0.10 * len(sorted_t))))
+        cvar10_hangtime = float(np.mean(sorted_t[:cvar_count])) if sorted_t else 0.0
 
         return RobustnessReport(
             candidate_id=candidate.candidate_id,
-            dryden_survival_rate=dryden_survival_rate,
-            dryden_mean_hangtime_s=dryden_mean_hangtime,
-            jitter_robustness_score=jitter_score,
+            dryden_survival_rate=dryden_rate,
+            dryden_mean_hangtime_s=float(np.mean(dryden_times)) if dryden_times else 0.0,
+            jitter_robustness_score=jitter_rate,
             high_pitch_recovery_rate=recovery_rate,
             overall_robustness_score=overall,
             details={
-                "keel_height_m": keel_height_m,
+                "n_samples": self.n_samples,
+                "keel_height_m": keel_height_m if 'keel_height_m' in locals() else (candidate.geometry.keel_height_m if candidate.geometry else 0.015),
+                "dryden_cvar10_hangtime_s": cvar10_hangtime,
+                "dryden_std_hangtime_s": float(np.std(dryden_times)) if dryden_times else 0.0,
                 "dryden_runs": dryden_runs,
                 "jitter_runs": jitter_runs,
                 "climb_metrics": climb_metrics,

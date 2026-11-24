@@ -613,6 +613,8 @@ export class WindParticles {
 
   update(dt, elapsed) {
     if (!this.mode || this.mode === "idle") return;
+    // Early return if particle group is not visible (saves GPGPU/CPU work)
+    if (this.group && !this.group.visible) return;
     const step = Math.min(Math.max(dt, 1 / 240), 1 / 20);
     this.time = elapsed;
     if (this.gpuSupported) {

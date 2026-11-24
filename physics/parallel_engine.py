@@ -68,7 +68,7 @@ from .config_schema import (
 )
 from .payload_contract import empty_payload, normalize_payload
 from .aero_domain import elevon_effects, helmbold_cl_alpha
-from . import gpu_dynamics
+from .gpu_dynamics import release_gpu_memory_pool
 from .stress_domain import (
     ALLOWABLE_BASE_PA,
     ALLOWABLE_GSM_EXPONENT,
@@ -271,24 +271,26 @@ def get_gpu_info() -> Dict[str, Any]:
 
 
 _WARMED_UP = False
+_WARMUP_LOCK = threading.Lock()
 
 
 def warmup_gpu() -> bool:
     """Pre-compile CUDA JIT kernels in background to eliminate first-request latency."""
     global _WARMED_UP
-    if _WARMED_UP:
-        return True
-    gpu_info = get_gpu_info()
-    if not (gpu_info["available"] and gpu_info["backend"] == "cupy"):
-        _WARMED_UP = True
-        return False
-    try:
-        # Pre-warm GPU ensemble simulation with a tiny batch
-        gpu_ensemble_simulation(n_trajectories=16)
-        _WARMED_UP = True
-        return True
-    except Exception:
-        return False
+    with _WARMUP_LOCK:
+        if _WARMED_UP:
+            return True
+        gpu_info = get_gpu_info()
+        if not (gpu_info["available"] and gpu_info["backend"] == "cupy"):
+            _WARMED_UP = True
+            return False
+        try:
+            # Pre-warm GPU ensemble simulation with a tiny batch
+            gpu_ensemble_simulation(n_trajectories=16)
+            _WARMED_UP = True
+            return True
+        except Exception:
+            return False
 
 # Worker sizing / backend naming
 # --------------------------------------------------------------------------
@@ -346,24 +348,26 @@ def worker_pid() -> int:
 #: exit through :func:`_release_cached_pool` so no child processes linger.
 _CACHED_POOL: Any = None
 _CACHED_POOL_WORKERS: int = 0
+_POOL_LOCK = threading.RLock()
 
 
 def _release_cached_pool() -> None:
     """Close and join the cached pool, if any (called at interpreter exit)."""
     global _CACHED_POOL, _CACHED_POOL_WORKERS
-    pool = _CACHED_POOL
-    _CACHED_POOL = None
-    _CACHED_POOL_WORKERS = 0
-    if pool is None:
-        return
-    try:
-        pool.close()
-    except Exception:
-        log.warning("closing the cached spawn pool failed", exc_info=True)
-    try:
-        pool.join()
-    except Exception:
-        log.warning("joining the cached spawn pool failed", exc_info=True)
+    with _POOL_LOCK:
+        pool = _CACHED_POOL
+        _CACHED_POOL = None
+        _CACHED_POOL_WORKERS = 0
+        if pool is None:
+            return
+        try:
+            pool.close()
+        except Exception:
+            log.warning("closing the cached spawn pool failed", exc_info=True)
+        try:
+            pool.join()
+        except Exception:
+            log.warning("joining the cached spawn pool failed", exc_info=True)
 
 
 atexit.register(_release_cached_pool)
@@ -376,20 +380,21 @@ def _get_cached_pool(workers: int) -> Any:
     rebuilt so every caller gets exactly the concurrency it asked for.
     """
     global _CACHED_POOL, _CACHED_POOL_WORKERS
-    if _CACHED_POOL is not None and _CACHED_POOL_WORKERS == workers:
-        return _CACHED_POOL
-    _release_cached_pool()
-    context = multiprocessing.get_context("spawn")
-    pool = context.Pool(
-        processes=workers,
-        initializer=_pool_init,
-        initargs=(-1,),
-        maxtasksperchild=50,
-    )
-    _CACHED_POOL = pool
-    _CACHED_POOL_WORKERS = workers
-    log.info("spawn pool created with %d workers", workers)
-    return pool
+    with _POOL_LOCK:
+        if _CACHED_POOL is not None and _CACHED_POOL_WORKERS == workers:
+            return _CACHED_POOL
+        _release_cached_pool()
+        context = multiprocessing.get_context("spawn")
+        pool = context.Pool(
+            processes=workers,
+            initializer=_pool_init,
+            initargs=(-1,),
+            maxtasksperchild=50,
+        )
+        _CACHED_POOL = pool
+        _CACHED_POOL_WORKERS = workers
+        log.info("spawn pool created with %d workers", workers)
+        return pool
 
 
 # --------------------------------------------------------------------------
@@ -882,9 +887,23 @@ def parallel_evaluate(
         return results
 
     tasks = [(evaluate_case, [materialised[index] for index in chunk]) for chunk in plan]
-    pool = _get_cached_pool(workers)
+    
+    # When cancellation is requested, use a dedicated pool so we can terminate it immediately.
+    # Otherwise, reuse the cached pool for efficiency across optimizer generations.
+    use_cached = cancel_cb is None
+    pool = None
     cancelled = False
     try:
+        if use_cached:
+            pool = _get_cached_pool(workers)
+        else:
+            context = multiprocessing.get_context("spawn")
+            pool = context.Pool(
+                processes=workers,
+                initializer=_pool_init,
+                initargs=(-1,),
+                maxtasksperchild=50,
+            )
         iterator = pool.imap(_pool_worker, tasks)
         while True:
             if cancel_cb is not None and bool(cancel_cb()):
@@ -899,11 +918,13 @@ def parallel_evaluate(
                 consider(result)
             emit()
     finally:
-        # The pool is cached and reused across optimiser generations instead
-        # of being torn down per call.  It is released once at interpreter
-        # exit through ``atexit`` (_release_cached_pool) so no child
-        # processes linger.
-        pass
+        if pool is not None:
+            if cancelled:
+                # Immediately terminate remaining workers and chunks
+                pool.terminate()
+            else:
+                pool.close()
+            pool.join()
     if cancelled:
         return results
     emit()
@@ -1536,6 +1557,10 @@ def gpu_ensemble_simulation(
     median_d = float(np.median(landing_distances_np))
 
     backend_display = f"{backend} ({device_name})" if device_name else backend
+
+    # Release GPU memory pool back to OS
+    if backend == "cupy":
+        release_gpu_memory_pool()
 
     return {
         "backend": backend,

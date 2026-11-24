@@ -110,7 +110,7 @@ def evaluate_horizontal_glide(
     """Run a single deterministic horizontal launch simulation and extract metrics."""
     launch = _build_fixed_launch_config(speed_mps)
     env = _build_environment_config()
-    settings = SimulationSettings(dt_max=dt_max, duration_s=duration_s)
+    settings = SimulationSettings(dt_max=dt_max, duration_s=duration_s, adaptive=True)
 
     sim = FlightSimulator(
         aircraft=aircraft_config,
