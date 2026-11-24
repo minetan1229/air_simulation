@@ -151,13 +151,18 @@ def _safe_ga_path(path_str: str, param_name: str, base_dir: Optional[str] = None
     if not path_str or not isinstance(path_str, str):
         raise BadRequest(f"invalid path for '{param_name}'")
     from pathlib import Path
-    root = Path(base_dir or os.getcwd()).resolve()
-    try:
-        candidate = (root / path_str).resolve() if not os.path.isabs(path_str) else Path(path_str).resolve()
-        candidate.relative_to(root)
-    except (ValueError, RuntimeError) as exc:
-        raise BadRequest(f"path '{path_str}' for '{param_name}' escapes the allowed directory: {exc}") from exc
-    return str(candidate)
+    if ".." in path_str.replace("\\", "/").split("/"):
+        raise BadRequest(f"path '{path_str}' for '{param_name}' contains parent-directory reference '..'")
+    p = Path(path_str)
+    if not p.is_absolute():
+        root = Path(base_dir or os.getcwd()).resolve()
+        try:
+            candidate = (root / p).resolve()
+            candidate.relative_to(root)
+        except (ValueError, RuntimeError) as exc:
+            raise BadRequest(f"path '{path_str}' for '{param_name}' escapes the allowed directory: {exc}") from exc
+        return str(candidate)
+    return str(p.resolve())
 
 
 def _overrides_from_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
