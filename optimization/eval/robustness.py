@@ -4,7 +4,7 @@ from __future__ import annotations
 import json
 import math
 from pathlib import Path
-from typing import Any, Dict, List, Sequence, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
 
@@ -27,8 +27,10 @@ class RobustnessEvaluator:
         seed: int = 2026,
         dryden_wind_directions_deg: Sequence[float] = (0.0, 90.0, 180.0, 270.0),
         dryden_seeds: Sequence[int] = (101, 202),
+        dt_max: Optional[float] = None,
     ) -> None:
         self.duration_s = duration_s
+        self.dt_max = dt_max
         self.n_samples = max(8, int(n_samples))
         self.seed = int(seed)
         self.dryden_wind_directions_deg = tuple(float(d) for d in dryden_wind_directions_deg)
