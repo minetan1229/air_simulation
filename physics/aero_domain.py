@@ -414,17 +414,8 @@ def stall_blend_weight(alpha_deg: float, cfg: AircraftConfig) -> float:
 
 
 def flat_plate_lift_coefficient(alpha_deg: float) -> float:
-    """Hoerner fully-separated flat-plate lift coefficient ``2 sin a cos^2 a``.
-
-    This is the correct limit once the flow is completely separated: the lift
-    peaks at ``2*sin(35.26 deg)*cos^2(35.26 deg) = 0.7698`` and returns to
-    **zero** at 90 deg, because a plate broadside to the flow carries no normal
-    force.  Unlike a linear post-stall ramp it is bounded, which is what keeps
-    the force model finite when the airframe tumbles (a body in vertical free
-    fall sits at alpha=90).
-    """
-    a = deg2rad(_finite(alpha_deg))
-    return 2.0 * math.sin(a) * math.cos(a) * math.cos(a)
+    """Hoerner fully-separated flat-plate lift coefficient ``2 sin a cos a |cos a|``."""
+    return float(aero_kernel.flat_plate_lift_coefficient(_SCALAR, alpha_deg))
 
 
 #: Angle (deg) at which the post-stall branch has fully moved onto the
@@ -744,17 +735,37 @@ def elevon_for_trim(cfg: AircraftConfig, alpha_deg: float) -> float:
     alpha = _finite(alpha_deg)
     from physics.aero_kernel import center_of_pressure_fraction
     elevon = clamp(-required / gain, -ELEVON_MAX_DEG, ELEVON_MAX_DEG)
-    for _ in range(5):
+    for _ in range(15):
         stall = max(abs(_finite(cfg.stall_alpha_deg, 14.0)), 1.0)
         frac = float(center_of_pressure_fraction(_SCALAR, alpha, stall, _finite(cfg.cp_shift_gain, 0.0)))
         cl = _finite(cfg.cL0) + lift_slope_per_rad(cfg) * deg2rad(alpha) + elevon_effects(elevon, cfg)["dcl"] + te_fold["dcl"]
-        cm_shift = -(frac - 0.25) * cl if float(cfg.cp_shift_gain) > 0.0 else 0.0
+        cd = _finite(getattr(cfg, "cd0", 0.02)) + (cl * cl) / _polar_constant(cfg)
+        c_n = cl * math.cos(deg2rad(alpha)) + cd * math.sin(deg2rad(alpha))
+        cm_shift = -(frac - 0.25) * c_n if float(cfg.cp_shift_gain) > 0.0 else 0.0
         required2 = -(_finite(cfg.cm0) + _finite(cfg.cm_alpha) * deg2rad(alpha) + te_fold["dcm"] + cm_shift)
         new_elevon = clamp(-required2 / gain, -ELEVON_MAX_DEG, ELEVON_MAX_DEG)
         if abs(new_elevon - elevon) < 1e-9:
             elevon = new_elevon
             break
         elevon = new_elevon
+    # Refine elevon deflection with secant search to ensure exact moment nulling
+    for _ in range(5):
+        trimmed_c = replace(cfg, elevon_deg=elevon)
+        res = evaluate_aero(trimmed_c, EnvironmentConfig(), 9.0, alpha, compute_trim=False)
+        cm = res.cm
+        if abs(cm) < 1.0e-9:
+            break
+        trimmed_c_eps = replace(cfg, elevon_deg=elevon + 1.0e-4)
+        res_eps = evaluate_aero(trimmed_c_eps, EnvironmentConfig(), 9.0, alpha, compute_trim=False)
+        dcm_de = (res_eps.cm - cm) / 1.0e-4
+        if abs(dcm_de) < 1.0e-12:
+            break
+        step = -cm / dcm_de
+        new_e = clamp(elevon + step, -ELEVON_MAX_DEG, ELEVON_MAX_DEG)
+        if abs(new_e - elevon) < 1.0e-9:
+            elevon = new_e
+            break
+        elevon = new_e
     return elevon
 
 
@@ -918,7 +929,7 @@ def trim_solution(
     """
     if target_alpha_deg is None:
         deflection = _finite(cfg.elevon_deg) if elevon_deg is None else _finite(elevon_deg)
-        alpha = trim_alpha_from_elevon(cfg, deflection)
+        alpha = trim_alpha_from_elevon(cfg, deflection, speed_mps=speed_mps, env=env)
         method = "alpha_trim"
     else:
         alpha = _finite(target_alpha_deg)
@@ -948,9 +959,33 @@ def trim_solution(
 # --------------------------------------------------------------------------
 # 7. Force / moment assembly
 # --------------------------------------------------------------------------
-def aerodynamic_force_body(drag_n: float, side_n: float, lift_n: float) -> Any:
-    """Aerodynamic force vector in body axes (``x`` fwd, ``y`` right, ``z`` down)."""
-    return vec3((-_finite(drag_n), _finite(side_n), -_finite(lift_n)))
+def aerodynamic_force_body(
+    drag_n: float,
+    side_n: float,
+    lift_n: float,
+    alpha_deg: float = 0.0,
+    beta_deg: float = 0.0,
+) -> Any:
+    """Aerodynamic force vector in body axes (``x`` fwd, ``y`` right, ``z`` down).
+
+    When ``alpha_deg`` and ``beta_deg`` are provided (non-zero), rotates the
+    wind-axis forces (-D, Y, -L) into body axes via alpha (pitch) and beta (yaw).
+    """
+    d = _finite(drag_n)
+    y = _finite(side_n)
+    l = _finite(lift_n)
+    a_deg = _finite(alpha_deg)
+    b_deg = _finite(beta_deg)
+    if abs(a_deg) > 1.0e-9 or abs(b_deg) > 1.0e-9:
+        ca = math.cos(deg2rad(a_deg))
+        sa = math.sin(deg2rad(a_deg))
+        cb = math.cos(deg2rad(b_deg))
+        sb = math.sin(deg2rad(b_deg))
+        fx = (-d * cb - y * sb) * ca + l * sa
+        fy = -d * sb + y * cb
+        fz = (-d * cb - y * sb) * sa - l * ca
+        return vec3((fx, fy, fz))
+    return vec3((-d, y, -l))
 
 
 def pitching_moment_offset_nm(
@@ -1207,12 +1242,17 @@ def evaluate_aero(
     stalled = bool(coefficients["stalled"])
     zero_lift = float(coefficients["cl_zero_lift"])
 
-    # Aeroelastic deformation estimates from dynamic pressure and stiffness
-    stiffness = max(_finite(cfg.paper_stiffness, 0.35), 0.01)
-    # Reference aeroelastic dynamic pressure scale: q_ref ~ 50 Pa for typical paper glider
-    q_scale = safe_div(dynamic_pressure, 50.0 * stiffness, 0.0)
-    aeroelastic_dihedral = _finite(cfg.aeroelastic_flex, 0.0) * q_scale * 2.5
-    aeroelastic_twist = -_finite(cfg.aeroelastic_twist, 0.0) * q_scale * 1.5
+    # Aeroelastic deformation estimates from stress_domain
+    try:
+        from . import stress_domain
+        deform = stress_domain.aeroelastic_deformations(cfg, dynamic_pressure, nz=1.0)
+        aeroelastic_dihedral = float(deform.get("delta_dihedral_deg", 0.0))
+        aeroelastic_twist = -float(abs(deform.get("washout_twist_deg", 0.0))) if float(cfg.aeroelastic_twist) > 0.0 else 0.0
+    except Exception:
+        stiffness = max(_finite(cfg.paper_stiffness, 0.35), 0.01)
+        q_scale = safe_div(dynamic_pressure, 50.0 * stiffness, 0.0)
+        aeroelastic_dihedral = _finite(cfg.aeroelastic_flex, 0.0) * q_scale * 2.5
+        aeroelastic_twist = -_finite(cfg.aeroelastic_twist, 0.0) * q_scale * 1.5
 
     # The reported polar minima are free-air and incompressible (no ground
     # effect, no wave drag, no Prandtl-Glauert), matching the free-air sweep

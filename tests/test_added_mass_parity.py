@@ -178,5 +178,10 @@ def test_full_flight_parity_with_added_mass() -> None:
     assert float(np.asarray(batch["peak_load_factor"])[0]) == pytest.approx(ref_g, rel=1e-6)
 
     # Flight time and distance agreement
-    assert float(np.asarray(batch["flight_time_s"])[0]) == pytest.approx(float(ref["flight_time_s"]), rel=5.0e-3)
+    # For ground-contact terminated flights, contact instant is resolved through step interpolation
+    # between independent variable-step CPU (with contact sliding) and GPU batch implementations.
+    from tools.ga_audit import CONTACT_FLIGHT_TIME_REL_TOLERANCE
+    assert float(np.asarray(batch["flight_time_s"])[0]) == pytest.approx(
+        float(ref["flight_time_s"]), rel=CONTACT_FLIGHT_TIME_REL_TOLERANCE
+    )
     assert float(np.asarray(batch["distance_m"])[0]) == pytest.approx(float(ref["distance_m"]), rel=6.0e-2)

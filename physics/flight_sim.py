@@ -1656,6 +1656,7 @@ class FlightSimulator:
                 inertia_xz_kgm2=0.0,
                 inertia_yz_kgm2=0.0,
             )
+            self._inertia = body_inertia_tensor(derived_properties(clean_cfg))
         # Issue #95: Integrate pre-flight panel aerodynamic ROM when aero_source == 'panel_rom'
         aero_src = getattr(self.aircraft, "aero_source", "analytical")
         panels = getattr(self.aircraft, "mesh_panels", None)

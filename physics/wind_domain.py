@@ -987,20 +987,15 @@ def _velocity_device(
         # preserved everywhere except the physical wall layer.
         if wall_thickness > 0.0 and tunnel_radius > 0.0:
             dist_to_wall = tunnel_radius - r_wall
-            wall_damping = xp.ones(n, dtype=xp.float64)
-            in_layer = (dist_to_wall > 0.0) & (dist_to_wall <= wall_thickness)
-            outside = dist_to_wall <= 0.0
-            layer_val = xp.clip(1.0 - xp.exp(-dist_to_wall / wall_thickness), 0.0, 1.0)
-            wall_damping = xp.where(in_layer, layer_val, wall_damping)
-            wall_damping = xp.where(outside, 1.0, wall_damping)
+            eta = xp.clip(dist_to_wall / wall_thickness, 0.0, 1.0)
+            wall_damping = xp.power(eta, 1.0 / 7.0)
         else:
             wall_damping = xp.ones(n, dtype=xp.float64)
 
         stream = xp.zeros((n, 3), dtype=xp.float64)
         if bool(getattr(env, "wind_tunnel_boundary_correction", False)):
             # Full boundary correction: blockage contraction, free-stream TI
-            # and the wall layer.  All of blockage / radius / TI / wall
-            # thickness are actually used here.
+            # and the wall layer.
             blockage_factor = float(getattr(env, "wind_tunnel_blockage", 1.035))
             v_eff = speed * blockage_factor
             stream[:, 0] = v_eff * wall_damping
@@ -1011,8 +1006,8 @@ def _velocity_device(
                 stream[:, 1] += v_eff * ti * xp.cos(P[:, 0] * 20.0 + phase)
                 stream[:, 2] += v_eff * ti * xp.sin(P[:, 2] * 20.0 + phase * 0.7)
         else:
-            # Baseline test-contract: uniform stream with the wall layer only.
-            stream[:, 0] = speed * wall_damping
+            # Baseline test-contract: strict uniform stream
+            stream[:, 0] = speed
         return ops.to_host(stream) if return_host else stream
 
     ground = float(env.ground_level_m)

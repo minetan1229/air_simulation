@@ -17,7 +17,8 @@ hide:
     ```bash
     git clone https://github.com/minetan1229/air_simulation.git
     cd air_simulation
-    docker compose up --build
+    docker build -t air_simulation .
+    docker run -p 5000:5000 air_simulation
     # → http://127.0.0.1:5000
     ```
 
@@ -27,7 +28,7 @@ hide:
     python -m venv .venv
     .\.venv\Scripts\Activate.ps1
     pip install -e ".[dev]"
-    python app.py
+    python app.py --allow-protected-branch
     # → http://127.0.0.1:5000
     ```
 
@@ -37,7 +38,7 @@ hide:
     python3 -m venv .venv
     source .venv/bin/activate
     pip install -e ".[dev]"
-    python app.py
+    python app.py --allow-protected-branch
     # → http://127.0.0.1:5000
     ```
 

@@ -77,8 +77,9 @@ class MCTSOrigamiGenerator:
 
     def evaluate_leaf_geometry(self, config: ParametricOrigamiConfig) -> Tuple[GeometricStaticScore, Optional[AircraftCandidate]]:
         """Fast geometric non-6DoF evaluation for MCTS rollout/leaf."""
-        candidate = self.adapter.compile_candidate(config)
-        valid, reasons = validate_tier0(candidate)
+        candidate = self.adapter.compile_candidate(config, include_macro=False)
+        valid = candidate.metadata.get("tier0_valid", False)
+        reasons = candidate.metadata.get("tier0_reasons", [])
 
         if not valid or candidate.geometry is None:
             return GeometricStaticScore(
@@ -144,10 +145,6 @@ class MCTSOrigamiGenerator:
             ("wing_lower_aspect", replace(base, wing=replace(base.wing, wingspan_ratio=max(0.55, base.wing.wingspan_ratio - 0.06)))),
             ("wing_more_dihedral", replace(base, wing=replace(base.wing, dihedral_deg=min(8.0, base.wing.dihedral_deg + 1.5)))),
             ("wing_less_dihedral", replace(base, wing=replace(base.wing, dihedral_deg=max(0.0, base.wing.dihedral_deg - 1.5)))),
-            # Additional wing variations from our branch
-            ("wing_left_elevon_up", replace(base, wing=replace(base.wing, elevon_left_deg=min(15.0, base.wing.elevon_left_deg + 2.0)))),
-            ("wing_right_elevon_up", replace(base, wing=replace(base.wing, elevon_right_deg=min(15.0, base.wing.elevon_right_deg + 2.0)))),
-            ("wing_lower_dihedral", replace(base, wing=replace(base.wing, dihedral_deg=max(-5.0, base.wing.dihedral_deg - 2.0)))),
         ]
 
         for desc, cfg in raw_variations:

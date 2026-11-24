@@ -48,6 +48,18 @@ class StructuredGrid3D:
     k_area_y: np.ndarray
     k_area_z: np.ndarray
 
+    @property
+    def ni(self) -> int:
+        return int(self.vol.shape[0])
+
+    @property
+    def nj(self) -> int:
+        return int(self.vol.shape[1])
+
+    @property
+    def nk(self) -> int:
+        return int(self.vol.shape[2])
+
 
 def _quad_area_normal(
     p0: np.ndarray, p1: np.ndarray, p2: np.ndarray, p3: np.ndarray
@@ -131,7 +143,7 @@ def generate_wing_grid_3d(
             x_le_k = b_half * np.tan(sweep_rad)
 
         x_section = x_le_k + chord_k * x_foil
-        z_section = chord_k * z_foil
+        z_section = chord_k * z_foil if k <= nk_wing else np.zeros_like(z_foil)
 
         r_outer_x = x_le_k + 0.5 * chord_k + farfield_r * np.cos(theta_foil)
         r_outer_z = farfield_r * np.sin(theta_foil)

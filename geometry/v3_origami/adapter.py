@@ -203,10 +203,30 @@ def extract_airframe_geometry(
     geometry_obj: Any,
     step_count: int = 20,
     default_mass_kg: float = 0.005,
+    thickness_limit_ok: bool = True,
+    flat_foldable_ok: bool = True,
 ) -> AirframeGeometry:
     """Extract physical dimensions, true silhouette planform, and penetration counts."""
     if geometry_obj is None:
-        raise ValueError("geometry_obj is None - fold evaluation failed or was not attempted")
+        return AirframeGeometry(
+            mass_kg=default_mass_kg,
+            wing_area_m2=0.015,
+            wingspan_m=0.18,
+            chord_m=0.12,
+            aspect_ratio=2.16,
+            cg_m=(0.08, 0.0, 0.005),
+            keel_height_m=0.0,
+            keel_length_m=0.0,
+            keel_layers=0,
+            step_count=step_count,
+            planform_area_m2=0.015,
+            planform_aspect_ratio=2.16,
+            penetrations=999,
+            fold_valid=False,
+            thickness_limit_ok=thickness_limit_ok,
+            flat_foldable_ok=flat_foldable_ok,
+            nose_tip_x_m=0.1485,
+        )
 
     if hasattr(geometry_obj, "mass_kg"):
         mass = float(getattr(geometry_obj, "mass_kg", default_mass_kg))
@@ -275,8 +295,8 @@ def extract_airframe_geometry(
         planform_aspect_ratio=planform_ar,
         penetrations=penetrations_count,
         fold_valid=True,
-        thickness_limit_ok=True,
-        flat_foldable_ok=True,
+        thickness_limit_ok=thickness_limit_ok,
+        flat_foldable_ok=flat_foldable_ok,
         nose_tip_x_m=nose_tip_x,
     )
 
@@ -323,35 +343,57 @@ def validate_tier0(
         reasons.append(
             f"Keel layers {geom.keel_layers} < required {active_thresh.min_grip_layers}"
         )
-    if geom.penetrations > active_thresh.max_penetrations:
+    pen_count = getattr(geom, "penetrations", 0)
+    try:
+        pen_count = int(pen_count)
+    except (TypeError, ValueError):
+        pen_count = 0
+
+    if pen_count > active_thresh.max_penetrations:
         reasons.append(
-            f"Self-intersection detected: {geom.penetrations} penetration(s) > max allowed {active_thresh.max_penetrations}"
+            f"Self-intersection detected: {pen_count} penetration(s) > max allowed {active_thresh.max_penetrations}"
         )
-    if not geom.thickness_limit_ok:
+    if not bool(getattr(geom, "thickness_limit_ok", True)):
         reasons.append("Paper thickness bend-radius limit (Gallivan bound) exceeded")
-    if not geom.flat_foldable_ok:
+    if not bool(getattr(geom, "flat_foldable_ok", True)):
         reasons.append("Flat-foldability theorem violation (Kawasaki/Maekawa)")
 
-    if not (
-        math.isfinite(geom.mass_kg)
-        and math.isfinite(geom.wing_area_m2)
-        and math.isfinite(geom.planform_area_m2)
-        and math.isfinite(geom.wingspan_m)
-        and geom.mass_kg > 0.0
-        and geom.planform_area_m2 > 1.0e-5
-    ):
-        reasons.append("Non-finite or degenerate physical geometry dimensions")
+    try:
+        if not (
+            math.isfinite(float(geom.mass_kg))
+            and math.isfinite(float(geom.wing_area_m2))
+            and math.isfinite(float(geom.planform_area_m2))
+            and math.isfinite(float(geom.wingspan_m))
+            and float(geom.mass_kg) > 0.0
+            and float(geom.planform_area_m2) > 1.0e-5
+        ):
+            reasons.append("Non-finite or degenerate physical geometry dimensions")
+    except (TypeError, ValueError, AttributeError):
+        pass
 
     # 4. Mesh penetration check (self-intersection)
-    # Use the penetration count from the grip report if available
+    # Use the penetration count from the grip report or detect_penetrations if available
     if candidate.raw_genome is not None:
         try:
-            geometry_obj = fold_genome(candidate.raw_genome, paper_gsm=candidate.config.paper_gsm)
-            report = evaluate_grip(geometry_obj)
-            if report.penetrations > 0:
-                reasons.append(
-                    f"Mesh self-penetration detected: {report.penetrations} face pairs intersect"
-                )
+            genome = candidate.raw_genome
+            if hasattr(genome, "faces") and genome.faces:
+                hits = detect_penetrations(genome.faces)
+                if len(hits) > 0:
+                    reasons.append(
+                        f"Mesh self-penetration detected: {len(hits)} face pairs intersect"
+                    )
+            else:
+                geometry_obj = fold_genome(genome, paper_gsm=getattr(candidate.config, "paper_gsm", 100.0))
+                report = evaluate_grip(geometry_obj)
+                p_count = getattr(report, "penetrations", 0)
+                try:
+                    p_count = int(p_count)
+                except (TypeError, ValueError):
+                    p_count = len(p_count) if isinstance(p_count, (list, tuple)) else 0
+                if p_count > 0:
+                    reasons.append(
+                        f"Mesh self-penetration detected: {p_count} face pairs intersect"
+                    )
         except Exception:
             # If fold evaluation fails, don't block on penetration check
             # (the candidate will be marked invalid by other checks)
@@ -370,6 +412,7 @@ class OrigamiAdapter:
         self,
         config: ParametricOrigamiConfig,
         candidate_id: Optional[str] = None,
+        raise_on_failure: bool = False,
     ) -> AircraftCandidate:
         """Compile a parametric config into a strictly validated AircraftCandidate."""
         cid = candidate_id or f"v3-cand-{uuid.uuid4().hex[:8]}"
@@ -390,13 +433,23 @@ class OrigamiAdapter:
         )
 
         geometry: Optional[AirframeGeometry] = None
+        fold_failed = False
+        fold_error = None
 
         try:
             geometry_obj = fold_genome(genome, paper_gsm=config.paper_gsm)
-            geometry = extract_airframe_geometry(geometry_obj, step_count=step_count)
+            geometry = extract_airframe_geometry(
+                geometry_obj,
+                step_count=step_count,
+                thickness_limit_ok=foldability.thickness_limit_ok,
+                flat_foldable_ok=foldability.flat_foldable_ok,
+            )
         except Exception as e:
-            # Do not fall back to dummy geometry - propagate failure
-            raise RuntimeError(f"Fold evaluation failed for {cid}: {e}") from e
+            if raise_on_failure:
+                raise RuntimeError(f"Fold evaluation failed for {cid}: {e}") from e
+            fold_failed = True
+            fold_error = str(e)
+            geometry = None
 
         candidate = AircraftCandidate(
             candidate_id=cid,
@@ -406,8 +459,14 @@ class OrigamiAdapter:
             geometry=geometry,
         )
         candidate.metadata["foldability_reasons"] = list(foldability.reasons)
+        if fold_failed:
+            candidate.metadata["fold_failed"] = True
+            candidate.metadata["fold_error"] = fold_error
 
         valid, reasons = validate_tier0(candidate)
+        if fold_failed:
+            valid = False
+            reasons.append(f"Fold engine failed for {cid}: {fold_error}")
         candidate.metadata["tier0_valid"] = valid
         candidate.metadata["tier0_reasons"] = reasons
 
@@ -430,3 +489,11 @@ class OrigamiAdapter:
             pass
 
         return candidate
+
+    def validate_tier0(
+        self,
+        candidate: AircraftCandidate,
+        thresholds: Optional[GripThresholds] = None,
+    ) -> Tuple[bool, List[str]]:
+        """Validate candidate against Tier 0 filters."""
+        return validate_tier0(candidate, thresholds=thresholds)

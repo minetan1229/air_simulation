@@ -59,12 +59,10 @@ def test_tangential_zeroing_and_effective_mass_split():
     assert not nxt.crashed
     assert not nxt.landed
     v_post = np.asarray(nxt.velocity_mps, dtype=float)
-    # Pre-slide analytic v~(0.878,0.293,0).  After sliding decay factor
-    # (1 - mu*g*dt/|v|) |v| ~ 0.92 the observable window is ~(0.831,0.277,0).
-    # The old m_eff_n path would fully stop the CG in this fixture
-    # (v~0,0).  Assert the new window tightly.
-    assert abs(float(v_post[0]) - 0.8313) < 0.02
-    assert abs(float(v_post[1]) - 0.2771) < 0.02
+    # Exact 3D Delassus contact resolution v_post_cg = v_pre + K^-1*(v_target - v_point) / m
+    # With sticking contact (mu=5.0 >= |j_t|/|j_n| = 2.27), contact point velocity is zeroed.
+    assert abs(float(v_post[0]) - 0.83214) < 0.02
+    assert abs(float(v_post[1]) - 0.27738) < 0.02
     assert abs(float(v_post[2])) < 1e-12
     # Energy must not increase.
     e_pre = 0.5 * 0.05 * (3.0**2 + 1.0**2 + 1.0**2)

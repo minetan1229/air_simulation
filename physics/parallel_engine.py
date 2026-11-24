@@ -454,10 +454,9 @@ def map_evaluate(
     plan = _chunk_plan(len(materialised), workers, chunk_size)
     tasks = [(func, [materialised[index] for index in chunk]) for chunk in plan]
     ordered: List[Any] = []
-    context = multiprocessing.get_context("spawn")
-    with context.Pool(processes=workers, initializer=_pool_init, initargs=(-1,)) as pool:
-        for chunk_result in pool.imap(_pool_worker, tasks):
-            ordered.extend(chunk_result)
+    pool = _get_cached_pool(workers)
+    for chunk_result in pool.imap(_pool_worker, tasks):
+        ordered.extend(chunk_result)
     return ordered
 
 
@@ -923,9 +922,12 @@ def parallel_evaluate(
             if cancelled:
                 # Immediately terminate remaining workers and chunks
                 pool.terminate()
-            else:
+                pool.join()
+                if use_cached:
+                    _release_cached_pool()
+            elif not use_cached:
                 pool.close()
-            pool.join()
+                pool.join()
     if cancelled:
         return results
     emit()
@@ -1833,6 +1835,7 @@ def evaluate_cases_on_device(
         # Allow sufficient integration steps for long flights while preventing infinite loops:
         # At typical minimum dt ~ 1e-3 to 2e-3, steps scale proportionally to flight duration.
         calculated_steps = min(max(int(max_dur / 1.5e-3) + 1000, 2500), 40000)
+        is_gpu = hasattr(xp, "__name__") and "cupy" in xp.__name__
         batch = gpu_dynamics.simulate_batch(
             xp,
             params,
@@ -1842,6 +1845,7 @@ def evaluate_cases_on_device(
             max_steps=calculated_steps,
             max_steps_per_case=calculated_steps,
             capture_timeout_s=10.0,
+            use_graph=True if is_gpu else False,
         )
 
         state = _to_host(xp, batch["state"])

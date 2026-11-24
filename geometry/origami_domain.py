@@ -115,6 +115,11 @@ PARALLEL_EPS: float = 0.995
 #: Depth tolerance (metres) used when ordering two stacked faces.
 DEPTH_EPS: float = 2.0e-6
 
+#: Maximum geometric clearance (metres) along normal between faces that can be
+#: part of the same physical layer stack. Faces further apart cannot fight for
+#: depth buffer and belong to different structural features (e.g. left vs right winglets).
+MAX_LAYER_STACK_GAP_M: float = 0.015
+
 #: Archetype identifiers.
 ARCHETYPE_DART = "classic_dart"
 ARCHETYPE_NAKAMURA = "nakamura_lock"
@@ -876,6 +881,20 @@ def assign_layers(
             fi = faces[i]
             fj = faces[j]
             if abs(_dot3(fi.normal, fj.normal)) < PARALLEL_EPS:
+                continue
+            # Parallel faces separated by large distance (e.g. left and right winglets)
+            # cannot fight for the depth buffer and belong to independent features.
+            normal_dist = abs(
+                _dot3(
+                    (
+                        fj.centroid3d[0] - fi.centroid3d[0],
+                        fj.centroid3d[1] - fi.centroid3d[1],
+                        fj.centroid3d[2] - fi.centroid3d[2],
+                    ),
+                    fi.normal,
+                )
+            )
+            if normal_dist > MAX_LAYER_STACK_GAP_M:
                 continue
             union(i, j)
 

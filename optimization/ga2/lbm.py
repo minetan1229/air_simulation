@@ -368,7 +368,7 @@ class LbmDnsSolver:
                 )
                 solid_velocity[:, solid_indices[0], solid_indices[1], solid_indices[2]] = wall
                 populations = self._stream_collide(
-                    populations, solid, solid_velocity, inflow, tau
+                    populations, solid, solid_velocity, inflow, tau, angle=angle
                 )
                 if not bool(xp.all(xp.isfinite(populations))):
                     return Stage3Result(
@@ -401,7 +401,8 @@ class LbmDnsSolver:
             samples = 1
         force_mean = force_sum / float(samples)
         moment_mean = moment_sum / float(samples)
-        dynamic = 0.5 * 1.225 * speed * speed
+        glide_speed = speed * 0.75
+        dynamic = 0.5 * 1.225 * glide_speed * glide_speed
         cl = float(force_mean[2]) / max(dynamic * area, 1.0e-12)
         cd = float(force_mean[0]) / max(dynamic * area, 1.0e-12)
         cm = float(moment_mean[1]) / max(dynamic * area * chord, 1.0e-12)
@@ -463,6 +464,7 @@ class LbmDnsSolver:
         solid_velocity: Any,
         inflow: float,
         tau: float,
+        angle: float = 0.0,
     ) -> Any:
         """One streaming and collision sweep of the lattice.
 
@@ -522,21 +524,23 @@ class LbmDnsSolver:
             for axis, component in enumerate((ex, ey, ez)):
                 if component == 0:
                     continue
-                wall = wall + component * solid_velocity[axis]
+                wall = wall + component * _shift(solid_velocity[axis], ex, ey, ez)
             correction = 6.0 * D3Q19_WEIGHTS[index] * rho * wall
             streamed[index] = xp.where(
-                source_solid, post[opposite] - correction, streamed[index]
+                source_solid, post[opposite] + correction, streamed[index]
             )
         collided = xp.where(solid[None, :, :, :], populations, streamed)
 
-        # Enforce dynamic inflow velocity on the inlet plane (x = 0)
-        u_inlet = float(inflow)
+        # Enforce dynamic inflow velocity on the inlet plane (x = 0) with angle of attack
+        u_inlet_x = float(inflow * math.cos(angle))
+        u_inlet_z = float(inflow * math.sin(angle))
+        u_sq = u_inlet_x * u_inlet_x + u_inlet_z * u_inlet_z
         for index in range(19):
             vx, vy, vz = D3Q19_VELOCITIES[index]
             if vx > 0:
-                cu = 3.0 * (vx * u_inlet)
+                cu = 3.0 * (vx * u_inlet_x + vz * u_inlet_z)
                 collided[index, 0, :, :] = D3Q19_WEIGHTS[index] * (
-                    1.0 + cu + 0.5 * cu * cu - 1.5 * u_inlet * u_inlet
+                    1.0 + cu + 0.5 * cu * cu - 1.5 * u_sq
                 )
             else:
                 shift_plane = _shift(collided[index], -1, 0, 0)
@@ -631,6 +635,8 @@ class LbmDnsSolver:
                 iz = int(round((point[2] - origin[2]) * scale))
                 projected.append((ix, iy, iz))
             _fill_triangle(host, projected, nx, ny, nz)
+        # Wing solid
+        wing_solid = host.copy()
         # Solidify y/z domain boundaries (ground, ceiling, sidewalls) for no-slip wall conditions
         host[:, 0, :] = True       # sidewall y = 0
         host[:, ny - 1, :] = True  # sidewall y = ny - 1
@@ -640,9 +646,10 @@ class LbmDnsSolver:
         host[0, :, :] = False
         host[nx - 1, :, :] = False
         solid = xp.asarray(host)
+        wing_solid_xp = xp.asarray(wing_solid)
         solid_velocity = xp.zeros((3, nx, ny, nz), dtype=np.float64)
-        interface = _interface_cells(solid)
-        solid_indices = xp.nonzero(solid)
+        interface = _interface_cells(wing_solid_xp)
+        solid_indices = xp.nonzero(wing_solid_xp)
         return solid, solid_velocity, interface, solid_indices
 
     def _couple_structure(
@@ -840,8 +847,8 @@ class _ModalStructure:
         count = max(1, values.shape[1])
         drag = float(values[0].sum()) / count
         lift = float(values[2].sum()) / count
-        self.generalised_force[0] = lift * _MODAL_FORCE_SCALE
-        self.generalised_force[1] = drag * _MODAL_FORCE_SCALE
+        self.generalised_force[0] = (lift * _MODAL_FORCE_SCALE) / self.mass
+        self.generalised_force[1] = (drag * _MODAL_FORCE_SCALE) / self.mass
 
     def step(self, dt: float) -> None:
         """One time step of the modal integration."""
@@ -864,12 +871,12 @@ class _ModalStructure:
         """The velocity of the solid at the interface cells.
 
         The bending mode moves the cells up and down along vertical lattice z (field[2]),
-        scaling with spanwise fraction along lattice iz (the span axis).
+        scaling with spanwise fraction along lattice iy (the cross-stream / span axis).
         The torsion mode produces angular pitch velocity around the span axis.
         """
         xp = np if isinstance(ix, np.ndarray) else __import__("cupy")
-        # In LBM embedding, iz corresponds to origami z (spanwise direction)
-        span_fraction = (iz.astype(xp.float64) + 0.5) / float(max(nz, 1))
+        # In LBM embedding, iy corresponds to sheet transverse / span direction
+        span_fraction = (iy.astype(xp.float64) + 0.5) / float(max(ny, 1))
         bending = self.velocity[_MODE_BENDING] * span_fraction**2
         torsion = self.velocity[_MODE_TORSION] * span_fraction
         field = xp.zeros((3, ix.shape[0]), dtype=np.float64)
@@ -879,9 +886,9 @@ class _ModalStructure:
 
     def moment(self) -> np.ndarray:
         """The moment the structure carries about the three axes."""
-        lift = self.generalised_force[0]
-        drag = self.generalised_force[1] / max(self.chord, 1.0e-3)
-        return np.asarray([0.0, drag, lift], dtype=np.float64)
+        lift = self.generalised_force[0] * self.chord
+        pitch_moment = self.generalised_force[1] * self.chord
+        return np.asarray([0.0, pitch_moment, lift], dtype=np.float64)
 
     def pitch_damping(self, energy: Sequence[float]) -> float:
         """The decay of the pitch oscillation over the glide phase."""
@@ -889,7 +896,7 @@ class _ModalStructure:
             return float(self.damping[_MODE_TORSION])
         first = max(1e-30, float(energy[0]))
         last = max(1e-30, float(energy[-1]))
-        decay = 0.5 * math.log(last / first) / max(len(energy), 1)
+        decay = -math.log(last / first) / max(len(energy) - 1, 1)
         if not math.isfinite(decay):
             return float(self.damping[_MODE_TORSION])
         return float(self.damping[_MODE_TORSION] + decay)

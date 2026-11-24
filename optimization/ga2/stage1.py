@@ -741,7 +741,8 @@ def _make_step(
         size = gpu_dynamics._step_size(xp, params, y, core, dt_max)
         size = xp.minimum(size, xp.maximum(duration - acc["time"], 0.0))
         size = xp.where(active, size, 0.0)
-        y_next = gpu_dynamics._rk4(xp, params, y, size, wind)
+        k1 = gpu_dynamics._derivative_from_core(xp, params, y, core)
+        y_next = gpu_dynamics._rk4(xp, params, y, size, wind, k1=k1)
         core_next = gpu_dynamics._evaluate_state(xp, params, y_next, wind)
 
         # Every accumulator is updated *in place*.  A CUDA graph replays the

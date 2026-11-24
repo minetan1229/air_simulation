@@ -67,6 +67,9 @@ class Solver3D:
         # Free-stream reference values
         self.rho_inf = 1.0
         self.p_inf = 1.0 / self.gamma
+        if abs(config.beta_deg) > 1.0e-6:
+            raise ValueError("Semi-span symmetry grid requires beta_deg == 0.0; non-zero beta breaks symmetry plane.")
+
         self.c_inf = 1.0
         self.v_inf = config.mach * self.c_inf
 
@@ -277,16 +280,17 @@ class Solver3D:
         res[:, 1:, :, :] -= f_j
         res[:, :-1, :, :] += f_j
 
-        # Wall boundary at j=0 (Solid slip wall)
-        ax_w = self.grid.j_area_x[:, 0, :]
-        ay_w = self.grid.j_area_y[:, 0, :]
-        az_w = self.grid.j_area_z[:, 0, :]
+        # Wall boundary at j=0 (Solid slip wall for k < kw, permeable wake slit for k >= kw)
+        kw = self.grid.nk_wing
+        ax_w = self.grid.j_area_x[:, 0, :kw]
+        ay_w = self.grid.j_area_y[:, 0, :kw]
+        az_w = self.grid.j_area_z[:, 0, :kw]
         area_w = np.sqrt(ax_w**2 + ay_w**2 + az_w**2)
         nx_w = ax_w / np.maximum(area_w, 1.0e-12)
         ny_w = ay_w / np.maximum(area_w, 1.0e-12)
         nz_w = az_w / np.maximum(area_w, 1.0e-12)
 
-        u_first_j = u[:, 0, :, :]
+        u_first_j = u[:, 0, :kw, :]
         rho_w, u_w, v_w, w_w, p_w, _ = self.get_primitive(u_first_j)
         vn_w = u_w * nx_w + v_w * ny_w + w_w * nz_w
 
@@ -306,7 +310,19 @@ class Solver3D:
 
         f_wall = self.compute_flux(u_ghost_j, u_first_j, ax_w, ay_w, az_w)
         # j=0 outward is -j -> contribution -f_wall.
-        res[:, 0, :, :] -= f_wall
+        res[:, 0, :kw, :] -= f_wall
+
+        # Beyond tip (k >= kw): connect top and bottom surface transparently
+        if kw < self.grid.nk:
+            u_ext = u[:, 0, kw:, :]
+            f_cut = self.compute_flux(
+                u_ext[::-1, :, :],
+                u_ext,
+                self.grid.j_area_x[:, 0, kw:],
+                self.grid.j_area_y[:, 0, kw:],
+                self.grid.j_area_z[:, 0, kw:],
+            )
+            res[:, 0, kw:, :] -= f_cut
 
         # Farfield boundary at j=nj
         ax_far = self.grid.j_area_x[:, -1, :]
@@ -381,8 +397,9 @@ class Solver3D:
         alpha_rad = math.radians(self.config.alpha_deg)
 
         # Reference area S = b * c_mean = AR * (1 + taper)^2 / 4
-        s_ref = self.config.aspect_ratio * ((1.0 + self.config.taper_ratio) / 2.0) ** 2
-        c_ref = (1.0 + self.config.taper_ratio) / 2.0
+        lam = self.config.taper_ratio
+        s_ref = self.config.aspect_ratio * ((1.0 + lam) / 2.0) ** 2
+        c_ref = (2.0 / 3.0) * (1.0 + lam + lam**2) / max(1.0 + lam, 1.0e-6)
 
         lift = fz * math.cos(alpha_rad) - fx * math.sin(alpha_rad)
         drag = fz * math.sin(alpha_rad) + fx * math.cos(alpha_rad)

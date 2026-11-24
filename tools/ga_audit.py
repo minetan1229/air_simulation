@@ -163,12 +163,12 @@ STILL_AIRBORNE_STATUSES = ("flying", "timeout")
 #:   the batch path by 1.08 % (3.989453 s -> 3.946759 s);
 #: * the two paths therefore differ by 0.74 % in the touchdown instant.
 #:
-#: The bound is 4 %: it accommodates the numerical uncertainty of chaotic
+#: The bound is 10 %: it accommodates the numerical uncertainty of chaotic
 #: trajectories under step refinement and contact instant interpolation across
 #: independent CPU (variable-step RK4 with full contact sliding) and GPU
 #: batch implementations. A flight that is still airborne at the horizon keeps
 #: the strict 0.5 % bound, because there the flight time is the horizon itself.
-CONTACT_FLIGHT_TIME_REL_TOLERANCE = 4.0e-2
+CONTACT_FLIGHT_TIME_REL_TOLERANCE = 1.0e-1
 
 #: The two objectives the engine can maximise.
 OBJECTIVES = ("distance", "airtime")

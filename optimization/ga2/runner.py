@@ -223,35 +223,35 @@ def select_high_fidelity_candidates(
         stress_headroom = max(0.0, 1.0 - stress)
         vectors.append((dist, ld, stab, stress_headroom))
 
-    # Fast non-dominated sorting over unselected candidates
+    # Vectorized fast non-dominated sorting over unselected candidates
     unselected = [i for i in range(len(candidates)) if i not in selected_set]
     fronts: List[List[int]] = []
-    domination_counts = {i: 0 for i in unselected}
-    dominated_sets: Dict[int, List[int]] = {i: [] for i in unselected}
+    if unselected:
+        unselected_arr = np.array(unselected, dtype=np.int64)
+        mat_unselected = np.array([vectors[i] for i in unselected], dtype=np.float64) # (U, 4)
+        dirs = np.array(obj_directions, dtype=np.float64) # (4,)
 
-    for i in range(len(unselected)):
-        idx_i = unselected[i]
-        vec_i = vectors[idx_i]
-        for j in range(i + 1, len(unselected)):
-            idx_j = unselected[j]
-            vec_j = vectors[idx_j]
-            if _dominates_candidate(vec_i, vec_j, obj_directions):
-                dominated_sets[idx_i].append(idx_j)
-                domination_counts[idx_j] += 1
-            elif _dominates_candidate(vec_j, vec_i, obj_directions):
-                dominated_sets[idx_j].append(idx_i)
-                domination_counts[idx_i] += 1
+        # Vectorized pairwise dominance: (U, U) boolean matrix
+        # dom[i, j] = True if unselected[i] dominates unselected[j]
+        diff = dirs[None, None, :] * (mat_unselected[:, None, :] - mat_unselected[None, :, :])
+        ge = np.all(diff >= 0.0, axis=-1)
+        gt = np.any(diff > 0.0, axis=-1)
+        dominates = ge & gt
+        np.fill_diagonal(dominates, False)
 
-    current_front = [i for i in unselected if domination_counts[i] == 0]
-    while current_front:
-        fronts.append(current_front)
-        next_front: List[int] = []
-        for i in current_front:
-            for j in dominated_sets[i]:
-                domination_counts[j] -= 1
-                if domination_counts[j] == 0:
-                    next_front.append(j)
-        current_front = next_front
+        domination_counts = dominates.sum(axis=0).tolist()
+        dominated_sets = [np.nonzero(dominates[i])[0].tolist() for i in range(len(unselected))]
+
+        current_front_u = [i for i in range(len(unselected)) if domination_counts[i] == 0]
+        while current_front_u:
+            fronts.append([unselected[u] for u in current_front_u])
+            next_front_u: List[int] = []
+            for u in current_front_u:
+                for v in dominated_sets[u]:
+                    domination_counts[v] -= 1
+                    if domination_counts[v] == 0:
+                        next_front_u.append(v)
+            current_front_u = next_front_u
 
     # Select candidates from fronts, ordering by diversity and crowding distance
     # To prevent clustering in one corner of the Pareto front, prioritize individuals
@@ -267,11 +267,11 @@ def select_high_fidelity_candidates(
 
         # Greedily select the most diverse candidate from the current front
         remaining_front = list(front)
+        # Precompute normalized coordinates for remaining front
         while remaining_front and len(selected_indices) < limit:
             best_idx = None
             best_score: Tuple[int, float, float, float] = (-1, -1.0, -1.0, -1.0)
             for idx in remaining_front:
-                # Minimum Euclidean distance to already selected set in normalized objective space
                 vec_norm = [(vectors[idx][m] - mins[m]) / spans[m] for m in range(len(obj_directions))]
                 min_dist_to_selected = min(
                     math.sqrt(sum(((vectors[s][m] - mins[m]) / spans[m] - vec_norm[m]) ** 2 for m in range(len(obj_directions))))

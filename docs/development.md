@@ -46,7 +46,7 @@ python -m pytest tests/test_jobs.py -q
 Flask API 疎通、最適化ジョブ実行とETA算出、および3Dモデル自動解析パイプラインを一括検証します：
 
 ```powershell
-python smoke_test.py
+python scripts/smoke_test.py
 ```
 
 ---

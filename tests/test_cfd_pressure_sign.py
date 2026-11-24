@@ -151,7 +151,8 @@ def test_3d_pressure_traction_sign() -> None:
     q_inf = 0.5 * solver.rho_inf * (solver.v_inf**2)
     alpha_rad = math.radians(solver.config.alpha_deg)
     s_ref = solver.config.aspect_ratio * ((1.0 + solver.config.taper_ratio) / 2.0) ** 2
-    c_ref = (1.0 + solver.config.taper_ratio) / 2.0
+    lam = solver.config.taper_ratio
+    c_ref = (2.0 / 3.0) * (1.0 + lam + lam**2) / max(1.0 + lam, 1.0e-6)
 
     expected_lift = expected_fz * math.cos(alpha_rad) - expected_fx * math.sin(alpha_rad)
     expected_drag = expected_fz * math.sin(alpha_rad) + expected_fx * math.cos(alpha_rad)

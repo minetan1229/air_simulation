@@ -22,13 +22,13 @@
 
 ### 2.1 Windows (PowerShell)
 ```powershell
-.\setup.ps1
+.\scripts\setup.ps1
 ```
 
 ### 2.2 Linux / macOS / WSL (Bash)
 ```bash
-chmod +x setup.sh
-./setup.sh
+chmod +x scripts/setup.sh
+./scripts/setup.sh
 ```
 
 ---
@@ -57,9 +57,16 @@ pip install --upgrade pip setuptools wheel
 pip install -e ".[dev]"
 ```
 
+GPU を使用する場合は `[gpu]` extra を含める:
+```bash
+pip install -e ".[dev,gpu]"
+```
+
 高速パッケージインストーラ `uv` を使用する場合:
 ```bash
 uv pip install -e ".[dev]"
+# GPU 利用時:
+uv pip install -e ".[dev,gpu]"
 ```
 
 ---
@@ -100,7 +107,7 @@ Current Device: 0
 
 サーバーを起動する:
 ```bash
-python app.py
+python app.py --allow-protected-branch
 ```
 
 ブラウザで `http://127.0.0.1:5000` を開き、計器コンソールが表示されることを確認する。

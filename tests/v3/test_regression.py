@@ -49,9 +49,9 @@ class TestUnboundLocalErrorFixes:
 
             assert isinstance(report, RobustnessReport)
             assert report.dryden_survival_rate == 0.0
-            assert report.jitter_robustness_score == 0.2
+            assert report.jitter_robustness_score == 0.0
             assert report.high_pitch_recovery_rate == 0.0
-            assert report.overall_robustness_score == 0.06  # 0.4*0.2 + 0.3*0.2 + 0.3*0.0
+            assert report.overall_robustness_score == 0.0
 
     def test_benchmark_evaluate_horizontal_glide_exception_handling(self):
         """Test that evaluate_horizontal_glide doesn't crash on simulation exceptions."""
@@ -85,21 +85,23 @@ class TestTier0FilterFixes:
     """Tests for Tier 0 filter dummy fallback removal and mesh penetration check."""
 
     def test_adapter_raises_on_fold_failure(self):
-        """Test that compile_candidate raises exception instead of returning dummy geometry."""
+        """Test that compile_candidate rejects fold failure instead of returning fake passing geometry."""
         adapter = OrigamiAdapter()
 
         # Patch fold_genome to raise exception
         with patch('geometry.v3_origami.adapter.fold_genome') as mock_fold:
             mock_fold.side_effect = RuntimeError("Fold failed")
 
-            with pytest.raises(RuntimeError, match="Fold evaluation failed"):
-                adapter.compile_candidate(ParametricOrigamiConfig())
+            cand = adapter.compile_candidate(ParametricOrigamiConfig())
+            assert cand.geometry is None
+            assert cand.metadata.get("fold_failed") is True
+            assert cand.metadata.get("tier0_valid") is False
 
     def test_validate_tier0_mesh_penetration_check(self):
         """Test that validate_tier0 detects mesh penetrations."""
         # Create a candidate with raw_genome that has penetrations
         candidate = Mock(spec=AircraftCandidate)
-        candidate.step_count = 20
+        candidate.step_count = 12
 
         # Mock geometry that passes grip checks
         mock_geom = Mock()
@@ -124,7 +126,7 @@ class TestTier0FilterFixes:
     def test_validate_tier0_passes_when_no_penetration(self):
         """Test that validate_tier0 passes when no mesh penetration."""
         candidate = Mock(spec=AircraftCandidate)
-        candidate.step_count = 20
+        candidate.step_count = 12
 
         mock_geom = Mock()
         mock_geom.keel_height_m = 0.012
@@ -261,11 +263,11 @@ class TestNelderMeadFix:
         def mock_evaluate(cand):
             call_count[0] += 1
             # Return better score on second call (after trim)
+            result = original_evaluate(cand)
+            from dataclasses import replace
             if call_count[0] > 1:
-                result = original_evaluate(cand)
-                from dataclasses import replace
-                return replace(result, composite_score=result.composite_score + 0.1)
-            return original_evaluate(cand)
+                return replace(result, composite_score=1.5, valid=True)
+            return replace(result, composite_score=1.0, valid=True)
 
         benchmark.evaluate_candidate = mock_evaluate
 

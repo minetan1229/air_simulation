@@ -38,6 +38,10 @@ def prepare_en_docs() -> None:
         target = DOCS_EN_STAGING / rel_path.parent / base_name
         target.write_text(en_file.read_text(encoding="utf-8"), encoding="utf-8")
 
+    # 3. Remove all *.en.md files from staging (they were copied by copytree)
+    for en_file in DOCS_EN_STAGING.rglob("*.en.md"):
+        en_file.unlink()
+
 
 def cleanup_en_docs() -> None:
     """Remove staging directory docs_en."""

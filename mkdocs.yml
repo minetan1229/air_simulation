@@ -8,6 +8,9 @@ edit_uri: edit/master/docs/
 
 docs_dir: docs
 
+exclude_docs: |
+  *.en.md
+
 theme:
   name: material
   custom_dir: docs/overrides
@@ -115,7 +118,7 @@ nav:
       - 航空・計算科学大用語集 (全281項目): HIGH_SCHOOL_GLOSSARY_MASTER.md
   - API リファレンス:
       - REST API 仕様: api.md
-      - OpenAPI (Swagger UI): https://github.com/minetan1229/air_simulation#api-リファレンス
+      - OpenAPI (Swagger UI): api.md
   - 開発・運用:
       - 開発ガイド: development.md
       - milcy 実践ガイド: MILCY_PROJECT_GUIDE.md

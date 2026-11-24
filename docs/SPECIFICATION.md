@@ -12,7 +12,7 @@
 
 ## 1. 物理・航空工学的理論モデル (Physics & Theoretical Models)
 
-本プロジェクトは、体積メッシュ上で連続の式・ナビエ–ストークス方程式を離散化して解く「体積メッシュ Navier-Stokes CFD ソルバー」ではなく、**AeroSandbox 準拠の 6自由度 (6DoF) 飛行力学方程式、Helmbold/Polhamus 三角翼・低アスペクト比経験空力モデル、Viterna 失速遷移、および静的空力パネル法を組み合わせた高精度・高速シミュレーター**である（Issue #29 明記）。
+本プロジェクトは、体積メッシュ上で連続の式・ナビエ–ストークス方程式を離散化して解く「体積メッシュ Navier-Stokes CFD ソルバー」ではなく、**AeroSandbox 準拠の 6自由度 (6DoF) 飛行力学方程式、Helmbold/Polhamus 三角翼・低アスペクト比経験空力モデル、Hoerner 平板失速後モデル、および静的空力パネル法を組み合わせた高精度・高速シミュレーター**である（Issue #29 明記）。
 
 ### 1.1 空気力学モデル (Aerodynamics)
 - **基礎空気力**:
@@ -52,14 +52,15 @@
   - Sutherland の式による動粘性係数 $\mu(T)$ 計算およびレイノルズ数 $Re = \rho V c / \mu$ の算出。
 - **3D 風場モデル (Wind Field & Turbulence)**:
   - 3D 空間 Simplex ノイズによる空間相関乱流、高度境界層プロファイル（対数則 / べき乗則）、熱上昇気流（Thermal コラム）。
-  - **座標系変換の厳密性**: 風場ドメインは鉛直軸を $+z$ 上向き、水平コンパス軸を north=$+y$ / east=$+x$（`physics/wind_domain.py` が正本）として定義し、`wind_direction_deg` は気象庁風向（北から時計回りの「吹いてくる」方位；流れベクトルはその逆を指す）とする。飛行力学ドメイン（世界 NED 座標系: $+x$ 北/前, $+y$ 東/右, $+z$ 下向き）への受け渡し時に $w_{\text{NED}} = -w_{\text{wind}}$ の符号変換を厳密に実行（Issue #30 整合性検証済み）。
+  - **座標系変換の厳密性**: 風場ドメインは鉛直軸を $+z$ 上向き、水平コンパス軸を north=$+y$ / east=$+x$（`physics/wind_domain.py` が正本）として定義し、`wind_direction_deg` は気象庁風向（北から時計回りの「吹いてくる」方位；流れベクトルはその逆を指す）とする。飛行力学ドメイン（世界 NED 座標系: $+x$ 北/前, $+y$ 東/右, $+z$ 下向き）への受け渡し時に $w_{\text{NED}} = -w_{\text{wind}}$ の符号変換に加え、水平成分の $x,y$ 軸交換（north=$+y$ → $+x$, east=$+x$ → $+y$）を厳密に実行（Issue #30 整合性検証済み）。
 
 - **幾何→空力の受渡仕様** (`physics/origami_domain.py::extract_aero_parameters` / `apply_aero_parameters`): 折紙幾何から無次元パラメータのみを抽出し `AircraftConfig`（`camber_ratio`, `leading_edge_sweep_deg`, `dihedral_eff_deg`, `camber_forward`）へ書き込む。**空力二重実装は origami 側に置かない**（正本は `physics/aero_kernel.py` の単一実装）。$f/c_{packet}=PACKET\_CAMBER\_M/0.10$, $f/c_{TE}=0.5\sin\phi_{TE}\cdot0.055$, $\Lambda_{LE}=\arctan(0.05 W/L)$, 上反角は符号保持。検証: `tests/test_origami_aero_coupling.py`（5 passed）, `tools/check_aero_kernel_parity.py` 差異 0.0。
-- **構造応力モデル (Structural Stress)**:
+
+### 1.3 構造応力モデル (Structural Stress)
 - 動圧 $q$、迎角 $\alpha$、および作用加速度（Gフォース）から翼根曲げモーメントを算出。
 - 翼面各頂点に対する動的応力評価値（0.0: 安全 〜 1.0: 破断限界）を算出し、3D ヒートマップとして可視化。
 - **応力インデックスの正規化尺度は単一**: `stress_index = sigma / sigma_allow` であり、分母は機体固有の許容折り応力 `paper_allowable_stress(gsm, stiffness)`（既定 100 g/m²・剛性 0.35 で 2.2 kPa）である。6DoF 経路・ヒートマップ・GPU 最適化バッチ・構造破壊判定はすべてこの尺度を共有する（旧来の 25 kPa / 120 kPa / 2.0e4·gsm の 3 系統は廃止）。荷重分布の min-max 形状は `stress_shape` チャンネルで別途公開する。
-- **応力較正係数 `KAPPA_SIGMA`**: 翼根曲げモーメント $M$ と矩形板の断面係数 $Z = b\,t^2/6$（$b$ = 局所弦長、$t$ = 展開シート厚 = `gsm/800`）から応力を $\sigma = \texttt{KAPPA\_SIGMA}\,M/Z$ として算出する。`physics/stress_domain.py::KAPPA_SIGMA = 9.0e-6` は **Beam 理論値へ掛ける無次元経験的較正係数**であり、報告応力を Beam 理論値の約 1/111000 に縮める（`stress_field` / `section_modulus_batch` の双方）。寸法的な意味は無く、§1.3 の `stress_index` の分子側を規定する。**値は §5.2 のとおり据え置き**（出典未取得）。
+- **応力較正係数 `KAPPA_SIGMA`**: 翼根曲げモーメント $M$ と矩形板の断面係数 $Z = b\,t^2/6$（$b$ = 局所弦長、$t$ = 展開シート厚 = `gsm/800 [mm] = gsm/8.0e5 [m]`）から応力を $\sigma = \texttt{KAPPA\_SIGMA}\,M/Z$ として算出する。`physics/stress_domain.py::KAPPA_SIGMA = 9.0e-6` は **Beam 理論値へ掛ける無次元経験的較正係数**であり、報告応力を Beam 理論値の約 1/111000 に縮める（`stress_field` / `section_modulus_batch` の双方）。寸法的な意味は無く、§1.3 の `stress_index` の分子側を規定する。**値は §5.2 のとおり据え置き**（出典未取得）。
 
 ### 1.4 6DoF 運動方程式積分 (Flight Dynamics Engine)
 - 四元数（Quaternion）表現による特異点フリーの機体姿勢更新。
@@ -91,7 +92,7 @@
 回転する（`T' = F ∘ T`）。同一折り目が跨ぐ層は同一の三次元直線を共有するため、
 折り目は重なりとして連続して折れる。
 
-**レイヤーオフセット（Z-Fighting 完全排除の証明）**:
+- **レイヤーオフセット（Z-Fighting 完全排除の証明）**:
 - 紙厚 $t$ = `VISUAL_THICKNESS_M` = 0.30 mm（実紙 0.10 mm の 3 倍の視覚強調）。
 - 空気隙 `LAYER_AIR_GAP_M` = 0.12 mm、レイヤーピッチ `LAYER_PITCH_M` = $t$ + gap = 0.42 mm。
 - 互いに平行かつ投影が重なる面のみを同一**スタック**に集群化し、スタック法線方向の
@@ -103,6 +104,8 @@
   5〜6 層が接触する（実装上の最深部スタック層インデックスは 8）。
 - オフセット量は折り工程 $\alpha$ に比例して 0 → 1 で増加し、
   $\alpha = 0$（平たい用紙）では全層が同一面になる。
+
+**物理厚さの換算**: 展開シート厚 $t = \text{gsm} / 800\ [\text{mm}] = \text{gsm} / 8.0\times10^5\ [\text{m}]$（実紙 80 g/m² で 0.10 mm、100 g/m² で 0.125 mm）。
 
 **ソリッド生成**: 各面は上スキム・下スキム・側壁（カットエッジ）の**閉じたスラブ**として
 出力され、紙の断面は面積を持つ矩形になる。折り目は**ロール折り**（3 次ベジエ）で
@@ -236,7 +239,7 @@ uniform として紙シェーダに渡し、翼端で $\mathrm{elastic}^2$ に�
 4. **Wieselsberger (1921)**: 翼幅および高度比に基づく地面効果誘導抗力低減理論。
 5. **Hoerner (1965)**: 乱流境界層摩擦抗力係数・形状抗力係数の経験データ（*Fluid-Dynamic Drag*）。
 6. **Sutherland (1893)**: 気体の動粘性係数の温度依存性式。
-7. **AeroSandbox (Bremwand et al.)**: 6DoF 飛行力学および微小擾乱安定微係数の定式化。
+7. **AeroSandbox (Peter Sharpe, MIT)**: 6DoF 飛行力学および微小擾乱安定微係数の定式化。
 
 ### 5.0 モデル別の正本・出典・適用限界 (Issue #48 / #49 / #50 / #51 / #52)
 
@@ -278,10 +281,10 @@ physics/origami_genome.py の GripThresholds 既定（最低高さ 8 mm / 前後
 
 | 定数 | 値 | 物理的意味 | 据え置きの理由 | 出典 |
 |---|---|---|---|---|
-| `KAPPA_SIGMA` | `9.0e-6`（`physics/stress_domain.py::KAPPA_SIGMA`） | 翼根曲げモーメント $M$ と矩形板の断面係数 $Z = b\,t^2/6$ から求めた Beam 理論応力 $\sigma = \texttt{KAPPA\_SIGMA}\,M/Z$ へ掛ける**無次元経験的較正係数**。$t$ は展開シート厚（`gsm/800`）。§1.3 の `stress_index = sigma/sigma_allow` の分子側を規定する<br>**数式・導出**: $\sigma_{beam}=M/Z_{flat}$, $Z_{flat}=b t^2/6$, $t=gsm/800\,\mathrm{mm}=gsm/8\mathrm{e}5\,\mathrm{m}$ により $Z\propto gsm^2$, $\sigma_{beam}\propto gsm^{-2}$。80 g/m²で $t=0.10\,\mathrm{mm}$、100 g/m²で $0.125\,\mathrm{mm}$(KAPPA_SIGMA_REFERENCE_GSM=80, GSM_EXPONENT=-2)。**物理量の訂正**: モデルは平板厚 $t$ を使うが、実折翼はキール/箱折り深さ $h\sim10$–$30\,\mathrm{mm}$（ROOT_SECTION_HEIGHT_FRACTION=0.40·MAC）であり $Z_{fold}\sim bh^2/6$ は $(h/t)^2\sim2.5\mathrm{e}4$ 倍。ヘルパー `kappa_sigma_derivation(gsm,h)` は $t,(h/t)^2$, 残留 $KAPPA\_SIGMA\cdot(h/t)^2\ (\approx0.36$ @80 g/m²$)・KAPPA\_SIGMA\cdot M/Z_{flat}\rightarrow 10^2$–$10^3\,\mathrm{Pa}$。**適用限界**: 準静的曲げの相対順位指標としてのみ有効;せん断・ねじり・座屈・動的/衝撃・クリープ・生繊維破壊予測には不可。AbsoluteScaleはkPa域(2500 Pa prior)でありMPa(20–40)ではない | 実紙・実折面の材料定数（引裂強度・折れ面の残留断面）に対応する出典が**監査済み範囲のどの論文にも存在しない**。値を直すと全応力値と失敗判定が同時に変わるため、**根拠を得るまで数値改定を行わない**。なお `paper_allowable_stress` の基準 2200 Pa も実紙の引張強度 20〜40 MPa ではなく、`KAPPA_SIGMA` との**組み合わせでのみ**意味を持つ | `no-finish.md` §A-1（48 行） / `PHYSICS_PAPER_CONFORMANCE_AUDIT.md` §2-H-11（462〜479 行）、定数表（1248 行）、付録B H-11（1314 行） |
-| `trailing_edge_fold_effects` の係数 | `0.015` / `-0.012` / `0.035`（`physics/aero_kernel.py::trailing_edge_fold_effects`） | 全幅後縁折れ角 $\phi$ に対する空力係数の増分 $\Delta C_L = 0.015\,\phi$、$\Delta C_m = -0.012\,\phi$、$\Delta C_D = 0.035\,\sin^2\phi$（§1.1）。正の折れ = 揚力増・機首下げ、負の折れ = 揚力減・機首上げ | 後縁折れによる空力変化（翼型後縁の抗力増加＋後縁渦の形成）に対応する**特定論文の式が存在しない**。パネル法の「局所幾何 → 局所揚力」枠組みで近似すると、正規経路（Helmbold / Hoerner）と混在して A-1 と同じ**出典なき係数**が増える | `no-finish.md` §A-2（55〜65 行） / `PHYSICS_PAPER_CONFORMANCE_AUDIT.md` §2-H-19（681〜699 行。「係数 0.015 / −0.012 / 0.035 は出典なし」）、付録B H-19（1322 行） |
+| `KAPPA_SIGMA` | `9.0e-6`（`physics/stress_domain.py::KAPPA_SIGMA`） | 翼根曲げモーメント $M$ と矩形板の断面係数 $Z = b\,t^2/6$ から求めた Beam 理論応力 $\sigma = \texttt{KAPPA\_SIGMA}\,M/Z$ へ掛ける**無次元経験的較正係数**。$t$ は展開シート厚（`gsm/800 [mm] = gsm/8.0e5 [m]`）。§1.3 の `stress_index = sigma/sigma_allow` の分子側を規定する<br>**数式・導出**: $\sigma_{beam}=M/Z_{flat}$, $Z_{flat}=b t^2/6$, $t=gsm/800\,\mathrm{mm}=gsm/8\mathrm{e}5\,\mathrm{m}$ により $Z\propto gsm^2$, $\sigma_{beam}\propto gsm^{-2}$。80 g/m²で $t=0.10\,\mathrm{mm}$、100 g/m²で $0.125\,\mathrm{mm}$(KAPPA_SIGMA_REFERENCE_GSM=80, GSM_EXPONENT=-2)。**物理量の訂正**: モデルは平板厚 $t$ を使うが、実折翼はキール/箱折り深さ $h\sim10$–$30\,\mathrm{mm}$（ROOT_SECTION_HEIGHT_FRACTION=0.40·MAC）であり $Z_{fold}\sim bh^2/6$ は $(h/t)^2\sim2.5\mathrm{e}4$ 倍。ヘルパー `kappa_sigma_derivation(gsm,h)` は $t,(h/t)^2$, 残留 $KAPPA\_SIGMA\cdot(h/t)^2\ (\approx0.36$ @80 g/m²$)・KAPPA\_SIGMA\cdot M/Z_{flat}\rightarrow 10^2$–$10^3\,\mathrm{Pa}$。**適用限界**: 準静的曲げの相対順位指標としてのみ有効;せん断・ねじり・座屈・動的/衝撃・クリープ・生繊維破壊予測には不可。AbsoluteScaleはkPa域(2500 Pa prior)でありMPa(20–40)ではない | 実紙・実折面の材料定数（引裂強度・折れ面の残留断面）に対応する出典が**監査済み範囲のどの論文にも存在しない**。値を直すと全応力値と失敗判定が同時に変わるため、**根拠を得るまで数値改定を行わない**。なお `paper_allowable_stress` の基準 2200 Pa も実紙の引張強度 20〜40 MPa ではなく、`KAPPA_SIGMA` との**組み合わせでのみ**意味を持つ | `PHYSICS_PAPER_CONFORMANCE_AUDIT.md` §2-H-11（462〜479 行）、定数表（1248 行）、付録B H-11（1314 行） |
+| `trailing_edge_fold_effects` の係数 | `0.015` / `-0.012` / `0.035`（`physics/aero_kernel.py::trailing_edge_fold_effects`） | 全幅後縁折れ角 $\phi$ に対する空力係数の増分 $\Delta C_L = 0.015\,\phi$、$\Delta C_m = -0.012\,\phi$、$\Delta C_D = 0.035\,\sin^2\phi$（§1.1）。正の折れ = 揚力増・機首下げ、負の折れ = 揚力減・機首上げ | 後縁折れによる空力変化（翼型後縁の抗力増加＋後縁渦の形成）に対応する**特定論文の式が存在しない**。パネル法の「局所幾何 → 局所揚力」枠組みで近似すると、正規経路（Helmbold / Hoerner）と混在して A-1 と同じ**出典なき係数**が増える | `PHYSICS_PAPER_CONFORMANCE_AUDIT.md` §2-H-19（681〜699 行。「係数 0.015 / −0.012 / 0.035 は出典なし」）、付録B H-19（1322 行） |
 
-**実装状況の注記**: `no-finish.md` §A-2 と監査 §H-19 は「`trailing_edge_fold_effects` の呼び出し元が無い」状態を記録しているが、その後縁の空力接続は `7639895 fix(physics): restore the fold-integration contract and the payload keys` で復元済みである（`no-finish.md` 363〜365 行）。**係数の出典が未取得である事実は変わらない**ため、値の据え置きは継続する（接続の有無と係数の出典は別問題）。
+**実装状況の注記**: 監査 §H-19 は「`trailing_edge_fold_effects` の呼び出し元が無い」状態を記録していたが、その後縁の空力接続は `7639895 fix(physics): restore the fold-integration contract and the payload keys` で復元済みである。**係数の出典が未取得である事実は変わらない**ため、値の据え置きは継続する（接続の有無と係数の出典は別問題）。
 
 **再オープン条件**: 紙航空機の後縁折れ空力（後縁抗力増加・後縁渦の揚力／モーメント寄与）に関する実測論文、または紙材料の引裂強度・折れ面の残留断面形状の実測データを入手できること。入手までは**値を改定しない**。
 
@@ -296,7 +299,7 @@ physics/origami_genome.py の GripThresholds 既定（最低高さ 8 mm / 前後
 | **#28** | Bug | GPUバッチでケース別の `duration_s` が `landing_time` に反映されない疑い | ケースごとの上限時間を配列保持し個別タイムアウト・着地判定を実装。`tests/test_issue28_gpu_duration.py` で検証合格。 |
 | **#29** | Physics | 6DoF 飛行力学モデルと体積メッシュ CFD の区別明確化 | README および本仕様書に AeroSandbox 準拠 6DoF + パネル法モデルであることを明記。 |
 | **#30** | Physics | 風場（+z上向き）と世界NED（+z下向き）の座標変換整合性 | 鉛直風符号変換経路を厳密化。`tests/test_security_and_frames_audit.py` で上昇風・下降風・無風を検証合格。 |
-| **#31** | Numerics | 固定時間刻み RK4 積分の系統的収束性の検証 | $\Delta t = 0.04 \to 0.005\,\text{s}$ の刻み細分化テストを実装し単調収束を実証。`tests/test_advanced_physics_audit.py` で検証合格。 |
+| **#31** | Numerics | 固定時間刻み RK4 積分の系統的収束性の検証 | $\Delta t = 0.0025 \to 0.000625\,\text{s}$ の刻み細分化テストを実装し単調収束を実証。`tests/test_advanced_physics_audit.py` で検証合格。 |
 | **#32** | Aerodynamics | 空力係数の理論・文献出典の独立検証と公開 | `/api/v1/meta/physics-references` エンドポイントを新設し学術引用レジストリを公開。単体テスト検証合格。 |
 | **#33** | Wind Model | 3D風場の有界発散・空間相関・時間連続性の検証 | 乱流場の発散有界性、空間距離に応じた相関減衰、および時間連続性を数値評価。`tests/test_advanced_physics_audit.py` で検証合格。 |
 | **#34** | Security | 予期しない例外時の内部トレースバック漏洩防止 | `api_error()` を改修し、本番環境で `error_id` のみを返却。`tests/test_security_and_frames_audit.py` で検証合格。 |
@@ -335,7 +338,8 @@ physics/origami_genome.py の GripThresholds 既定（最低高さ 8 mm / 前後
 ├── app.py                     # Flask アプリケーション エントリポイント
 ├── smoke_test.py              # エンドツーエンドスモークテスト (14 ステージ)
 ├── config/                    # 遺伝的調査設定 (genetic_research.yaml 等)
-├── no-finish.md               # 残課題台帳
+├── app.py                     # Flask アプリケーション エントリポイント
+├── smoke_test.py              # エンドツーエンドスモークテスト (14 ステージ)
 └── README.md                  # プロジェクト概要
 ```
 

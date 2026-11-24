@@ -177,7 +177,8 @@ def audit_geometry(
     mesh = build_mesh(archetype, alpha, span_m=span_m)
     orig_span = _mesh_span(mesh)
     orig_area = _planform_area_m2(mesh)
-    orig_sheet_area = mesh.surface_area()
+    # OrigamiMesh has top and bottom surfaces; single-side sheet area is 0.5 * surface_area()
+    orig_sheet_area = 0.5 * mesh.surface_area()
     orig_ar = (orig_span * orig_span) / orig_area if orig_area > 0.0 else 0.0
 
     cfg = config if config is not None else AircraftConfig()

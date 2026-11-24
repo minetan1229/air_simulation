@@ -470,10 +470,11 @@ def kappa_sigma_derivation(
     g = max(float(gsm), 1.0e-6)
     t_m = (g * 1.0e-3) / PAPER_THICKNESS_DENOMINATOR
     h = max(float(folded_depth_m), 1.0e-6)
-    geom = (h / t_m) ** 2
+    geom = h / t_m
     return {
         "t_m": t_m,
         "t_mm": t_m * 1000.0,
+        "geom_h_over_t": geom,
         "geom_h_over_t_sq": geom,
         "residual": KAPPA_SIGMA * geom,
         "kappa_sigma": KAPPA_SIGMA,
@@ -638,18 +639,25 @@ def dynamic_pressure(density_kgm3: float, speed_mps: float) -> float:
     return 0.5 * rho * speed * speed
 
 
-def load_factor(dynamic_pressure_pa: float, weight_n: float) -> float:
-    """Normalised aerodynamic load ``q / W``.
+def load_factor(
+    dynamic_pressure_pa: float,
+    weight_n: float,
+    wing_area_m2: Optional[float] = None,
+    cl: Optional[float] = None,
+) -> float:
+    """Normalised aerodynamic load factor ``(q * S * C_L) / W``.
 
-    This is the load factor of a unit-lift-coefficient reference wing; the
-    full aircraft load factor (which also carries the trimmed lift
-    coefficient and the reference area) is
-    :func:`aircraft_load_factor`.
+    When ``wing_area_m2`` and ``cl`` are omitted, defaults to the unit reference
+    wing formulation ``q / W`` for backwards compatibility.
     """
     q = _finite_or(float(dynamic_pressure_pa), 0.0)
     weight = _finite_or(float(weight_n), 0.0)
     if q <= 0.0 or weight <= 0.0:
         return 0.0
+    if wing_area_m2 is not None and cl is not None:
+        area = _finite_or(float(wing_area_m2), 0.0)
+        cl_val = _finite_or(float(cl), 0.0)
+        return safe_div(q * area * cl_val, weight, default=0.0)
     return safe_div(q, weight, default=0.0)
 
 
@@ -900,16 +908,21 @@ def aeroelastic_deformations(
 
 
 def dihedral_roll_couple(
-    cfg: AircraftConfig, dynamic_pressure_pa: float, load_factor_value: float = 1.0
+    cfg: AircraftConfig,
+    dynamic_pressure_pa: float,
+    load_factor_value: float = 1.0,
+    beta_deg: float = 0.0,
 ) -> float:
     """Return the dihedral rolling moment about the roll axis in N m.
 
-    ``C_l = DIHEDRAL_ROLL_DERIVATIVE * tan(Lambda)``, ``M = q S b C_l nz``.
-    Positive dihedral rolls to port, so the returned value is positive.
+    ``C_l = -DIHEDRAL_ROLL_DERIVATIVE * tan(Lambda) * beta_rad``, ``M = q S b C_l``.
+    In NED coordinates, positive dihedral with positive sideslip produces negative restoring rolling moment.
+    When beta_deg is explicitly provided or non-zero, uses exact aerodynamic side-slip couple.
+    If beta_deg is 0 and load_factor_value is provided as legacy, scales proportionally to load_factor_value.
     """
     q = _finite_or(float(dynamic_pressure_pa), 0.0)
     nz = _finite_or(float(load_factor_value), 0.0)
-    if q <= 0.0 or nz <= 0.0:
+    if q <= 0.0:
         return 0.0
     derived = derived_properties(cfg)
     tilt = clamp(
@@ -919,6 +932,12 @@ def dihedral_roll_couple(
     )
     area = max(_finite_or(float(derived["ref_area_m2"]), 0.0), _EPS)
     span = max(_finite_or(float(derived["ref_span_m"]), 0.0), _EPS)
+    beta = _finite_or(float(beta_deg), 0.0)
+    if abs(beta) > 1.0e-9:
+        beta_rad = deg2rad(clamp(beta, -90.0, 90.0))
+        return q * area * span * (-DIHEDRAL_ROLL_DERIVATIVE * tilt * beta_rad)
+    if nz <= 0.0:
+        return 0.0
     return q * area * span * DIHEDRAL_ROLL_DERIVATIVE * tilt * nz
 
 

@@ -17,7 +17,8 @@ This document describes all endpoints, request/response formats, and error handl
   {
     "error": "Error description message",
     "status": 400,
-    "timestamp": "2026-10-17T13:20:00Z"
+    "timestamp": "2026-10-17T13:20:00Z",
+    "error_id": "err_abc123def456"
   }
   ```
 
@@ -58,26 +59,50 @@ This document describes all endpoints, request/response formats, and error handl
 **Request Example:**
 ```json
 {
+  "speed_mps": 6.2,
   "alpha_deg": 4.5,
-  "velocity_mps": 6.2,
-  "density": 1.225,
-  "wing_span": 0.28,
-  "wing_area": 0.024,
-  "aspect_ratio": 3.27,
-  "gsm": 80.0
+  "beta_deg": 0.0,
+  "mach": 0.0,
+  "ground_height_m": 1.0,
+  "aircraft": {
+    "wing_area_m2": 0.024,
+    "wingspan_m": 0.28,
+    "aspect_ratio": 3.27,
+    "mass_kg": 0.005,
+    "paper_gsm": 80.0
+  },
+  "environment": {
+    "density": 1.225,
+    "temperature_K": 288.15
+  }
 }
 ```
 
 **Response Example:**
 ```json
 {
-  "lift_N": 0.0892,
-  "drag_N": 0.0124,
-  "lift_coeff": 0.324,
-  "drag_coeff": 0.045,
-  "is_stalled": false,
-  "reynolds_number": 34500,
+  "cl": 0.324,
+  "cd": 0.045,
+  "cm": -0.012,
+  "cy": 0.0,
+  "lift_n": 0.0892,
+  "drag_n": 0.0124,
+  "side_n": 0.0,
+  "pitching_moment_nm": -0.0015,
+  "yawing_moment_nm": 0.0,
+  "rolling_moment_nm": 0.0,
   "ld_ratio": 7.19,
+  "dynamic_pressure_pa": 23.5,
+  "reynolds": 34500,
+  "mach": 0.018,
+  "stall_margin": 0.65,
+  "stalled": false,
+  "w_stall": 0.0,
+  "trim_alpha_deg": 4.44,
+  "ground_effect_ratio": 1.02,
+  "lift_left_n": 0.0446,
+  "lift_right_n": 0.0446,
+  "cp_x_m": 0.032,
   "backend": "numpy"
 }
 ```
@@ -90,23 +115,38 @@ This document describes all endpoints, request/response formats, and error handl
 **Request Example:**
 ```json
 {
-  "bounds": {
-    "x_min": -10, "x_max": 10,
-    "y_min": -10, "y_max": 10,
-    "z_min": 0, "z_max": 15
-  },
+  "bounds_min": [-10, -10, 0],
+  "bounds_max": [10, 10, 15],
   "resolution": [20, 20, 15],
-  "mean_wind": [2.0, 0.0, 0.0],
-  "turbulence_intensity": 0.15
+  "time_s": 0.0,
+  "backend": "auto",
+  "environment": {
+    "wind_speed": 2.0,
+    "wind_direction_deg": 0.0,
+    "gust_intensity": 0.15,
+    "turbulence_scale": 0.35,
+    "turbulence_seed": 12345
+  }
 }
 ```
 
 **Response Example:**
 ```json
 {
-  "grid_shape": [20, 20, 15, 3],
-  "vectors": [...],
-  "backend": "cupy"
+  "positions": [[...], [...], [...]],
+  "vectors": [[...], [...], [...]],
+  "speeds": [...],
+  "shape": [20, 20, 15],
+  "resolution": [20, 20, 15],
+  "backend": "cupy",
+  "backend_requested": "auto",
+  "grid_point_count": 6000,
+  "bounds": {"min": [-10, -10, 0], "max": [10, 10, 15]},
+  "time_s": 0.0,
+  "gust_factor": 1.0,
+  "mean_wind_mps": 2.0,
+  "max_speed": 2.8,
+  "mean_speed": 2.1
 }
 ```
 
@@ -121,16 +161,41 @@ This document describes all endpoints, request/response formats, and error handl
   "algorithm": "nsga2",
   "objectives": ["max_distance", "min_max_stress"],
   "population_size": 24,
-  "generations": 10
+  "max_evaluations": 200,
+  "design_variables": ["wing_area_m2", "wingspan_m", "mass_kg", "paper_gsm", "elevon_deg"],
+  "aircraft": {},
+  "environment": {},
+  "launch": {},
+  "variable_bounds": {},
+  "sim_duration_s": 6.0,
+  "dt_max": 0.02,
+  "seed": 7,
+  "processes": 0
 }
 ```
 
-**Response Example (immediate return):**
+**Response Example (immediate return, status is `running`):**
 ```json
 {
   "job_id": "8f3b2d1c-e7a9-4a2b-923f-1d84f04c64b1",
-  "status": "queued",
-  "message": "Optimization job successfully queued"
+  "name": "nsga2 optimizer",
+  "algorithm": "nsga2",
+  "status": "running",
+  "progress": 0.0,
+  "evaluated_count": 0,
+  "total_evaluations": 200,
+  "started_at": "2026-10-17T13:20:00Z",
+  "updated_at": "2026-10-17T13:20:00Z",
+  "finished_at": "",
+  "eta_seconds": 0.0,
+  "estimated_completion": "",
+  "backend": "multiprocessing",
+  "elapsed_seconds": 0.0,
+  "evals_per_second": 0.0,
+  "message": "Optimization job started",
+  "objectives": ["max_distance", "min_max_stress"],
+  "model_id": "",
+  "result_path": ""
 }
 ```
 
@@ -143,13 +208,24 @@ This document describes all endpoints, request/response formats, and error handl
 ```json
 {
   "job_id": "8f3b2d1c-e7a9-4a2b-923f-1d84f04c64b1",
+  "name": "nsga2 optimizer",
+  "algorithm": "nsga2",
   "status": "running",
   "progress": 0.45,
   "evaluated_count": 108,
   "total_evaluations": 240,
-  "evals_per_second": 12.4,
+  "started_at": "2026-10-17T13:20:00Z",
+  "updated_at": "2026-10-17T13:20:15Z",
+  "finished_at": "",
   "eta_seconds": 10.6,
-  "estimated_completion": "2026-10-17T13:20:15Z"
+  "estimated_completion": "2026-10-17T13:20:25Z",
+  "backend": "multiprocessing",
+  "elapsed_seconds": 15.2,
+  "evals_per_second": 12.4,
+  "message": "Optimization running",
+  "objectives": ["max_distance", "min_max_stress"],
+  "model_id": "",
+  "result_path": ""
 }
 ```
 

@@ -56,7 +56,7 @@ def naca4_coordinates(code: str, n_points: int) -> Tuple[np.ndarray, np.ndarray]
         - 0.1260 * x_dist
         - 0.3516 * (x_dist**2)
         + 0.2843 * (x_dist**3)
-        - 0.1015 * (x_dist**4)
+        - 0.1036 * (x_dist**4)
     )
 
     yc = np.zeros_like(x_dist)
@@ -80,6 +80,8 @@ def naca4_coordinates(code: str, n_points: int) -> Tuple[np.ndarray, np.ndarray]
 
     x_full = np.concatenate([xu[::-1], xl[1:]])
     y_full = np.concatenate([yu[::-1], yl[1:]])
+    x_full[-1] = x_full[0]
+    y_full[-1] = y_full[0]
 
     return x_full, y_full
 

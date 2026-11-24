@@ -163,26 +163,43 @@ class ParetoArchiveManager:
             self._trim_archive()
 
     def _trim_archive(self) -> None:
-        """Trim archive to max_size using non-dominated sort and crowding distance."""
-        if not self._archive or self.max_size is None:
+        """Trim archive to max_size using non-dominated sort and crowding distance in a single pass."""
+        if not self._archive or self.max_size is None or len(self._archive) <= self.max_size:
             return
-        while len(self._archive) > self.max_size:
-            matrix = self.as_matrix()
-            fronts = non_dominated_sort_matrix(matrix, self.directions)
-            if not fronts:
-                # フロントが空の場合、古い順に削除
-                self._archive.pop(0)
-                continue
 
-            # 最後のフロントから削除
-            last_front = fronts[-1]
-            if len(last_front) == 1:
-                self._archive.pop(last_front[0])
+        to_remove = len(self._archive) - self.max_size
+        matrix = self.as_matrix()
+        fronts = non_dominated_sort_matrix(matrix, self.directions)
+        if not fronts:
+            # Fallback if fronts empty: remove oldest
+            del self._archive[:to_remove]
+            return
+
+        removed_indices = set()
+        # Traverse fronts from the worst (last) forward
+        for front in reversed(fronts):
+            if len(removed_indices) >= to_remove:
+                break
+            needed = to_remove - len(removed_indices)
+            if len(front) <= needed:
+                removed_indices.update(front)
             else:
-                distances = crowding_distance_matrix(matrix, last_front)
-                # 最大距離の点を残し、最小距離の点を削除
-                worst_idx = min(last_front, key=lambda i: distances[last_front.index(i)])
-                self._archive.pop(worst_idx)
+                # Need to select a subset of this front to remove (lowest crowding distance)
+                distances = crowding_distance_matrix(matrix, front)
+                # Sort front indices by crowding distance ascending (lowest first)
+                sorted_by_dist = sorted(range(len(front)), key=lambda k: distances[k])
+                for k in sorted_by_dist[:needed]:
+                    removed_indices.add(front[k])
+
+        if len(removed_indices) < to_remove:
+            # Fallback for any remainder
+            for i in range(len(self._archive)):
+                if i not in removed_indices:
+                    removed_indices.add(i)
+                    if len(removed_indices) >= to_remove:
+                        break
+
+        self._archive = [item for i, item in enumerate(self._archive) if i not in removed_indices]
 
     def as_matrix(self) -> np.ndarray:
         """Return the current archive as an (n, num_objectives) float matrix."""

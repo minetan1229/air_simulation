@@ -108,13 +108,13 @@ nav:
       - Physics Roadmap: PHYSICS_ROADMAP.md
   - API Reference:
       - REST API: api.md
-      - OpenAPI (Swagger UI): https://github.com/minetan1229/air_simulation#api-reference
+      - OpenAPI (Swagger UI): api.md
   - Development & Ops:
       - Development Guide: development.md
-      - MILCY Project Guide: MILCY_PROJECT_GUIDE.md
-      - GA V2 Architecture: GA_V2_ARCHITECTURE.md
+      - MILCY Project Guide (JA): MILCY_PROJECT_GUIDE.md
+      - GA V2 Architecture (JA): GA_V2_ARCHITECTURE.md
       - CFD Roadmap: CFD_ROADMAP.md
-      - Paper Registry Pipeline: PAPER_REGISTRY_PIPELINE.md
+      - Paper Registry Pipeline (JA): PAPER_REGISTRY_PIPELINE.md
       - Discord Bridge: discord-bridge.md
-      - Remote Compute: REMOTE_COMPUTE_ENVIRONMENT.md
-      - Code Review Findings: CODE_REVIEW_FINDINGS.md
+      - Remote Compute (JA): REMOTE_COMPUTE_ENVIRONMENT.md
+      - Code Review Findings (JA): CODE_REVIEW_FINDINGS.md

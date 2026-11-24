@@ -31,7 +31,7 @@
 
 **風の高さ基準の正本**: 風場は **地表面からの高度** (`z_up = -z_ned` からの `ground_level_m` 差し引き) で
 サンプルする。`physics/wind_domain.py` と `physics/flight_sim.py::wind_vector` は同一の基準を使い、
-`physics/gpu_dynamics.py` のバッチ経路も `flight_sim` と同じ `wind_vector` を呼ぶ
+`physics/gpu_dynamics.py` のバッチ経路も `wind_domain.wind_flow_components` を直接呼ぶ
 （バッチ経路が独自の高度基準を持つことはない）。
 
 ---
@@ -49,7 +49,7 @@
 ### 2.1 適用限界の明示
 
 - Helmbold 式は **三角翼・直線翼** の低 AR wings の **揚力傾斜** の経験式であり、**失速後の挙動**・
-  **抗力**・**モーメント**・**空力弾性**を記述しない。CNN 経路（`physics/aero_domain.py`）では
+  **抗力**・**モーメント**・**空力弾性**を記述しない。スカラー経路（`physics/aero_domain.py`）では
   この式を **Attached 域の傾斜** としてのみ使い、失速後は §3 の別モデル接手する。
 - `cfg.cLalpha_per_rad > 0` のとき Helmbold は **上書き** される（ユーザー明示値＝単一実装原則の
   例外として、API 契約で公開されている）。
@@ -125,7 +125,7 @@ python -m pytest tests/test_aero.py -q -k helmbold
 | 項目 | 内容 |
 |---|---|
 | 実装 | `physics/aero_kernel.py::post_stall_lift_coefficient`（正本）、`physics/aero_domain.py::_post_stall_lift_coefficient`（再エクスポート） |
-| 式 | 失速時の翼の `C_L` を基準に、**Hoerner の完全分離平板** `C_L = 2 sin α cos²α` の **混合角における値** へ `[α_stall, 45°]` で滑らかに接続（`POST_STALL_PLATE_BLEND_DEG = 45.0`） |
+| 式 | 失速時の翼の `C_L` を基準に、**Hoerner の完全分離平板** `C_L = 2 sin α cos²α |cos α|` の **混合角における値** へ `[α_stall, 45°]` で滑らかに接続（`POST_STALL_PLATE_BLEND_DEG = 45.0`） |
 | 出典 | Hoerner, S. F. (1965), *Fluid-Dynamic Drag*, §2.4（平板の法線力） |
 | 検証 | `tests/test_aero.py` の失速後テスト群、`tools/check_stress_peak_parity.py` |
 
@@ -158,7 +158,7 @@ Hoerner 平板（実装済）と Viterna-Corrigan（**代替案・未実装**）
 - `applicability`: 適用限界の 1 行
 
 これにより「公開されている式が実装されている」という **虚偽の主張**（Viterna-Corrigan）が API 上で
-OTHERS 燃焼しない。検証: `tests/test_physics_model_registry.py`。
+防止される。検証: `tests/test_physics_model_registry.py`。
 
 ---
 
@@ -175,7 +175,7 @@ OTHERS 燃焼しない。検証: `tests/test_physics_model_registry.py`。
 | 誘導抗力 `C_L²/(π e AR)` | **非依存** | — | `physics/aero_domain.py` |
 | 翼根曲げ応力 | **非依存** | 幾何と `nz` のみ | `physics/stress_domain.py` |
 
-`re_cd0_exponent` の既定は **0**（`AircraftConfig`）。既定機体では `C_D0` は Re に依存しない。
+`re_cd0_exponent` の既定は **0.15**（`AircraftConfig`）。既定機体では `C_D0` は Re に弱く依存する（`(1e5/Re)^0.15`）。
 層流境界線 Blasius 則に対応させる場合は `re_cd0_exponent = 0.5`（`C_f ~ 1.328 / sqrt(Re)`）を設定可能。
 また、低 Reynolds 数（`1e3 <= Re <= 5e4`）特有の層流剥離泡（LSB）によるピッチアップ失速遅延およびピッチダウン再付着遅延は、
 `lsb_dynamic_stall_shift` / `lsb_dynamic_stall_hysteresis` によって動的にモデル化されている（`f(Re) = sqrt(1e4 / Re)`）。
@@ -190,7 +190,7 @@ OTHERS 燃焼しない。検証: `tests/test_physics_model_registry.py`。
 ### 4.3 範囲外 (Re ≪ 1e3 / Re ≫ 1e5) の扱い
 
 - **クランプしない**。`C_D0(Re)` は範囲外でも式に従い **外挿** される（値を丸めない）。
-- **警告ではなく**: テレメトリの `model_valid` フラグが外挿的事实を **機械可読に** 伝える。
+- **警告ではなく**: テレメトリの `model_valid` フラグが外挿である事実を **機械可読に** 伝える。
   `physics/flight_sim.py`:
   - `MODEL_MACH_LIMIT = 0.3`
   - `MODEL_REYNOLDS_MIN = 1.0e3`
@@ -201,7 +201,7 @@ OTHERS 燃焼しない。検証: `tests/test_physics_model_registry.py`。
 - 検証: `tests/test_aero.py`（`C_D0` の Re 依存形と単調性）、
   `tests/test_flight.py`（`model_valid` が範囲内で `True` / 範囲外で `False`）。
 
-### 4.3 遷移の連続性
+### 4.4 遷移の連続性
 
 `C_D0(Re)` はべき乗則で **連続**（`Re` の不連続点を持たない）。Re 参照値 `1e5` は相関の基準点であり、
 特異点ではない（`1e5/1e5 = 1` で `C_D0 = cd0`）。
@@ -223,18 +223,12 @@ OTHERS 燃焼しない。検証: `tests/test_physics_model_registry.py`。
   そのまま使われる。低アスペクト比の紙機体では **Helmbold の 3 次元傾斜のほうが物理的に正しい**
   （Polhamus 式は本来 **2 次元**（`K_p` は 2 次元揚力傾斜）で、三角翼の 3 次元効果を陽に含む）。
 - `K_v = 0` のとき、**前縁渦の吸い出し項**も消える。紙機体には **Sharp-Edge Delta** の前縁渦を
-  成立させる锐い前縁・三角平面形が存在しない（`no-finish.md` §A-1 のpanel 法との線形も Issues #47 の
-  3D CFD フェーズで扱うべき事項）。
-- したがって **既定 0.0 は「物理的に妥当」** であり、数値を 0 以外へ **持ち込む** 才是例外である。
-  非 0 を使う場合は **Polhamus 式の適用対象（鋭い前縁の三角翼）であることを確認** したうえで、
-  `K_p` / `K_v` を API から設定し、**応答に `polhamus_active` 相当の情報** が出ることを確認する。
+  成立させる鋭い前縁・三角平面形が存在しない。**例外的に非ゼロを設定する**場合のみ、`K_p` / `K_v` を API から設定し、**応答に `polhamus_active` 相当の情報** が出ることを確認する。
 
 ### 5.2 適用限界
 
-- Polhamus 式は **三角翼・超音速域** で導出されている。極超音速（`Ma > 0.3`）は本シミュレーターの
-  妥当性範囲外（`MODEL_MACH_LIMIT = 0.3`、§4.2）。
-- `K_p` は 2 次元量であり、**3 次元機体にそのまま適用** すると過大評価になる。`K_p > 0` を設定する
-  場合は「2 次元傾斜」「3 次元傾斜」の使い分けを記録すること。
+- Polhamus 式は **亜音速域の鋭い前縁を持つ三角翼** で導出されている（圧縮性亜音速域の三次元ポテンシャル流揚力傾斜を扱う）。
+- `K_p` は **三次元ポテンシャル流揚力傾斜** であり、これを **2 次元値としてそのまま 3 次元機体に適用** すると過大評価になる。`K_p > 0` を設定する場合は「2 次元傾斜」「3 次元傾斜」の使い分けを記録すること。
 
 ---
 
@@ -246,7 +240,7 @@ OTHERS 燃焼しない。検証: `tests/test_physics_model_registry.py`。
 | 正本（縮約） | `physics/stress_domain.py::peak_root_stress_pa` — GPU バッチ経路が使う **スカラー** |
 | 整合 | 縮約は **場の厳密な縮約** でなければならない。上反角の射影 `1/√(1+tan²Λ)`（`dihedral_load_multiplier`）も場と縮約の両方に適用する |
 
-上反角の射影 aplic忘记了場合、縮約は場の **1/cos(Λ)** 倍（既定 5° で 3.8e-3、45° で 1.4e-1）になり、
+上反角の射影を忘れた場合、縮約は場の **1/cos(Λ)** 倍（既定 5° で 3.8e-3、45° で 4.14e-1）になり、
 GPU 経路と 6DoF 経路のピーク応力が食い違う。検証:
 
 ```

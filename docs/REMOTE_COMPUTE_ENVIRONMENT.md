@@ -69,7 +69,7 @@
 ### 3.1 隔離環境の再構築（クリーンインストール）
 何らかの依存破損や設定変更があった場合、リモート側で以下を実行するだけで初期状態に復元可能：
 ```bash
-ssh minetan1229@192.168.100.2
+ssh $REMOTE_SSH_USER@$REMOTE_SSH_HOST
 cd ~/paper_airplanes_worker
 ./setup_env.sh
 ```
@@ -77,7 +77,7 @@ cd ~/paper_airplanes_worker
 ### 3.2 隔離環境の完全削除（クリーンアップ）
 作業ディレクトリおよび仮想環境を完全に撤去する場合：
 ```bash
-ssh minetan1229@192.168.100.2
+ssh $REMOTE_SSH_USER@$REMOTE_SSH_HOST
 cd ~/paper_airplanes_worker
 ./cleanup.sh
 ```

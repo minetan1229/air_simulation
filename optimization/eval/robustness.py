@@ -23,7 +23,7 @@ class RobustnessEvaluator:
     def __init__(
         self,
         duration_s: float = 6.0,
-        n_samples: int = 16,
+        n_samples: Optional[int] = None,
         seed: int = 2026,
         dryden_wind_directions_deg: Sequence[float] = (0.0, 90.0, 180.0, 270.0),
         dryden_seeds: Sequence[int] = (101, 202),
@@ -31,7 +31,8 @@ class RobustnessEvaluator:
     ) -> None:
         self.duration_s = duration_s
         self.dt_max = dt_max
-        self.n_samples = max(8, int(n_samples))
+        fixed_count = len(dryden_wind_directions_deg) * len(dryden_seeds)
+        self.n_samples = fixed_count if n_samples is None else int(n_samples)
         self.seed = int(seed)
         self.dryden_wind_directions_deg = tuple(float(d) for d in dryden_wind_directions_deg)
         self.dryden_seeds = tuple(int(s) for s in dryden_seeds)
@@ -39,24 +40,11 @@ class RobustnessEvaluator:
     def evaluate_candidate(self, candidate: AircraftCandidate) -> RobustnessReport:
         """Run Dryden turbulence, jitter, and high-pitch throw stress tests with Monte Carlo."""
         # 折り紙ジオメトリ由来の完全な AircraftConfig を構築（CG/慣性欠落を解消）
-        if candidate.raw_genome is not None:
-            from physics.origami_genome import genome_to_aircraft_config
-            aircraft = genome_to_aircraft_config(
-                candidate.raw_genome, paper_gsm=candidate.config.paper_gsm
-            )
-        else:
-            geom = candidate.geometry
-            cfg = candidate.config
-            keel_height_m = geom.keel_height_m if geom else 0.015
-            aircraft = AircraftConfig(
-                mass_kg=geom.mass_kg if geom else 0.005,
-                wing_area_m2=geom.wing_area_m2 if geom else 0.015,
-                wingspan_m=geom.wingspan_m if geom else 0.18,
-                aspect_ratio=geom.aspect_ratio if geom else 2.16,
-                dihedral_deg=cfg.wing.dihedral_deg,
-                elevon_deg=0.5 * (cfg.wing.elevon_left_deg + cfg.wing.elevon_right_deg),
-                keel_height_m=keel_height_m,
-            )
+        from physics.benchmark.benchmark import _build_aircraft_config
+        aircraft = _build_aircraft_config(candidate)
+        geom = candidate.geometry
+        keel_height_m = geom.keel_height_m if geom else 0.015
+        aircraft.keel_height_m = keel_height_m
 
         rng = np.random.default_rng(self.seed)
         dryden_survivals, dryden_times = [], []

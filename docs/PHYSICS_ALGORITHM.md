@@ -107,7 +107,7 @@ $$C_D = C_{D0} + \frac{C_L^2}{\pi e AR} \cdot GE(h) + C_{D,\text{sep}}(\alpha)$$
 
 ### 1.5 モーメント係数・静的安定性
 
-$$C_m = C_{m0} + C_{m\alpha}(\alpha - \alpha_{\text{trim}}) + C_{mq} \frac{\bar{c}}{2V} q$$
+$$C_m = C_{m0} + C_{m\alpha} \alpha + C_{mq} \frac{\bar{c}}{2V} q$$
 
 - トリム迎角: $\alpha_{\text{trim}} = -C_{m0}/C_{m\alpha}$（静的マージン確保）
 - 動的減衰: $C_{mq}$ はピッチレート$q$に比例
@@ -221,8 +221,8 @@ $$x_{n+1} = x_n + \frac{h}{6}(k_1 + 2k_2 + 2k_3 + k_4)$$
 | 角速度変化 | $|\Delta\omega| > 2.0$ rad/s | ステップ半分・再実行 |
 | 速度変化 | $|\Delta v| > 25$ m/s | ステップ半分・再実行 |
 | 姿勢変化 | $|\Delta q| > 0.35$ rad | ステップ半分・再実行 |
-| 予測超過 | 観測ジャンプ $> 1.25 \times$ 予測 | ステップ半分・再実行 |
-| 非有限値/上限超過 | NaN, |v|>500, |z|>11km, |r_xy|>100km | `diverged` 判定 |
+| 予測超過 | 観測ジャンプ $> 2.25 \times$ 予測 | ステップ半分・再実行 |
+| 非有限値/上限超過 | NaN, \|v\|>500, \|z\|>11km, \|r_xy\|>100km | `diverged` 判定 |
 
 **最大リトライ**: 6回（`DIVERGENCE_RETRIES = 6`）。超過で `crashed` + `status="diverged"`。
 
@@ -238,11 +238,11 @@ $$x_{n+1} = x_n + \frac{h}{6}(k_1 + 2k_2 + 2k_3 + k_4)$$
 
 ### 3.1 翼根曲げモーメント（正本: `stress_domain.py::peak_root_stress_pa`）
 
-$$M_{\text{root}} = \frac{1}{2} \rho V^2 S b \cdot C_{M,\text{root}}$$
+$$M_{\text{root}} = \frac{m g |n_z| b (1 + 2\lambda)}{12(1 + \lambda)}$$
 
 ### 3.2 断面係数（矩形板近似）
 
-$$Z = \frac{b \cdot t^2}{6}, \quad t = \frac{\text{GSM}}{800} \text{ [m]}$$
+$$Z = \frac{b \cdot t^2}{6}, \quad t = \frac{\text{GSM}}{800}\ [\text{mm}] = \frac{\text{GSM}}{8.0\times10^5}\ [\text{m}]$$
 
 ### 3.3 較正係数 `KAPPA_SIGMA = 9.0e-6`
 
@@ -320,7 +320,7 @@ $$\mu(T) = \mu_0 \frac{T^{3/2}}{T + S} \frac{T_0 + S}{T_0^{3/2}}$$
 │  │ (北から時計回り「吹いてくる」)     │                         │         │
 │  └─────────────────────────┘           └─────────────────────────┘         │
 │                                                                             │
-│  風速ベクトル変換:  w_NED = -w_wind   (符号反転のみ、水平成分は回転不要)       │
+│  風速ベクトル変換:  w_NED = -w_wind  （鉛直符号反転＋水平成分 x,y 軸交換）       │
 │                                                                             │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```

@@ -574,17 +574,46 @@ def apply_correction(
     the mean design.
     """
     names = tuple(str(name) for name in feature_names)
-    if not model.fitted or not names:
+    if not model.fitted or not names or not results:
         return [dict(result) for result in results]
 
+    # Vectorized feature matrix construction:
+    # Build (N, p) matrix directly using model._mean as default for missing features
+    N = len(results)
+    num_features = len(model.feature_names)
+    matrix = np.empty((N, num_features), dtype=np.float64)
+    # Fill with mean design (neutral assumption)
+    if model._mean is not None:
+        matrix[:] = model._mean
+    else:
+        matrix.fill(0.0)
+
+    # Fast column filling for each model feature name
+    name_to_col = {name: idx for idx, name in enumerate(model.feature_names)}
+    for row_idx, res in enumerate(results):
+        for name, col_idx in name_to_col.items():
+            if name in res:
+                try:
+                    matrix[row_idx, col_idx] = float(res[name])
+                except (ValueError, TypeError):
+                    pass
+
+    # Batch prediction: (N, T) matrix
+    predictions = np.asarray(model.predict(matrix), dtype=np.float64)
+    if predictions.ndim == 1:
+        predictions = predictions.reshape(1, -1)
+
+    target_names = model.target_names
+    num_targets = min(len(target_names), predictions.shape[1])
+
     corrected: List[Dict[str, Any]] = []
-    for result in results:
-        features = {name: float(result[name]) for name in names if name in result}
-        prediction = np.asarray(model.predict(features)).reshape(-1)
+    for row_idx, result in enumerate(results):
         updated = dict(result)
-        for index, target in enumerate(model.target_names):
-            if target in updated and index < prediction.size:
-                val = float(updated[target]) + float(prediction[index])
+        pred_row = predictions[row_idx]
+        for index in range(num_targets):
+            target = target_names[index]
+            if target in updated:
+                val = float(updated[target]) + float(pred_row[index])
                 # Physical bound guards (M-26):
                 # Parasitic and total drag coefficients cannot be negative or smaller than laminar skin friction
                 if target in ("cd", "screening_cd", "cd0"):

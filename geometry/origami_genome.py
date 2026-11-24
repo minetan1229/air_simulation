@@ -164,6 +164,11 @@ class FoldStep:
         """The unsigned amount the paper is turned."""
         return abs(self.fold_angle_deg)
 
+    @property
+    def up(self) -> bool:
+        """Whether this fold is a mountain fold (consistent with Crease.up)."""
+        return self.mountain
+
     def to_dict(self) -> Dict[str, Any]:
         return {
             "step_index": int(self.step_index),

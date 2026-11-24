@@ -966,8 +966,11 @@ def lsb_dynamic_stall_hysteresis(
     Returns:
         (effective_stall_alpha_deg, is_stalled_current)
     """
-    alpha = xp.abs(_finite(xp, alpha_deg, 0.0))
+    alpha_signed = _finite(xp, alpha_deg, 0.0)
+    alpha = xp.abs(alpha_signed)
     adot = _finite(xp, alpha_dot_deg_s, 0.0)
+    alpha_sign = xp.where(alpha_signed >= 0.0, _f64(xp, 1.0), _f64(xp, -1.0))
+    abs_adot = alpha_sign * adot
     adot_rad = _rad(xp, adot)
     c = xp.maximum(_finite(xp, mac_m, 0.1), 1.0e-6)
     v = xp.maximum(_finite(xp, speed_mps, 0.0), 0.1)
@@ -983,7 +986,7 @@ def lsb_dynamic_stall_hysteresis(
 
     shift_up = k_lsb * k_red * f_re * (180.0 / math.pi)
     shift_down = -(delta_reatt + k_reatt * k_red * f_re * (180.0 / math.pi))
-    w_up = 0.5 * (1.0 + xp.tanh(adot / 1.0))
+    w_up = 0.5 * (1.0 + xp.tanh(abs_adot / 1.0))
     delta_shift = (1.0 - w_up) * shift_down + w_up * shift_up
 
     # Turbulence suppression factor (Hoffmann 1991: LSB loop collapses under freestream turbulence)

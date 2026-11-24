@@ -168,7 +168,10 @@ def test_static_margin_sensitivity_and_pitch_coupling() -> None:
             # Analytical check in attached flow (alpha <= stall_alpha):
             # delta_cm == -(cp_x - 0.25*chord)/chord * cl
             if a <= 14.0:
-                expected_delta_cm = -((cp_x_shift[i] - 0.25 * chord) / chord) * cl_shift[i]
+                a_rad = np.radians(a)
+                cd_shift = np.asarray(res_shift["cd"])
+                c_n = cl_shift[i] * np.cos(a_rad) + cd_shift[i] * np.sin(a_rad)
+                expected_delta_cm = -((cp_x_shift[i] - 0.25 * chord) / chord) * c_n
                 actual_delta_cm = cm_shift[i] - cm_base[i]
                 assert actual_delta_cm == pytest.approx(expected_delta_cm, abs=1e-12)
             else:

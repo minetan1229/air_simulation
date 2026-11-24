@@ -614,7 +614,7 @@ def build_params(
         span=spans,
         dihedral_rad=_rad(xp, column("dihedral_deg")),
         dihedral_sin=xp.sin(_rad(xp, column("dihedral_deg"))),
-        gravity=abs(float(env.gravity)),
+        gravity=float(env.gravity),
         ground_level_m=float(env.ground_level_m),
         wind=wind,
         aero=aero,
@@ -794,12 +794,15 @@ def _evaluate_state(
         m_add_z = added["added_mass_z_kg"]
         m_eff_z = params.mass + m_add_z
         gravity_body = world_to_body_batch(xp, rotation, gravity_world)
+        u_rel_app = body_relative[:, 0]
+        v_rel_app = body_relative[:, 1]
         w_rel_app = body_relative[:, 2]
         f_cor_x = -omega[:, 1] * m_add_z * w_rel_app
         f_cor_y = omega[:, 0] * m_add_z * w_rel_app
+        f_cor_z = m_add_z * (omega[:, 0] * v_rel_app - omega[:, 1] * u_rel_app)
         a_body_0 = (force_body[:, 0] + f_cor_x) / params.mass + gravity_body[:, 0]
         a_body_1 = (force_body[:, 1] + f_cor_y) / params.mass + gravity_body[:, 1]
-        a_body_2_app = (force_body[:, 2] + params.mass * gravity_body[:, 2]) / m_eff_z
+        a_body_2_app = (force_body[:, 2] + params.mass * gravity_body[:, 2] + f_cor_z) / m_eff_z
         a_body_0 = xp.where(params.apparent_active, a_body_0, (force_body[:, 0] / params.mass) + gravity_body[:, 0])
         a_body_1 = xp.where(params.apparent_active, a_body_1, (force_body[:, 1] / params.mass) + gravity_body[:, 1])
         a_body_z = xp.where(params.apparent_active, a_body_2_app, (force_body[:, 2] / params.mass) + gravity_body[:, 2])
@@ -1371,7 +1374,8 @@ def simulate_batch(
         # the state evaluation above is the same evaluation of the same
         # state.  It is evaluated once and shared instead of twice.
         k1 = _derivative_from_core(xp, params, y, core)
-        current_time = float(xp.mean(acc["time"]))
+        sample_stages = bool(getattr(params, "sample_wind_stages", False))
+        current_time = float(xp.mean(acc["time"])) if sample_stages else 0.0
         y_next = _rk4(
             xp,
             params,
@@ -1380,7 +1384,7 @@ def simulate_batch(
             wind,
             k1=k1,
             time_s=current_time,
-            sample_wind_stages=getattr(params, "sample_wind_stages", False),
+            sample_wind_stages=sample_stages,
         )
 
         # --- ground contact ------------------------------------------------

@@ -65,22 +65,45 @@ def _build_aircraft_config(candidate: AircraftCandidate) -> AircraftConfig:
     geom = candidate.geometry
     cfg = candidate.config
 
-    mass_kg = geom.mass_kg if geom else 0.005
-    wing_area = geom.wing_area_m2 if geom else 0.015
-    wingspan = geom.wingspan_m if geom else 0.18
-    aspect_ratio = geom.aspect_ratio if geom else 2.16
+    mass_kg = float(getattr(geom, "mass_kg", 0.005)) if geom else 0.005
+    raw_area = getattr(geom, "planform_area_m2", None)
+    if raw_area is None and geom is not None:
+        raw_area = getattr(geom, "wing_area_m2", 0.015)
+    try:
+        wing_area = float(raw_area) if raw_area is not None else 0.015
+    except (TypeError, ValueError):
+        wing_area = 0.015
+
+    try:
+        wingspan = float(getattr(geom, "wingspan_m", 0.18)) if geom else 0.18
+    except (TypeError, ValueError):
+        wingspan = 0.18
+
+    raw_ar = getattr(geom, "planform_aspect_ratio", None)
+    if raw_ar is None and geom is not None:
+        raw_ar = getattr(geom, "aspect_ratio", 2.16)
+    try:
+        aspect_ratio = float(raw_ar) if raw_ar is not None else 2.16
+    except (TypeError, ValueError):
+        aspect_ratio = 2.16
+
     dihedral_deg = cfg.wing.dihedral_deg
     elevon_deg = 0.5 * (cfg.wing.elevon_left_deg + cfg.wing.elevon_right_deg)
 
     cg_offset_x = 0.0
     static_margin = 0.12
     if geom:
-        chord = max(0.01, float(geom.chord_m))
-        x_from_nose = 0.1485 - float(geom.cg_m[0])
-        nominal_ac_from_nose = 0.35 * chord
-        raw_offset = x_from_nose - nominal_ac_from_nose
-        cg_offset_x = max(-0.05, min(0.05, float(raw_offset)))
-        static_margin = max(-0.20, min(0.30, float(-cg_offset_x / chord)))
+        try:
+            chord = max(0.01, float(getattr(geom, "chord_m", 0.12)))
+            nose_x = float(getattr(geom, "nose_tip_x_m", 0.1485))
+            cg_m = getattr(geom, "cg_m", (0.08, 0.0, 0.005))
+            x_from_nose = nose_x - float(cg_m[0])
+            nominal_ac_from_nose = 0.35 * chord
+            raw_offset = x_from_nose - nominal_ac_from_nose
+            cg_offset_x = max(-0.05, min(0.05, float(raw_offset)))
+            static_margin = max(-0.20, min(0.30, float(-cg_offset_x / chord)))
+        except (TypeError, ValueError, AttributeError, IndexError):
+            pass
 
     ac = AircraftConfig(
         mass_kg=mass_kg,
@@ -119,17 +142,17 @@ def evaluate_horizontal_glide(
         settings=settings,
     )
 
-    result = sim.simulate(duration_s=duration_s)
-    sim_metrics = sim.metrics()
-
-    # Extract flight history samples for phase analysis
+    sim_metrics: dict = {}
     samples: list = []
+    stable_duration = 0.0
     try:
+        result = sim.simulate(duration_s=duration_s)
+        sim_metrics = sim.metrics() or {}
         samples = sim.history()
         phase_metrics = flight_phase_metrics(samples, phugoid_window_s=2.5)
         stable_duration = float(phase_metrics.get("stable_glide_duration_s", 0.0) or 0.0)
     except Exception:
-        stable_duration = 0.0
+        pass
 
     flight_time = float(sim_metrics.get("flight_time_s", 0.0) or 0.0)
     distance_m = float(sim_metrics.get("distance_m", 0.0) or 0.0)

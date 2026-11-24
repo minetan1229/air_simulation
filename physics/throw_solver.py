@@ -24,7 +24,7 @@ from core.config_schema import (
     safe_div,
     throw_style,
 )
-from core.geometry_utils import body_to_world, quaternion_from_euler
+from core.geometry_utils import body_to_world, quaternion_from_euler, world_to_body
 from physics.ground_contact import compute_ground_stations
 
 
@@ -245,11 +245,13 @@ def resolve_throw(
     yaw_total = flight_yaw_deg + release_yaw_deg
     quaternion = quaternion_from_euler(roll_total, pitch_total, yaw_total)
 
-    # --- release speed and direction -------------------------------------
+    impulse_scale = 1.0
     if active:
-        speed = impulse_ns / mass
+        raw_speed = impulse_ns / mass
+        speed = raw_speed
         if not math.isfinite(speed) or speed > MAX_RELEASE_SPEED_MPS:
             speed = min(speed if math.isfinite(speed) else MAX_RELEASE_SPEED_MPS, MAX_RELEASE_SPEED_MPS)
+            impulse_scale = speed / max(raw_speed, 1.0e-9) if math.isfinite(raw_speed) else 1.0
             warnings.append(
                 f"release speed clamped to {MAX_RELEASE_SPEED_MPS:g} m/s (hand impulse too large)"
             )
@@ -283,7 +285,7 @@ def resolve_throw(
     inertia[1, 2] = inertia[2, 1] = derived.get("inertia_yz_kgm2", 0.0)
     if active:
         try:
-            torque_rate = np.linalg.solve(inertia, moment * duration * efficiency)
+            torque_rate = np.linalg.solve(inertia, moment * duration * efficiency * impulse_scale)
         except np.linalg.LinAlgError:
             torque_rate = np.zeros(3, dtype=np.float64)
         rates = np.array(
@@ -343,7 +345,15 @@ def resolve_throw(
         dtype=np.float64,
     )
     gravity = abs(_finite(env.gravity, 9.80665))
-    kinetic_energy = 0.5 * mass * speed * speed
+    e_rot = 0.5 * float(rates @ (inertia @ rates))
+    kinetic_energy = 0.5 * mass * speed * speed + e_rot
+
+    # 3D aerodynamic release angle of attack from body velocity
+    v_body = world_to_body(quaternion, velocity)
+    if math.hypot(v_body[0], v_body[2]) > 1.0e-9:
+        release_alpha_deg = rad2deg(math.atan2(v_body[2], v_body[0]))
+    else:
+        release_alpha_deg = float(pitch_total - velocity_pitch_deg)
 
     return ThrowSolution(
         style=key,
@@ -363,9 +373,7 @@ def resolve_throw(
         speed_mps=float(speed),
         velocity_mps=tuple(float(v) for v in velocity),  # type: ignore[arg-type]
         flight_path_deg=(float(velocity_pitch_deg), float(velocity_yaw_deg)),
-        # Nose-up attitude relative to flight path gives positive angle of attack:
-        # alpha = pitch_attitude - flight_path_pitch.
-        release_alpha_deg=float(pitch_total - velocity_pitch_deg),
+        release_alpha_deg=float(release_alpha_deg),
         release_euler_deg=(float(roll_total), float(pitch_total), float(yaw_total)),
         quaternion=tuple(float(v) for v in quaternion),  # type: ignore[arg-type]
         release_height_m=float(height),

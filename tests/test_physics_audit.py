@@ -392,7 +392,7 @@ def test_flat_plate_lift_matches_the_hoerner_curve() -> None:
     for degrees in (0.0, 5.0, 15.0, 35.26, 60.0, 85.0, 90.0, 120.0):
         a = deg2rad(degrees)
         assert flat_plate_lift_coefficient(degrees) == pytest.approx(
-            2.0 * math.sin(a) * math.cos(a) ** 2, rel=1e-12
+            2.0 * math.sin(a) * math.cos(a) * abs(math.cos(a)), rel=1e-12
         )
     # d/dalpha [2 sin a cos^2 a] = 0  =>  cos^2 a = 2 sin^2 a  =>  tan a = 1/sqrt(2)
     peak_angle = math.degrees(math.atan(1.0 / math.sqrt(2.0)))

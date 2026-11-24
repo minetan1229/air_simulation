@@ -1479,7 +1479,7 @@ def panel_aerodynamics(
                 prandt_glauert = 1.0 / math.sqrt(1.0 - mach_sq)
 
     alpha_rad = math.radians(float(alpha_deg))
-    flow = np.array([-math.cos(alpha_rad), 0.0, math.sin(alpha_rad)], dtype=np.float64)
+    flow = np.array([-math.cos(alpha_rad), 0.0, -math.sin(alpha_rad)], dtype=np.float64)
     q = float(dynamic_pressure_pa)
 
     panel_list = list(panels) if panels is not None else []
@@ -1533,12 +1533,8 @@ def panel_aerodynamics(
         centroid = centroids[position]
         area = max(float(areas[position]), 0.0)
 
-        cos_local = -float(np.dot(normal, flow))
-        if math.isnan(cos_local) or not math.isfinite(cos_local):
-            cos_local = 0.0
-        else:
-            cos_local = float(np.clip(cos_local, -1.0, 1.0))
-        local_rad = math.asin(cos_local)
+        sin_local = float(np.clip(np.dot(normal, flow), -1.0, 1.0))
+        local_rad = math.asin(sin_local)
         local_deg = math.degrees(local_rad)
 
         magnitude = abs(local_rad)
@@ -1552,19 +1548,20 @@ def panel_aerodynamics(
             cl_flat = 2.0 * math.sin(local_rad) * (math.cos(local_rad) ** 2)
             cl = (1.0 - weight) * cl_linear + weight * cl_flat
 
-        cl_rot = cl * safe_div(cg_proj - float(chord_proj[position]), chord_extent, default=0.0)
+        cl_rot = 0.0
         cl_total = (cl + cl_rot) * lift_scale * prandt_glauert
         lambda_n = q * cl_total * area
 
         in_plane = normal - float(np.dot(normal, flow)) * flow
-        lift_dir = normalize(in_plane, fallback=(0.0, 0.0, -1.0))
+        global_lift_axis = np.array([math.sin(alpha_rad), 0.0, -math.cos(alpha_rad)], dtype=np.float64)
+        lift_dir = normalize(in_plane, fallback=(math.sin(alpha_rad), 0.0, -math.cos(alpha_rad)))
         force = lambda_n * lift_dir
         lever = centroid - reference_cg
         moment += np.cross(lever, force)
 
         drag = PANEL_PROFILE_DRAG_CD * q * area * drag_scale
         total_drag += drag
-        total_lift += lambda_n
+        total_lift += float(np.dot(force, global_lift_axis))
         max_lambda = max(max_lambda, abs(lambda_n))
 
         if hasattr(panel, "local_alpha_deg"):
@@ -1666,9 +1663,9 @@ def extract_panel_aerodynamic_rom(
     cl_alpha, cl0 = np.polyfit(alphas_rad, cl_arr, deg=1)
     cm_alpha, cm0 = np.polyfit(alphas_rad, cm_arr, deg=1)
 
-    # Aerodynamic center: x_ac = x_cg - (dCm/dalpha) / (dCL/dalpha) * c
+    # Aerodynamic center: x_ac = x_cg + (dCm/dalpha) / (dCL/dalpha) * c
     if abs(cl_alpha) > 1e-4:
-        x_ac_frac = (cg_m[0] / chord_m) - (cm_alpha / cl_alpha)
+        x_ac_frac = (cg_m[0] / chord_m) + (cm_alpha / cl_alpha)
     else:
         x_ac_frac = 0.25
 
@@ -2078,8 +2075,15 @@ def compute_metrics(
 
     cg_tuple = tuple(float(v) for v in properties["cg_m"])
     cg_3: Tuple[float, float, float] = (cg_tuple[0], cg_tuple[1], cg_tuple[2])
-    specific = inertia_tensor_mesh(verts, tris, max(mass, 1.0e-12), cg_3)
-    trace = float(np.trace(specific))
+    is_closed = bool(properties.get("is_closed", False))
+    vol = float(properties.get("volume_m3", 0.0))
+    if is_closed and vol > _VOLUME_EPS:
+        specific = inertia_tensor_mesh(verts, tris, max(mass, 1.0e-12), cg_3)
+        trace = float(np.trace(specific))
+    else:
+        specific = np.zeros((3, 3), dtype=np.float64)
+        trace = 0.0
+
     if not np.all(np.isfinite(specific)) or trace <= 0.0:
         # Uniform surface mass on an open paper sheet. Exact triangle
         # second moments preserve body axes and off-diagonal components.

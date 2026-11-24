@@ -406,10 +406,8 @@ class StaticFsiScreener:
         section = section_modulus_batch(
             xp, root_chord_safe * scale_safe, t_safe, z_safe
         )
-        # Physical root stress in Pa (without KAPPA_SIGMA scaling)
-        root_stress_pa = moment / section
-        # Stress margin uses KAPPA_SIGMA for the index comparison
-        stress_margin = xp.where(root_stress_pa > 0.0, allowable_array / (KAPPA_SIGMA * root_stress_pa), 0.0)
+        root_stress = KAPPA_SIGMA * moment / section
+        stress_margin = xp.where(root_stress > 0.0, allowable_array / root_stress, 0.0)
 
         # The buckling of the compressed ply at the root: the root section
         # is a plate of the thickness of one sheet, and the critical stress
@@ -428,9 +426,8 @@ class StaticFsiScreener:
                 * root_chord_safe
             )
         )
-        # Compare physical stresses (both in Pa)
         buckling_margin = xp.where(
-            root_stress_pa > 0.0, critical_stress / xp.maximum(root_stress_pa, 1.0e-30), 0.0
+            root_stress > 0.0, critical_stress / xp.maximum(root_stress, 1.0e-30), 0.0
         )
 
         # Elastic deflection using inextensible elastica cantilever (corrects dimension error)

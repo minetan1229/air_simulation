@@ -22,6 +22,8 @@ import uuid
 from dataclasses import dataclass, field, fields, is_dataclass
 from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
 
+import numpy as np
+
 __all__ = [
     "G0", "R_AIR", "R_VAPOR", "MU0_ISA", "SUTHERLAND_T0", "T0_ISA", "P0_ISA", "LAPSE_RATE_ISA",
     "GAMMA_AIR", "VON_KARMAN", "MU_SUTHERLAND", "STANDARD_GRAVITY",
@@ -422,6 +424,20 @@ class AircraftConfig:
                 ixy = clamp(ixy, -max_xy, max_xy)
                 ixz = clamp(ixz, -max_xz, max_xz)
                 iyz = clamp(iyz, -max_yz, max_yz)
+
+                # Ensure 3x3 inertia matrix is positive semi-definite (eigenvalues >= 0)
+                # Second-moment matrix M = 0.5 * tr(I) * I_3 - I >= 0
+                mat = np.array([[r, ixy, ixz], [ixy, p, iyz], [ixz, iyz, y]], dtype=np.float64)
+                eigvals, eigvecs = np.linalg.eigh(mat)
+                if np.any(eigvals < 1.0e-12):
+                    eigvals = np.maximum(eigvals, 1.0e-12)
+                    mat = eigvecs @ np.diag(eigvals) @ eigvecs.T
+                    r = float(mat[0, 0])
+                    p = float(mat[1, 1])
+                    y = float(mat[2, 2])
+                    ixy = float(mat[0, 1])
+                    ixz = float(mat[0, 2])
+                    iyz = float(mat[1, 2])
 
         mean_chord = float(self.wing_area_m2) / max(float(self.wingspan_m), 1.0e-6)
 
@@ -1487,20 +1503,12 @@ def derived_properties(cfg: AircraftConfig) -> Dict[str, float]:
     # term is included, because the roll/pitch inertia enters Euler's equation
     # about the CG.  For a linearly tapered sheet with root chord ``c_root``,
     # span ``b`` and taper ``lambda`` (c(y) = c_root (1 - (1-L) 2y/b)):
-    #
-    #   y_cg = b (1 + 2L) / (3 (1 + L))            spanwise, measured from the root
-    #   x_cg = c_root (1 + L + L^2) / (3 (1 + L))  chordwise, measured from the LE
-    #   E[(y - y_cg)^2] = b^2 [ (1+3L)/(6(1+L)) - (1+2L)^2/(9(1+L)^2) ]
-    #
-    # The bracket reduces to 1/12 for a rectangular sheet (b^2/12) and to 1/18
-    # for a triangular one (b^2/18) - the textbook values.  The previous
-    # expression b^2 (1+3L)/(24(1+L)) was exact only for a rectangle (it
-    # omitted the parallel-axis shift), understating the triangular-wing
-    # inertia by 25 %.
-    second_y = span * span * (
-        (1.0 + 3.0 * taper) / (6.0 * (1.0 + taper))
-        - (1.0 + 2.0 * taper) ** 2 / (9.0 * (1.0 + taper) ** 2)
-    )
+    # Symmetric trapezoidal planform y in [-b/2, +b/2]:
+    #   By lateral symmetry, y_cg = 0.
+    #   E[y^2] = (1 / Area) \int_{-b/2}^{b/2} y^2 c(y) dy = b^2 * (1 + 3*L) / (24 * (1 + L)).
+    #   For rectangular wing (L = 1): b^2 / 12.
+    #   For delta / triangular wing (L = 0): b^2 / 24.
+    second_y = span * span * (1.0 + 3.0 * taper) / (24.0 * (1.0 + taper))
     second_x = root_chord * root_chord * (
         (1.0 + taper + taper ** 2 + taper ** 3) / (6.0 * (1.0 + taper))
         - (1.0 + taper + taper ** 2) ** 2 / (9.0 * (1.0 + taper) ** 2)
@@ -1542,11 +1550,16 @@ def derived_properties(cfg: AircraftConfig) -> Dict[str, float]:
         "yaw_inertia_kgm2": float(cfg.yaw_inertia_kgm2)
         if cfg.yaw_inertia_kgm2 > 0.0
         else (
-            max(
-                inertia_yaw,
+            min(
+                max(
+                    inertia_yaw,
+                    abs(
+                        (float(cfg.roll_inertia_kgm2) if cfg.roll_inertia_kgm2 > 0.0 else inertia_roll)
+                        - (float(cfg.pitch_inertia_kgm2) if cfg.pitch_inertia_kgm2 > 0.0 else inertia_pitch)
+                    ),
+                ),
                 (float(cfg.roll_inertia_kgm2) if cfg.roll_inertia_kgm2 > 0.0 else inertia_roll)
-                + (float(cfg.pitch_inertia_kgm2) if cfg.pitch_inertia_kgm2 > 0.0 else inertia_pitch)
-                - 2.0 * mass * second_z,
+                + (float(cfg.pitch_inertia_kgm2) if cfg.pitch_inertia_kgm2 > 0.0 else inertia_pitch),
             )
             if (cfg.roll_inertia_kgm2 > 0.0 or cfg.pitch_inertia_kgm2 > 0.0)
             else inertia_yaw

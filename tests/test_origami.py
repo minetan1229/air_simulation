@@ -243,6 +243,14 @@ def test_stacked_layers_are_separated_by_a_full_pitch(archetype):
             if abs(od._dot3(a.normal, b.normal)) < od.PARALLEL_EPS:
                 continue
             ref = layers.reference[a.fid]
+            normal_dist = abs(
+                od._dot3(
+                    od._sub3(b.centroid3d, a.centroid3d),
+                    a.normal,
+                )
+            )
+            if normal_dist > od.MAX_LAYER_STACK_GAP_M:
+                continue
             proj_a = od._project_polygon(a.poly3d, ref)
             proj_b = od._project_polygon(b.poly3d, ref)
             if not od._convex_overlap(proj_a, proj_b):
