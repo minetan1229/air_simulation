@@ -40,6 +40,7 @@ from __future__ import annotations
 import contextlib
 import inspect
 import math
+import threading
 from dataclasses import dataclass
 from dataclasses import fields as _dataclass_fields
 from dataclasses import MISSING as _MISSING
@@ -2133,45 +2134,31 @@ def _is_cupy(xp: Any) -> bool:
     return getattr(xp, "__name__", "") == "cupy"
 
 
+_FUSED_LOCK = threading.RLock()
+
+
 @contextlib.contextmanager
 def _fma_contraction_disabled() -> Any:
-    """Compile the fused kernel without FMA contraction.
+    """Compile the fused kernel without FMA contraction."""
+    with _FUSED_LOCK:
+        try:
+            import cupy.cuda.compiler as compiler
+        except Exception:  # pragma: no cover - a CuPy without the compiler module
+            yield
+            return
+        original = getattr(compiler, "_compile_module_with_cache", None)
+        if original is None:  # pragma: no cover - an unknown CuPy layout
+            yield
+            return
 
-    A fused kernel evaluates a whole expression tree inside one thread, so
-    the compiler may contract a multiplication and the addition that
-    consumes it into a single fused multiply-add.  The eager path cannot do
-    that -- it runs one operation per kernel -- so the contraction would
-    make the fused kernel differ from the eager one in the last bit.  The
-    option is therefore removed from the NVRTC command line of the fused
-    kernel alone, which keeps the two paths bit-identical.
+        def without_fma(source, options=(), *args, **kwargs):
+            return original(source, tuple(options) + ("--fmad=false",), *args, **kwargs)
 
-    The patch is scoped to the compilation of the fused kernel; every other
-    CuPy kernel of the process keeps the default (contracting) behaviour.
-    The patch is held for the whole fused call, not only for the first one,
-    because a new dtype combination would be compiled during that call and
-    would have to be compiled without the contraction as well.  The window
-    is short and the batch path is single threaded, so a kernel compiled
-    concurrently by another thread would at worst lose its contraction --
-    a last-bit difference in an unrelated kernel.
-    """
-    try:
-        import cupy.cuda.compiler as compiler
-    except Exception:  # pragma: no cover - a CuPy without the compiler module
-        yield
-        return
-    original = getattr(compiler, "_compile_module_with_cache", None)
-    if original is None:  # pragma: no cover - an unknown CuPy layout
-        yield
-        return
-
-    def without_fma(source, options=(), *args, **kwargs):
-        return original(source, tuple(options) + ("--fmad=false",), *args, **kwargs)
-
-    compiler._compile_module_with_cache = without_fma
-    try:
-        yield
-    finally:
-        compiler._compile_module_with_cache = original
+        compiler._compile_module_with_cache = without_fma
+        try:
+            yield
+        finally:
+            compiler._compile_module_with_cache = original
 
 
 def _device_array(xp: Any, value: Any) -> Any:
@@ -2184,16 +2171,17 @@ def _device_array(xp: Any, value: Any) -> Any:
 def _run_fused(xp: Any, device_arguments: Tuple[Any, ...]) -> Tuple[Any, ...]:
     """Run the fused kernel (compiling it on first use)."""
     global _FUSED_KERNEL
-    if _FUSED_KERNEL is None:
-        import cupy
+    with _FUSED_LOCK:
+        if _FUSED_KERNEL is None:
+            import cupy
 
-        @cupy.fuse(kernel_name="aero_coefficients_fused")
-        def _fused(*kernel_arguments: Any) -> Tuple[Any, ...]:
-            return _coefficient_core(cupy, *kernel_arguments)
+            @cupy.fuse(kernel_name="aero_coefficients_fused")
+            def _fused(*kernel_arguments: Any) -> Tuple[Any, ...]:
+                return _coefficient_core(cupy, *kernel_arguments)
 
-        _FUSED_KERNEL = _fused
-    with _fma_contraction_disabled():
-        return _FUSED_KERNEL(*device_arguments)
+            _FUSED_KERNEL = _fused
+        with _fma_contraction_disabled():
+            return _FUSED_KERNEL(*device_arguments)
 
 
 def _values_match(xp: Any, fused: Any, eager: Any) -> bool:
@@ -2223,25 +2211,34 @@ def _fused_matches_eager(
     The comparison covers the state of the call itself and a set of
     rounding-sensitive probe states, evaluated with the same airframe.
     """
-    eager = _coefficient_core(xp, *arguments)
-    if len(eager) != len(values):
-        return False
-    for fused_value, eager_value in zip(values, eager):
-        if not _values_match(xp, fused_value, eager_value):
+    try:
+        eager = _coefficient_core(xp, *arguments)
+        if len(eager) != len(values):
             return False
-
-    shape = xp.asarray(arguments[_CORE_BUNDLE_FIELDS.index("area")]).shape
-    for probe in _FUSED_PROBE_STATES:
-        probe_arguments = list(arguments)
-        for offset, value in enumerate(probe):
-            index = len(_CORE_BUNDLE_FIELDS) + offset
-            probe_arguments[index] = xp.full(shape, value, dtype=xp.float64)
-        probe_values = _run_fused(xp, tuple(probe_arguments))
-        probe_eager = _coefficient_core(xp, *probe_arguments)
-        for fused_value, eager_value in zip(probe_values, probe_eager):
+        for fused_value, eager_value in zip(values, eager):
             if not _values_match(xp, fused_value, eager_value):
                 return False
-    return True
+
+        # Use a small fixed shape (4,) for verification probes instead of large batch shape to avoid OOM
+        probe_shape = (4,)
+        for probe in _FUSED_PROBE_STATES:
+            probe_arguments = list(arguments)
+            # Re-shape airframe bundle fields to probe_shape
+            for b_idx in range(len(_CORE_BUNDLE_FIELDS)):
+                val = arguments[b_idx]
+                scalar_val = float(val.flat[0]) if hasattr(val, "flat") else float(val)
+                probe_arguments[b_idx] = xp.full(probe_shape, scalar_val, dtype=xp.float64)
+            for offset, value in enumerate(probe):
+                index = len(_CORE_BUNDLE_FIELDS) + offset
+                probe_arguments[index] = xp.full(probe_shape, value, dtype=xp.float64)
+            probe_values = _run_fused(xp, tuple(probe_arguments))
+            probe_eager = _coefficient_core(xp, *probe_arguments)
+            for fused_value, eager_value in zip(probe_values, probe_eager):
+                if not _values_match(xp, fused_value, eager_value):
+                    return False
+        return True
+    except Exception:
+        return False
 
 
 def _fused_coefficients(xp: Any, arguments: Tuple[Any, ...]) -> Any:
@@ -2252,24 +2249,23 @@ def _fused_coefficients(xp: Any, arguments: Tuple[Any, ...]) -> Any:
     uses the eager path, which computes the same numbers.
     """
     global _FUSED_STATE, _FUSED_KERNEL
-    if _FUSED_STATE == "rejected":
-        return None
-    try:
-        device_arguments = tuple(_device_array(xp, value) for value in arguments)
-        values = _run_fused(xp, device_arguments)
-    except Exception:
-        # A CuPy build without a working fusion must not break the batch
-        # path: the eager evaluation computes exactly the same numbers.
-        _FUSED_STATE = "rejected"
-        _FUSED_KERNEL = None
-        return None
-    if _FUSED_STATE != "verified":
-        if not _fused_matches_eager(xp, device_arguments, values):
+    with _FUSED_LOCK:
+        if _FUSED_STATE == "rejected":
+            return None
+        try:
+            device_arguments = tuple(_device_array(xp, value) for value in arguments)
+            values = _run_fused(xp, device_arguments)
+        except Exception:
             _FUSED_STATE = "rejected"
             _FUSED_KERNEL = None
             return None
-        _FUSED_STATE = "verified"
-    return values
+        if _FUSED_STATE != "verified":
+            if not _fused_matches_eager(xp, device_arguments, values):
+                _FUSED_STATE = "rejected"
+                _FUSED_KERNEL = None
+                return None
+            _FUSED_STATE = "verified"
+        return values
 
 
 def fused_gpu_state() -> str:
@@ -2638,7 +2634,7 @@ def params_from_aircraft(cfg: AircraftConfig) -> AeroParams:
         stall_sharpness=max(abs(_finite_scalar(cfg.stall_sharpness, 1.4)), 1.0e-6),
         polhamus_kp=max(_finite_scalar(getattr(cfg, "polhamus_kp", 0.0), 0.0), 0.0),
         polhamus_kv=max(_finite_scalar(cfg.polhamus_kv, 0.0), 0.0),
-        cd0=_finite_scalar(raw_cd0, 0.02),
+        cd0=max(_finite_scalar(raw_cd0, 0.02), 0.0),
         re_cd0_exponent=_finite_scalar(cfg.re_cd0_exponent, 0.0),
         cm0=_finite_scalar(raw_cm0, 0.0),
         cm_alpha=_finite_scalar(cfg.cm_alpha, 0.0),
@@ -2651,7 +2647,7 @@ def params_from_aircraft(cfg: AircraftConfig) -> AeroParams:
         cl_yaw_rate=_finite_scalar(cfg.cl_yaw_rate, 0.0),
         cn_beta=_finite_scalar(cfg.cn_beta, 0.0),
         cn_roll_rate=_finite_scalar(cfg.cn_roll_rate, 0.0) + prandtl_bell_proverse_yaw(
-            getattr(cfg, "washout_deg", 0.0),
+            _finite_scalar(getattr(cfg, "washout_deg", 0.0), 0.0),
             _finite_scalar(raw_cL0, 0.0) if abs(_finite_scalar(raw_cL0, 0.0)) > 1.0e-6 else 0.3,
             aspect,
         ),
@@ -2662,7 +2658,7 @@ def params_from_aircraft(cfg: AircraftConfig) -> AeroParams:
         asymmetry_cl=_finite_scalar(getattr(cfg, "asymmetry_cl", 0.0), 0.0),
         rudder_deg=_finite_scalar(getattr(cfg, "rudder_deg", 0.0), 0.0),
         elevon_deg=_finite_scalar(cfg.elevon_deg, 0.0),
-        elevon_authority=clamp(abs(_finite_scalar(cfg.elevon_chord_ratio, 0.22)), 0.0, 1.0),
+        elevon_authority=clamp(_finite_scalar(cfg.elevon_chord_ratio, 0.22), 0.0, 1.0),
         fold_trailing_deg=_finite_scalar(getattr(cfg, "fold_trailing_deg", 0.0), 0.0),
         cg_offset_x=_finite_scalar(cfg.cg_offset_x, 0.0),
         cp_shift_gain=_finite_scalar(cfg.cp_shift_gain, 0.0),

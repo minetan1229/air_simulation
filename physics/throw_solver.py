@@ -281,33 +281,32 @@ def resolve_throw(
     inertia[0, 1] = inertia[1, 0] = derived.get("inertia_xy_kgm2", 0.0)
     inertia[0, 2] = inertia[2, 0] = derived.get("inertia_xz_kgm2", 0.0)
     inertia[1, 2] = inertia[2, 1] = derived.get("inertia_yz_kgm2", 0.0)
-    # The release rotation is the rigid-body rate the contact impulse produces,
-    # ``w = I^-1 (r x F) dt eta``.  No component is scaled beyond the
-    # documented ``throw_torque_efficiency`` ``eta``: a per-axis factor would
-    # be an unsourced magic number that biases the initial condition of every
-    # flight (root AGENTS.md section 1.5).
-    torque_rate = np.linalg.solve(inertia, moment * duration * efficiency)
-    rates = np.array(
-        [
-            clamp(
-                _finite(torque_rate[0] + _finite(cfg.throw_wrist_spin_radps)),
-                -MAX_RELEASE_ROLL_RATE_RADPS,
-                MAX_RELEASE_ROLL_RATE_RADPS,
-            ),
-            clamp(
-                _finite(torque_rate[1] + _finite(cfg.throw_pitch_rate_radps)),
-                -MAX_RELEASE_PITCH_RATE_RADPS,
-                MAX_RELEASE_PITCH_RATE_RADPS,
-            ),
-            clamp(
-                _finite(torque_rate[2] + _finite(cfg.throw_yaw_rate_radps)),
-                -MAX_RELEASE_YAW_RATE_RADPS,
-                MAX_RELEASE_YAW_RATE_RADPS,
-            ),
-        ],
-        dtype=np.float64,
-    )
-    if not active:
+    if active:
+        try:
+            torque_rate = np.linalg.solve(inertia, moment * duration * efficiency)
+        except np.linalg.LinAlgError:
+            torque_rate = np.zeros(3, dtype=np.float64)
+        rates = np.array(
+            [
+                clamp(
+                    _finite(torque_rate[0] + _finite(cfg.throw_wrist_spin_radps)),
+                    -MAX_RELEASE_ROLL_RATE_RADPS,
+                    MAX_RELEASE_ROLL_RATE_RADPS,
+                ),
+                clamp(
+                    _finite(torque_rate[1] + _finite(cfg.throw_pitch_rate_radps)),
+                    -MAX_RELEASE_PITCH_RATE_RADPS,
+                    MAX_RELEASE_PITCH_RATE_RADPS,
+                ),
+                clamp(
+                    _finite(torque_rate[2] + _finite(cfg.throw_yaw_rate_radps)),
+                    -MAX_RELEASE_YAW_RATE_RADPS,
+                    MAX_RELEASE_YAW_RATE_RADPS,
+                ),
+            ],
+            dtype=np.float64,
+        )
+    else:
         # The neutral entry point keeps the historical behaviour exactly:
         # no force, no grip, no wrist rotation.
         grip = np.zeros(3, dtype=np.float64)
@@ -331,6 +330,8 @@ def resolve_throw(
     height = _finite(cfg.launch_height_m)
     ground_level = _finite(getattr(env, "ground_level_m", 0.0))
     raw_pos = getattr(cfg, "launch_position_m", (0.0, 0.0, 0.0))
+    if raw_pos is None or not isinstance(raw_pos, (list, tuple, np.ndarray)):
+        raw_pos = (0.0, 0.0, 0.0)
     pos_x = _finite(raw_pos[0]) if len(raw_pos) > 0 else 0.0
     pos_y = _finite(raw_pos[1]) if len(raw_pos) > 1 else 0.0
     position = np.array(

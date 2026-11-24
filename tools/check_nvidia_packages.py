@@ -1,9 +1,20 @@
-import paramiko
-from setup_remote_worker import get_client, run_cmd
+"""Check NVIDIA packages - delegates SSH auth to tools.remote_auth."""
 
-client = get_client()
-run_cmd(client, "apt-cache search '^nvidia-driver' | head -n 10")
-run_cmd(client, "apt-cache search '^nvidia-open' | head -n 10")
-run_cmd(client, "apt-cache search '^nvidia-cuda-toolkit' || true")
-run_cmd(client, "dpkg -l | grep -E 'linux-headers|nvidia' || true")
-client.close()
+from tools.remote_auth import build_ssh_client, exec_command
+
+
+def run(cmd):
+    status, out, err = exec_command(client, cmd)
+    print(out)
+    if err and status != 0:
+        print("ERR:", err)
+    return status
+
+
+if __name__ == "__main__":
+    client = build_ssh_client()
+    run("apt-cache search '^nvidia-driver' | head -n 10")
+    run("apt-cache search '^nvidia-open' | head -n 10")
+    run("apt-cache search '^nvidia-cuda-toolkit' || true")
+    run("dpkg -l | grep -E 'linux-headers|nvidia' || true")
+    client.close()

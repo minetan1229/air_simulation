@@ -146,6 +146,20 @@ def _state(run_id: str) -> GARunState:
     return state
 
 
+def _safe_ga_path(path_str: str, param_name: str, base_dir: Optional[str] = None) -> str:
+    """Validate that path_str does not traverse outside the allowed directory."""
+    if not path_str or not isinstance(path_str, str):
+        raise BadRequest(f"invalid path for '{param_name}'")
+    from pathlib import Path
+    root = Path(base_dir or os.getcwd()).resolve()
+    try:
+        candidate = (root / path_str).resolve() if not os.path.isabs(path_str) else Path(path_str).resolve()
+        candidate.relative_to(root)
+    except (ValueError, RuntimeError) as exc:
+        raise BadRequest(f"path '{path_str}' for '{param_name}' escapes the allowed directory: {exc}") from exc
+    return str(candidate)
+
+
 def _overrides_from_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
     """The configuration overrides a request body asks for."""
     overrides: Dict[str, Any] = {}
@@ -169,13 +183,16 @@ def _overrides_from_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
     take("tier3_duration_s", "tier3_duration_s")
     take("paper_gsm", "paper_gsm")
     take("processes", "processes")
-    take("checkpoint_dir", "checkpoint_dir")
-    take("journal_path", "journal_path")
-    take("resume_from", "resume_from")
+    if payload.get("checkpoint_dir") is not None:
+        overrides["checkpoint_dir"] = _safe_ga_path(payload["checkpoint_dir"], "checkpoint_dir")
+    if payload.get("journal_path") is not None:
+        overrides["journal_path"] = _safe_ga_path(payload["journal_path"], "journal_path")
+    if payload.get("resume_from") is not None:
+        overrides["resume_from"] = _safe_ga_path(payload["resume_from"], "resume_from")
 
     out_dir = payload.get("output_dir") or payload.get("out_dir")
     if out_dir:
-        overrides["out_dir"] = str(out_dir)
+        overrides["out_dir"] = _safe_ga_path(str(out_dir), "out_dir")
     # The batch evaluator spawns worker processes; inside a server thread
     # that is both slow and fragile, so a run started through the API stays
     # in the process unless the request asks for workers explicitly.
@@ -196,10 +213,11 @@ def _base_config_from_payload(payload: Dict[str, Any]) -> Any:
     path = payload.get("config_path")
     if not path:
         return None
+    safe_path = _safe_ga_path(str(path), "config_path")
     from physics.ga_config import load_config_file
 
     try:
-        return load_config_file(str(path), {})
+        return load_config_file(safe_path, {})
     except (OSError, ValueError) as exc:
         raise BadRequest(f"invalid research configuration file: {exc}") from exc
 
@@ -295,11 +313,13 @@ def ga_research_run():
 
     base = base_config if base_config is not None else GAConfig()
     config = base.merged(overrides).validate()
+    with state.lock:
+        current_status = state.status
     return jsonify(
         {
             "run_id": state.run_id,
             "config": config.to_dict(),
-            "status": state.status,
+            "status": current_status,
             "objective": config.objective,
             "output_dir": state.out_dir,
         }
@@ -438,6 +458,8 @@ def ga_research_resume():
         if not os.path.exists(latest):
             raise NotFound(f"research run '{run_id}' has no checkpoint to resume from")
         checkpoint = latest
+    else:
+        checkpoint = _safe_ga_path(str(checkpoint), "checkpoint", base_dir=state.checkpoint_dir)
 
     overrides: Dict[str, Any] = {"resume_from": str(checkpoint)}
     if payload.get("max_trials") is not None:
@@ -447,7 +469,7 @@ def ga_research_resume():
     if payload.get("generations") is not None:
         overrides["generations"] = as_int(payload["generations"], "generations")
     if payload.get("output_dir") or payload.get("out_dir"):
-        overrides["out_dir"] = str(payload.get("output_dir") or payload.get("out_dir"))
+        overrides["out_dir"] = _safe_ga_path(str(payload.get("output_dir") or payload.get("out_dir")), "out_dir")
 
     from physics.ga_config import GAConfig
 

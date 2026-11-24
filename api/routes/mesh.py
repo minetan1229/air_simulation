@@ -24,12 +24,17 @@ def mesh_import():
         raise BadRequest(f"could not import model: {exc}") from exc
 
 
+MAX_MESH_BYTES = 64 * 1024 * 1024  # 64 MB
+
+
 def _mesh_import_inner():
     if request.files:
         uploaded = request.files.get("file")
         if uploaded is None or not uploaded.filename:
             raise BadRequest("multipart upload must contain a 'file' field")
-        data = uploaded.read()
+        data = uploaded.read(MAX_MESH_BYTES + 1)
+        if len(data) > MAX_MESH_BYTES:
+            raise BadRequest(f"mesh file exceeds maximum allowed size ({MAX_MESH_BYTES} bytes)")
         filename = secure_filename(uploaded.filename) or 'model.glb'
         raw_gsm = as_float(request.form.get("paper_gsm", 100.0), "paper_gsm")
         metrics = mesh_domain.MESH_LIBRARY.import_model_bytes(
@@ -58,12 +63,17 @@ def _mesh_import_inner():
             data = payload.get("data_base64")
             if not data:
                 raise BadRequest("provide a multipart 'file', a 'url', or 'data_base64'")
+            # Base64 string length check before decoding (approx 4/3 of binary size)
+            if len(data) > int(MAX_MESH_BYTES * 1.35):
+                raise BadRequest(f"base64 mesh data exceeds maximum size limit ({MAX_MESH_BYTES} bytes)")
             import base64
 
             try:
                 raw = base64.b64decode(data, validate=True)
             except Exception as exc:
                 raise BadRequest(f"'data_base64' is not valid base64: {exc}") from exc
+            if len(raw) > MAX_MESH_BYTES:
+                raise BadRequest(f"decoded mesh data exceeds maximum size limit ({MAX_MESH_BYTES} bytes)")
             raw_fn = str(payload.get("filename", "model.glb"))
             filename = secure_filename(raw_fn) or "model.glb"
             metrics = mesh_domain.MESH_LIBRARY.import_model_bytes(

@@ -601,7 +601,7 @@ def ground_effect_factor(height_m: float, span_m: float, enabled: bool = True, s
 
     sigma = sigma_min + (1 - sigma_min) * 16(h/b)_eff^2 / (1 + 16(h/b)_eff^2)
     where (h/b)_eff = max(h/b, 0.05) prevents induced-drag collapse at zero clearance.
-    
+
     The value multiplies the free-air induced drag, so it is ``1.0`` when the
     model is disabled (full free-air induced drag) and approaches ``sigma_min``
     at the surface.  Matches :func:`physics.aero_domain.ground_effect_factor`.
@@ -1656,7 +1656,22 @@ class FlightSimulator:
                 inertia_xz_kgm2=0.0,
                 inertia_yz_kgm2=0.0,
             )
-            self._inertia = body_inertia_tensor(derived_properties(clean_cfg))
+        # Issue #95: Integrate pre-flight panel aerodynamic ROM when aero_source == 'panel_rom'
+        aero_src = getattr(self.aircraft, "aero_source", "analytical")
+        panels = getattr(self.aircraft, "mesh_panels", None)
+        if aero_src == "panel_rom" and panels:
+            from geometry.mesh_domain import extract_panel_aerodynamic_rom
+            area = max(float(derived.get("ref_area_m2", 0.015)), 1e-6)
+            mac = max(float(derived.get("mac_m", 0.08)), 1e-4)
+            cg = (float(derived.get("cg_x_m", 0.0)), 0.0, 0.0)
+            rom = extract_panel_aerodynamic_rom(panels, chord_m=mac, area_m2=area, cg_m=cg)
+            self.aircraft = replace(
+                self.aircraft,
+                cL0=float(rom.get("cL0", self.aircraft.cL0)),
+                cm0=float(rom.get("cm0", self.aircraft.cm0)),
+                cm_alpha=float(rom.get("cm_alpha", self.aircraft.cm_alpha)),
+                cd0=float(rom.get("cd0", self.aircraft.cd0)),
+            )
 
     def _resolve_trim_pitch(self) -> float:
         """Elevon trim angle of attack, from ``aero_domain`` when available."""

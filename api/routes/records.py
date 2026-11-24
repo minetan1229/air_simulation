@@ -41,37 +41,43 @@ def data_export():
     if fmt not in ("csv", "json"):
         raise BadRequest("'format' must be csv or json")
 
-    if kind == "flight":
-        samples = payload.get("samples")
-        if samples is None:
-            with SESSION.lock:
-                if SESSION.simulator is None:
-                    raise BadRequest(
-                        "no simulation history available; start one or pass 'samples' explicitly"
-                    )
-                samples = [as_dict(s) for s in SESSION.simulator.history()]
-        if not isinstance(samples, list):
-            raise BadRequest("'samples' must be a list of flight-log records")
-        text, mimetype, filename = storage_domain.export_flight_log(samples, fmt)
-    elif kind == "optimizer":
-        result = payload.get("result")
-        if result is None:
-            raise BadRequest("an optimizer 'result' payload is required for kind='optimizer'")
-        text, mimetype, filename = storage_domain.export_optimizer_result(result, fmt)
-    elif kind == "config":
-        bundle = payload.get("bundle") or SESSION.current_snapshot()
-        text, mimetype, filename = storage_domain.export_config(bundle, fmt)
-    elif kind == "ensemble":
-        ensemble_data = payload.get("data")
-        if ensemble_data is None:
-            raise BadRequest("ensemble 'data' payload is required for kind='ensemble'")
-        text, mimetype, filename = storage_domain.export_ensemble_data(ensemble_data, fmt)
-    else:
-        raise BadRequest("'kind' must be one of flight, optimizer, config, ensemble")
+    try:
+        if kind == "flight":
+            samples = payload.get("samples")
+            if samples is None:
+                with SESSION.lock:
+                    if SESSION.simulator is None:
+                        raise BadRequest(
+                            "no simulation history available; start one or pass 'samples' explicitly"
+                        )
+                    samples = [as_dict(s) for s in SESSION.simulator.history()]
+            if not isinstance(samples, list):
+                raise BadRequest("'samples' must be a list of flight-log records")
+            text, mimetype, filename = storage_domain.export_flight_log(samples, fmt)
+        elif kind == "optimizer":
+            result = payload.get("result")
+            if result is None:
+                raise BadRequest("an optimizer 'result' payload is required for kind='optimizer'")
+            text, mimetype, filename = storage_domain.export_optimizer_result(result, fmt)
+        elif kind == "config":
+            bundle = payload.get("bundle") or SESSION.current_snapshot()
+            text, mimetype, filename = storage_domain.export_config(bundle, fmt)
+        elif kind == "ensemble":
+            ensemble_data = payload.get("data")
+            if ensemble_data is None:
+                raise BadRequest("ensemble 'data' payload is required for kind='ensemble'")
+            text, mimetype, filename = storage_domain.export_ensemble_data(ensemble_data, fmt)
+        else:
+            raise BadRequest("'kind' must be one of flight, optimizer, config, ensemble")
+    except BadRequest:
+        raise
+    except Exception as exc:
+        raise BadRequest(f"could not export data: {exc}") from exc
 
     if request.args.get("download") in ("1", "true", "yes"):
+        safe_fn = filename.replace('"', '\\"')
         return Response(
-            text, mimetype=mimetype, headers={"Content-Disposition": f"attachment; filename={filename}"}
+            text, mimetype=mimetype, headers={"Content-Disposition": f'attachment; filename="{safe_fn}"'}
         )
     return jsonify({"filename": filename, "mimetype": mimetype, "payload": text})
 
@@ -270,6 +276,8 @@ def report_client_error():
         raise BadRequest("'details' must be a JSON object")
     if details is None:
         details = {}
+    elif len(details) > 50:
+        details = {k: details[k] for k in list(details.keys())[:50]}
 
     traceback_str = payload.get("stack") or payload.get("traceback")
     if traceback_str is not None and not isinstance(traceback_str, str):

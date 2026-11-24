@@ -439,7 +439,7 @@ class StaticFsiScreener:
         line_load = q_safe * c_safe
         # Bending stiffness per unit width: EI = e_safe * (c_safe * t_safe^3 / 12) [N·m²]
         ei_nm2 = e_safe * c_safe * t_safe * t_safe * t_safe / 12.0
-        
+
         # Use vectorized elastica for each panel (can't easily vectorize, use approximation)
         # For small deflections, use linear theory; for large, use elastica
         # Here we use a corrected formula with proper dimensions:

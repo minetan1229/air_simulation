@@ -7,7 +7,7 @@
 ## 1. 動作環境・必要要件 (Prerequisites)
 
 - **オペレーティングシステム**: Windows 10/11 (64-bit), Linux (Ubuntu 20.04 LTS 以上推奨), macOS 12+
-- **Python**: 3.10 以上 (3.11.x 推奨)
+- **Python**: 3.10 以上 (CI/CD において Python 3.10, 3.11, 3.12 を常時マトリクス検証済み。3.11.x 推奨。Python 3.13 は C-API/CuPy のエコシステム対応状況に応じて順次サポート)
 - **アクセラレータ (GPU)**: NVIDIA GPU (CUDA 12.x / Compute Capability 5.0 以上)
 - **パッケージ**: `cupy-cuda12x>=13.0.0` (GPU 利用時)
   - GPU 非搭載または CUDA 初期化不可環境では、NumPy / `multiprocessing` による **CPU フォールバックへ自動的に移行する**（返却スキーマは GPU 経路と同一）。CUDA 初期化に失敗しても `RuntimeError` で停止しない。

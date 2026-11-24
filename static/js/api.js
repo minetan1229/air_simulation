@@ -37,14 +37,14 @@ async function parse(response) {
 const DEFAULT_TIMEOUT_MS = 60000;
 
 function createSignal(options) {
-  if (options && options.signal) return options.signal;
+  if (options && options.signal) return { signal: options.signal, cleanup: () => {} };
   const timeoutMs = (options && options.timeoutMs) || DEFAULT_TIMEOUT_MS;
   if (typeof AbortSignal !== "undefined" && typeof AbortSignal.timeout === "function") {
-    return AbortSignal.timeout(timeoutMs);
+    return { signal: AbortSignal.timeout(timeoutMs), cleanup: () => {} };
   }
   const controller = new AbortController();
-  setTimeout(() => controller.abort(), timeoutMs);
-  return controller.signal;
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  return { signal: controller.signal, cleanup: () => clearTimeout(timer) };
 }
 
 function handleFetchError(err) {
@@ -55,47 +55,59 @@ function handleFetchError(err) {
 }
 
 async function get(path, options = {}) {
+  const { signal, cleanup } = createSignal(options);
+  const headers = { Accept: "application/json", ...(options.headers || {}) };
   const init = {
-    headers: { Accept: "application/json" },
     cache: "no-store",
-    signal: createSignal(options),
     ...options,
+    headers,
+    signal,
   };
   try {
     const response = await fetch(`${BASE}${path}`, init);
-    return parse(response);
+    return await parse(response);
   } catch (err) {
     handleFetchError(err);
+  } finally {
+    cleanup();
   }
 }
 
 async function post(path, body, options = {}) {
+  const { signal, cleanup } = createSignal(options);
+  const defaultHeaders = { Accept: "application/json" };
   const init = {
     method: "POST",
-    headers: { Accept: "application/json" },
-    signal: createSignal(options),
+    ...options,
+    signal,
   };
   if (body instanceof FormData) {
     init.body = body;
+    init.headers = { ...defaultHeaders, ...(options.headers || {}) };
   } else if (body !== undefined && body !== null) {
-    init.headers["Content-Type"] = "application/json";
+    defaultHeaders["Content-Type"] = "application/json";
     init.body = JSON.stringify(body);
+    init.headers = { ...defaultHeaders, ...(options.headers || {}) };
+  } else {
+    init.headers = { ...defaultHeaders, ...(options.headers || {}) };
   }
-  Object.assign(init, options);
   try {
     const response = await fetch(`${BASE}${path}`, init);
-    return parse(response);
+    return await parse(response);
   } catch (err) {
     handleFetchError(err);
+  } finally {
+    cleanup();
   }
 }
 
 /** GET returning the raw response (used for CSV downloads). */
 async function getText(path, options = {}) {
+  const { signal, cleanup } = createSignal(options);
   const init = {
     cache: "no-store",
-    signal: createSignal(options),
     ...options,
+    signal,
   };
   try {
     const response = await fetch(`${BASE}${path}`, init);
@@ -103,6 +115,8 @@ async function getText(path, options = {}) {
     return { text: await response.text(), type: response.headers.get("Content-Type") || "text/csv" };
   } catch (err) {
     handleFetchError(err);
+  } finally {
+    cleanup();
   }
 }
 
@@ -111,36 +125,44 @@ async function getText(path, options = {}) {
 /* ------------------------------------------------------------------ */
 
 async function gaGet(path, options = {}) {
+  const { signal, cleanup } = createSignal(options);
+  const headers = { Accept: "application/json", ...(options.headers || {}) };
   const init = {
-    headers: { Accept: "application/json" },
     cache: "no-store",
-    signal: createSignal(options),
     ...options,
+    headers,
+    signal,
   };
   try {
     const response = await fetch(`${GA_BASE}${path}`, init);
-    return parse(response);
+    return await parse(response);
   } catch (err) {
     handleFetchError(err);
+  } finally {
+    cleanup();
   }
 }
 
 async function gaPost(path, body, options = {}) {
+  const { signal, cleanup } = createSignal(options);
+  const defaultHeaders = { Accept: "application/json" };
   const init = {
     method: "POST",
-    headers: { Accept: "application/json" },
-    signal: createSignal(options),
+    ...options,
+    signal,
   };
   if (body !== undefined && body !== null) {
-    init.headers["Content-Type"] = "application/json";
+    defaultHeaders["Content-Type"] = "application/json";
     init.body = JSON.stringify(body);
   }
-  Object.assign(init, options);
+  init.headers = { ...defaultHeaders, ...(options.headers || {}) };
   try {
     const response = await fetch(`${GA_BASE}${path}`, init);
-    return parse(response);
+    return await parse(response);
   } catch (err) {
     handleFetchError(err);
+  } finally {
+    cleanup();
   }
 }
 

@@ -863,12 +863,24 @@ def stage_ui(r: Runner) -> None:
             rel = os.path.relpath(os.path.join(root, name), "static").replace("\\", "/")
             static_files.add(f"static/{rel}")
     local = {ref for ref in referenced if ref.startswith("static/")}
-    # Modules reached through an ES dynamic import() from main.js are referenced
-    # by bare filename, not by a <script src>, so collect those too.
+    # Modules reached through ES imports are referenced by module import statements,
+    # so transitively crawl any imported JS module.
     js_sources = []
-    for asset in sorted(local):
-        if asset.endswith(".js"):
-            js_sources.append(r.client.get(f"/{asset}").get_data(as_text=True))
+    seen_js = set()
+    to_visit = [asset for asset in sorted(local) if asset.endswith(".js")]
+    while to_visit:
+        curr = to_visit.pop(0)
+        if curr in seen_js:
+            continue
+        seen_js.add(curr)
+        code = r.client.get(f"/{curr}").get_data(as_text=True)
+        js_sources.append(code)
+        for cand in sorted(static_files):
+            if cand.endswith(".js") and cand not in seen_js:
+                name = cand.rsplit("/", 1)[-1]
+                if name in code or cand in code:
+                    local.add(cand)
+                    to_visit.append(cand)
     for asset in sorted(static_files):
         if asset not in local:
             name = asset.rsplit("/", 1)[-1]

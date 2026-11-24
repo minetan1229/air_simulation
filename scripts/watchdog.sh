@@ -15,8 +15,9 @@
 
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-cd "$SCRIPT_DIR"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+PROJECT_ROOT="$SCRIPT_DIR"
+cd "$PROJECT_ROOT"
 
 if command -v python >/dev/null 2>&1; then
     PY_CMD="python"
@@ -27,10 +28,10 @@ else
     exit 1
 fi
 
-PID_FILE="sim_process.pid"
-LOG_FILE="sim_output.log"
-RUN_DIR="runs/ga_research"
-STATUS_FILE="watchdog_status.txt"
+PID_FILE="$PROJECT_ROOT/sim_process.pid"
+LOG_FILE="$PROJECT_ROOT/sim_output.log"
+RUN_DIR="$PROJECT_ROOT/runs/ga_research"
+STATUS_FILE="$PROJECT_ROOT/watchdog_status.txt"
 
 # 1. Start simulation if not already running
 START_SIM=false
@@ -39,20 +40,7 @@ if [ ! -f "$PID_FILE" ]; then
 else
     SIM_PID=$(cat "$PID_FILE")
     # Verify if PID is running
-    if ! "$PY_CMD" -c "
-import sys, os
-pid = int(sys.argv[1])
-if os.name == 'nt':
-    import ctypes
-    h = ctypes.windll.kernel32.OpenProcess(0x0400, False, pid)
-    sys.exit(0 if h else 1)
-else:
-    try:
-        os.kill(pid, 0)
-        sys.exit(0)
-    except OSError:
-        sys.exit(1)
-" "$SIM_PID" 2>/dev/null; then
+    if ! "$PY_CMD" -c "import ctypes, sys; h=ctypes.windll.kernel32.OpenProcess(0x0400, False, int(sys.argv[1])); sys.exit(0 if h else 1)" "$SIM_PID" 2>/dev/null; then
         START_SIM=true
     fi
 fi
@@ -62,13 +50,14 @@ if [ "$START_SIM" = true ]; then
     # Launch independently (resume if latest.json exists)
     "$PY_CMD" -c "
 import subprocess, sys, os
-cmd = [sys.executable, 'tools/run_ga_research.py', '--generations', '1000', '--max-trials', '500000']
-latest = 'runs/ga_research/checkpoints/latest.json'
+root = os.environ.get('PROJECT_ROOT', os.getcwd())
+cmd = [sys.executable, os.path.join(root, 'tools/run_ga_research.py'), '--generations', '1000', '--max-trials', '500000']
+latest = os.path.join(root, 'runs/ga_research/checkpoints/latest.json')
 if os.path.exists(latest):
     cmd.extend(['--resume', latest])
     print('Resuming from:', latest, 'with generations=1000, max_trials=500000')
-p = subprocess.Popen(cmd, stdout=open('sim_output.log', 'ab'), stderr=subprocess.STDOUT)
-with open('sim_process.pid', 'w') as f:
+p = subprocess.Popen(cmd, stdout=open(os.path.join(root, 'sim_output.log'), 'ab'), stderr=subprocess.STDOUT)
+with open(os.path.join(root, 'sim_process.pid'), 'w') as f:
     f.write(str(p.pid))
 print('Started PID:', p.pid)
 "
@@ -80,15 +69,16 @@ echo "[watchdog.sh] Monitoring PID $SIM_PID..."
 
 # 2. Run monitoring loop
 set +e
-"$PY_CMD" tools/watchdog_loop.py --pid "$SIM_PID" --log "$LOG_FILE" --run-dir "$RUN_DIR" --check-interval 30 --max-period 7200
+export PROJECT_ROOT
+"$PY_CMD" "$PROJECT_ROOT/tools/watchdog_loop.py" --pid "$SIM_PID" --log "$LOG_FILE" --run-dir "$RUN_DIR" --check-interval 30 --max-period 7200
 WATCHDOG_EXIT=$?
 set -e
 
 # 3. Handle exit codes
 if [ "$WATCHDOG_EXIT" -eq 20 ]; then
     echo "[watchdog.sh] Periodic audit triggered. Sending Discord report & updating runs/ga_research/progress.log..."
-    "$PY_CMD" tools/notify_discord.py verify "GA 2-Hour Periodic Check" "Simulation running normally. Periodic audit initiated." || true
-    echo "[$(date '+%Y-%m-%d %H:%M:%S')] Periodic 2h heartbeat: PID $SIM_PID active." >> runs/ga_research/progress.log
+    "$PY_CMD" "$PROJECT_ROOT/tools/notify_discord.py" verify "GA 2-Hour Periodic Check" "Simulation running normally. Periodic audit initiated." || true
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] Periodic 2h heartbeat: PID $SIM_PID active." >> "$PROJECT_ROOT/runs/ga_research/progress.log"
 fi
 
 exit "$WATCHDOG_EXIT"

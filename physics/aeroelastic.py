@@ -6,6 +6,7 @@ and low-Reynolds laminar separation bubble (LSB) dynamic stall hysteresis.
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from typing import Any, Dict, Optional
 
@@ -36,15 +37,35 @@ class AeroelasticLagState:
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> AeroelasticLagState:
+        def _get_float(key1: str, key2: str, default: float) -> float:
+            val = data.get(key1, data.get(key2, default))
+            if val is None:
+                return default
+            try:
+                f = float(val)
+                return f if math.isfinite(f) else default
+            except (ValueError, TypeError):
+                return default
+
+        def _get_bool(key1: str, key2: str, default: bool) -> bool:
+            val = data.get(key1, data.get(key2, default))
+            if isinstance(val, str):
+                return val.strip().lower() in ("true", "1", "yes")
+            return bool(val)
+
+        last_dt = _get_float("_last_dt", "last_dt", 0.01)
+        if last_dt <= 0.0:
+            last_dt = 0.01
+
         return cls(
-            aero_dihedral_lag=float(data.get("_aero_dihedral_lag", data.get("aero_dihedral_lag", 0.0))),
-            aero_twist_lag=float(data.get("_aero_twist_lag", data.get("aero_twist_lag", 0.0))),
-            unsteady_cl_lag=float(data.get("_unsteady_cl_lag", data.get("unsteady_cl_lag", 0.0))),
-            prev_alpha_deg=float(data.get("_prev_alpha_deg", data.get("prev_alpha_deg", 0.0))),
-            alpha_dot_deg_s=float(data.get("_alpha_dot_deg_s", data.get("alpha_dot_deg_s", 0.0))),
-            lsb_shift_deg=float(data.get("_lsb_shift_deg", data.get("lsb_shift_deg", 0.0))),
-            is_stalled_prev=bool(data.get("_is_stalled_prev", data.get("is_stalled_prev", False))),
-            last_dt=float(data.get("_last_dt", data.get("last_dt", 0.01))),
+            aero_dihedral_lag=_get_float("_aero_dihedral_lag", "aero_dihedral_lag", 0.0),
+            aero_twist_lag=_get_float("_aero_twist_lag", "aero_twist_lag", 0.0),
+            unsteady_cl_lag=_get_float("_unsteady_cl_lag", "unsteady_cl_lag", 0.0),
+            prev_alpha_deg=_get_float("_prev_alpha_deg", "prev_alpha_deg", 0.0),
+            alpha_dot_deg_s=_get_float("_alpha_dot_deg_s", "alpha_dot_deg_s", 0.0),
+            lsb_shift_deg=_get_float("_lsb_shift_deg", "lsb_shift_deg", 0.0),
+            is_stalled_prev=_get_bool("_is_stalled_prev", "is_stalled_prev", False),
+            last_dt=last_dt,
         )
 
 
@@ -71,19 +92,38 @@ class AeroelasticManager:
     def apply_states(self, lag_states: Optional[Dict[str, Any]]) -> None:
         if not lag_states:
             return
+
+        def _get_float(key1: str, key2: str, current: float) -> float:
+            val = lag_states.get(key1, lag_states.get(key2, current))
+            if val is None:
+                return current
+            try:
+                f = float(val)
+                return f if math.isfinite(f) else current
+            except (ValueError, TypeError):
+                return current
+
+        def _get_bool(key1: str, key2: str, current: bool) -> bool:
+            val = lag_states.get(key1, lag_states.get(key2, current))
+            if isinstance(val, str):
+                return val.strip().lower() in ("true", "1", "yes")
+            return bool(val)
+
         if "_aero_dihedral_lag" in lag_states or "aero_dihedral_lag" in lag_states:
-            self.state.aero_dihedral_lag = float(lag_states.get("_aero_dihedral_lag", lag_states.get("aero_dihedral_lag", self.state.aero_dihedral_lag)))
+            self.state.aero_dihedral_lag = _get_float("_aero_dihedral_lag", "aero_dihedral_lag", self.state.aero_dihedral_lag)
         if "_aero_twist_lag" in lag_states or "aero_twist_lag" in lag_states:
-            self.state.aero_twist_lag = float(lag_states.get("_aero_twist_lag", lag_states.get("aero_twist_lag", self.state.aero_twist_lag)))
+            self.state.aero_twist_lag = _get_float("_aero_twist_lag", "aero_twist_lag", self.state.aero_twist_lag)
         if "_prev_alpha_deg" in lag_states or "prev_alpha_deg" in lag_states:
-            self.state.prev_alpha_deg = float(lag_states.get("_prev_alpha_deg", lag_states.get("prev_alpha_deg", self.state.prev_alpha_deg)))
+            self.state.prev_alpha_deg = _get_float("_prev_alpha_deg", "prev_alpha_deg", self.state.prev_alpha_deg)
         if "_alpha_dot_deg_s" in lag_states or "alpha_dot_deg_s" in lag_states:
-            self.state.alpha_dot_deg_s = float(lag_states.get("_alpha_dot_deg_s", lag_states.get("alpha_dot_deg_s", self.state.alpha_dot_deg_s)))
+            self.state.alpha_dot_deg_s = _get_float("_alpha_dot_deg_s", "alpha_dot_deg_s", self.state.alpha_dot_deg_s)
         if "_is_stalled_prev" in lag_states or "is_stalled_prev" in lag_states:
-            self.state.is_stalled_prev = bool(lag_states.get("_is_stalled_prev", lag_states.get("is_stalled_prev", self.state.is_stalled_prev)))
+            self.state.is_stalled_prev = _get_bool("_is_stalled_prev", "is_stalled_prev", self.state.is_stalled_prev)
         if "_lsb_shift_deg" in lag_states or "lsb_shift_deg" in lag_states:
-            self.state.lsb_shift_deg = float(lag_states.get("_lsb_shift_deg", lag_states.get("lsb_shift_deg", self.state.lsb_shift_deg)))
+            self.state.lsb_shift_deg = _get_float("_lsb_shift_deg", "lsb_shift_deg", self.state.lsb_shift_deg)
         if "_unsteady_cl_lag" in lag_states or "unsteady_cl_lag" in lag_states:
-            self.state.unsteady_cl_lag = float(lag_states.get("_unsteady_cl_lag", lag_states.get("unsteady_cl_lag", self.state.unsteady_cl_lag)))
+            self.state.unsteady_cl_lag = _get_float("_unsteady_cl_lag", "unsteady_cl_lag", self.state.unsteady_cl_lag)
         if "_last_dt" in lag_states or "last_dt" in lag_states:
-            self.state.last_dt = float(lag_states.get("_last_dt", lag_states.get("last_dt", self.state.last_dt)))
+            dt = _get_float("_last_dt", "last_dt", self.state.last_dt)
+            if dt > 0.0:
+                self.state.last_dt = dt

@@ -16,25 +16,14 @@ def _require(name: str) -> str:
         raise SystemExit(f"{name} is not set. Copy .env.example to .env (repo root) and fill REMOTE_SSH_* values.")
     return value
 
-_load_env()
-HOST = _require("REMOTE_SSH_HOST")
-USER = _require("REMOTE_SSH_USER")
-PASS = _require("REMOTE_SSH_PASSWORD")
+from tools.remote_auth import build_ssh_client, exec_sudo
 
 def get_client():
-    client = paramiko.SSHClient()
-    client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-    client.connect(HOST, username=USER, password=PASS, timeout=10)
-    return client
+    return build_ssh_client()
 
 def run_sudo(client, cmd):
-    # Pass environment correctly to sudo
-    full_cmd = f"echo {PASS} | sudo -S env DEBIAN_FRONTEND=noninteractive LC_ALL=C LANG=C {cmd}"
     print(f"--- SUDO RUN: {cmd} ---")
-    stdin, stdout, stderr = client.exec_command(full_cmd)
-    out = stdout.read().decode('utf-8', errors='replace')
-    err = stderr.read().decode('utf-8', errors='replace')
-    status = stdout.channel.recv_exit_status()
+    status, out, err = exec_sudo(client, cmd)
     print(f"STATUS: {status}")
     if out:
         print(out[-500:])

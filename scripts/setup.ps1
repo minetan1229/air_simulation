@@ -17,7 +17,8 @@ function Assert-LastExitCode {
 Write-Host "[SETUP] Bootstrapping Paper Airplane Simulation Environment..." -ForegroundColor Cyan
 
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
-Set-Location $ScriptDir
+$ProjectRoot = Split-Path -Parent $ScriptDir
+Set-Location $ProjectRoot
 
 # Check Python installation
 # Check Python installation (requiring Python 3.10+)
@@ -52,7 +53,7 @@ $PyVersion = & $PythonCmd -c "import sys; print(f'{sys.version_info.major}.{sys.
 Write-Host "[SETUP] Detected Python version: $PyVersion" -ForegroundColor Green
 
 # Create virtual environment if missing
-$VenvDir = Join-Path $ScriptDir ".venv"
+$VenvDir = Join-Path $ProjectRoot ".venv"
 if (-not (Test-Path $VenvDir)) {
     Write-Host "[SETUP] Creating virtual environment at .venv..." -ForegroundColor Yellow
     & $PythonCmd -m venv $VenvDir
@@ -71,11 +72,11 @@ Assert-LastExitCode "upgrade pip/setuptools/wheel"
 $HasUv = Get-Command uv -ErrorAction SilentlyContinue
 if ($HasUv) {
     Write-Host "[SETUP] Detected 'uv' package manager. Installing dependencies via uv..." -ForegroundColor Green
-    & uv pip install -e ".[dev]" --python $VenvPython
+    & uv pip install -e "$ProjectRoot[dev]" --python $VenvPython
     Assert-LastExitCode "uv pip install"
 } else {
     Write-Host "[SETUP] Installing dependencies via pip..." -ForegroundColor Yellow
-    & $VenvPython -m pip install -e ".[dev]"
+    & $VenvPython -m pip install -e "$ProjectRoot[dev]"
     Assert-LastExitCode "pip install"
 }
 

@@ -195,7 +195,7 @@ def isa_pressure(
         return p0 * (ratio ** exponent)
 
     # Tropopause boundary pressure (continuous with the troposphere).
-    p11 = p0 * ((t11 / max(t0, 1.0)) ** (g / (lapse * R_AIR)))
+    p11 = p0 * ((max(t11, 1.0e-6) / max(t0, 1.0)) ** (g / (lapse * R_AIR)))
     if h <= STRATOSPHERE_BASE_ALTITUDE_M:
         exponent = -g * (h - TROPOPAUSE_ALTITUDE_M) / (R_AIR * max(abs(t11), _MIN_TEMPERATURE_K))
         return p11 * math.exp(clamp(exponent, -700.0, 700.0))
@@ -216,7 +216,7 @@ def isa_pressure(
     t32 = t20 + strat_lapse * (
         STRATOSPHERE_TOP_ALTITUDE_M - STRATOSPHERE_BASE_ALTITUDE_M
     )
-    p32 = p20 * ((t32 / max(t20, 1.0e-6)) ** (-g / (strat_lapse * R_AIR)))
+    p32 = p20 * ((max(t32, 1.0e-6) / max(t20, 1.0e-6)) ** (-g / (strat_lapse * R_AIR)))
     exponent = -g * (h - STRATOSPHERE_TOP_ALTITUDE_M) / (R_AIR * max(abs(t32), _MIN_TEMPERATURE_K))
     return p32 * math.exp(clamp(exponent, -700.0, 700.0))
 
@@ -229,7 +229,7 @@ def isa_density(
     gravity: float = G0,
 ) -> float:
     """ISA tropospheric density ``rho = p / (R_air T)`` (dry standard air)."""
-    temperature = isa_temperature(altitude_m, sea_level_temperature_K, lapse_rate_K_per_m)
+    temperature = max(isa_temperature(altitude_m, sea_level_temperature_K, lapse_rate_K_per_m), _MIN_TEMPERATURE_K)
     pressure = isa_pressure(
         altitude_m,
         sea_level_pressure_Pa,
@@ -267,7 +267,10 @@ def saturation_vapour_pressure_Pa(temperature_K: float) -> float:
     ``-40 degC .. + 50 degC``; ``273.15 K -> 610.94 Pa`` exactly.
     """
     t = float(temperature_K) - _ZERO_CELSIUS_K
-    return 610.94 * math.exp(clamp(17.625 * t / (t + 243.04), -60.0, 60.0))
+    denom = t + 243.04
+    if abs(denom) < 1.0e-6:
+        denom = 1.0e-6 if denom >= 0.0 else -1.0e-6
+    return 610.94 * math.exp(clamp(17.625 * t / denom, -60.0, 60.0))
 
 
 def vapour_partial_pressure_Pa(temperature_K: float, humidity_rel: float, total_pressure_Pa: float) -> float:
@@ -305,11 +308,12 @@ def air_density(temperature_K: float, pressure_Pa: float, humidity_rel: float = 
     ``R_vapour > R_air``) and therefore lowers the density at fixed ``T``/``p``.
     """
     total = float(pressure_Pa)
-    if total <= 0.0:
+    if total <= 0.0 or not math.isfinite(total):
         raise ValueError(f"air_density requires a positive pressure, got {total} Pa")
-    temperature = max(float(temperature_K), _MIN_TEMPERATURE_K)
-    r_moist = moist_air_gas_constant(temperature, total, humidity_rel)
-    return total / (r_moist * temperature)
+    raw_t = float(temperature_K)
+    temp_val = _MIN_TEMPERATURE_K if (not math.isfinite(raw_t) or raw_t < _MIN_TEMPERATURE_K) else raw_t
+    r_moist = moist_air_gas_constant(temp_val, total, humidity_rel)
+    return total / (r_moist * temp_val)
 
 
 # --------------------------------------------------------------------------
@@ -339,8 +343,9 @@ def kinematic_viscosity(temperature_K: float, density_kgm3: float) -> float:
 
 def speed_of_sound(temperature_K: float) -> float:
     """Speed of sound ``a = sqrt(gamma R_air T)`` (m/s), incompressible form."""
-    temperature = max(float(temperature_K), _MIN_TEMPERATURE_K)
-    return math.sqrt(GAMMA_AIR * R_AIR * temperature)
+    raw_t = float(temperature_K)
+    temp_val = _MIN_TEMPERATURE_K if (not math.isfinite(raw_t) or raw_t < _MIN_TEMPERATURE_K) else raw_t
+    return math.sqrt(GAMMA_AIR * R_AIR * temp_val)
 
 
 def reynolds_number(speed_mps: float, chord_m: float, kinematic_viscosity_m2s: float) -> float:

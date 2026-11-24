@@ -12,6 +12,7 @@ pyyaml>=6.0
 cupy-cuda12x>=13.0.0 ; extra == "gpu"
 discord.py>=2.7.1,<3.0 ; extra == "bridge"
 psutil>=7.2.2 ; extra == "bridge"
+paramiko>=3.4.0 ; extra == "remote"
 
 # Development, testing, and static analysis
 pytest>=8.0.0

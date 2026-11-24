@@ -183,6 +183,9 @@ class Stage3Result:
     separation_tolerance: float
     grid_cells: int
     wall_time_s: float
+    tau_clamped: bool = False
+    nu_lattice_actual: float = 0.0
+    re_actual: float = 0.0
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -197,6 +200,9 @@ class Stage3Result:
             "separation_tolerance": float(self.separation_tolerance),
             "grid_cells": int(self.grid_cells),
             "wall_time_s": float(self.wall_time_s),
+            "tau_clamped": bool(self.tau_clamped),
+            "nu_lattice_actual": float(self.nu_lattice_actual),
+            "re_actual": float(self.re_actual),
         }
 
 
@@ -337,7 +343,12 @@ class LbmDnsSolver:
         lattice_speed = _LATTICE_INFLOW
         dt = lattice_speed * dx / max(speed, 0.1)
         nu_lattice = viscosity * dt / (dx * dx)
-        tau = min(max(0.5 + 3.0 * nu_lattice, 0.5005), 2.0)
+        tau_raw = 0.5 + 3.0 * nu_lattice
+        tau = min(max(tau_raw, 0.5005), 2.0)
+        tau_clamped = bool(tau != tau_raw)
+        nu_lattice_actual = (tau - 0.5) / 3.0
+        viscosity_actual = nu_lattice_actual * (dx * dx) / dt
+        re_actual = speed * chord / max(viscosity_actual, 1.0e-9)
 
         populations = self._initial_population(lattice_speed, angle)
         structure = _ModalStructure(
@@ -435,6 +446,9 @@ class LbmDnsSolver:
             separation_tolerance=float(separation),
             grid_cells=int(self.grid_cells),
             wall_time_s=0.0,
+            tau_clamped=tau_clamped,
+            nu_lattice_actual=float(nu_lattice_actual),
+            re_actual=float(re_actual),
         )
 
     # ------------------------------------------------------------------

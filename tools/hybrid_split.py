@@ -111,16 +111,13 @@ def remote_cores_query(cfg: Dict[str, Any], timeout: int = 10) -> int:
     if not cfg.get("host") or not cfg.get("user"):
         return 0
     try:
-        import paramiko
-        client = paramiko.SSHClient()
-        client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-        kw: Dict[str, Any] = {"hostname": cfg["host"], "port": cfg["port"], "username": cfg["user"], "timeout": timeout}
-        if cfg.get("password"):
-            kw["password"] = cfg["password"]
-        else:
-            # Key auth
-            kw["key_filename"] = os.path.expanduser("~/.ssh/id_rsa")
-        client.connect(**kw)
+        from tools.remote_auth import build_ssh_client
+        client = build_ssh_client(
+            timeout=timeout,
+            host=cfg["host"],
+            user=cfg["user"],
+            password=cfg.get("password"),
+        )
         _stdin, stdout, _stderr = client.exec_command("nproc; nvidia-smi --query-gpu=name --format=csv,noheader 2>/dev/null || true", timeout=timeout)
         out = stdout.read().decode("utf-8", errors="replace").strip().splitlines()
         client.close()
@@ -136,13 +133,13 @@ def remote_cores_query(cfg: Dict[str, Any], timeout: int = 10) -> int:
         return 0
 
 def _ensure_remote_root(cfg: Dict[str, Any]) -> None:
-    import paramiko
-    client = paramiko.SSHClient()
-    client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-    kw: Dict[str, Any] = {"hostname": cfg["host"], "port": cfg["port"], "username": cfg["user"], "timeout": 15}
-    if cfg.get("password"):
-        kw["password"] = cfg["password"]
-    client.connect(**kw)
+    from tools.remote_auth import build_ssh_client
+    client = build_ssh_client(
+        timeout=15,
+        host=cfg["host"],
+        user=cfg["user"],
+        password=cfg.get("password"),
+    )
     _stdin, stdout, _stderr = client.exec_command(
         f"mkdir -p {cfg['remote_root']}/cases {cfg['remote_root']}/venv && "
         f"command -v rsync >/dev/null || true; ls {cfg['remote_root']}",
@@ -193,12 +190,13 @@ def _sync_tree(cfg: Dict[str, Any]) -> None:
         rsync_ok = False
 
     # SFTP walk fallback
-    client = paramiko.SSHClient()
-    client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-    kw: Dict[str, Any] = {"hostname": cfg["host"], "port": cfg["port"], "username": cfg["user"], "timeout": 15}
-    if cfg.get("password"):
-        kw["password"] = cfg["password"]
-    client.connect(**kw)
+    from tools.remote_auth import build_ssh_client
+    client = build_ssh_client(
+        timeout=15,
+        host=cfg["host"],
+        user=cfg["user"],
+        password=cfg.get("password"),
+    )
     sftp = client.open_sftp()
     for src_dir in ("physics", "tools"):
         local_root = PROJECT_ROOT / src_dir
@@ -222,7 +220,7 @@ def _sync_tree(cfg: Dict[str, Any]) -> None:
 
 def _remote_run(cfg: Dict[str, Any], remote_cases: List[Dict[str, Any]], processes: int) -> List[Dict[str, Any]]:
     """Ship cases to remote, run worker, fetch results. Ordered JSON. Raises on failure."""
-    import paramiko
+    from tools.remote_auth import build_ssh_client
     _ensure_remote_root(cfg)
     _sync_tree(cfg)
     batch_id = hashlib.sha1(json.dumps({"cases": remote_cases}).encode("utf-8")).hexdigest()[:12]
@@ -233,14 +231,14 @@ def _remote_run(cfg: Dict[str, Any], remote_cases: List[Dict[str, Any]], process
     remote_results_path = f"{cfg['remote_root']}/{REMOTE_RESULTS_NAME}"
     remote_worker_path = f"{cfg['remote_root']}/{WORKER_SCRIPT}"
 
-    client = paramiko.SSHClient()
-    client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-    kw: Dict[str, Any] = {"hostname": cfg["host"], "port": cfg["port"], "username": cfg["user"], "timeout": cfg["timeout_s"]}
-    if cfg.get("password"):
-        kw["password"] = cfg["password"]
+    client = build_ssh_client(
+        timeout=cfg["timeout_s"],
+        host=cfg["host"],
+        user=cfg["user"],
+        password=cfg.get("password"),
+    )
 
     try:
-        client.connect(**kw)
         sftp = client.open_sftp()
         sftp.put(str(local_gz), remote_cases_path)
         sftp.close()

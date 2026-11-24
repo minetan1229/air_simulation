@@ -68,6 +68,7 @@ from .config_schema import (
 )
 from .payload_contract import empty_payload, normalize_payload
 from .aero_domain import elevon_effects, helmbold_cl_alpha
+from . import gpu_dynamics
 from .gpu_dynamics import release_gpu_memory_pool
 from .stress_domain import (
     ALLOWABLE_BASE_PA,
@@ -887,7 +888,7 @@ def parallel_evaluate(
         return results
 
     tasks = [(evaluate_case, [materialised[index] for index in chunk]) for chunk in plan]
-    
+
     # When cancellation is requested, use a dedicated pool so we can terminate it immediately.
     # Otherwise, reuse the cached pool for efficiency across optimizer generations.
     use_cached = cancel_cb is None

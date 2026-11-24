@@ -626,9 +626,12 @@ export class WindParticles {
       uniforms.uSpeedScale.value = this.speedScale;
       uniforms.uSwirl.value = this.swirl;
       const target = this.renderer.getRenderTarget();
-      this.renderer.setRenderTarget(this.next);
-      this.renderer.render(this.simScene, this.simCamera);
-      this.renderer.setRenderTarget(target);
+      try {
+        this.renderer.setRenderTarget(this.next);
+        this.renderer.render(this.simScene, this.simCamera);
+      } finally {
+        this.renderer.setRenderTarget(target);
+      }
       const swap = this.current;
       this.current = this.next;
       this.next = swap;
@@ -681,7 +684,11 @@ export class WindParticles {
   setBudget(fraction) {
     const ratio = Math.min(Math.max(Number(fraction) || 1, 0.05), 1);
     this.budget = ratio;
-    const total = this.points ? this.points.geometry.getAttribute("position").count : 0;
+    if (!this.points || !this.points.geometry) {
+      return 0;
+    }
+    const posAttr = this.points.geometry.getAttribute("position");
+    const total = posAttr ? posAttr.count : 0;
     const visible = Math.max(Math.floor(total * ratio), 1);
     this.points.geometry.setDrawRange(0, visible);
     this.drawn = visible;

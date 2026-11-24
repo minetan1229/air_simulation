@@ -745,8 +745,13 @@ def validate_config_bundle(bundle: Any) -> Dict[str, Any]:
     for key, value in normalised.items():
         if key in validated:
             continue
-        if key == "optimizer" and isinstance(value, Mapping):
+        if key == "optimizer":
+            if not isinstance(value, Mapping):
+                raise ValueError(
+                    f"configuration section 'optimizer' must be a mapping, got {type(value).__name__}"
+                )
             _validate_optimizer_section(value)
+        _assert_json_finite(key, value)
         validated[key] = value
     return validated
 
@@ -847,6 +852,8 @@ def sanitise_artefact_name(name: Any, kind: str = "artefact") -> str:
         safe = safe[:96].rstrip("._-")
     if not safe or safe in {".", ".."}:
         raise ValueError(f"{kind} name {raw!r} does not contain any usable character")
+    if safe.split(".")[0].upper() in _RESERVED_STEMS:
+        raise ValueError(f"{kind} name {raw!r} is a reserved device name")
     return safe
 
 
@@ -888,13 +895,26 @@ class StorageManager:
     def _write_text(path: Path, text: str) -> Path:
         # newline="" keeps the CRLF terminators of csv.writer byte-exact on
         # Windows; utf-8 without BOM keeps the JSON round-trip lossless.
-        # Write to a sibling temp file and atomically replace so a crash mid
-        # write can never leave a partially written (corrupt) artefact behind.
-        tmp = path.with_name(f"{path.name}.tmp.{os.getpid()}")
-        with open(tmp, "w", encoding="utf-8", newline="") as handle:
-            handle.write(text)
-        os.replace(tmp, path)
-        return path
+        # Write to a sibling temp file with unique name and atomically replace.
+        import tempfile
+
+        parent_dir = path.parent
+        parent_dir.mkdir(parents=True, exist_ok=True)
+        tmp_fd, tmp_path_str = tempfile.mkstemp(
+            prefix=f"{path.name}.tmp.", dir=str(parent_dir)
+        )
+        tmp_path = Path(tmp_path_str)
+        try:
+            with open(tmp_fd, "w", encoding="utf-8", newline="") as handle:
+                handle.write(text)
+            os.replace(tmp_path, path)
+            return path
+        except Exception:
+            try:
+                tmp_path.unlink(missing_ok=True)
+            except OSError:
+                pass
+            raise
 
     @staticmethod
     def _read_text(path: Path) -> str:

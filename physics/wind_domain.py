@@ -85,6 +85,7 @@ machine without a GPU ``active_backend() == "numpy"`` and ``wind_field`` reports
 
 from __future__ import annotations
 
+import functools
 import importlib
 import math
 from typing import Any, Dict, List, Sequence, Tuple
@@ -199,26 +200,41 @@ def _try_import(name: str):
         return None
 
 
-def _probe_backend() -> str:
-    """Return ``"cupy"`` / ``"torch"`` if a usable device exists, else ``"numpy"``."""
+def _probe_cupy():
     cupy_module = _try_import("cupy")
     if cupy_module is not None:
         try:
-            if int(cupy_module.cuda.runtime.getDeviceCount()) > 0:  # type: ignore[attr-defined]
-                _BACKEND_CACHE["module"] = cupy_module
-                return "cupy"
+            if int(cupy_module.cuda.runtime.getDeviceCount()) > 0:
+                return cupy_module
         except Exception:
-            _BACKEND_CACHE["module"] = None
+            pass
+    return None
 
+
+def _probe_torch():
     torch_module = _try_import("torch")
     if torch_module is not None:
         try:
             if bool(torch_module.cuda.is_available()) and int(torch_module.cuda.device_count()) > 0:
-                _BACKEND_CACHE["module"] = torch_module
-                return "torch"
+                return torch_module
         except Exception:
-            _BACKEND_CACHE["module"] = None
+            pass
+    return None
 
+
+def _probe_backend() -> str:
+    """Return ``"cupy"`` / ``"torch"`` if a usable device exists, else ``"numpy"``."""
+    cupy_mod = _probe_cupy()
+    if cupy_mod is not None:
+        _BACKEND_CACHE["module"] = cupy_mod
+        return "cupy"
+
+    torch_mod = _probe_torch()
+    if torch_mod is not None:
+        _BACKEND_CACHE["module"] = torch_mod
+        return "torch"
+
+    _BACKEND_CACHE["module"] = None
     return "numpy"
 
 
@@ -244,6 +260,12 @@ def _array_module(backend: str):
     """The array namespace (``numpy`` / ``cupy`` / ``torch``) for ``backend``."""
     if backend == "numpy":
         return np
+    if backend == "cupy":
+        cupy_mod = _probe_cupy()
+        return cupy_mod if cupy_mod is not None else np
+    if backend == "torch":
+        torch_mod = _probe_torch()
+        return torch_mod if torch_mod is not None else np
     module = _BACKEND_CACHE.get("module")
     if module is None:
         _probe_backend()
@@ -264,14 +286,20 @@ def _resolve_backend(requested: str) -> Tuple[str, str]:
         return real, "auto"
     if name == "numpy":
         return "numpy", name
-    if name in ("cupy", "torch"):
-        real = active_backend()
-        if real != name:
+    if name == "cupy":
+        if _probe_cupy() is None:
             raise RuntimeError(
                 f"Requested GPU backend '{name}' is unavailable on this system. "
                 "Hardware acceleration (CUDA GPU) is required and CPU fallback is strictly prohibited."
             )
-        return name, name
+        return "cupy", name
+    if name == "torch":
+        if _probe_torch() is None:
+            raise RuntimeError(
+                f"Requested GPU backend '{name}' is unavailable on this system. "
+                "Hardware acceleration (CUDA GPU) is required and CPU fallback is strictly prohibited."
+            )
+        return "torch", name
     raise ValueError(
         f"unknown wind backend '{requested}'; expected 'auto', 'numpy', 'cupy' or 'torch'"
     )
@@ -314,9 +342,7 @@ class _Ops:
 # ==========================================================================
 # Vectorised 3D simplex noise (Gustavson / Ashima formulation)
 # ==========================================================================
-_SIMPLEX_SEED_TABLE_CACHE: Dict[int, Tuple[float, ...]] = {}
-
-
+@functools.lru_cache(maxsize=1024)
 def _simplex_seed_table(seed: int) -> Tuple[float, ...]:
     """Per-axis affine lattice relabelling ``i -> (A i + B) mod 289``.
 
@@ -329,9 +355,6 @@ def _simplex_seed_table(seed: int) -> Tuple[float, ...]:
     rebuilding the RNG was the single largest cost in the wind inner loop.
     """
     key = int(seed) & 0xFFFFFFFF
-    cached = _SIMPLEX_SEED_TABLE_CACHE.get(key)
-    if cached is not None:
-        return cached
     rng = np.random.default_rng(key)
     multipliers: List[float] = []
     offsets: List[float] = []
@@ -342,9 +365,7 @@ def _simplex_seed_table(seed: int) -> Tuple[float, ...]:
                 multipliers.append(float(candidate))
                 break
         offsets.append(float(rng.integers(0, int(_SIMPLEX_MOD))))
-    table = (multipliers[0], offsets[0], multipliers[1], offsets[1], multipliers[2], offsets[2])
-    _SIMPLEX_SEED_TABLE_CACHE[key] = table
-    return table
+    return (multipliers[0], offsets[0], multipliers[1], offsets[1], multipliers[2], offsets[2])
 
 
 def _mod289(values, xp):
@@ -934,9 +955,10 @@ def _velocity_device(
     backend: str,
     return_host: bool = True,
 ) -> Any:
-    """Run the field maths with ``backend`` and return either host or device array."""
     ops = _Ops(backend)
     xp = ops.xp
+    if not hasattr(points, "shape"):
+        points = np.asarray(points, dtype=np.float64)
     n = int(points.shape[0])
     if n == 0:
         res = xp.zeros((0, 3), dtype=xp.float64)
@@ -1156,6 +1178,10 @@ def wind_field(
     hi = np.asarray(bounds_max, dtype=np.float64).reshape(-1)
     if lo.size != 3 or hi.size != 3:
         raise ValueError("bounds_min and bounds_max must both hold exactly three values")
+    if not (np.all(np.isfinite(lo)) and np.all(np.isfinite(hi))):
+        raise ValueError("bounds_min and bounds_max must contain only finite numbers")
+    if np.any(lo > hi):
+        raise ValueError("bounds_min must not exceed bounds_max on any axis")
     shape, echoed_resolution = _parse_resolution(resolution)
     nx, ny, nz = shape
     backend_name, backend_requested = _resolve_backend(backend)

@@ -84,10 +84,12 @@ def _optimizer_config(payload: Dict[str, Any]) -> OptimizerConfig:
     dvars_raw = raw.get("design_variables")
     if dvars_raw is None:
         dvars = [v.name for v in DESIGN_VARIABLE_CATALOGUE]
+    elif not isinstance(dvars_raw, list):
+        raise BadRequest("'design_variables' must be a list of variable names")
     elif not dvars_raw:
         raise BadRequest("at least one design variable must be selected")
     else:
-        dvars = list(dvars_raw)
+        dvars = [str(v) for v in dvars_raw]
 
     base = merge_overlay(as_dict(SESSION.aircraft), raw.get("aircraft"), "aircraft")
     env = merge_overlay(as_dict(SESSION.environment), raw.get("environment"), "environment")
@@ -102,6 +104,13 @@ def _optimizer_config(payload: Dict[str, Any]) -> OptimizerConfig:
         if float(bounds[0]) > float(bounds[1]):
             raise BadRequest(f"variable_bounds['{key}'] low must not exceed high")
 
+    pop_size = int(raw.get("population_size", 40))
+    if pop_size < 4 or pop_size > 500:
+        raise BadRequest("'population_size' must be within [4, 500]")
+    procs = int(raw.get("processes", 0))
+    if procs < 0 or procs > 64:
+        raise BadRequest("'processes' must be within [0, 64]")
+
     try:
         cfg = OptimizerConfig(
             objectives=names,
@@ -110,9 +119,9 @@ def _optimizer_config(payload: Dict[str, Any]) -> OptimizerConfig:
             design_variables=dvars,
             variable_bounds={k: (float(v[0]), float(v[1])) for k, v in variable_bounds.items()},
             max_evaluations=int(raw.get("max_evaluations", 200)),
-            population_size=int(raw.get("population_size", 40)),
+            population_size=pop_size,
             seed=int(raw.get("seed", 7)),
-            processes=int(raw.get("processes", 0)),
+            processes=procs,
             sim_duration_s=float(raw.get("sim_duration_s", 6.0)),
             dt_max=float(raw.get("dt_max", 0.02)),
             aircraft=from_dict(AircraftConfig, base, strict=False),
