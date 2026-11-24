@@ -117,6 +117,8 @@ def simulation_launch():
         # very same trajectory mutex that /simulation/step holds.  A concurrent
         # step would otherwise advance the same state machine in the middle of
         # the integration loop and mix its frames into the recorded trajectory.
+        # We only hold SIMULATION_LOCK for the short setup phase, not the
+        # entire simulation run (which can take up to 120s).
         with SIMULATION_TRAJECTORY_LOCK:
             with SIMULATION_LOCK:
                 simulator = SESSION.simulator_for_request(payload)
@@ -129,8 +131,9 @@ def simulation_launch():
                 launch = SESSION.launch
                 settings = SESSION.settings
 
-                summary = simulator.simulate(duration_s=duration_s, record=True)
-                samples = [as_dict(s) for s in simulator.history()]
+            # Release SIMULATION_LOCK before the long-running simulation
+            summary = simulator.simulate(duration_s=duration_s, record=True)
+            samples = [as_dict(s) for s in simulator.history()]
 
         parallel = domain("parallel_engine")
         gpu_info = parallel.get_gpu_info()

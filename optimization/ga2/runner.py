@@ -53,6 +53,9 @@ __all__ = [
 #: The objectives the Pareto front of the search is built on.
 OBJECTIVES: Tuple[str, ...] = ("distance_m", "max_ld_ratio", "min_peak_stress_index")
 
+#: Infeasible statuses that must never receive a positive fitness.
+INFEASIBLE_GA2_STATUSES = {"crashed", "diverged", "degenerate", "error", "failed"}
+
 #: The behaviour descriptors of the MAP-Elites grid.
 BEHAVIOUR_DESCRIPTORS: Tuple[str, str, str] = ("wing_loading", "aspect_ratio", "fold_count")
 
@@ -77,23 +80,37 @@ def _to_host(xp: Any) -> Any:
     return pull
 
 
-def default_objective(records: Dict[str, float]) -> float:
+def default_objective(records: Dict[str, float | str | bool]) -> float:
     """The scalar fitness of one individual.
 
     Flight distance is the primary objective, modulated by physical static
     stability and structural stress headroom. Completely unstable gliders
     or structurally failing designs receive zero score (no free 25% baseline
-    reward hacking).
+    reward hacking). Crashed/diverged/degenerate/error/failed statuses
+    receive zero fitness immediately.
     """
+    status = str(records.get("status", "unknown")).lower()
+    ref = records.get("reference")
+    ref_status = str(ref.get("status", "")).lower() if isinstance(ref, dict) else ""
+    if status in INFEASIBLE_GA2_STATUSES or ref_status in INFEASIBLE_GA2_STATUSES:
+        return 0.0
+
+    stage2 = records.get("stage2")
+    if isinstance(stage2, dict) and not bool(stage2.get("feasible", True)):
+        return 0.0
+
     distance = float(records.get("distance_m", 0.0))
-    ld_ratio = float(records.get("max_ld_ratio", 0.0))
+    ld_ratio = max(0.0, float(records.get("max_ld_ratio", 0.0)))
     stability = float(records.get("stability", 0.0))
     stress_index = float(records.get("peak_stress_index", 1.0))
+    ge_ratio = float(records.get("ground_effect_time_ratio", 0.0))
     if distance <= 0.0:
         return 0.0
+
     stab_factor = max(0.0, min(1.0, stability))
     stress_factor = max(0.0, min(1.0, 1.0 - stress_index))
-    quality = stab_factor * stress_factor
+    ge_penalty = math.exp(-4.0 * max(0.0, ge_ratio - 0.25))
+    quality = stab_factor * stress_factor * ge_penalty
     if quality <= 1e-6:
         return 0.0
     return distance * quality * (1.0 + 0.05 * min(ld_ratio, 20.0))
@@ -641,7 +658,8 @@ class EvolutionRunner:
                     break
                 children.append(record)
             random_slots = max(0, explore_slots // 4)
-            while len(children) < target:
+            breed_limit = max(len(children), target - random_slots)
+            while len(children) < breed_limit:
                 parent_a = self._tournament(ranked)
                 if parent_a is None:
                     break
@@ -664,9 +682,7 @@ class EvolutionRunner:
                     )
                 children.append(self._record(child))
             # Random restart injects: fresh programmes keep the pool open.
-            for _ in range(random_slots):
-                if len(children) >= target:
-                    break
+            for _ in range(target - len(children)):
                 children.append(
                     self._record(
                         genome_module.random_hybrid_genome(
@@ -795,13 +811,14 @@ class EvolutionRunner:
             matched_record["max_ld_ratio"] = result.max_ld_ratio
             matched_record["stability"] = result.stability
             matched_record["peak_stress_index"] = result.peak_stress_index
+            matched_record["peak_load_factor"] = float(result.peak_load_factor)
             matched_record["cl"] = result.cl
             matched_record["cd"] = result.cd
             matched_record["screening_cl"] = result.cl
             matched_record["screening_cd"] = result.cd
             matched_record["status"] = result.status
             matched_record["fitness"] = default_objective(matched_record)
-            if result.status not in ("crashed", "degenerate"):
+            if result.status not in INFEASIBLE_GA2_STATUSES:
                 flown.append(matched_record)
         self._correct_screening(flown)
         return flown
@@ -925,17 +942,19 @@ class EvolutionRunner:
         crashed = pull(summary["crashed"])
         landed = pull(summary["landed"])
         for index, record in enumerate(valid_records[:count]):
+            ref_status = (
+                "crashed"
+                if bool(crashed[index])
+                else ("landed" if bool(landed[index]) else "timeout")
+            )
             record["reference"] = {
                 "distance_m": float(distance[index]),
                 "flight_time_s": float(flight_time[index]),
                 "max_ld_ratio": float(max_ld[index]),
                 "peak_stress_pa": float(peak_stress[index]),
-                "status": (
-                    "crashed"
-                    if bool(crashed[index])
-                    else ("landed" if bool(landed[index]) else "timeout")
-                ),
+                "status": ref_status,
             }
+            record["status"] = ref_status
             record["distance_m"] = float(distance[index])
             record["max_ld_ratio"] = float(max_ld[index])
             record["fitness"] = default_objective(record)
@@ -1006,6 +1025,13 @@ class EvolutionRunner:
     def _absorb(self, records: Sequence[Dict[str, Any]]) -> None:
         """Feed the evaluated individuals into the archive and the front."""
         for record in records:
+            if float(record.get("fitness", 0.0)) <= 0.0:
+                continue
+            if str(record.get("status", "")).lower() in INFEASIBLE_GA2_STATUSES:
+                continue
+            stage2 = record.get("stage2")
+            if isinstance(stage2, dict) and not bool(stage2.get("feasible", True)):
+                continue
             metrics = self._behaviour(record)
             entry = archive_module.ArchiveEntry(
                 key=str(record.get("key", "")),

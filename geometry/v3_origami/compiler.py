@@ -53,11 +53,16 @@ class ParametricOrigamiCompiler:
         keel_beta = _clamp(keel_depth_ratio * 40.0, 1.0, 15.0)
 
         span_ratio = _clamp(float(wing_cfg.wingspan_ratio), 0.5, 0.9)
-        wing_u = _clamp(0.50 - 0.20 * span_ratio, 0.30, 0.48)
+        wing_u = _clamp(0.30 + 0.18 * span_ratio, 0.30, 0.48)
+        # Apply keel crease offset to shift wing fold line slightly
+        crease_offset = _clamp(float(keel_cfg.crease_offset_u), 0.4, 0.6)
+        wing_u = _clamp(wing_u + (crease_offset - 0.5) * 0.05, 0.30, 0.48)
         dihedral = _clamp(float(wing_cfg.dihedral_deg), -5.0, 15.0)
-        elevon = 0.5 * (_clamp(float(wing_cfg.elevon_left_deg), -10.0, 15.0) + _clamp(float(wing_cfg.elevon_right_deg), -10.0, 15.0))
+        elevon_left = _clamp(float(wing_cfg.elevon_left_deg), -15.0, 15.0)
+        elevon_right = _clamp(float(wing_cfg.elevon_right_deg), -15.0, 15.0)
         winglet_u = _clamp(0.08 * (1.0 - span_ratio * 0.2), 0.04, 0.12)
         winglet_angle = _clamp(float(wing_cfg.winglet_angle_deg), 10.0, 85.0)
+        has_winglet = bool(wing_cfg.has_winglet)
 
         # ------------------------------------------------------------------
         # Build core crease pattern with proper group propagation
@@ -113,17 +118,40 @@ class ParametricOrigamiCompiler:
                 Crease(key="nose_reinforce_r", p0=(0.65, eff_nose_v * 0.9), p1=(0.52, eff_nose_v), angle_deg=120.0, side=1, up=False, level=2, groups=("flap_r",), set_group="nose_rf_r")
             )
 
+        if fold_count >= 6:
+            creases.append(
+                Crease(key="nose_cap_l", p0=(0.30, eff_nose_v * 0.85), p1=(0.45, eff_nose_v * 0.95), angle_deg=180.0, side=1, up=True, level=2, groups=("flap_l",), set_group="nose_cap_l")
+            )
+            creases.append(
+                Crease(key="nose_cap_r", p0=(0.70, eff_nose_v * 0.85), p1=(0.55, eff_nose_v * 0.95), angle_deg=180.0, side=1, up=False, level=2, groups=("flap_r",), set_group="nose_cap_r")
+            )
+
+        # Keel lock fold for structural grip reinforcement (only when has_lock and fold_count >= 6)
+        if has_lock and fold_count >= 6:
+            lock_angle = _clamp(float(keel_cfg.lock_fold_angle_deg), 90.0, 180.0)
+            creases.append(
+                Crease(key="keel_lock_l", p0=(0.45, 0.10), p1=(0.55, 0.30), angle_deg=lock_angle, side=1, up=True, level=2, groups=("flap_l",), set_group="keel_lock_l")
+            )
+            creases.append(
+                Crease(key="keel_lock_r", p0=(0.55, 0.10), p1=(0.45, 0.30), angle_deg=lock_angle, side=1, up=False, level=2, groups=("flap_r",), set_group="keel_lock_r")
+            )
+
         # Wings and control surfaces (folded down from keel)
         wing_creases = [
             Crease(key="wing_l", p0=(wing_u, 0.0), p1=(wing_l_nose, 1.0), angle_deg=wing_angle, side=1, up=True, level=0, groups=("body_l",), set_group="wing_l"),
-            Crease(key="wing_r", p0=(1.0 - wing_u, 0.0), p1=(1.0 - wing_l_nose, 1.0), angle_deg=wing_angle, side=-1, up=True, level=0, groups=("body_r",), set_group="wing_r"),
-            Crease(key="winglet_l", p0=(winglet_u, 0.0), p1=(winglet_u, 1.0), angle_deg=winglet_angle, side=1, up=True, level=0, groups=("wing_l",), set_group="winglet_l"),
-            Crease(key="winglet_r", p0=(1.0 - winglet_u, 0.0), p1=(1.0 - winglet_u, 1.0), angle_deg=winglet_angle, side=-1, up=True, level=0, groups=("wing_r",), set_group="winglet_r"),
-            Crease(key="elevon_l", p0=(0.0, elevon_v), p1=(1.0, elevon_v), angle_deg=abs(elevon), side=-1, up=False, level=0, groups=("wing_l", "winglet_l"), set_group="elevon_l"),
-            Crease(key="elevon_r", p0=(0.0, elevon_v), p1=(1.0, elevon_v), angle_deg=abs(elevon), side=-1, up=False, level=0, groups=("wing_r", "winglet_r"), set_group="elevon_r"),
+            Crease(key="wing_r", p0=(1.0 - wing_u, 0.0), p1=(wing_r_nose, 1.0), angle_deg=wing_angle, side=-1, up=True, level=0, groups=("body_r",), set_group="wing_r"),
+        ]
+        if has_winglet:
+            wing_creases.extend([
+                Crease(key="winglet_l", p0=(winglet_u, 0.0), p1=(winglet_u, 1.0), angle_deg=winglet_angle, side=1, up=True, level=0, groups=("wing_l",), set_group="winglet_l"),
+                Crease(key="winglet_r", p0=(1.0 - winglet_u, 0.0), p1=(1.0 - winglet_u, 1.0), angle_deg=winglet_angle, side=-1, up=True, level=0, groups=("wing_r",), set_group="winglet_r"),
+            ])
+        wing_creases.extend([
+            Crease(key="elevon_l", p0=(0.0, elevon_v), p1=(1.0, elevon_v), angle_deg=abs(elevon_left), side=1, up=elevon_left >= 0, level=0, groups=("wing_l", "winglet_l") if has_winglet else ("wing_l",), set_group="elevon_l"),
+            Crease(key="elevon_r", p0=(0.0, elevon_v), p1=(1.0, elevon_v), angle_deg=abs(elevon_right), side=-1, up=elevon_right >= 0, level=0, groups=("wing_r", "winglet_r") if has_winglet else ("wing_r",), set_group="elevon_r"),
             Crease(key="trailing_l", p0=(0.0, trailing_v), p1=(0.5, trailing_v), angle_deg=15.0, side=-1, up=False, level=0, groups=("elevon_l",), set_group="trailing_l"),
             Crease(key="trailing_r", p0=(0.5, trailing_v), p1=(1.0, trailing_v), angle_deg=15.0, side=-1, up=False, level=0, groups=("elevon_r",), set_group="trailing_r"),
-        ]
+        ])
         creases.extend(wing_creases)
 
         # Pad with aerodynamic wing camber micro-creases to reach 20 steps (between MIN 16 and MAX 24)

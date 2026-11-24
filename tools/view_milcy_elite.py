@@ -58,6 +58,7 @@ def load_elites(marathon_dir: Path) -> List[Dict[str, Any]]:
 
             # Generate intermediate folding steps (Step 0: Flat sheet to Step 20: Final plane)
             folding_steps_3d = []
+            crease_lines_data = []
             cfg_d = data.get("config")
             if cfg_d:
                 try:
@@ -81,7 +82,6 @@ def load_elites(marathon_dir: Path) -> List[Dict[str, Any]]:
                         })
 
                     # Extract 2D crease lines with canonical mountain/valley types for vector drawing
-                    crease_lines_data = []
                     for step in cand.raw_genome.steps:
                         p0, p1 = step.crease_line
                         is_mtn, badge_num, fold_name = resolve_canonical_crease_style(step.label, step.mountain)
@@ -111,52 +111,6 @@ def load_elites(marathon_dir: Path) -> List[Dict[str, Any]]:
 
     elites.sort(key=lambda x: x["rank"])
     return elites
-
-
-def generate_crease_svg(config: Dict[str, Any], width: int = 240, height: int = 340) -> str:
-    """Generate an SVG crease pattern schematic for the origami aircraft."""
-    nose = config.get("nose", {})
-    keel = config.get("keel", {})
-    wing = config.get("wing", {})
-
-    nose_v = nose.get("nose_length_ratio", 0.20)
-    keel_u = keel.get("crease_offset_u", 0.52)
-    wing_u = wing.get("wingspan_ratio", 0.77) * 0.5
-    winglet_angle = wing.get("winglet_angle_deg", 30.0)
-    has_winglet = wing.get("has_winglet", True)
-
-    w = width
-    h = height
-    cx = w / 2.0
-    ny = h * (1.0 - nose_v)  # nose fold boundary
-
-    # Crease lines: Centerline, nose folds, wing fold lines, winglets
-    svg_elements = [
-        f'<svg viewBox="0 0 {w} {h}" width="{w}" height="{h}" xmlns="http://www.w3.org/2000/svg" style="background: #1e293b; border-radius: 8px; border: 1px solid #334155;">',
-        # Paper boundary
-        f'<rect x="10" y="10" width="{w - 20}" height="{h - 20}" fill="#0f172a" stroke="#64748b" stroke-width="1.5" rx="4"/>',
-        # Centerfold line (valley fold, dashed)
-        f'<line x1="{cx}" y1="10" x2="{cx}" y2="{h - 10}" stroke="#38bdf8" stroke-width="2" stroke-dasharray="4,3"/>',
-        # Nose fold lines (mountain fold, orange)
-        f'<polygon points="{cx},{10} {10},{ny*0.6} {w-10},{ny*0.6}" fill="none" stroke="#f97316" stroke-width="1.5" stroke-dasharray="2,2"/>',
-        f'<line x1="10" y1="{ny}" x2="{w-10}" y2="{ny}" stroke="#f97316" stroke-width="1.5"/>',
-        # Wing fold lines
-        f'<line x1="{cx - w * 0.28}" y1="{ny}" x2="{10 + w*0.1}" y2="{h - 10}" stroke="#a855f7" stroke-width="2"/>',
-        f'<line x1="{cx + w * 0.28}" y1="{ny}" x2="{w - 10 - w*0.1}" y2="{h - 10}" stroke="#a855f7" stroke-width="2"/>',
-    ]
-
-    if has_winglet:
-        svg_elements.extend([
-            f'<line x1="{25}" y1="{h*0.4}" x2="{25}" y2="{h - 10}" stroke="#ec4899" stroke-width="1.5" stroke-dasharray="3,3"/>',
-            f'<line x1="{w - 25}" y1="{h*0.4}" x2="{w - 25}" y2="{h - 10}" stroke="#ec4899" stroke-width="1.5" stroke-dasharray="3,3"/>',
-        ])
-
-    # Legend text
-    svg_elements.extend([
-        f'<text x="{cx}" y="{h - 20}" font-family="sans-serif" font-size="10" fill="#94a3b8" text-anchor="middle">折り線展開図 (A4比率)</text>',
-        '</svg>',
-    ])
-    return "".join(svg_elements)
 
 
 def build_viewer_html(elites: List[Dict[str, Any]]) -> str:
@@ -773,7 +727,30 @@ def build_viewer_html(elites: List[Dict[str, Any]]) -> str:
 
       // Rebuild 3D Mesh for this intermediate fold step
       while (modelGroup.children.length > 0) {{
-        modelGroup.remove(modelGroup.children[0]);
+        const child = modelGroup.children[0];
+        // Dispose of geometry and materials to prevent WebGL memory leak
+        if (child.geometry) {{
+          child.geometry.dispose();
+        }}
+        if (child.material) {{
+          if (Array.isArray(child.material)) {{
+            child.material.forEach(mat => mat.dispose());
+          }} else {{
+            child.material.dispose();
+          }}
+        }}
+        // Recursively dispose children (like wireframe overlay)
+        child.traverse((obj) => {{
+          if (obj.geometry) obj.geometry.dispose();
+          if (obj.material) {{
+            if (Array.isArray(obj.material)) {{
+              obj.material.forEach(mat => mat.dispose());
+            }} else {{
+              obj.material.dispose();
+            }}
+          }}
+        }});
+        modelGroup.remove(child);
       }}
 
       let geometry = null;

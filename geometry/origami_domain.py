@@ -39,6 +39,8 @@ import math
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
+from geometry.validation_fixes import cluster_signed_depth
+
 Vec2 = Tuple[float, float]
 Vec3 = Tuple[float, float, float]
 Mat3 = Tuple[Vec3, Vec3, Vec3]
@@ -721,11 +723,10 @@ def _fold_faces(pattern: CreasePattern) -> List[FoldedFace]:
 
 
 def _poly3d_centroid(poly: Sequence[Vec3]) -> Vec3:
-    count = len(poly)
-    cx = sum(p[0] for p in poly) / count
-    cy = sum(p[1] for p in poly) / count
-    cz = sum(p[2] for p in poly) / count
-    return (cx, cy, cz)
+    """Area-weighted centroid of a planar polygon."""
+    from geometry.validation_fixes import area_weighted_centroid_3d
+    c, _ = area_weighted_centroid_3d(poly)
+    return c
 
 
 def _poly3d_area(poly: Sequence[Vec3]) -> float:
@@ -896,8 +897,9 @@ def assign_layers(
         depths: Dict[int, float] = {}
         for i in members:
             face = faces[i]
-            sign = 1.0 if _dot3(face.normal, ref) >= 0.0 else -1.0
-            depths[i] = sign * _dot3(_sub3(face.centroid3d, faces[lead].centroid3d), ref)
+            # Use corrected depth calculation that doesn't flip sign based on face normal
+            # This fixes the 180-degree fold layer ordering bug
+            depths[i] = cluster_signed_depth(face.centroid3d, faces[lead].centroid3d, ref)
 
         # 3. build the "A is below B" DAG.
         overlaps: Dict[Tuple[int, int], bool] = {}

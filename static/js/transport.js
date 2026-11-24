@@ -41,6 +41,8 @@ export class Transport extends Emitter {
     this.busy = false;
     this._stressInFlight = false;
     this._windInFlight = false;
+    this._stressAbort = null;
+    this._windAbort = null;
     this._tick = this._tick.bind(this);
     this._handle = 0;
   }
@@ -53,6 +55,11 @@ export class Transport extends Emitter {
   detach() {
     if (this._handle) cancelAnimationFrame(this._handle);
     this._handle = 0;
+    // Abort any in-flight polling requests
+    this._stressAbort?.abort();
+    this._windAbort?.abort();
+    this._stressAbort = null;
+    this._windAbort = null;
   }
 
   get state() {
@@ -220,7 +227,6 @@ export class Transport extends Emitter {
     this.lastFrame = sample;
     this.playTime = Number(sample.time_s) || 0;
     this.emit("frame", sample);
-    this.emit("replay", sample);
     this.emit("state", this.state);
     return sample;
   }
@@ -261,7 +267,6 @@ export class Transport extends Emitter {
         const frame = this.history[idx];
         this.lastFrame = frame;
         this.emit("frame", frame);
-        this.emit("replay", frame);
         this.emit("state", this.state);
 
         if (idx >= this.history.length - 1) {
@@ -278,15 +283,19 @@ export class Transport extends Emitter {
       if (now - this.lastStressAt > STRESS_INTERVAL_MS && !this._stressInFlight) {
         this.lastStressAt = now;
         this._stressInFlight = true;
-        this._pollStress().finally(() => {
+        this._stressAbort = new AbortController();
+        this._pollStress(this._stressAbort.signal).finally(() => {
           this._stressInFlight = false;
+          this._stressAbort = null;
         });
       }
       if (now - this.lastWindAt > WIND_INTERVAL_MS && !this._windInFlight) {
         this.lastWindAt = now;
         this._windInFlight = true;
-        this._pollWind().finally(() => {
+        this._windAbort = new AbortController();
+        this._pollWind(this._windAbort.signal).finally(() => {
           this._windInFlight = false;
+          this._windAbort = null;
         });
       }
     }
@@ -294,7 +303,7 @@ export class Transport extends Emitter {
     this._handle = requestAnimationFrame(this._tick);
   }
 
-  async _pollStress() {
+  async _pollStress(signal) {
     let speed = 0;
     let beta = 0;
     let loadFactor = 1.0;
@@ -319,14 +328,14 @@ export class Transport extends Emitter {
         environment: this.store.data.environment,
         spanwise: 20,
         chordwise: 12,
-      })
+      }, { signal })
       .catch(() => null);
     if (!payload) return;
     this.stressIndex = payload;
     this.emit("stress", payload);
   }
 
-  async _pollWind() {
+  async _pollWind(signal) {
     const frame = this.lastFrame;
     let min, max, resolution;
     if (this.tunnelMode) {
@@ -359,7 +368,7 @@ export class Transport extends Emitter {
         resolution,
         time_s: time,
         environment: this.store.data.environment,
-      })
+      }, { signal })
       .catch(() => null);
     if (!payload) return;
     payload.tunnelMode = this.tunnelMode;

@@ -362,7 +362,7 @@ class RobustnessReport:
 class OrigamiCompilerProtocol(Protocol):
     """Compiles parametric configs into 16-24 fold sequences and OrigamiGenome."""
 
-    def compile(self, config: ParametricOrigamiConfig) -> AircraftCandidate: ...
+    def compile_candidate(self, config: ParametricOrigamiConfig, candidate_id: Optional[str] = None) -> AircraftCandidate: ...
 
     def validate_tier0(self, candidate: AircraftCandidate) -> Tuple[bool, List[str]]: ...
 
@@ -396,7 +396,7 @@ class TrimOptimizerProtocol(Protocol):
 class RobustnessEvaluatorProtocol(Protocol):
     """Evaluates top candidates under turbulence and throw perturbations."""
 
-    def evaluate_robustness(self, candidate: AircraftCandidate) -> RobustnessReport: ...
+    def evaluate_candidate(self, candidate: AircraftCandidate) -> RobustnessReport: ...
 
 
 # ============================================================================

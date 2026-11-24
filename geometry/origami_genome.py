@@ -34,6 +34,7 @@ from __future__ import annotations
 
 import math
 import random
+import numpy as np
 from dataclasses import dataclass, field
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
@@ -52,6 +53,12 @@ from geometry.origami_domain import (
     build_pattern_mesh,
     compile_creases,
     mesh_payload,
+)
+from geometry.validation_fixes import (
+    panels_intersect_3d,
+    planform_area_silhouette,
+    origami_to_frd_inertia,
+    area_weighted_centroid_3d,
 )
 
 __all__ = [
@@ -918,13 +925,15 @@ def fold_genome(
     total_area = sum(face.area_m2 for face in faces)
     mass = max(areal_density * total_area, 1.0e-9)
 
+    # Use area-weighted centroid for CG
     if faces:
-        cx = sum(face.area_m2 * face.centroid3d[0] for face in faces) / total_area
-        cy = sum(face.area_m2 * face.centroid3d[1] for face in faces) / total_area
-        cz = sum(face.area_m2 * face.centroid3d[2] for face in faces) / total_area
+        total_moment = np.zeros(3, dtype=np.float64)
+        for face in faces:
+            c, a = area_weighted_centroid_3d(face.poly3d)
+            total_moment += a * np.asarray(c, dtype=np.float64)
+        cg = tuple(total_moment / total_area)
     else:
-        cx = cy = cz = 0.0
-    cg: Vec3 = (cx, cy, cz)
+        cg = (0.0, 0.0, 0.0)
 
     tensor = [[0.0, 0.0, 0.0], [0.0, 0.0, 0.0], [0.0, 0.0, 0.0]]
     for face in faces:
@@ -945,6 +954,7 @@ def fold_genome(
             if tri_area <= 1.0e-12:
                 continue
             tri_mass = areal_density * tri_area
+            # Use triangle centroid (not vertex average)
             tc_x = (p0[0] + p1[0] + p2[0]) / 3.0
             tc_y = (p0[1] + p1[1] + p2[1]) / 3.0
             tc_z = (p0[2] + p1[2] + p2[2]) / 3.0
@@ -970,9 +980,9 @@ def fold_genome(
             i_loc_xz = -m_xz
             i_loc_yz = -m_yz
 
-            dx = tc_x - cx
-            dy = tc_y - cy
-            dz = tc_z - cz
+            dx = tc_x - cg[0]
+            dy = tc_y - cg[1]
+            dz = tc_z - cg[2]
             r2 = dx * dx + dy * dy + dz * dz
 
             tensor[0][0] += i_loc_xx + tri_mass * (r2 - dx * dx)
@@ -991,6 +1001,9 @@ def fold_genome(
     wing_area = _planform_area(faces)
     chord = max(length, 1.0e-6)
 
+    # Transform inertia to FRD frame: origami (x=fwd, y=up, z=span) -> FRD (x=fwd, y=right, z=down)
+    frd_inertia = origami_to_frd_inertia(tensor)
+
     return GenomeGeometry(
         genome=genome,
         pattern=pattern,
@@ -999,9 +1012,9 @@ def fold_genome(
         mass_kg=mass,
         cg=cg,
         inertia_tensor_kgm2=tensor,
-        roll_inertia_kgm2=max(tensor[0][0], 1.0e-12),
-        pitch_inertia_kgm2=max(tensor[1][1], 1.0e-12),
-        yaw_inertia_kgm2=max(tensor[2][2], 1.0e-12),
+        roll_inertia_kgm2=frd_inertia["roll_inertia_kgm2"],
+        pitch_inertia_kgm2=frd_inertia["pitch_inertia_kgm2"],
+        yaw_inertia_kgm2=frd_inertia["yaw_inertia_kgm2"],
         wing_area_m2=wing_area,
         span_m=span,
         length_m=length,
@@ -1035,133 +1048,15 @@ def _planform_area(faces: Sequence[FoldedFace]) -> float:
     """Planform (shadow) area of the folded solid.
 
     The planform is what the flight dynamics sees as the wing area: the
-    projection of every panel onto the horizontal plane, counted once per
-    panel (overlapping layers are different parts of the paper and therefore
-    both contribute).
+    projection of every panel onto the horizontal plane. Overlapping layers
+    are merged to compute the true silhouette area (not double-counted).
     """
-    total = 0.0
-    for face in faces:
-        if len(face.poly3d) < 3:
-            continue
-        area = 0.0
-        for index in range(len(face.poly3d)):
-            a = face.poly3d[index]
-            b = face.poly3d[(index + 1) % len(face.poly3d)]
-            area += a[0] * b[2] - b[0] * a[2]
-        total += abs(0.5 * area)
-    return max(total, 1.0e-9)
+    return planform_area_silhouette(faces)
 
 
 # --------------------------------------------------------------------------
 # Self intersection
 # --------------------------------------------------------------------------
-def _segment_distance(p: Vec3, q: Vec3) -> float:
-    dx = q[0] - p[0]
-    dy = q[1] - p[1]
-    dz = q[2] - p[2]
-    return math.sqrt(dx * dx + dy * dy + dz * dz)
-
-
-def _point_in_polygon3d(point: Vec3, polygon: Sequence[Vec3], normal: Vec3, eps: float) -> bool:
-    """Is ``point`` *strictly* inside the planar polygon ``polygon``?
-
-    A point that sits on the boundary does not count: two panels that share a
-    crease touch along their common edge, and that is not a penetration.
-    """
-    if len(polygon) < 3:
-        return False
-    distance = abs(
-        normal[0] * (point[0] - polygon[0][0])
-        + normal[1] * (point[1] - polygon[0][1])
-        + normal[2] * (point[2] - polygon[0][2])
-    )
-    if distance > eps:
-        return False
-    # Project onto the plane of the polygon and use the even-odd rule.
-    axis = _dominant_axis(normal)
-    if axis == 0:
-        px, py = point[1], point[2]
-        coords = [(vertex[1], vertex[2]) for vertex in polygon]
-    elif axis == 1:
-        px, py = point[0], point[2]
-        coords = [(vertex[0], vertex[2]) for vertex in polygon]
-    else:
-        px, py = point[0], point[1]
-        coords = [(vertex[0], vertex[1]) for vertex in polygon]
-    for index in range(len(coords)):
-        ax, ay = coords[index]
-        bx, by = coords[(index + 1) % len(coords)]
-        if _point_segment_distance_2d(px, py, ax, ay, bx, by) <= eps:
-            return False
-    inside = False
-    count = len(coords)
-    for index in range(count):
-        ax, ay = coords[index]
-        bx, by = coords[(index + 1) % count]
-        if (ay > py) != (by > py):
-            t = (py - ay) / (by - ay) if abs(by - ay) > 1.0e-18 else 0.0
-            if px < ax + t * (bx - ax):
-                inside = not inside
-    return inside
-
-
-def _point_segment_distance_2d(
-    px: float, py: float, ax: float, ay: float, bx: float, by: float
-) -> float:
-    """Distance from a point to a segment in the plane."""
-    dx = bx - ax
-    dy = by - ay
-    length2 = dx * dx + dy * dy
-    if length2 < 1.0e-24:
-        return math.hypot(px - ax, py - ay)
-    t = ((px - ax) * dx + (py - ay) * dy) / length2
-    t = 0.0 if t < 0.0 else (1.0 if t > 1.0 else t)
-    return math.hypot(px - (ax + t * dx), py - (ay + t * dy))
-
-
-def _dominant_axis(normal: Vec3) -> int:
-    ax, ay, az = abs(normal[0]), abs(normal[1]), abs(normal[2])
-    if ax >= ay and ax >= az:
-        return 0
-    if ay >= az:
-        return 1
-    return 2
-
-
-def _segments_cross(p1: Vec3, q1: Vec3, p2: Vec3, q2: Vec3, eps: float) -> bool:
-    """Do the two segments cross *through* each other?
-
-    Collinear (overlapping) segments do **not** count: two panels that share
-    a crease meet exactly along their common edge, and that is a legitimate
-    touch, not a penetration.  Only a proper crossing - the segments meet in
-    the interior of both - is a penetration.
-    """
-    d1 = (q1[0] - p1[0], q1[1] - p1[1], q1[2] - p1[2])
-    d2 = (q2[0] - p2[0], q2[1] - p2[1], q2[2] - p2[2])
-    r = (p1[0] - p2[0], p1[1] - p2[1], p1[2] - p2[2])
-    a = d1[0] * d1[0] + d1[1] * d1[1] + d1[2] * d1[2]
-    b = d1[0] * d2[0] + d1[1] * d2[1] + d1[2] * d2[2]
-    c = d2[0] * d2[0] + d2[1] * d2[1] + d2[2] * d2[2]
-    d = d1[0] * r[0] + d1[1] * r[1] + d1[2] * r[2]
-    e = d2[0] * r[0] + d2[1] * r[1] + d2[2] * r[2]
-    denom = a * c - b * b
-    if abs(denom) <= 1.0e-18:
-        # Parallel or collinear: a shared crease edge, not a crossing.
-        return False
-    s = (b * e - c * d) / denom
-    t = (a * e - b * d) / denom
-    margin = 1.0e-9
-    if not (margin <= s <= 1.0 - margin and margin <= t <= 1.0 - margin):
-        return False
-    # The closest approach has to be a *common* point.  Two skew segments
-    # that merely pass near each other have closest-approach parameters in
-    # the interior of both segments without ever meeting.
-    cx = (p1[0] + s * d1[0]) - (p2[0] + t * d2[0])
-    cy = (p1[1] + s * d1[1]) - (p2[1] + t * d2[1])
-    cz = (p1[2] + s * d1[2]) - (p2[2] + t * d2[2])
-    return math.sqrt(cx * cx + cy * cy + cz * cz) <= eps
-
-
 def _separated_polygons(
     geometry: GenomeGeometry,
     alpha: float = 1.0,
@@ -1212,22 +1107,6 @@ def detect_penetrations(
         return list(face.poly3d)
 
     count = len(faces)
-    radius = [0.0] * count
-    for index, face in enumerate(faces):
-        points = outline(face)
-        if not points:
-            radius[index] = 0.0
-            continue
-        cx = sum(point[0] for point in points) / len(points)
-        cy = sum(point[1] for point in points) / len(points)
-        cz = sum(point[2] for point in points) / len(points)
-        radius[index] = max(
-            math.sqrt(
-                (point[0] - cx) ** 2 + (point[1] - cy) ** 2 + (point[2] - cz) ** 2
-            )
-            for point in points
-        )
-
     hits: List[Dict[str, Any]] = []
     for i in range(count):
         face_i = faces[i]
@@ -1239,17 +1118,11 @@ def detect_penetrations(
             poly_j = outline(face_j)
             if len(poly_j) < 3:
                 continue
-            if (i, j) in adjacent:
+            # Use fid-based adjacency check
+            pair = (min(face_i.fid, face_j.fid), max(face_i.fid, face_j.fid))
+            if pair in adjacent:
                 continue
-            # Cheap rejection on the bounding spheres.
-            distance = math.sqrt(
-                (face_i.centroid3d[0] - face_j.centroid3d[0]) ** 2
-                + (face_i.centroid3d[1] - face_j.centroid3d[1]) ** 2
-                + (face_i.centroid3d[2] - face_j.centroid3d[2]) ** 2
-            )
-            if distance > radius[i] + radius[j] + tolerance:
-                continue
-            if _panels_intersect(face_i, face_j, poly_i, poly_j, tolerance):
+            if panels_intersect_3d(poly_i, face_i.normal, poly_j, face_j.normal, tolerance):
                 hits.append(
                     {
                         "face_a": int(face_i.fid),
@@ -1259,36 +1132,6 @@ def detect_penetrations(
                     }
                 )
     return hits
-
-
-def _panels_intersect(
-    face_a: FoldedFace,
-    face_b: FoldedFace,
-    poly_a: Sequence[Vec3],
-    poly_b: Sequence[Vec3],
-    tolerance: float,
-) -> bool:
-    """Does one panel pass through the other?
-
-    The unambiguous test is **containment**: a corner of one panel that lies
-    strictly inside the other panel means the paper of the first one is
-    inside the second one, which no pair of hands can produce.
-
-    An edge of one panel crossing an edge of the other is *not* a
-    penetration: two crease lines of the same sheet cross each other all the
-    time (the nose fold runs across the wing fold), and the panels that
-    carry them can still lie on opposite sides of the crossing.  Whenever
-    two panels really overlap, the overlap region has a corner inside the
-    other panel, so the containment test also catches a panel that slices
-    through another one.
-    """
-    for point in poly_a:
-        if _point_in_polygon3d(point, poly_b, face_b.normal, tolerance):
-            return True
-    for point in poly_b:
-        if _point_in_polygon3d(point, poly_a, face_a.normal, tolerance):
-            return True
-    return False
 
 
 def _centroid(points: Sequence[Vec3]) -> Vec3:
@@ -1518,6 +1361,7 @@ def genome_to_aircraft_config(
     config.taper_ratio = taper
     config.mass_kg = max(areal_density * total_area_s, 1.0e-9)
     config.sheet_area_m2 = total_area_s
+    # Inertia already in FRD frame from fold_genome
     config.roll_inertia_kgm2 = max(float(geometry.roll_inertia_kgm2) * fit4, 1.0e-12)
     config.pitch_inertia_kgm2 = max(float(geometry.pitch_inertia_kgm2) * fit4, 1.0e-12)
     config.yaw_inertia_kgm2 = max(float(geometry.yaw_inertia_kgm2) * fit4, 1.0e-12)

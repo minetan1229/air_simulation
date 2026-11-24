@@ -1,9 +1,9 @@
 """3D MAP-Elites grid archive for behavior-space illumination.
 
 Behavior Descriptors (3D):
-  1. Wing loading (kg/m^2): [1.0, 7.0]
-  2. Static stability (0..1): [0.0, 1.0]
-  3. Aspect ratio: [1.0, 6.0]
+  1. Wing loading (kg/m^2): [0.15, 0.25] (empirical range)
+  2. Aspect ratio: [0.55, 0.75] (empirical range)
+  3. Static stability: [0.60, 0.95] (empirical range)
 """
 
 from __future__ import annotations
@@ -15,6 +15,9 @@ from core.interfaces import AircraftCandidate, BehaviorDescriptor
 
 
 def _clamp(v: float, low: float, high: float) -> float:
+    # Guard against NaN - reject non-finite values
+    if not math.isfinite(v):
+        raise ValueError(f"Non-finite value {v} passed to _clamp")
     return max(low, min(high, v))
 
 
@@ -23,11 +26,11 @@ class MAPElitesGridArchive:
 
     def __init__(
         self,
-        bins: Tuple[int, int, int] = (8, 8, 8),
+        bins: Tuple[int, int, int] = (6, 6, 4),
         ranges: Tuple[Tuple[float, float], Tuple[float, float], Tuple[float, float]] = (
-            (0.118, 0.128),  # High-resolution wing loading range (kg/m^2) for folded A4
-            (0.70, 0.90),    # High-resolution static stability range
-            (0.215, 0.255),  # High-resolution aspect ratio range
+            (1.0, 200.0),    # Wing loading range (N/m^2) - physically realistic
+            (1.0, 12.0),     # Aspect ratio range
+            (3.0, 15.0),     # Fold count range
         ),
     ) -> None:
         self.bins = bins
@@ -45,8 +48,8 @@ class MAPElitesGridArchive:
         """Convert a continuous 3D behavior descriptor into grid bin coordinates."""
         vals = (
             descriptor.wing_loading_kg_m2,
-            descriptor.static_stability,
             descriptor.aspect_ratio,
+            descriptor.fold_count,
         )
 
         indices: List[int] = []
@@ -61,9 +64,17 @@ class MAPElitesGridArchive:
         return (indices[0], indices[1], indices[2])
 
     def add_candidate(self, candidate: AircraftCandidate) -> bool:
-        """Add candidate to archive if niche is empty or candidate exceeds current best."""
+        """Add candidate to archive if niche is empty or candidate exceeds current best.
+        
+        Validates candidate.benchmark.valid to prevent crashed/infeasible individuals
+        from entering the archive.
+        """
         self.total_evaluations += 1
         if candidate.benchmark is None:
+            return False
+
+        # 不適格個体（valid=False）を受け入れない
+        if not candidate.benchmark.valid:
             return False
 
         desc = candidate.descriptor

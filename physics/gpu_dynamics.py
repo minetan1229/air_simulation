@@ -1156,6 +1156,12 @@ def _capture_step(
         # Capture timed out - cannot cleanly terminate the thread, but we can
         # return None to fall back to eager mode. The thread will be abandoned
         # (daemon thread will exit when process ends).
+        # Clean up any GPU resources that may have been allocated.
+        try:
+            if result["pool"] is not None:
+                result["pool"].free_all_blocks()
+        except Exception:
+            pass
         return None, None, None
 
     if result["error"] is not None:
@@ -1557,45 +1563,52 @@ def simulate_batch(
     graph = None
     stream = None
     pool = None
-    if use_graph:
-        graph, stream, pool = _capture_step(xp, step, snapshot, restore, timeout_s=capture_timeout_s)
-    launches_per_step = graph_kernel_launches(graph)
+    try:
+        if use_graph:
+            graph, stream, pool = _capture_step(xp, step, snapshot, restore, timeout_s=capture_timeout_s)
+        launches_per_step = graph_kernel_launches(graph)
 
-    steps_executed = 0
-    for _ in range(int(max_steps)):
-        active = (~acc["landed"]) & (~acc["crashed"]) & (acc["time"] < duration) & (acc["steps"] < max_steps_per_case)
-        if not bool(xp.any(active)):
-            break
-        # The wind field is sampled once per step for the whole batch, at
-        # the mean time of the active cases.
-        #
-        # The captured graph is replayed on the **current** stream, the same
-        # stream the wind is written on and the same stream the host reads
-        # of the batch state are issued on.  A graph replayed on a second,
-        # non-blocking stream would not be ordered against the host reads of
-        # this loop: the mean time and the wind would be taken from a state
-        # the previous step had not written yet, and the flight would
-        # depend on the order in which the streams happened to drain.
-        mean_time = float(xp.mean(acc["time"][active]))
-        wind_batch(xp, params, y[:, 0:3], mean_time, out=wind)
-        if graph is not None:
-            graph.launch()
-        else:
-            step()
-        acc["steps"][...] = xp.where(active, acc["steps"] + 1, acc["steps"])
-        steps_executed += 1
-    if graph is not None and stream is not None:
-        stream.synchronize()
-        # The graph keeps the memory of the temporaries it captured alive.
-        # Releasing it before the caller allocates device memory of its own
-        # keeps both of them sound.  The private memory pool of the capture
-        # is released with it: its blocks are the ones the graph writes to.
-        del graph
-        graph = None
-        del pool
-        pool = None
-
-    # The stability metric of the reference path is the **static** trim
+        steps_executed = 0
+        for _ in range(int(max_steps)):
+            active = (~acc["landed"]) & (~acc["crashed"]) & (acc["time"] < duration) & (acc["steps"] < max_steps_per_case)
+            if not bool(xp.any(active)):
+                break
+            # The wind field is sampled once per step for the whole batch, at
+            # the mean time of the active cases.
+            #
+            # The captured graph is replayed on the **current** stream, the same
+            # stream the wind is written on and the same stream the host reads
+            # of the batch state are issued on.  A graph replayed on a second,
+            # non-blocking stream would not be ordered against the host reads of
+            # this loop: the mean time and the wind would be taken from a state
+            # the previous step had not written yet, and the flight would
+            # depend on the order in which the streams happened to drain.
+            mean_time = float(xp.mean(acc["time"][active]))
+            wind_batch(xp, params, y[:, 0:3], mean_time, out=wind)
+            if graph is not None:
+                graph.launch()
+            else:
+                step()
+            acc["steps"][...] = xp.where(active, acc["steps"] + 1, acc["steps"])
+            steps_executed += 1
+    finally:
+        # Always clean up GPU resources even if an exception occurs
+        if graph is not None and stream is not None:
+            try:
+                stream.synchronize()
+            except Exception:
+                pass
+            # The graph keeps the memory of the temporaries it captured alive.
+            # Releasing it before the caller allocates device memory of its own
+            # keeps both of them sound.  The private memory pool of the capture
+            # is released with it: its blocks are the ones the graph writes to.
+            del graph
+            graph = None
+            del pool
+            pool = None
+        # Release GPU memory pool back to OS
+        if _is_device_module(xp):
+            release_gpu_memory_pool(xp)
     # residual at the best-glide point: the pitching moment coefficient of
     # the airframe trimmed at that angle of attack, with no sideslip and no
     # body rates.  It is evaluated here with the same shared kernel.

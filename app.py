@@ -27,6 +27,7 @@ from api.core import (
     NotFound,
     SESSION,
     ServiceUnavailable,
+    UnprocessableEntity,
     api_error,
     domain,
 )
@@ -54,18 +55,6 @@ app.config["JSON_SORT_KEYS"] = False
 app.config["MAX_CONTENT_LENGTH"] = 64 * 1024 * 1024
 
 
-# Pre-warm GPU kernels in background on app load
-def _kick_gpu_warmup() -> None:
-    try:
-        from physics import parallel_engine
-        threading.Thread(target=parallel_engine.warmup_gpu, daemon=True).start()
-    except Exception:
-        pass
-
-
-_kick_gpu_warmup()
-
-
 # ---------------------------------------------------------------------------
 # Backward-compatibility alias for internal testing / references
 # ---------------------------------------------------------------------------
@@ -89,6 +78,11 @@ def _handle_not_found(exc: NotFound):
 @app.errorhandler(ServiceUnavailable)
 def _handle_unavailable(exc: ServiceUnavailable):
     return api_error(str(exc), 503, exc=exc, level="ERROR", category="backend")
+
+
+@app.errorhandler(UnprocessableEntity)
+def _handle_unprocessable(exc: UnprocessableEntity):
+    return api_error(str(exc), 422, exc=exc, level="WARNING", category="validation")
 
 
 @app.errorhandler(404)

@@ -24,6 +24,7 @@ import {
   requestOrigamiGenomeSteps,
   requestOrigamiRecipe,
 } from "./origami.js";
+import { ResilientPoller } from "./resilient_poller.js";
 
 const POLL_MS = 1200;
 const JOURNAL_MS = 2600;
@@ -232,7 +233,8 @@ export class GaResearchPanel {
     this.activeStep = -1;        // recipe step index (0 based)
     this.foldSource = "sample";
     this.markersEnabled = true;
-    this.abort = null;
+    this._statusPoller = null;
+    this._journalPoller = null;
   }
 
   /* ---------------------------------------------------------------- boot */
@@ -542,27 +544,77 @@ export class GaResearchPanel {
 
   _startPolling() {
     this._stopPolling();
-    const tick = async () => {
-      this.pollHandle = window.setTimeout(tick, POLL_MS);
-      await this.pollStatus();
-    };
-    this.pollHandle = window.setTimeout(tick, POLL_MS);
+    
+    // Status poller with ResilientPoller
+    this._statusPoller = new ResilientPoller(
+      async (signal) => {
+        if (!this.runId) return false;
+        let record;
+        try {
+          record = await this.api.gaResearch.status(this.runId);
+        } catch (error) {
+          if (isMissingEndpoint(error)) this._noteUnavailable(error);
+          throw error;
+        }
+        this.available = true;
+        this.status = record;
+        this._renderStatus(record);
+        this._recordTrend(record);
+        this._renderIslands(Array.isArray(record.islands) ? record.islands : []);
+        if (TERMINAL.has(String(record.status))) {
+          if (this.dom.run) this.dom.run.disabled = false;
+          if (this.dom.stop) this.dom.stop.disabled = true;
+          await this.loadResult();
+          return false; // Stop polling
+        }
+        return true; // Continue polling
+      },
+      {
+        intervalMs: POLL_MS,
+        maxBackoffMs: 15000,
+        maxRetries: 8,
+        onFatal: (err) => {
+          this.notify(`GAステータス取得で致命的エラー: ${err.message}`, "error");
+        }
+      }
+    );
+    this._statusPoller.start();
 
-    const journalTick = async () => {
-      this.journalHandle = window.setTimeout(journalTick, JOURNAL_MS);
-      await this.pollJournal();
-    };
-    this.journalHandle = window.setTimeout(journalTick, JOURNAL_MS);
+    // Journal poller with ResilientPoller
+    this._journalPoller = new ResilientPoller(
+      async (signal) => {
+        if (!this.runId) return false;
+        let payload;
+        try {
+          payload = await this.api.gaResearch.journal(this.runId);
+        } catch (error) {
+          return true; // Continue on error
+        }
+        const entries = Array.isArray(payload && payload.entries) ? payload.entries : [];
+        this._renderJournal(entries);
+        return true; // Continue polling
+      },
+      {
+        intervalMs: JOURNAL_MS,
+        maxBackoffMs: 30000,
+        maxRetries: 8,
+        onFatal: (err) => {
+          this.notify(`GAジャーナル取得で致命的エラー: ${err.message}`, "error");
+        }
+      }
+    );
+    this._journalPoller.start();
   }
 
   _stopPolling() {
-    if (this.pollHandle) window.clearTimeout(this.pollHandle);
-    if (this.journalHandle) window.clearTimeout(this.journalHandle);
-    this.pollHandle = 0;
-    this.journalHandle = 0;
+    this._statusPoller?.stop();
+    this._statusPoller = null;
+    this._journalPoller?.stop();
+    this._journalPoller = null;
   }
 
   async pollStatus() {
+    // Kept for backward compatibility (e.g., _restoreRun calls this directly)
     if (!this.runId) return;
     let record;
     try {
@@ -585,6 +637,7 @@ export class GaResearchPanel {
   }
 
   async pollJournal() {
+    // Kept for backward compatibility
     if (!this.runId) return;
     let payload;
     try {
@@ -1613,5 +1666,16 @@ export class GaResearchPanel {
     }
     this.viewport.setResearchMarkers({ cg, keel });
     this.viewport.setResearchMarkersVisible(this.markersEnabled);
+  }
+
+  dispose() {
+    this._statusPoller?.stop();
+    this._statusPoller = null;
+    this._journalPoller?.stop();
+    this._journalPoller = null;
+    this.svgRoot = null;
+    this.currentFold = null;
+    this.stepMeshes = [];
+    this.steps = [];
   }
 }

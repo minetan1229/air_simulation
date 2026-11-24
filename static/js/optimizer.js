@@ -5,6 +5,7 @@
  */
 
 import { clockFmt, clear, fmt, isNum, make, sig } from "./lib.js";
+import { ResilientPoller } from "./resilient_poller.js";
 
 const POLL_MS = 2000;
 const JOBS_MS = 2000;
@@ -264,21 +265,74 @@ export class OptimizerPanel {
   /* ------------------------------------------------------------- polling */
 
   startJobPolling() {
-    if (this.pollHandle) return;
-    const tick = async () => {
-      this.pollHandle = window.setTimeout(tick, POLL_MS);
-      if (this.jobId) await this.pollJob();
-      await this.refreshJobs();
-    };
-    this.pollHandle = window.setTimeout(tick, JOBS_MS);
+    if (this._jobPoller) return;
+    this._jobPoller = new ResilientPoller(
+      async (signal) => {
+        if (!this.jobId) return false;
+        let record;
+        try {
+          record = await this.api.optimizerStatus(this.jobId);
+        } catch (error) {
+          throw error;
+        }
+        const total = Number(record.total_evaluations) || 0;
+        const done = Number(record.evaluated_count) || 0;
+        const ratio = total ? Math.min(done / total, 1) : Number(record.progress) || 0;
+        this.dom.fill.style.width = `${(ratio * 100).toFixed(1)}%`;
+        this.dom.count.textContent = `${done} / ${total}`;
+        this.dom.rate.textContent = Number(record.evals_per_second) > 0
+          ? `${fmt(record.evals_per_second, 2)} eval/s`
+          : record.backend || "—";
+        this.setEta(record);
+
+        // Also refresh jobs list periodically
+        await this.refreshJobs();
+
+        if (TERMINAL.has(record.status) && this.result?.job_id !== this.jobId) {
+          this.dom.run.disabled = false;
+          this.dom.cancel.disabled = true;
+          this.dom.eta.dataset.active = "0";
+          if (record.status === "completed") {
+            await this.loadResult();
+          } else if (record.status === "failed") {
+            this.notify(`探索が失敗しました: ${record.message || record.status}`, "error");
+            if (this.onError) {
+              this.onError({
+                title: "最適化探索シミュレーションエラー",
+                message: record.message || "最適化ジョブの実行中にエラーが発生しました",
+                hint: "探索設計変数の上下限値や目的関数設定を見直してください。",
+                badge: "OPT_FAILED",
+              });
+            }
+            this.dom.chartEmpty.hidden = false;
+            this.dom.chartEmpty.textContent = record.message || "failed";
+          } else {
+            this.dom.chartEmpty.hidden = false;
+            this.dom.chartEmpty.textContent = "中断されました";
+          }
+          return false; // Stop polling
+        }
+        return true; // Continue polling
+      },
+      {
+        intervalMs: POLL_MS,
+        maxBackoffMs: 30000,
+        maxRetries: 10,
+        onFatal: (err) => {
+          this.notify(`最適化ステータス取得で致命的エラー: ${err.message}`, "error");
+        }
+      }
+    );
+    this._jobPoller.start();
   }
 
   stop() {
-    if (this.pollHandle) window.clearTimeout(this.pollHandle);
-    this.pollHandle = 0;
+    this._jobPoller?.stop();
+    this._jobPoller = null;
   }
 
   async pollJob() {
+    // Kept for backward compatibility (e.g., selectJob calls this directly)
     if (!this.jobId) return;
     let record;
     try {

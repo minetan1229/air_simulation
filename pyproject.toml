@@ -19,6 +19,7 @@ dependencies = [
     "trimesh>=5.1.1",
     "requests>=2.28.0",
     "python-dotenv>=1.0.0",
+    "pyyaml>=6.0",
 ]
 
 [project.optional-dependencies]
@@ -39,6 +40,6 @@ bridge = [
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["api*", "physics*", "tools*"]
+include = ["api*", "physics*", "tools*", "core*", "geometry*", "optimization*", "milcy*", "v3*"]
 exclude = ["tests*", "docs*", "static*", "templates*", "archive*", "skill*", "config*", "search*"]
 

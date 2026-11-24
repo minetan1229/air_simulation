@@ -56,7 +56,7 @@ class MCTSOrigamiGenerator:
         self.adapter = adapter or OrigamiAdapter()
         self.rng = random.Random(seed)
 
-    def evaluate_leaf_geometry(self, config: ParametricOrigamiConfig) -> GeometricStaticScore:
+    def evaluate_leaf_geometry(self, config: ParametricOrigamiConfig) -> Tuple[GeometricStaticScore, Optional[AircraftCandidate]]:
         """Fast geometric non-6DoF evaluation for MCTS rollout/leaf."""
         candidate = self.adapter.compile_candidate(config)
         valid, reasons = validate_tier0(candidate)
@@ -68,7 +68,7 @@ class MCTSOrigamiGenerator:
                 wing_loading_score=0.0,
                 tier0_passed=False,
                 rejection_reasons=tuple(reasons),
-            )
+            ), None
 
         geom = candidate.geometry
 
@@ -99,7 +99,7 @@ class MCTSOrigamiGenerator:
             wing_loading_score=loading_score,
             tier0_passed=True,
             rejection_reasons=(),
-        )
+        ), candidate
 
     def _expand_node(self, node: MCTSNode) -> None:
         """Expand node with possible parameter variations across Phases 1, 2, and 3."""
@@ -151,6 +151,9 @@ class MCTSOrigamiGenerator:
                     keel=ParametricKeelSpec(
                         keel_depth_ratio=min(0.14, base.keel.keel_depth_ratio + 0.02),
                         has_lock_fold=True,
+                        lock_fold_angle_deg=base.keel.lock_fold_angle_deg,
+                        keel_layers=base.keel.keel_layers,
+                        crease_offset_u=base.keel.crease_offset_u,
                     ),
                     wing=base.wing,
                 ),
@@ -162,6 +165,9 @@ class MCTSOrigamiGenerator:
                     keel=ParametricKeelSpec(
                         keel_depth_ratio=max(0.06, base.keel.keel_depth_ratio - 0.02),
                         has_lock_fold=False,
+                        lock_fold_angle_deg=base.keel.lock_fold_angle_deg,
+                        keel_layers=base.keel.keel_layers,
+                        crease_offset_u=base.keel.crease_offset_u,
                     ),
                     wing=base.wing,
                 ),
@@ -175,6 +181,10 @@ class MCTSOrigamiGenerator:
                     wing=ParametricWingSpec(
                         wingspan_ratio=min(0.88, base.wing.wingspan_ratio + 0.08),
                         dihedral_deg=base.wing.dihedral_deg,
+                        elevon_left_deg=base.wing.elevon_left_deg,
+                        elevon_right_deg=base.wing.elevon_right_deg,
+                        winglet_angle_deg=base.wing.winglet_angle_deg,
+                        has_winglet=base.wing.has_winglet,
                     ),
                 ),
             ),
@@ -186,6 +196,70 @@ class MCTSOrigamiGenerator:
                     wing=ParametricWingSpec(
                         wingspan_ratio=base.wing.wingspan_ratio,
                         dihedral_deg=min(8.0, base.wing.dihedral_deg + 2.0),
+                        elevon_left_deg=base.wing.elevon_left_deg,
+                        elevon_right_deg=base.wing.elevon_right_deg,
+                        winglet_angle_deg=base.wing.winglet_angle_deg,
+                        has_winglet=base.wing.has_winglet,
+                    ),
+                ),
+            ),
+            (
+                "wing_left_elevon_up",
+                ParametricOrigamiConfig(
+                    nose=base.nose,
+                    keel=base.keel,
+                    wing=ParametricWingSpec(
+                        wingspan_ratio=base.wing.wingspan_ratio,
+                        dihedral_deg=base.wing.dihedral_deg,
+                        elevon_left_deg=min(15.0, base.wing.elevon_left_deg + 2.0),
+                        elevon_right_deg=base.wing.elevon_right_deg,
+                        winglet_angle_deg=base.wing.winglet_angle_deg,
+                        has_winglet=base.wing.has_winglet,
+                    ),
+                ),
+            ),
+            (
+                "wing_right_elevon_up",
+                ParametricOrigamiConfig(
+                    nose=base.nose,
+                    keel=base.keel,
+                    wing=ParametricWingSpec(
+                        wingspan_ratio=base.wing.wingspan_ratio,
+                        dihedral_deg=base.wing.dihedral_deg,
+                        elevon_left_deg=base.wing.elevon_left_deg,
+                        elevon_right_deg=min(15.0, base.wing.elevon_right_deg + 2.0),
+                        winglet_angle_deg=base.wing.winglet_angle_deg,
+                        has_winglet=base.wing.has_winglet,
+                    ),
+                ),
+            ),
+            (
+                "wing_lower_dihedral",
+                ParametricOrigamiConfig(
+                    nose=base.nose,
+                    keel=base.keel,
+                    wing=ParametricWingSpec(
+                        wingspan_ratio=base.wing.wingspan_ratio,
+                        dihedral_deg=max(-5.0, base.wing.dihedral_deg - 2.0),
+                        elevon_left_deg=base.wing.elevon_left_deg,
+                        elevon_right_deg=base.wing.elevon_right_deg,
+                        winglet_angle_deg=base.wing.winglet_angle_deg,
+                        has_winglet=base.wing.has_winglet,
+                    ),
+                ),
+            ),
+            (
+                "wing_lower_aspect",
+                ParametricOrigamiConfig(
+                    nose=base.nose,
+                    keel=base.keel,
+                    wing=ParametricWingSpec(
+                        wingspan_ratio=max(0.50, base.wing.wingspan_ratio - 0.08),
+                        dihedral_deg=base.wing.dihedral_deg,
+                        elevon_left_deg=base.wing.elevon_left_deg,
+                        elevon_right_deg=base.wing.elevon_right_deg,
+                        winglet_angle_deg=base.wing.winglet_angle_deg,
+                        has_winglet=base.wing.has_winglet,
                     ),
                 ),
             ),
@@ -217,11 +291,10 @@ class MCTSOrigamiGenerator:
                     curr = self.rng.choice(curr.children)
 
             # 3. Simulation / Geometric Rollout
-            score = self.evaluate_leaf_geometry(curr.config)
+            score, cand = self.evaluate_leaf_geometry(curr.config)
             value = score.total_value
 
-            if score.tier0_passed:
-                cand = self.adapter.compile_candidate(curr.config)
+            if score.tier0_passed and cand is not None:
                 best_candidates.append((value, cand))
 
             # 4. Backpropagation

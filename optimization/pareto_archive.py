@@ -138,12 +138,51 @@ class ParetoArchiveManager:
         objectives: Dict[str, float],
         physics: Optional[Dict[str, Any]] = None,
     ) -> None:
-        """Add an evaluated vector and its objective values to the archive."""
+        """Add an evaluated vector and its objective values to the archive.
+        
+        Rejects infeasible candidates and those with non-finite objective values.
+        Trims archive to max_size if specified.
+        """
+        # 非有限値チェック
+        obj_values = {k: float(v) for k, v in objectives.items()}
+        if not all(math.isfinite(v) for v in obj_values.values()):
+            return
+        
+        # infeasible チェック
+        if obj_values.get("infeasible", False):
+            return
+        
         self._archive.append((
             [float(v) for v in vector],
-            {k: float(v) for k, v in objectives.items()},
+            obj_values,
             dict(physics or {})
         ))
+        
+        # 容量制御
+        if self.max_size is not None and len(self._archive) > self.max_size:
+            self._trim_archive()
+
+    def _trim_archive(self) -> None:
+        """Trim archive to max_size using non-dominated sort and crowding distance."""
+        if not self._archive or self.max_size is None:
+            return
+        while len(self._archive) > self.max_size:
+            matrix = self.as_matrix()
+            fronts = non_dominated_sort_matrix(matrix, self.directions)
+            if not fronts:
+                # フロントが空の場合、古い順に削除
+                self._archive.pop(0)
+                continue
+            
+            # 最後のフロントから削除
+            last_front = fronts[-1]
+            if len(last_front) == 1:
+                self._archive.pop(last_front[0])
+            else:
+                distances = crowding_distance_matrix(matrix, last_front)
+                # 最大距離の点を残し、最小距離の点を削除
+                worst_idx = min(last_front, key=lambda i: distances[last_front.index(i)])
+                self._archive.pop(worst_idx)
 
     def as_matrix(self) -> np.ndarray:
         """Return the current archive as an (n, num_objectives) float matrix."""

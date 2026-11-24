@@ -1,11 +1,12 @@
 """Comprehensive aerodynamic ground effect audit and verification tests.
 
 Verifies:
-1. Wieselsberger (1922) induced drag factor:
-   sigma = 16 (h/b)^2 / (1 + 16 (h/b)^2)
+1. Wieselsberger (1922) induced drag factor with viscous/boundary-layer floor:
+   sigma = sigma_min + (1 - sigma_min) * 16 (h/b)_eff^2 / (1 + 16 (h/b)_eff^2)
+   where (h/b)_eff = max(h/b, 0.05) and sigma_min = 0.20
    - Free-air asymptotic limit: sigma -> 1.0 as h/b >> 1.
-   - Ground contact / zero clearance limit: sigma -> 0.0 as h/b -> 0.
-   - Monotonicity: d(sigma)/d(h/b) > 0 for all h/b > 0.
+   - Ground contact / zero clearance limit: sigma -> sigma_min + (1-sigma_min)*wieselsberger(0.05) ≈ 0.2308
+   - Monotonicity: d(sigma)/d(h/b) > 0 for all h/b > 0.05 (plateaus below 0.05).
    - Singularity-free / safe handling of edge cases (h <= 0, span <= 0, NaN, Inf).
    - Equivalence between numpy array and scalar math paths.
    - Disabled behavior: sigma = 1.0 everywhere when ground_effect_enabled=False.
@@ -39,47 +40,61 @@ from physics.aero_kernel import ScalarMath
 from physics.config_schema import AircraftConfig, EnvironmentConfig
 
 
+# Expected sigma_min floor value
+SIGMA_MIN = 0.20
+HB_EFF_MIN = 0.05
+
+def _expected_sigma(h: float, span: float, sigma_min: float = SIGMA_MIN, hb_eff_min: float = HB_EFF_MIN) -> float:
+    """Compute expected ground effect factor with sigma_min floor and hb_eff minimum."""
+    if h < 0:
+        h = 0.0
+    hb_eff = max(h / span, hb_eff_min)
+    ratio = 16.0 * hb_eff ** 2
+    wieselsberger = ratio / (1.0 + ratio)
+    return sigma_min + (1.0 - sigma_min) * wieselsberger
+
+
 # ==============================================================================
 # 1. Wieselsberger Induced Drag Factor Tests
 # ==============================================================================
 
 class TestWieselsbergerFactor:
-    """Audit of sigma = 16 (h/b)^2 / (1 + 16 (h/b)^2)."""
+    """Audit of sigma = sigma_min + (1-sigma_min) * 16 (h/b)_eff^2 / (1 + 16 (h/b)_eff^2)."""
 
     def test_high_altitude_asymptotic_unity(self) -> None:
         """Hypothesis: As h/b >> 1, sigma -> 1.0 asymptotically."""
         span = 0.20
-        # Check several high clearances
+        # Check several high clearances - h/b > 0.05 so hb_eff = h/b
         for hb_mult in [5.0, 10.0, 50.0, 100.0, 1000.0]:
             h = hb_mult * span
             val_scalar = aero_domain.ground_effect_factor(h, span, enabled=True)
             val_kernel = aero_kernel.ground_effect_factor(np, np.array([h]), np.array([span]), enabled=True)
 
-            # Theoretical formula
-            hb = h / span
-            expected = (16.0 * hb**2) / (1.0 + 16.0 * hb**2)
+            # Theoretical formula - at high h/b, hb_eff = h/b
+            expected = _expected_sigma(h, span)
 
             assert val_scalar == pytest.approx(expected, rel=1e-12)
             assert float(val_kernel[0]) == pytest.approx(expected, rel=1e-12)
 
-            # For h/b >= 10, sigma should be within 0.07% of 1.0 (1600/1601 = 0.999375)
+            # For h/b >= 10, sigma should be within 0.07% of 1.0
             if hb_mult >= 10.0:
                 assert val_scalar > 0.999
                 assert val_scalar <= 1.0
 
     def test_zero_height_limit(self) -> None:
-        """Hypothesis: At ground contact h = 0, sigma = 0.0 with no singularity."""
+        """Hypothesis: At ground contact h = 0, sigma = sigma_min + (1-sigma_min)*wieselsberger(0.05) ≈ 0.2308."""
         span = 0.25
         val_scalar = aero_domain.ground_effect_factor(0.0, span, enabled=True)
         val_kernel = aero_kernel.ground_effect_factor(np, 0.0, span, enabled=True)
         val_scalar_math = aero_kernel.ground_effect_factor(ScalarMath, 0.0, span, enabled=True)
 
-        assert val_scalar == 0.0
-        assert float(val_kernel) == 0.0
-        assert val_scalar_math == 0.0
+        expected = _expected_sigma(0.0, span)
+        assert val_scalar == pytest.approx(expected, rel=1e-12)
+        assert float(val_kernel) == pytest.approx(expected, rel=1e-12)
+        assert val_scalar_math == pytest.approx(expected, rel=1e-12)
 
     def test_monotonic_decrease_towards_ground(self) -> None:
-        """Hypothesis: sigma strictly monotonically increases with clearance h/b."""
+        """Hypothesis: sigma strictly monotonically increases with clearance h/b for h/b > 0.05."""
         span = 0.22
         h_ratios = np.linspace(0.0, 3.0, 100)
         h_values = h_ratios * span
@@ -88,14 +103,24 @@ class TestWieselsbergerFactor:
 
         for i in range(len(factors) - 1):
             assert factors[i] <= factors[i + 1]
-            if h_ratios[i + 1] > 0.0:
+            if h_ratios[i + 1] > HB_EFF_MIN:
                 assert factors[i] < factors[i + 1]
-                assert 0.0 <= factors[i] <= 1.0
+                assert SIGMA_MIN <= factors[i] <= 1.0
+
+    def test_plateau_below_hb_eff_min(self) -> None:
+        """Below h/b = 0.05, sigma plateaus at the minimum value."""
+        span = 0.20
+        # All these h/b values are below 0.05, so hb_eff = 0.05
+        for h_ratio in [0.0, 0.01, 0.02, 0.03, 0.04, 0.05]:
+            h = h_ratio * span
+            val = aero_domain.ground_effect_factor(h, span, enabled=True)
+            expected = _expected_sigma(h, span)
+            assert val == pytest.approx(expected, rel=1e-12)
 
     def test_derivative_closed_form(self) -> None:
-        """Verify derivative d(sigma)/d(eta) = 32*eta / (1 + 16*eta^2)^2 where eta = h/b."""
+        """Verify derivative d(sigma)/d(eta) for eta > 0.05."""
         span = 0.20
-        eta_samples = [0.05, 0.1, 0.25, 0.5, 1.0, 2.0]
+        eta_samples = [0.1, 0.25, 0.5, 1.0, 2.0]  # Only above hb_eff_min
         eps = 1e-6
         for eta in eta_samples:
             h1 = (eta - eps) * span
@@ -104,8 +129,9 @@ class TestWieselsbergerFactor:
             f2 = aero_domain.ground_effect_factor(h2, span)
             num_deriv = (f2 - f1) / (2.0 * eps)
 
-            # Analytic derivative w.r.t (h/b)
-            analytic_deriv = (32.0 * eta) / ((1.0 + 16.0 * eta**2)**2)
+            # Analytic derivative w.r.t (h/b) for Wieselsberger part
+            # d(sigma)/d(eta) = (1-sigma_min) * 32*eta / (1 + 16*eta^2)^2
+            analytic_deriv = (1.0 - SIGMA_MIN) * (32.0 * eta) / ((1.0 + 16.0 * eta**2)**2)
             assert num_deriv == pytest.approx(analytic_deriv, rel=1e-4)
 
     def test_disabled_returns_unity_everywhere(self) -> None:
@@ -121,9 +147,10 @@ class TestWieselsbergerFactor:
     def test_robustness_against_negative_and_extreme_inputs(self) -> None:
         """Hypothesis: Negative height is safely clamped to 0.0, zero span does not ZeroDivisionError."""
         span = 0.20
-        # Negative height -> clamped to 0.0 -> factor 0.0
-        assert aero_domain.ground_effect_factor(-0.5, span, enabled=True) == 0.0
-        assert float(aero_kernel.ground_effect_factor(np, -0.5, span, enabled=True)) == 0.0
+        # Negative height -> clamped to 0.0 -> factor = sigma_min + (1-sigma_min)*wieselsberger(0.05)
+        expected_neg = _expected_sigma(-0.5, span)
+        assert aero_domain.ground_effect_factor(-0.5, span, enabled=True) == pytest.approx(expected_neg, rel=1e-12)
+        assert float(aero_kernel.ground_effect_factor(np, -0.5, span, enabled=True)) == pytest.approx(expected_neg, rel=1e-12)
 
         # Zero or negative span -> safe fallback without crash
         val_zero_span = aero_kernel.ground_effect_factor(np, 0.1, 0.0, enabled=True)
@@ -175,7 +202,7 @@ class TestInducedDragPolarGroundEffect:
 
         # Induced drag ratio matches ground_effect_ratio
         sigma = res_near_on.ground_effect_ratio
-        expected_sigma = (16.0 * (h_near / span)**2) / (1.0 + 16.0 * (h_near / span)**2)
+        expected_sigma = _expected_sigma(h_near, span)
         assert sigma == pytest.approx(expected_sigma, rel=1e-6)
 
         # When GE disabled, ground_effect_ratio is 1.0 and drag equals free air

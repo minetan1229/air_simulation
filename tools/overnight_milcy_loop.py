@@ -112,9 +112,15 @@ def run_overnight_loop(
     base_dir = PROJECT_ROOT / base_output_dir
     base_dir.mkdir(parents=True, exist_ok=True)
 
+    # Compute absolute target datetime in JST
+    now_jst_start = get_current_jst()
+    target_dt = now_jst_start.replace(hour=target_hour, minute=target_minute, second=0, microsecond=0)
+    if target_dt <= now_jst_start:
+        target_dt += datetime.timedelta(days=1)
+
     print("=" * 75)
     print("  [NIGHT-LOOP] AUTONOMOUS OVERNIGHT OPTIMIZATION & CONTINUOUS IMPROVEMENT")
-    print(f"  Target Finish Time : {target_hour:02d}:{target_minute:02d} JST")
+    print(f"  Target Finish Time : {target_hour:02d}:{target_minute:02d} JST (absolute: {target_dt.strftime('%Y-%m-%d %H:%M:%S JST')})")
     print(f"  Base Output Dir    : {base_dir.resolve()}")
     print("=" * 75)
 
@@ -143,9 +149,9 @@ def run_overnight_loop(
         now_jst = get_current_jst()
         print(f"\n>>> [Round {round_idx}] Current Time: {now_jst.strftime('%H:%M:%S JST')}")
 
-        # Check termination condition: reached target hour and minute JST
-        if now_jst.hour >= target_hour and now_jst.minute >= target_minute:
-            print(f"[*] Reached target time ({target_hour:02d}:{target_minute:02d} JST). Concluding overnight loop.")
+        # Check termination condition: reached absolute target datetime JST
+        if now_jst >= target_dt:
+            print(f"[*] Reached target time ({target_dt.strftime('%Y-%m-%d %H:%M:%S JST')}). Concluding overnight loop.")
             break
 
         # Adaptive search parameters per round

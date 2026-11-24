@@ -22,7 +22,7 @@ from typing import Any, Dict, List, Optional
 
 from flask import Blueprint, jsonify
 
-from api.core import BadRequest, NotFound, as_int, body
+from api.core import BadRequest, NotFound, ServiceUnavailable, as_int, body
 
 ga_research_bp = Blueprint("ga_research", __name__)
 
@@ -34,6 +34,10 @@ RUNS: Dict[str, "GARunState"] = {}
 
 #: Maximum completed/terminal research runs kept in memory.
 MAX_RETAINED_GA_RUNS = 32
+
+#: Maximum concurrent GA research runs.
+MAX_ACTIVE_GA_RUNS = 2
+_GA_SEMAPHORE = threading.BoundedSemaphore(value=MAX_ACTIVE_GA_RUNS)
 
 #: Lock that protects the registry.
 RUNS_LOCK = threading.RLock()
@@ -86,6 +90,7 @@ class GARunState:
     started_at: float = field(default_factory=time.time)
     finished_at: Optional[float] = None
     lock: threading.RLock = field(default_factory=threading.RLock)
+    cancel_event: threading.Event = field(default_factory=threading.Event)
 
     def elapsed_s(self) -> float:
         end = self.finished_at if self.finished_at is not None else time.time()
@@ -205,6 +210,8 @@ def _worker(state: GARunState, overrides: Dict[str, Any], base_config: Any = Non
 
     def on_progress(snapshot: Dict[str, Any]) -> None:
         """Store the live snapshot of the research thread (thread safe)."""
+        if state.cancel_event.is_set():
+            raise InterruptedError(f"GA research run {state.run_id} cancelled")
         with state.lock:
             state.progress = dict(snapshot)
 
@@ -212,26 +219,38 @@ def _worker(state: GARunState, overrides: Dict[str, Any], base_config: Any = Non
         summary = run_research(
             overrides, base_config=base_config, progress_callback=on_progress
         )
+    except InterruptedError:
+        with state.lock:
+            state.status = "cancelled"
+            state.finished_at = time.time()
+        _GA_SEMAPHORE.release()
+        return
     except Exception as exc:  # the failure is reported through the status
         with state.lock:
             state.status = "failed"
             state.error = f"{type(exc).__name__}: {exc}"
             state.finished_at = time.time()
+        _GA_SEMAPHORE.release()
         return
     with state.lock:
         state.summary = summary
         state.status = str(summary.get("status", "completed"))
         state.finished_at = time.time()
+    _GA_SEMAPHORE.release()
 
 
 def _start(overrides: Dict[str, Any], base_config: Any = None) -> GARunState:
     """Start a research run in the background and register it."""
     from physics.ga_config import GAConfig
 
+    if not _GA_SEMAPHORE.acquire(blocking=False):
+        raise ServiceUnavailable("max concurrent GA runs reached")
+
     try:
         base = base_config if base_config is not None else GAConfig()
         config = base.merged(overrides).validate()
     except ValueError as exc:
+        _GA_SEMAPHORE.release()
         raise BadRequest(f"invalid research configuration: {exc}") from exc
 
     run_id = uuid.uuid4().hex[:16]
@@ -447,6 +466,17 @@ def ga_research_resume():
             "resumed_from": str(checkpoint),
         }
     )
+
+
+@ga_research_bp.post(f"{API_PREFIX}/cancel/<run_id>")
+def ga_research_cancel(run_id: str):
+    """Cancel a running research run."""
+    state = _state(run_id)
+    state.cancel_event.set()
+    with state.lock:
+        if state.status == "running":
+            state.status = "cancelling"
+    return jsonify(state.to_status()), 202
 
 
 @ga_research_bp.get(f"{API_PREFIX}/journal/<run_id>")

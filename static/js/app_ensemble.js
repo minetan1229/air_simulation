@@ -126,15 +126,15 @@ export function showEnsembleChampionHud(app, res) {
   const avgDist = displayDistList.reduce((acc, cur) => acc + (cur.distance_m || 0), 0) / displayDistList.length;
   const avgTime = displayDistList.reduce((acc, cur) => acc + (cur.flight_time_s || 0), 0) / displayDistList.length;
 
-  if (app.dom["champ-best-val"]) app.dom["champ-best-val"].textContent = `${champ.distance_m.toFixed(2)}m`;
+  if (app.dom["champ-best-dist"]) app.dom["champ-best-dist"].textContent = `${champ.distance_m.toFixed(2)}m`;
   if (app.dom["champ-best-detail"]) {
     app.dom["champ-best-detail"].textContent = `機体 #${champ.id ?? 1} · 滞空 ${(champ.flight_time_s || 0).toFixed(1)}s · 最高高度 ${(champ.max_altitude_m || 0).toFixed(1)}m`;
   }
   if (app.dom["champ-avg-range"]) {
     app.dom["champ-avg-range"].textContent = `${avgDist.toFixed(1)}m`;
   }
-  if (app.dom["champ-avg-detail"]) {
-    app.dom["champ-avg-detail"].textContent = `平均滞空 ${avgTime.toFixed(1)}s (${displayDistList.length}機集計)`;
+  if (app.dom["champ-avg-dist"]) {
+    app.dom["champ-avg-dist"].textContent = `平均滞空 ${avgTime.toFixed(1)}s (${displayDistList.length}機集計)`;
   }
 
   app.dom["ensemble-champion-card"].hidden = false;
@@ -161,6 +161,67 @@ export function initChampionActions(app) {
       if (app._lastEnsembleResult) autoSaveEnsembleData(app, app._lastEnsembleResult, "csv", true);
     });
   }
+  // Bind 6 champion action buttons
+  if (app.dom["champ-btn-adopt"]) {
+    app.dom["champ-btn-adopt"].addEventListener("click", () => {
+      if (app._lastChampFlight && app.viewport) {
+        app.viewport.focusTrajectory(app._lastChampFlight.id);
+        app.notify("1位の機体にフォーカスしました", "ok");
+      }
+    });
+  }
+  if (app.dom["champ-btn-focus"]) {
+    app.dom["champ-btn-focus"].addEventListener("click", () => {
+      if (app._lastChampFlight && app.viewport) {
+        app.viewport.focusTrajectory(app._lastChampFlight.id);
+      }
+    });
+  }
+  if (app.dom["champ-btn-skip-top1"]) {
+    app.dom["champ-btn-skip-top1"].addEventListener("click", () => {
+      app._skipFirstRank = !app._skipFirstRank;
+      if (app._lastEnsembleResult && app.viewport) {
+        app.viewport.setSkipFirstRank(app._skipFirstRank);
+      }
+      const btn = app.dom["champ-btn-skip-top1"];
+      const label = app.dom["champ-label-skip-top1"];
+      const icon = app.dom["champ-icon-skip-top1"];
+      const badge = app.dom["champ-skip-status-badge"];
+      if (btn) btn.classList.toggle("active", app._skipFirstRank);
+      if (label) label.textContent = app._skipFirstRank ? "スキップ解除 (1位復帰)" : "1位をスキップ (2位繰上)";
+      if (icon) icon.style.display = app._skipFirstRank ? "none" : "";
+      if (badge) badge.style.display = app._skipFirstRank ? "" : "none";
+      if (app.dom["champ-promoted-tag"]) {
+        app.dom["champ-promoted-tag"].style.display = app._skipFirstRank ? "" : "none";
+      }
+    });
+  }
+  if (app.dom["champ-btn-focus-worst"]) {
+    app.dom["champ-btn-focus-worst"].addEventListener("click", () => {
+      if (app._lastWorstFlight && app.viewport) {
+        app.viewport.focusTrajectory(app._lastWorstFlight.id);
+        app.notify("最下位の機体にフォーカスしました", "ok");
+      }
+    });
+  }
+  if (app.dom["champ-btn-toggle-fleet"]) {
+    app.dom["champ-btn-toggle-fleet"].addEventListener("click", () => {
+      if (!app.viewport || !app.viewport._ensembleGroup) return;
+      const currentMode = app.viewport._ensembleMode || "all";
+      const nextMode = currentMode === "all" ? "top3" : "all";
+      app.viewport.filterEnsembleTracks(nextMode);
+      const btn = app.dom["champ-btn-toggle-fleet"];
+      if (btn) btn.textContent = nextMode === "all" ? "表示: 全100機 ⇄ 上位3機" : "表示: 上位3機 ⇄ 全100機";
+    });
+  }
+  if (app.dom["champ-btn-focus-mean"]) {
+    app.dom["champ-btn-focus-mean"].addEventListener("click", () => {
+      if (app.viewport) {
+        app.viewport.focusMeanTrajectory();
+        app.notify("平均機にフォーカスしました", "ok");
+      }
+    });
+  }
 }
 
 /**
@@ -171,7 +232,7 @@ export async function autoSaveEnsembleData(app, res, format = "json", isUserRequ
   try {
     const filename = `ensemble_100_${Date.now()}.${format}`;
     const content = format === "json" ? JSON.stringify(res, null, 2) : "format not supported";
-    const blob = new Blob([content], { type: "application/json" });
+    const blob = new Blob([content], { type: format === "json" ? "application/json" : "text/csv" });
     const url = URL.createObjectURL(blob);
     if (isUserRequested) {
       const a = document.createElement("a");
@@ -180,9 +241,10 @@ export async function autoSaveEnsembleData(app, res, format = "json", isUserRequ
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
-      URL.revokeObjectURL(url);
       app.notify(`アンサンブル結果を保存しました: ${filename}`, "ok");
     }
+    // Always revoke to prevent memory leak
+    URL.revokeObjectURL(url);
   } catch (e) {
     console.warn("アンサンブル保存エラー:", e);
   }

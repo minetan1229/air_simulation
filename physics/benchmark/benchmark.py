@@ -11,7 +11,7 @@ from __future__ import annotations
 import math
 from typing import Any, Dict, Optional, Tuple
 
-from physics.config_schema import AircraftConfig, EnvironmentConfig, LaunchConfig
+from physics.config_schema import AircraftConfig, EnvironmentConfig, LaunchConfig, SimulationSettings
 from physics.flight_sim import FlightSimulator, flight_phase_metrics
 from core.interfaces import (
     AircraftCandidate,
@@ -66,6 +66,25 @@ def _build_aircraft_config(candidate: AircraftCandidate) -> AircraftConfig:
     dihedral_deg = cfg.wing.dihedral_deg
     elevon_deg = 0.5 * (cfg.wing.elevon_left_deg + cfg.wing.elevon_right_deg)
 
+    # Origami-derived properties
+    cg_offset_x = 0.0
+    static_margin = 0.12
+    roll_inertia = 0.0
+    pitch_inertia = 0.0
+    yaw_inertia = 0.0
+    low_re_enabled = True
+
+    if geom:
+        # CG offset: extract x from cg_m (NED: x forward, so cg_m[0] is forward position)
+        # Positive cg_offset_x means aft CG; nose-heavy = negative offset
+        cg_offset_x = -float(geom.cg_m[0]) if len(geom.cg_m) >= 1 else 0.0
+        # Static margin from geometry if available, else default
+        static_margin = float(getattr(geom, "static_margin", 0.12))
+        # Inertia from geometry
+        roll_inertia = float(getattr(geom, "roll_inertia_kgm2", 0.0))
+        pitch_inertia = float(getattr(geom, "pitch_inertia_kgm2", 0.0))
+        yaw_inertia = float(getattr(geom, "yaw_inertia_kgm2", 0.0))
+
     return AircraftConfig(
         mass_kg=mass_kg,
         wing_area_m2=wing_area,
@@ -73,7 +92,12 @@ def _build_aircraft_config(candidate: AircraftCandidate) -> AircraftConfig:
         aspect_ratio=aspect_ratio,
         dihedral_deg=dihedral_deg,
         elevon_deg=elevon_deg,
-        low_re_enabled=True,
+        low_re_enabled=low_re_enabled,
+        cg_offset_x=cg_offset_x,
+        static_margin=static_margin,
+        roll_inertia_kgm2=roll_inertia,
+        pitch_inertia_kgm2=pitch_inertia,
+        yaw_inertia_kgm2=yaw_inertia,
     )
 
 
@@ -86,17 +110,20 @@ def evaluate_horizontal_glide(
     """Run a single deterministic horizontal launch simulation and extract metrics."""
     launch = _build_fixed_launch_config(speed_mps)
     env = _build_environment_config()
+    settings = SimulationSettings(dt_max=dt_max, duration_s=duration_s, adaptive=True)
 
     sim = FlightSimulator(
         aircraft=aircraft_config,
         environment=env,
         launch=launch,
+        settings=settings,
     )
 
     result = sim.simulate(duration_s=duration_s)
     sim_metrics = sim.metrics()
 
     # Extract flight history samples for phase analysis
+    samples = []
     try:
         samples = sim.history()
         phase_metrics = flight_phase_metrics(samples, phugoid_window_s=2.5)

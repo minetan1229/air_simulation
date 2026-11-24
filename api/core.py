@@ -13,6 +13,7 @@ from werkzeug.exceptions import HTTPException
 
 from core.config_schema import (
     AircraftConfig,
+    AIRCRAFT_RANGES,
     EnvironmentConfig,
     LaunchConfig,
     SimulationSettings,
@@ -37,6 +38,10 @@ class BadRequest(ValueError):
 
 class NotFound(KeyError):
     """Raised when an entity or preset is not found."""
+
+
+class UnprocessableEntity(ValueError):
+    """Raised when syntactically valid JSON violates physical/domain constraints (HTTP 422)."""
 
 
 # ---------------------------------------------------------------------------
@@ -199,6 +204,28 @@ def as_vec3(value: Any, key: str) -> Tuple[float, float, float]:
 MAX_SPEED_MPS = 1500.0
 MAX_MACH = 0.99
 MAX_DENSITY = 50.0
+
+
+import math
+
+
+def validate_aircraft_strict(payload: Optional[Dict[str, Any]], base: AircraftConfig) -> AircraftConfig:
+    """Validate aircraft config against physical bounds, raising 422 for out-of-bounds values.
+
+    Unlike build(), this does NOT silently clamp values - it rejects them with
+    UnprocessableEntity (HTTP 422) to make domain constraint violations explicit.
+    """
+    if payload is not None and not isinstance(payload, dict):
+        raise BadRequest(f"{AircraftConfig.__name__} payload must be a JSON object")
+    if payload:
+        for field_name, (lo, hi) in AIRCRAFT_RANGES.items():
+            if field_name in payload and payload[field_name] is not None:
+                val = as_float(payload[field_name], f"aircraft.{field_name}")
+                if not math.isfinite(val) or not (lo <= val <= hi):
+                    raise UnprocessableEntity(
+                        f"aircraft.{field_name}={val} is out of physical bounds [{lo}, {hi}]"
+                    )
+    return build(AircraftConfig, payload, base)
 
 
 def build(cfg_cls: Any, payload: Optional[Dict[str, Any]], base: Any = None) -> Any:
@@ -449,7 +476,8 @@ _RESULT_CACHE_BYTES: Dict[str, int] = {}
 def result_cache_put(job_id: str, result: Dict[str, Any]) -> None:
     """Insert ``result`` into :data:`RESULT_CACHE`, evicting the oldest entries
     while the entry count or the total byte size exceeds its limit."""
-    size = len(json.dumps(result, ensure_ascii=False, default=str))
+    # Use fast_dumps if available (orjson) for efficient size calculation
+    size = len(fast_dumps(result))
     with RESULT_CACHE_LOCK:
         RESULT_CACHE[job_id] = result
         _RESULT_CACHE_BYTES[job_id] = size

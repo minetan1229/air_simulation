@@ -596,21 +596,26 @@ def prandtl_glauert(mach: float) -> float:
     return 1.0 / math.sqrt(max(1.0 - m * m, 1.0e-6))
 
 
-def ground_effect_factor(height_m: float, span_m: float, enabled: bool = True) -> float:
-    """Induced-drag ground-effect factor ``16(h/b)^2 / (1 + 16(h/b)^2)``.
+def ground_effect_factor(height_m: float, span_m: float, enabled: bool = True, sigma_min: float = 0.20) -> float:
+    """Induced-drag ground-effect factor with viscous/boundary-layer floor.
 
+    sigma = sigma_min + (1 - sigma_min) * 16(h/b)_eff^2 / (1 + 16(h/b)_eff^2)
+    where (h/b)_eff = max(h/b, 0.05) prevents induced-drag collapse at zero clearance.
+    
     The value multiplies the free-air induced drag, so it is ``1.0`` when the
-    model is disabled (full free-air induced drag) and ``1.0`` again far above the
-    ground.  Matches :func:`physics.aero_domain.ground_effect_factor`.
+    model is disabled (full free-air induced drag) and approaches ``sigma_min``
+    at the surface.  Matches :func:`physics.aero_domain.ground_effect_factor`.
     """
     if not enabled:
         return 1.0
     height = max(_finite(height_m), 0.0)
     span = max(abs(_finite(span_m)), 1.0e-6)
-    ratio = 16.0 * (height / span) ** 2
+    hb_eff = max(height / span, 0.05)
+    ratio = 16.0 * hb_eff ** 2
     if not math.isfinite(ratio):
         return 1.0
-    return ratio / (1.0 + ratio)
+    wieselsberger = ratio / (1.0 + ratio)
+    return sigma_min + (1.0 - sigma_min) * wieselsberger
 
 
 #: Elevon (trailing-edge fold) authority: lift and pitching-moment increments

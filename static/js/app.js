@@ -48,7 +48,6 @@ import {
 import {
   detectGpu,
   openGpuModal,
-  bindKeyboardShortcuts,
 } from "./app_events.js";
 import {
   runGpuEnsemble,

@@ -284,44 +284,46 @@ def investigate_run():
             algorithm="sensitivity_and_focused_tuning",
             model_id=SESSION.mesh_model_id,
         )
+        JOB_MANAGER.start(job.job_id)
 
-    def progress_cb(pct: int, total: int, msg: str) -> None:
-        if JOB_MANAGER.is_cancelled(job.job_id) or JOB_MANAGER.is_cancel_requested(job.job_id):
-            raise RuntimeError(f"Job {job.job_id} cancelled")
-        try:
-            JOB_MANAGER.update(job.job_id, pct, total_evaluations=total, message=msg)
-        except KeyError:
-            pass
-
-    def worker() -> None:
-        try:
-            res = auto_investigate.investigate_airplane(
-                aircraft=aircraft_cfg,
-                environment=environment_cfg,
-                launch=launch_cfg,
-                target_metric=target_metric,
-                progress_callback=progress_cb,
-            )
-            res_dict = as_dict(res)
-            res_dict["job_id"] = job.job_id
-            result_cache_put(job.job_id, res_dict)
-            JOB_MANAGER.finish(job.job_id, message=f"Completed auto-investigation: {res.summary.get('primary_issue', 'OK')}")
-        except BaseException as exc:
+        def progress_cb(pct: int, total: int, msg: str) -> None:
+            if JOB_MANAGER.is_cancelled(job.job_id) or JOB_MANAGER.is_cancel_requested(job.job_id):
+                raise RuntimeError(f"Job {job.job_id} cancelled")
             try:
-                if JOB_MANAGER.is_cancelled(job.job_id) or JOB_MANAGER.is_cancel_requested(job.job_id):
-                    JOB_MANAGER.cancel(job.job_id)
-                    return
-            except KeyError:
-                return
-            log.error("investigation job %s failed: %s\n%s", job.job_id, exc, traceback.format_exc())
-            try:
-                JOB_MANAGER.fail(job.job_id, str(exc))
+                JOB_MANAGER.update(job.job_id, pct, total_evaluations=total, message=msg)
             except KeyError:
                 pass
-            if isinstance(exc, (KeyboardInterrupt, SystemExit)):
-                raise
 
-        JOB_MANAGER.start(job.job_id)
+        def worker() -> None:
+            try:
+                res = auto_investigate.investigate_airplane(
+                    aircraft=aircraft_cfg,
+                    environment=environment_cfg,
+                    launch=launch_cfg,
+                    target_metric=target_metric,
+                    progress_callback=progress_cb,
+                )
+                res_dict = as_dict(res)
+                res_dict["job_id"] = job.job_id
+                result_cache_put(job.job_id, res_dict)
+                JOB_MANAGER.finish(
+                    job.job_id,
+                    message=f"Completed auto-investigation: {res.summary.get('primary_issue', 'OK')}",
+                )
+            except BaseException as exc:
+                try:
+                    if JOB_MANAGER.is_cancelled(job.job_id) or JOB_MANAGER.is_cancel_requested(job.job_id):
+                        JOB_MANAGER.cancel(job.job_id)
+                        return
+                except KeyError:
+                    return
+                log.error("investigation job %s failed: %s\n%s", job.job_id, exc, traceback.format_exc())
+                try:
+                    JOB_MANAGER.fail(job.job_id, str(exc))
+                except KeyError:
+                    pass
+                if isinstance(exc, (KeyboardInterrupt, SystemExit)):
+                    raise
 
         thread = threading.Thread(target=worker, name=f"investigate-{job.job_id}", daemon=True)
         JOB_MANAGER.register_thread(job.job_id, thread)

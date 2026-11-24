@@ -7,6 +7,7 @@ using a 2D Nelder-Mead simplex algorithm against the deterministic benchmark.
 from __future__ import annotations
 
 import copy
+import math
 from typing import Callable, List, Optional, Tuple
 
 from core.interfaces import (
@@ -46,9 +47,15 @@ class NelderMeadTrimOptimizer:
         dihedral: float,
         base_candidate: AircraftCandidate,
     ) -> Tuple[float, AircraftCandidate]:
-        """Evaluate (elevon, dihedral) pair and return (-score, candidate)."""
+        """Evaluate (elevon, dihedral) pair and return (cost, candidate).
+        
+        Cost includes boundary penalty to maintain gradient outside bounds,
+        and continuous penalty for stall/failure instead of flat zero.
+        """
         clamped_e = _clamp(elevon, self.elevon_bounds[0], self.elevon_bounds[1])
         clamped_d = _clamp(dihedral, self.dihedral_bounds[0], self.dihedral_bounds[1])
+        bound_violation = (elevon - clamped_e) ** 2 + (dihedral - clamped_d) ** 2
+        bound_penalty = 5.0 * bound_violation  # 境界外への勾配を維持する滑らかな二次バリア
 
         new_wing = ParametricWingSpec(
             wingspan_ratio=base_candidate.config.wing.wingspan_ratio,
@@ -70,8 +77,14 @@ class NelderMeadTrimOptimizer:
             candidate_id=f"{base_candidate.candidate_id}-trim",
         )
         bench = self.benchmark.evaluate_candidate(cand)
-        score = bench.composite_score if bench.valid else 0.0
-        return -score, cand
+        if bench.valid:
+            score = bench.composite_score
+        else:
+            # 一律 0.0 を廃止し、失速領域でも脱出方向を示す連続ペナルティを与える
+            partial_time = 0.5 * (bench.low_speed.flight_time_s + bench.mid_speed.flight_time_s)
+            crash_pen = (1.0 if bench.low_speed.crashed else 0.0) + (1.0 if bench.mid_speed.crashed else 0.0)
+            score = -1.0 - crash_pen + 0.05 * min(partial_time, 6.0)
+        return (-score + bound_penalty), cand
 
     def optimize_trim(self, candidate: AircraftCandidate) -> TrimResult:
         """Optimize candidate's elevon and dihedral angles via Nelder-Mead simplex."""
@@ -92,8 +105,8 @@ class NelderMeadTrimOptimizer:
             step_d = -step_d
 
         v0 = (e0, d0)
-        v1 = (e0 + step_e, d0)
-        v2 = (e0, d0 + step_d)
+        v1 = (_clamp(e0 + step_e, self.elevon_bounds[0], self.elevon_bounds[1]), d0)
+        v2 = (e0, _clamp(d0 + step_d, self.dihedral_bounds[0], self.dihedral_bounds[1]))
 
         cost0, cand0 = self._evaluate_point(v0[0], v0[1], candidate)
         cost1, cand1 = self._evaluate_point(v1[0], v1[1], candidate)
@@ -122,7 +135,12 @@ class NelderMeadTrimOptimizer:
             worst_cost, worst_v, _ = simplex[-1]
             second_worst_cost, _, _ = simplex[-2]
 
-            if abs(worst_cost - best_cost) < 1.0e-4:
+            # Convergence check: cost difference AND simplex diameter (xatol)
+            simplex_diam = max(
+                math.hypot(simplex[1][1][0] - best_v[0], simplex[1][1][1] - best_v[1]),
+                math.hypot(simplex[2][1][0] - best_v[0], simplex[2][1][1] - best_v[1]),
+            )
+            if abs(worst_cost - best_cost) < 1.0e-4 and simplex_diam < 5.0e-3:
                 converged = True
                 break
 
@@ -133,6 +151,8 @@ class NelderMeadTrimOptimizer:
             # 1. Reflection
             r_e = c_e + alpha * (c_e - worst_v[0])
             r_d = c_d + alpha * (c_d - worst_v[1])
+            r_e = _clamp(r_e, self.elevon_bounds[0], self.elevon_bounds[1])
+            r_d = _clamp(r_d, self.dihedral_bounds[0], self.dihedral_bounds[1])
             cost_r, cand_r = self._evaluate_point(r_e, r_d, candidate)
 
             if best_cost <= cost_r < second_worst_cost:
@@ -143,6 +163,8 @@ class NelderMeadTrimOptimizer:
             if cost_r < best_cost:
                 e_e = c_e + gamma * (r_e - c_e)
                 e_d = c_d + gamma * (r_d - c_d)
+                e_e = _clamp(e_e, self.elevon_bounds[0], self.elevon_bounds[1])
+                e_d = _clamp(e_d, self.dihedral_bounds[0], self.dihedral_bounds[1])
                 cost_e, cand_e = self._evaluate_point(e_e, e_d, candidate)
                 if cost_e < cost_r:
                     simplex[-1] = (cost_e, (e_e, e_d), cand_e)
@@ -150,22 +172,36 @@ class NelderMeadTrimOptimizer:
                     simplex[-1] = (cost_r, (r_e, r_d), cand_r)
                 continue
 
-            # 3. Contraction
-            con_e = c_e + rho * (worst_v[0] - c_e)
-            con_d = c_d + rho * (worst_v[1] - c_d)
-            cost_con, cand_con = self._evaluate_point(con_e, con_d, candidate)
-            if cost_con < worst_cost:
-                simplex[-1] = (cost_con, (con_e, con_d), cand_con)
-                continue
+            # 3. Outside / Inside Contraction
+            if cost_r < worst_cost:
+                # Outside Contraction
+                con_e = c_e + rho * (r_e - c_e)
+                con_d = c_d + rho * (r_d - c_d)
+                con_e = _clamp(con_e, self.elevon_bounds[0], self.elevon_bounds[1])
+                con_d = _clamp(con_d, self.dihedral_bounds[0], self.dihedral_bounds[1])
+                cost_con, cand_con = self._evaluate_point(con_e, con_d, candidate)
+                if cost_con <= cost_r:
+                    simplex[-1] = (cost_con, (con_e, con_d), cand_con)
+                    continue
+            else:
+                # Inside Contraction
+                con_e = c_e + rho * (worst_v[0] - c_e)
+                con_d = c_d + rho * (worst_v[1] - c_d)
+                con_e = _clamp(con_e, self.elevon_bounds[0], self.elevon_bounds[1])
+                con_d = _clamp(con_d, self.dihedral_bounds[0], self.dihedral_bounds[1])
+                cost_con, cand_con = self._evaluate_point(con_e, con_d, candidate)
+                if cost_con < worst_cost:
+                    simplex[-1] = (cost_con, (con_e, con_d), cand_con)
+                    continue
 
             # 4. Shrink
             v1_new = (
-                best_v[0] + sigma * (simplex[1][1][0] - best_v[0]),
-                best_v[1] + sigma * (simplex[1][1][1] - best_v[1]),
+                _clamp(best_v[0] + sigma * (simplex[1][1][0] - best_v[0]), self.elevon_bounds[0], self.elevon_bounds[1]),
+                _clamp(best_v[1] + sigma * (simplex[1][1][1] - best_v[1]), self.dihedral_bounds[0], self.dihedral_bounds[1]),
             )
             v2_new = (
-                best_v[0] + sigma * (simplex[2][1][0] - best_v[0]),
-                best_v[1] + sigma * (simplex[2][1][1] - best_v[1]),
+                _clamp(best_v[0] + sigma * (simplex[2][1][0] - best_v[0]), self.elevon_bounds[0], self.elevon_bounds[1]),
+                _clamp(best_v[1] + sigma * (simplex[2][1][1] - best_v[1]), self.dihedral_bounds[0], self.dihedral_bounds[1]),
             )
             cost1_new, cand1_new = self._evaluate_point(v1_new[0], v1_new[1], candidate)
             cost2_new, cand2_new = self._evaluate_point(v2_new[0], v2_new[1], candidate)
@@ -183,6 +219,8 @@ class NelderMeadTrimOptimizer:
             candidate.config = final_cand.config
             candidate.geometry = final_cand.geometry
             candidate.benchmark = final_cand.benchmark
+            candidate.raw_genome = final_cand.raw_genome
+            candidate.descriptor = final_cand.descriptor
 
         return TrimResult(
             candidate_id=candidate.candidate_id,
