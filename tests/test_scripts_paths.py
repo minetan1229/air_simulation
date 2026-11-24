@@ -67,7 +67,8 @@ def _bash_root_probe(script: Path, cwd: Path) -> str | None:
     if bash is None:
         return None
     probe = (
-        'SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"; '
+        'TARGET="$1"; '
+        'SCRIPT_DIR="$(cd "$(dirname "$TARGET")/.." && pwd)"; '
         'PROJECT_ROOT="$SCRIPT_DIR"; printf "%s" "$PROJECT_ROOT"'
     )
     proc = subprocess.run(
@@ -75,7 +76,7 @@ def _bash_root_probe(script: Path, cwd: Path) -> str | None:
             bash,
             "-c",
             probe,
-            "bash",
+            "probe",
             str(script),
         ],
         cwd=str(cwd),
