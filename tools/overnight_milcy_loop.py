@@ -170,9 +170,9 @@ def run_overnight_loop(
             strategy_name = "広域探索 & 高アスペクト比ニッチ開拓"
             # Expanded aspect ratio bounds
             grid_ranges = (
-                (0.10, 0.22),  # wing loading
-                (0.65, 0.95),  # static stability
-                (0.18, 0.45),  # expanded aspect ratio range
+                (0.12, 0.28),
+                (0.25, 0.95),
+                (0.45, 1.10),
             )
         else:
             iterations = 450
@@ -180,9 +180,9 @@ def run_overnight_loop(
             trim_iters = 35
             strategy_name = "局所洗練 & 多点適応トリム極限追究"
             grid_ranges = (
-                (0.115, 0.135),
-                (0.72, 0.92),
-                (0.20, 0.30),
+                (0.12, 0.28),
+                (0.25, 0.95),
+                (0.45, 1.10),
             )
 
         print(f"[*] Strategy: {strategy_name}")

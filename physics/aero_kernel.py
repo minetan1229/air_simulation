@@ -324,6 +324,10 @@ class ScalarMath:
         return math.cos(value)
 
     @staticmethod
+    def tan(value: float) -> float:
+        return math.tan(value)
+
+    @staticmethod
     def exp(value: float) -> float:
         return math.exp(value)
 
@@ -1943,11 +1947,18 @@ def _coefficient_core(
     )
 
     cushion_gain = xp.maximum(ground_cushion_lift, 0.0)
-    cl = cl + xp.where(
+    delta_cl_cushion = xp.where(
         (cushion_gain > 0.0) & (ground_proximity > 0.0),
         cushion_gain * ground_proximity,
         0.0,
     )
+    cl = cl + delta_cl_cushion
+    # Cushion lift acts normal to the chord: resolves induced drag increment
+    # Delta C_Di = Delta C_L * sin(alpha) * tan(alpha) = Delta C_L * sin^2(alpha) / cos(alpha)
+    sin_a_cushion = xp.sin(_rad(xp, alpha))
+    cos_a_cushion = xp.cos(_rad(xp, alpha))
+    delta_cd_cushion = delta_cl_cushion * xp.square(sin_a_cushion) / xp.maximum(xp.abs(cos_a_cushion), 1.0e-6)
+    cd = cd + xp.maximum(delta_cd_cushion, 0.0)
 
     pitch_coupling = xp.maximum(ground_pitch_coupling, 0.0)
     cm = cm + xp.where(
@@ -1983,12 +1994,12 @@ def _coefficient_core(
     low_speed = speed < 3.0
     v_norm = _clamp(xp, speed / 3.0, 0.0, 1.0)
     speed_gate = 1.0 - v_norm * v_norm * (3.0 - 2.0 * v_norm)
-    # Zero-airspeed extinction: ramp down to 0 below 0.8 m/s to prevent artificial torque
-    # injection at standstill while retaining the dynamic pressure floor for stall recovery.
-    zero_speed_gate = _smoothstep01(xp, speed / 0.8)
-    q_eff = 0.5 * density * xp.square(xp.maximum(speed, 0.8)) * zero_speed_gate
+    # Physically, aerodynamic pushover torque cannot exceed the available kinetic energy (q_eff <= q_dyn).
+    # Zero-airspeed extinction: ramp down to 0 below 0.8 m/s without exceeding actual q_dyn.
+    q_eff = xp.minimum(q_dyn, 0.5 * density * xp.square(xp.maximum(speed, 0.0)))
     alpha_gate = xp.tanh(xp.abs(alpha) / 8.0)
-    sin_a = xp.sin(_rad(xp, _clamp(xp, alpha, -90.0, 90.0)))
+    # Natural 2pi periodicity: sin(alpha_rad) wraps continuously without clamping discontinuities
+    sin_a = xp.sin(_rad(xp, alpha))
     pushover = -q_eff * area * chord * 0.85 * sin_a * speed_gate * alpha_gate
     pushover_moment = xp.where(low_speed, pushover, 0.0)
 

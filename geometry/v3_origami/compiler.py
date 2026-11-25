@@ -111,7 +111,7 @@ def _segment_intersection_2d(
     t = (dx * sy - dy * sx) / denom
     u = (dx * ry - dy * rx) / denom
     margin = 1.0e-5
-    if margin < t < 1.0 - margin and margin < u < 1.0 - margin:
+    if -margin <= t <= 1.0 + margin and -margin <= u <= 1.0 + margin:
         return True, (p0[0] + t * rx, p0[1] + t * ry)
     return False, (0.0, 0.0)
 
@@ -153,7 +153,11 @@ def validate_crease_pattern_physics(
             vkey = (int(round(pt[0] / 5.0e-4)), int(round(pt[1] / 5.0e-4)))
             rays = vertex_rays.setdefault(vkey, [])
             sense_j = 1 if sj.mountain else -1
-            for end_pt, sense in ((p0, sense_i), (p1, sense_i), (q0, sense_j), (q1, sense_j)):
+            seg_len_i = math.hypot(p1[0] - p0[0], p1[1] - p0[1])
+            seg_len_j = math.hypot(q1[0] - q0[0], q1[1] - q0[1])
+            for end_pt, sense, seg_len in ((p0, sense_i, seg_len_i), (p1, sense_i, seg_len_i), (q0, sense_j, seg_len_j), (q1, sense_j, seg_len_j)):
+                if math.hypot(end_pt[0] - pt[0], end_pt[1] - pt[1]) <= 1.0e-5 * max(seg_len, 1.0):
+                    continue
                 ang = math.degrees(math.atan2(end_pt[1] - pt[1], end_pt[0] - pt[0])) % 360.0
                 if not any(abs(((ang - a + 180.0) % 360.0) - 180.0) < 0.5 for a, _ in rays):
                     rays.append((ang, sense))
@@ -322,7 +326,7 @@ class ParametricOrigamiCompiler:
                     p0=(0.60, tip_v),
                     p1=(0.50, tip_v + 0.04),
                     angle_deg=180.0,
-                    side=1,
+                    side=-1,
                     up=False,
                     level=3,
                     groups=("collar_r",),
@@ -350,7 +354,7 @@ class ParametricOrigamiCompiler:
                     p0=(0.65, eff_nose_v * 0.9),
                     p1=(0.52, eff_nose_v),
                     angle_deg=120.0,
-                    side=1,
+                    side=-1,
                     up=False,
                     level=2,
                     groups=("flap_r",),
@@ -369,7 +373,7 @@ class ParametricOrigamiCompiler:
                     side=1,
                     up=True,
                     level=2,
-                    groups=("body_l",),
+                    groups=("flap_l",),
                     set_group="keel_lock_l",
                 )
             )
@@ -379,10 +383,10 @@ class ParametricOrigamiCompiler:
                     p0=(0.56, lock_v),
                     p1=(keel_offset_u, lock_v + 0.03),
                     angle_deg=lock_angle,
-                    side=1,
+                    side=-1,
                     up=False,
                     level=2,
-                    groups=("body_r",),
+                    groups=("flap_r",),
                     set_group="keel_lock_r",
                 )
             )
@@ -407,43 +411,13 @@ class ParametricOrigamiCompiler:
                     p0=(0.70, eff_nose_v * 0.85),
                     p1=(0.55, eff_nose_v * 0.95),
                     angle_deg=180.0,
-                    side=1,
+                    side=-1,
                     up=False,
                     level=2,
                     groups=("flap_r",),
                     set_group="nose_cap_r",
-                )
             )
-
-        # Keel lock fold for structural grip reinforcement (only when has_lock and fold_count >= 6)
-        if has_lock and fold_count >= 6:
-            lock_angle = _clamp(float(keel_cfg.lock_fold_angle_deg), 90.0, 180.0)
-            creases.append(
-                Crease(
-                    key="keel_lock_l",
-                    p0=(0.45, 0.10),
-                    p1=(0.55, 0.30),
-                    angle_deg=lock_angle,
-                    side=1,
-                    up=True,
-                    level=2,
-                    groups=("flap_l",),
-                    set_group="keel_lock_l",
-                )
-            )
-            creases.append(
-                Crease(
-                    key="keel_lock_r",
-                    p0=(0.55, 0.10),
-                    p1=(0.45, 0.30),
-                    angle_deg=lock_angle,
-                    side=1,
-                    up=False,
-                    level=2,
-                    groups=("flap_r",),
-                    set_group="keel_lock_r",
-                )
-            )
+        )
 
         # Wings and control surfaces (folded down from keel)
         wing_creases = [
@@ -496,17 +470,17 @@ class ParametricOrigamiCompiler:
                 ),
             ])
         wing_creases.extend([
-            Crease(
-                key="elevon_l",
-                p0=(0.0, elevon_v),
-                p1=(1.0, elevon_v),
-                angle_deg=abs(elevon_left),
-                side=1,
-                up=elevon_left >= 0,
-                level=0,
-                groups=("wing_l", "winglet_l") if has_winglet else ("wing_l",),
-                set_group="elevon_l",
-            ),
+                Crease(
+                    key="elevon_l",
+                    p0=(0.0, elevon_v),
+                    p1=(1.0, elevon_v),
+                    angle_deg=abs(elevon_left),
+                    side=-1,
+                    up=elevon_left >= 0,
+                    level=0,
+                    groups=("wing_l", "winglet_l") if has_winglet else ("wing_l",),
+                    set_group="elevon_l",
+                ),
             Crease(
                 key="elevon_r",
                 p0=(0.0, elevon_v),

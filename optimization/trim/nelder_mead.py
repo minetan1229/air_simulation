@@ -94,7 +94,6 @@ class NelderMeadTrimOptimizer:
             candidate_id=f"{base_candidate.candidate_id}-trim",
         )
         bench = self.benchmark.evaluate_candidate(cand)
-        cand.benchmark = bench
         score = (
             bench.composite_score
             if (bench.valid and math.isfinite(bench.composite_score))
@@ -258,7 +257,8 @@ class NelderMeadTrimOptimizer:
             candidate.config = final_cand.config
             candidate.geometry = final_cand.geometry
             candidate.benchmark = final_cand.benchmark
-            candidate.raw_genome = final_cand.raw_genome
+            if getattr(final_cand, "raw_genome", None) is not None:
+                candidate.raw_genome = final_cand.raw_genome
             if candidate.geometry and candidate.benchmark:
                 try:
                     stability = min(
@@ -267,9 +267,9 @@ class NelderMeadTrimOptimizer:
                     )
                     candidate.descriptor = candidate.geometry.compute_behavior_descriptor(stability=stability)
                 except Exception:
-                    candidate.descriptor = final_cand.descriptor
+                    candidate.descriptor = getattr(final_cand, "descriptor", None)
             else:
-                candidate.descriptor = final_cand.descriptor
+                candidate.descriptor = getattr(final_cand, "descriptor", None)
 
         return TrimResult(
             candidate_id=candidate.candidate_id,

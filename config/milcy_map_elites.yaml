@@ -11,9 +11,9 @@ search:
 
 grid:
   bins: [10, 10, 10]  # 1,000 behavior niches
-  wing_loading_range: [0.15, 0.25]
-  stability_range: [0.60, 0.95]
-  aspect_ratio_range: [0.55, 0.75]
+  wing_loading_range: [0.12, 0.28]
+  stability_range: [0.25, 0.95]
+  aspect_ratio_range: [0.45, 1.10]
 
 benchmark:
   low_speed_mps: 6.0

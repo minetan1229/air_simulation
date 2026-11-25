@@ -398,6 +398,7 @@ class FlightParams:
     has_apparent: bool = False
     munk_active: Any = None
     has_munk: bool = False
+    keel_height_m: Any = None
 
 
 def wind_batch(
@@ -558,6 +559,8 @@ def build_params(
                 "elevon_deg", "elevon_authority", "fold_trailing_deg",
                 "cg_offset_x",
                 "cp_shift_gain", "ground_cushion_lift", "ground_pitch_coupling",
+                "low_re_cl_alpha_gain", "low_re_stall_gain", "low_re_cl_max_gain",
+                "low_re_lsb_gain", "low_re_cd0_gain",
             )
         }
     )
@@ -566,6 +569,7 @@ def build_params(
     aero.drag_scale = ones * drag_scale
     aero.compressible = xp.asarray(bool(env.compressibility_enabled))
     aero.ground_effect_enabled = xp.asarray(bool(env.ground_effect_enabled))
+    aero.low_re_enabled = xp.asarray([bool(item.low_re_enabled) for item in case_params], dtype=bool)
 
     if wind_override is not None:
         wind = xp.asarray(wind_override, dtype=xp.float64).reshape(count, 3)
@@ -653,8 +657,9 @@ def build_params(
         has_munk=any(
             bool(getattr(cfg, "munk_coupling_enabled", False))
             for cfg in configs
-        ),
-    )
+         ),
+         keel_height_m=xp.asarray([max(float(item.get("keel_height_m", GROUND_KEEL_DEPTH_M)), 1.0e-3) for item in derived]),
+     )
 
 
 # --------------------------------------------------------------------------
@@ -797,9 +802,10 @@ def _evaluate_state(
         u_rel_app = body_relative[:, 0]
         v_rel_app = body_relative[:, 1]
         w_rel_app = body_relative[:, 2]
+        munk_factor = xp.where(params.munk_active, xp.maximum(1.0 - xp.asarray(coefficients.get("w_stall", 0.0)), 0.0), 0.0) if getattr(params, "has_munk", False) else 0.0
         f_cor_x = -omega[:, 1] * m_add_z * w_rel_app
         f_cor_y = omega[:, 0] * m_add_z * w_rel_app
-        f_cor_z = m_add_z * (omega[:, 0] * v_rel_app - omega[:, 1] * u_rel_app)
+        f_cor_z = munk_factor * m_add_z * (omega[:, 0] * v_rel_app - omega[:, 1] * u_rel_app)
         a_body_0 = (force_body[:, 0] + f_cor_x) / params.mass + gravity_body[:, 0]
         a_body_1 = (force_body[:, 1] + f_cor_y) / params.mass + gravity_body[:, 1]
         a_body_2_app = (force_body[:, 2] + params.mass * gravity_body[:, 2] + f_cor_z) / m_eff_z
@@ -844,8 +850,6 @@ def _evaluate_state(
         u_rel = body_relative[:, 0]
         v_rel = body_relative[:, 1]
         w_rel = body_relative[:, 2]
-        w_stall_val = xp.asarray(coefficients.get("w_stall", 0.0))
-        munk_factor = xp.where(params.munk_active, xp.maximum(1.0 - w_stall_val, 0.0), 0.0)
         munk_x = -v_rel * m_add_z * w_rel * munk_factor
         munk_y = u_rel * m_add_z * w_rel * munk_factor
         munk_z = xp.zeros_like(munk_x)
@@ -979,11 +983,12 @@ def _station_altitudes(
     nose = xp.stack((0.5 * mac, xp.zeros_like(mac), xp.zeros_like(mac)), axis=-1)
     left = xp.stack((-0.3 * mac, -semispan, xp.zeros_like(mac)), axis=-1)
     right = xp.stack((-0.3 * mac, semispan, xp.zeros_like(mac)), axis=-1)
+    keel_depth = xp.full_like(mac, GROUND_KEEL_DEPTH_M) if params.keel_height_m is None else xp.broadcast_to(xp.maximum(xp.asarray(params.keel_height_m, dtype=xp.float64), 1.0e-3), mac.shape)
     tail = xp.stack(
-        (-0.7 * mac, xp.zeros_like(mac), xp.full_like(mac, GROUND_KEEL_DEPTH_M)), axis=-1
+        (-0.7 * mac, xp.zeros_like(mac), keel_depth), axis=-1
     )
     keel = xp.stack(
-        (xp.zeros_like(mac), xp.zeros_like(mac), xp.full_like(mac, GROUND_KEEL_DEPTH_M)),
+        (xp.zeros_like(mac), xp.zeros_like(mac), keel_depth),
         axis=-1,
     )
     altitudes = []
@@ -1281,6 +1286,9 @@ def simulate_batch(
         "trim_alpha": xp.zeros(count),
         "trim_speed": xp.zeros(count),
         "trim_altitude": xp.zeros(count),
+        "peak_altitude": xp.zeros(count),
+        "peak_speed": xp.zeros(count),
+        "diverged": xp.zeros(count, dtype=bool),
         # Per-case step counter to enforce max_steps_per_case limit
         "steps": xp.zeros(count, dtype=xp.int32),
         # Every case keeps its own clock: the step size is a per-case
@@ -1334,6 +1342,8 @@ def simulate_batch(
     acc["peak_q"][...] = xp.maximum(acc["peak_q"], launch_core["dynamic_pressure"])
     acc["peak_g"][...] = xp.maximum(acc["peak_g"], launch_core["g_load"])
     acc["peak_stress"][...] = xp.maximum(acc["peak_stress"], stress_of(launch_core))
+    acc["peak_altitude"][...] = xp.maximum(acc["peak_altitude"], launch_core["altitude"])
+    acc["peak_speed"][...] = xp.maximum(acc["peak_speed"], launch_core["speed"])
     acc["stall_events"][...] = xp.where(launch_core["stalled"], 1.0, 0.0)
     # The launch sample is the first sample of the reporting grid.
     acc["samples"][...] = 1.0
@@ -1480,6 +1490,13 @@ def simulate_batch(
         acc["peak_g"][...] = xp.where(
             recorded, xp.maximum(acc["peak_g"], core_next["g_load"]), acc["peak_g"]
         )
+        acc["peak_altitude"][...] = xp.where(
+            recorded, xp.maximum(acc["peak_altitude"], core_next["altitude"]), acc["peak_altitude"]
+        )
+        acc["peak_speed"][...] = xp.where(
+            recorded, xp.maximum(acc["peak_speed"], core_next["speed"]), acc["peak_speed"]
+        )
+        acc["diverged"] |= ~xp.all(xp.isfinite(y_next), axis=1)
         worse = recorded & (stress > acc["peak_stress"])
         acc["peak_stress"][...] = xp.where(worse, stress, acc["peak_stress"])
         acc["peak_stress_time"][...] = xp.where(
@@ -1673,6 +1690,9 @@ def simulate_batch(
         "stall_events": acc["stall_events"],
         "stall_margin": acc["stall_margin"],
         "max_ld_ratio": acc["max_ld_ratio"],
+        "max_altitude_m": acc["peak_altitude"],
+        "max_speed_mps": acc["peak_speed"],
+        "diverged": acc["diverged"],
         "stability": 1.0 / (1.0 + xp.abs(trim_cm)),
         "recorded_samples": acc["samples"],
         "last_recorded_time_s": acc["record_time"],

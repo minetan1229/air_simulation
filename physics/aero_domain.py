@@ -281,6 +281,18 @@ def prandtl_glauert(mach: float) -> float:
     return float(aero_kernel.prandtl_glauert(_SCALAR, value))
 
 
+def _low_re_factors(cfg: AircraftConfig, reynolds: float) -> Dict[str, float]:
+    if not getattr(cfg, 'low_re_enabled', False):
+        return {'cl_alpha': 1.0, 'stall': 1.0, 'cl_max': 1.0, 'cd0': 1.0}
+    x = float(aero_kernel._log_Re(_SCALAR, reynolds))
+    return {
+        'cl_alpha': clamp(1.0 - _finite(getattr(cfg, 'low_re_cl_alpha_gain', 0.04), 0.04) * x, 0.90, 1.05),
+        'stall': clamp(1.0 - _finite(getattr(cfg, 'low_re_stall_gain', 0.10), 0.10) * x, 0.75, 1.05),
+        'cl_max': clamp(1.0 - _finite(getattr(cfg, 'low_re_cl_max_gain', 0.12), 0.12) * x, 0.70, 1.05),
+        'cd0': clamp(1.0 + _finite(getattr(cfg, 'low_re_cd0_gain', 0.03), 0.03) * x, 1.0, 1.12),
+    }
+
+
 def lift_slope_per_rad(
     cfg: AircraftConfig,
     compressible: bool = True,
@@ -294,8 +306,7 @@ def lift_slope_per_rad(
     else:
         slope = helmbold_cl_alpha(geom["aspect_ratio"], geom["taper_ratio"])
     comp = prandtl_glauert(mach) if compressible else 1.0
-    if getattr(cfg, "low_re_enabled", False):
-        slope *= float(aero_kernel.re_cl_alpha_factor(_SCALAR, reynolds))
+    slope *= _low_re_factors(cfg, reynolds)['cl_alpha']
     return slope * comp
 
 

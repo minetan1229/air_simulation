@@ -10,7 +10,7 @@ from __future__ import annotations
 import math
 from typing import Dict, List, Optional, Tuple
 
-from core.interfaces import AircraftCandidate, BehaviorDescriptor
+from core.interfaces import AircraftCandidate, BehaviorDescriptor, MAX_FOLD_STEPS, MIN_FOLD_STEPS
 
 
 def _clamp(v: float, low: float, high: float) -> float:
@@ -33,7 +33,7 @@ class MAPElitesGridArchive:
         ),
         min_improvement_eps: float = 1.0e-4,
         reject_out_of_bounds: bool = True,
-        use_planform_bd: bool = False,
+        use_planform_bd: bool = True,
     ) -> None:
         self.bins = bins
         self.ranges = ranges
@@ -86,6 +86,8 @@ class MAPElitesGridArchive:
         if bench.low_speed.crashed or bench.low_speed.diverged:
             return False
         if bench.mid_speed.crashed or bench.mid_speed.diverged:
+            return False
+        if candidate.metadata.get("tier0_valid") is False:
             return False
         if candidate.geometry is not None:
             if not candidate.geometry.fold_valid or candidate.geometry.penetrations > 0:

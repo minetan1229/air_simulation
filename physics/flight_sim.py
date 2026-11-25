@@ -1092,6 +1092,7 @@ def _normalise_aero_result(out: Any, speed_mps: float, density: float, kinematic
         mach=_result_field(out, "mach"),
         stall_margin=_result_field(out, "stall_margin"),
         stalled=stalled,
+        w_stall=_result_field(out, "w_stall", default=0.0),
         cd_min=_result_field(out, "cd_min"),
         alpha_ld_max_deg=_result_field(out, "alpha_ld_max_deg"),
         circulation_m2ps=_result_field(out, "circulation_m2ps"),
@@ -2429,15 +2430,28 @@ class FlightSimulator:
             m_add_z = float(added["added_mass_z_kg"])
             m_eff_z = self._mass + m_add_z
             gravity_body = world_to_body(quaternion, gravity_world)
+            # Kirchhoff added-mass fluid Coriolis translational force & Munk moment:
+            # P_A = [0, 0, m_add_z * w_rel]
+            # F_coriolis = - omega x P_A = [-q * m_add_z * w_rel, p * m_add_z * w_rel, 0]
+            # In body coordinates, a_body = dv_b/dt + omega x v_b.
+            # Kirchhoff translational dynamics M_eff dv_b/dt + omega x (M_eff v_b) = F_aero + m g_b
+            # implies dv_b/dt = M_eff^-1 (F_aero + m g_b - omega x (M_eff v_b)).
+            # Therefore a_body = dv_b/dt + omega x v_b gives:
+            # a_body[0] = (force_body[0] - q * m_add_z * w_rel) / m + gravity_body[0]
+            # a_body[1] = (force_body[1] + p * m_add_z * w_rel) / m + gravity_body[1]
+            # a_body[2] = (force_body[2] + m * gravity_body[2] + m_add_z * (p * v_rel - q * u_rel)) / m_eff_z
+            w_stall_val = float(getattr(result, "w_stall", 0.0) if hasattr(result, "w_stall") else (result.get("w_stall", 0.0) if isinstance(result, dict) else 0.0))
+            munk_active = bool(getattr(self.aircraft, "munk_coupling_enabled", False))
+            # Symmetrically roll off both Coriolis and Munk post-stall to guarantee passivity dT/dt <= 0
+            kirchhoff_factor = max(1.0 - w_stall_val, 0.0) if munk_active else 1.0
+
             u_rel = float(body_relative[0])
             v_rel = float(body_relative[1])
             w_rel = float(body_relative[2])
-            w_stall_val = float(getattr(result, "w_stall", 0.0) if hasattr(result, "w_stall") else (result.get("w_stall", 0.0) if isinstance(result, dict) else 0.0))
-            munk_active = bool(getattr(self.aircraft, "munk_coupling_enabled", False))
-            munk_factor = max(1.0 - w_stall_val, 0.0) if munk_active else 0.0
-            f_cor_x = -float(omega[1]) * m_add_z * w_rel
-            f_cor_y = float(omega[0]) * m_add_z * w_rel
-            f_cor_z = munk_factor * m_add_z * (float(omega[0]) * v_rel - float(omega[1]) * u_rel)
+            f_cor_x = -float(omega[1]) * m_add_z * w_rel * kirchhoff_factor
+            f_cor_y = float(omega[0]) * m_add_z * w_rel * kirchhoff_factor
+            f_cor_z = m_add_z * (float(omega[0]) * v_rel - float(omega[1]) * u_rel) * kirchhoff_factor
+
             a_body = np.zeros(3, dtype=np.float64)
             a_body[0] = (force_body[0] + f_cor_x) / self._mass + gravity_body[0]
             a_body[1] = (force_body[1] + f_cor_y) / self._mass + gravity_body[1]
@@ -2454,6 +2468,7 @@ class FlightSimulator:
             # Munk moment: M_munk = - v_rel x P_A = [-v_rel * m_add_z * w_rel, u_rel * m_add_z * w_rel, 0]
             # Coupled passively inside generalized angular acceleration (Euler's equations).
             # Smoothly rolled off post-stall where potential flow suction breaks down.
+            munk_factor = max(1.0 - w_stall_val, 0.0) if munk_active else 0.0
             m_munk_x = -v_rel * m_add_z * w_rel * munk_factor
             m_munk_y = u_rel * m_add_z * w_rel * munk_factor
             munk_moment = np.array([m_munk_x, m_munk_y, 0.0], dtype=np.float64)
@@ -2925,7 +2940,23 @@ class FlightSimulator:
                 touched = _resolve_contact(r_rtip, e_tip) > 0.0 or touched
             if touched:
                 self._bounce_count += 1
-                if impact_speed > CRASH_IMPACT_SPEED_MPS:
+                grav = max(abs(_finite(self.environment.gravity)), 1.0e-9)
+                d_stop = max(
+                    _finite(getattr(self.settings, "ground_crush_stroke_m", 0.031), 0.031), 1.0e-6
+                )
+                impact_g = 1.0 + impact_speed * impact_speed / (2.0 * grav * d_stop)
+                air = atmosphere_state(self.environment, 0.0, self._chord)
+                impact_stress = stress_metrics(
+                    self.aircraft,
+                    self.environment,
+                    self._derived,
+                    dynamic_pressure_pa=0.5 * air["density_kgm3"] * impact_speed * impact_speed,
+                    g_load=impact_g,
+                    speed_mps=impact_speed,
+                    density_kgm3=air["density_kgm3"],
+                )
+                overstressed = bool(impact_stress.get("failure_index", 0.0) >= 1.0)
+                if impact_speed > CRASH_IMPACT_SPEED_MPS or overstressed:
                     crashed = True
         else:
             # Body contact: resolve it at the deepest station.  The keel

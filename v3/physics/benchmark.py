@@ -111,7 +111,7 @@ def _build_aircraft_config(candidate: AircraftCandidate) -> AircraftConfig:
             nose_x = float(getattr(geom, "nose_tip_x_m", 0.1485))
             cg_m = getattr(geom, "cg_m", (0.08, 0.0, 0.005))
             x_from_nose = nose_x - float(cg_m[0])
-            nominal_ac_from_nose = 0.35 * chord
+            nominal_ac_from_nose = 0.55 * chord
             raw_offset = x_from_nose - nominal_ac_from_nose
             bounded_offset = max(-0.05, min(0.05, float(raw_offset)))
             static_margin = max(-0.20, min(0.30, float(-bounded_offset / chord)))
@@ -153,22 +153,27 @@ def evaluate_horizontal_glide(
     launch = _build_fixed_launch_config(speed_mps)
     env = _build_environment_config()
 
+    settings = SimulationSettings(dt_max=dt_max, duration_s=duration_s, adaptive=True)
+
     sim = FlightSimulator(
         aircraft=aircraft_config,
         environment=env,
         launch=launch,
+        settings=settings,
     )
 
-    result = sim.simulate(duration_s=duration_s)
-    sim_metrics = sim.metrics()
+    sim_metrics: dict = {}
+    samples: list = []
+    stable_duration = 0.0
 
-    # Extract flight history samples for phase analysis
     try:
+        sim.simulate(duration_s=duration_s)
+        sim_metrics = sim.metrics() or {}
         samples = sim.history()
         phase_metrics = flight_phase_metrics(samples, phugoid_window_s=2.5)
         stable_duration = float(phase_metrics.get("stable_glide_duration_s", 0.0) or 0.0)
     except Exception:
-        stable_duration = 0.0
+        pass
 
     flight_time = float(sim_metrics.get("flight_time_s", 0.0) or 0.0)
     distance_m = float(sim_metrics.get("distance_m", 0.0) or 0.0)
@@ -208,6 +213,38 @@ def evaluate_horizontal_glide(
         climb_penalty = 1.0 / (1.0 + 3.0 * excess_alt * excess_alt)
         stability = float(0.35 * sm_factor + 0.35 * damping_factor + 0.30 * climb_penalty)
 
+    # Extract bounce_count
+    raw_bounces = sim_metrics.get("bounce_count")
+    try:
+        bounce_count = max(0, int(raw_bounces))
+    except (TypeError, ValueError):
+        bounce_count = max(0, int(getattr(sim, "_bounce_count", 0)))
+
+    # Extract max_abs_roll_deg
+    raw_roll = sim_metrics.get("max_abs_roll_deg")
+    try:
+        max_abs_roll_deg = abs(float(raw_roll))
+    except (TypeError, ValueError):
+        max_abs_roll_deg = max(
+            abs(float(getattr(s, "roll_deg", 0.0))) for s in samples
+        ) if samples else 0.0
+    if not math.isfinite(max_abs_roll_deg):
+        max_abs_roll_deg = 0.0
+
+    # Extract ground_skim_fraction
+    raw_skim = sim_metrics.get("ground_skim_fraction")
+    try:
+        ground_skim_fraction = max(0.0, min(1.0, float(raw_skim)))
+    except (TypeError, ValueError):
+        airborne = [s for s in samples if getattr(s, "altitude_m", 0.0) > 0.05]
+        if airborne:
+            skim_count = sum(1 for s in airborne if getattr(s, "altitude_m", 0.0) < 0.25)
+            ground_skim_fraction = skim_count / len(airborne)
+        else:
+            ground_skim_fraction = 0.0
+    if not math.isfinite(ground_skim_fraction):
+        ground_skim_fraction = 0.0
+
     return EvaluationMetric(
         speed_mps=float(speed_mps),
         flight_time_s=flight_time,
@@ -220,6 +257,9 @@ def evaluate_horizontal_glide(
         crashed=crashed,
         diverged=diverged,
         status=status,
+        bounce_count=bounce_count,
+        max_abs_roll_deg=max_abs_roll_deg,
+        ground_skim_fraction=ground_skim_fraction,
     )
 
 

@@ -262,6 +262,9 @@ def evaluate_horizontal_glide(
         crashed=crashed,
         diverged=diverged,
         status=status,
+        bounce_count=bounce_count,
+        max_abs_roll_deg=max_abs_roll_deg,
+        ground_skim_fraction=ground_skim_fraction,
     )
 
 
