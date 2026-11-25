@@ -875,16 +875,16 @@ def build_viewer_html(elites: List[Dict[str, Any]]) -> str:
         const pos = nextStepData.positions;
         const idxs = nextStepData.indices;
         // Project points: X is nose(+0.1485) to tail(-0.1485) -> map to Y
-        // Z is left(+0.105) to right(-0.105) -> map to X
+        // Z is left(-0.105, u=0) to right(+0.105, u=1) -> map to X
         // Normalise by A4 half width (0.105m) and half length (0.1485m)
         let triSvg = "";
         for (let i = 0; i < idxs.length; i += 3) {{
           const i0 = idxs[i], i1 = idxs[i+1], i2 = idxs[i+2];
-          const x0 = w/2 - (pos[i0*3 + 2] / 0.105) * (drawW / 2);
+          const x0 = w/2 + (pos[i0*3 + 2] / 0.105) * (drawW / 2);
           const y0 = margin + (0.1485 - pos[i0*3]) / 0.297 * drawH;
-          const x1 = w/2 - (pos[i1*3 + 2] / 0.105) * (drawW / 2);
+          const x1 = w/2 + (pos[i1*3 + 2] / 0.105) * (drawW / 2);
           const y1 = margin + (0.1485 - pos[i1*3]) / 0.297 * drawH;
-          const x2 = w/2 - (pos[i2*3 + 2] / 0.105) * (drawW / 2);
+          const x2 = w/2 + (pos[i2*3 + 2] / 0.105) * (drawW / 2);
           const y2 = margin + (0.1485 - pos[i2*3]) / 0.297 * drawH;
           triSvg += `<polygon points="${{x0.toFixed(1)}},${{y0.toFixed(1)}} ${{x1.toFixed(1)}},${{y1.toFixed(1)}} ${{x2.toFixed(1)}},${{y2.toFixed(1)}}" fill="rgba(56, 189, 248, 0.22)" stroke="#38bdf8" stroke-width="0.75" stroke-linejoin="round"/>`;
         }}
@@ -1037,8 +1037,8 @@ def build_viewer_html(elites: List[Dict[str, Any]]) -> str:
       `;
 
       // 3. Populate Geometry Grid
-      const elevon = cfg.wing ? (cfg.wing.elevon_left_deg || 0).toFixed(2) : "-3.81";
-      const dihedral = cfg.wing ? (cfg.wing.dihedral_deg || 0).toFixed(2) : "5.29";
+      const elevon = cfg.wing ? (cfg.wing.elevon_left_deg ?? 0).toFixed(2) : "-3.81";
+      const dihedral = cfg.wing ? (cfg.wing.dihedral_deg ?? 0).toFixed(2) : "5.29";
       const spanCm = geom.wingspan_m ? (geom.wingspan_m * 100).toFixed(1) : "10.9";
       const massG = geom.mass_kg ? (geom.mass_kg * 1000).toFixed(2) : "6.24";
       const planformAR = geom.planform_aspect_ratio ? geom.planform_aspect_ratio.toFixed(2) : (geom.wingspan_m ? ((geom.wingspan_m * geom.wingspan_m) / (geom.wingspan_m * (geom.chord_m || 0.28) * 0.52)).toFixed(2) : "0.74");
@@ -1055,9 +1055,9 @@ def build_viewer_html(elites: List[Dict[str, Any]]) -> str:
 
       // 4. Detailed Step-by-Step Folding Manual (Dynamically populated per elite genome)
       const keelDepthMm = geom.keel_height_m ? (geom.keel_height_m * 1000).toFixed(0) : "12";
-      const wingletDeg = cfg.wing ? (cfg.wing.winglet_angle_deg || 50.3).toFixed(1) : "50.3";
-      const elevonDeg = cfg.wing ? Math.abs(cfg.wing.elevon_left_deg || 3.9).toFixed(1) : "3.9";
-      const dihedralDeg = cfg.wing ? (cfg.wing.dihedral_deg || 4.4).toFixed(1) : "4.4";
+      const wingletDeg = cfg.wing ? (cfg.wing.winglet_angle_deg ?? 50.3).toFixed(1) : "50.3";
+      const elevonDeg = cfg.wing ? Math.abs(cfg.wing.elevon_left_deg ?? 3.9).toFixed(1) : "3.9";
+      const dihedralDeg = cfg.wing ? (cfg.wing.dihedral_deg ?? 4.4).toFixed(1) : "4.4";
 
       const manualSteps = elite.folding_steps_3d || [];
       const creaseData = elite.crease_lines || [];

@@ -11,9 +11,15 @@ from __future__ import annotations
 import math
 from typing import Any, Dict, Optional, Tuple
 
-from physics.config_schema import AircraftConfig, EnvironmentConfig, LaunchConfig
-from physics.flight_sim import FlightSimulator, flight_phase_metrics
-from v3.interfaces import (
+from physics.config_schema import (
+    AircraftConfig,
+    EnvironmentConfig,
+    LaunchConfig,
+    SimulationSettings,
+    derived_properties,
+)
+from physics.flight_sim import FlightSimulator, flight_phase_metrics, helmbold_cl_alpha
+from core.interfaces import (
     AircraftCandidate,
     BENCHMARK_SPEEDS,
     EvaluationMetric,
@@ -59,10 +65,40 @@ def _build_aircraft_config(candidate: AircraftCandidate) -> AircraftConfig:
     geom = candidate.geometry
     cfg = candidate.config
 
-    mass_kg = geom.mass_kg if geom else 0.005
-    wing_area = geom.wing_area_m2 if geom else 0.015
-    wingspan = geom.wingspan_m if geom else 0.18
-    aspect_ratio = geom.aspect_ratio if geom else 2.16
+    try:
+        mass_kg = float(getattr(geom, "mass_kg", 0.005)) if geom else 0.005
+    except (TypeError, ValueError):
+        mass_kg = 0.005
+
+    raw_area = getattr(geom, "planform_area_m2", None)
+    if raw_area is None and geom is not None:
+        raw_area = getattr(geom, "wing_area_m2", 0.015)
+    try:
+        wing_area = float(raw_area) if raw_area is not None else 0.015
+    except (TypeError, ValueError):
+        wing_area = 0.015
+
+    try:
+        wingspan = float(getattr(geom, "wingspan_m", 0.18)) if geom else 0.18
+    except (TypeError, ValueError):
+        wingspan = 0.18
+
+    raw_ar = getattr(geom, "planform_aspect_ratio", None)
+    if raw_ar is None and geom is not None:
+        raw_ar = getattr(geom, "aspect_ratio", 2.16)
+    try:
+        aspect_ratio = float(raw_ar) if raw_ar is not None else 2.16
+    except (TypeError, ValueError):
+        aspect_ratio = 2.16
+
+    try:
+        keel_height_m = float(getattr(geom, "keel_height_m", 0.015)) if geom else 0.015
+        if not math.isfinite(keel_height_m) or keel_height_m <= 0.0:
+            keel_height_m = 0.015
+        keel_height_m = max(0.001, min(0.15, keel_height_m))
+    except (TypeError, ValueError):
+        keel_height_m = 0.015
+
     dihedral_deg = cfg.wing.dihedral_deg
     elevon_deg = 0.5 * (cfg.wing.elevon_left_deg + cfg.wing.elevon_right_deg)
 
@@ -70,27 +106,41 @@ def _build_aircraft_config(candidate: AircraftCandidate) -> AircraftConfig:
     cg_offset_x = 0.0
     static_margin = 0.12
     if geom:
-        # Distance from sheet nose (0.1485) to folded CG x-coordinate
-        # Positive offset in aero_domain convention means aft of nominal AC
-        chord = max(0.01, float(geom.chord_m))
-        x_from_nose = 0.1485 - float(geom.cg_m[0])
-        nominal_ac_from_nose = 0.35 * chord
-        raw_offset = x_from_nose - nominal_ac_from_nose
-        cg_offset_x = max(-0.05, min(0.05, float(raw_offset)))
-        # Static margin: positive when CG is ahead of AC
-        static_margin = max(-0.20, min(0.30, float(-cg_offset_x / chord)))
+        try:
+            chord = max(0.01, float(getattr(geom, "chord_m", 0.12)))
+            nose_x = float(getattr(geom, "nose_tip_x_m", 0.1485))
+            cg_m = getattr(geom, "cg_m", (0.08, 0.0, 0.005))
+            x_from_nose = nose_x - float(cg_m[0])
+            nominal_ac_from_nose = 0.35 * chord
+            raw_offset = x_from_nose - nominal_ac_from_nose
+            bounded_offset = max(-0.05, min(0.05, float(raw_offset)))
+            static_margin = max(-0.20, min(0.30, float(-bounded_offset / chord)))
+        except (TypeError, ValueError, AttributeError, IndexError):
+            pass
 
-    return AircraftConfig(
+    cl_alpha = helmbold_cl_alpha(aspect_ratio, 0.70)
+    cm_alpha = max(-5.0, min(2.0, -static_margin * cl_alpha))
+
+    ac = AircraftConfig(
         mass_kg=mass_kg,
         wing_area_m2=wing_area,
         wingspan_m=wingspan,
         aspect_ratio=aspect_ratio,
         dihedral_deg=dihedral_deg,
         elevon_deg=elevon_deg,
+        fold_trailing_deg=0.0,
+        keel_height_m=keel_height_m,
+        cm_alpha=cm_alpha,
         cg_offset_x=cg_offset_x,
         static_margin=static_margin,
         low_re_enabled=True,
     )
+
+    props = derived_properties(ac)
+    ac.roll_inertia_kgm2 = props.get("roll_inertia_kgm2", ac.roll_inertia_kgm2)
+    ac.pitch_inertia_kgm2 = props.get("pitch_inertia_kgm2", ac.pitch_inertia_kgm2)
+    ac.yaw_inertia_kgm2 = props.get("yaw_inertia_kgm2", ac.yaw_inertia_kgm2)
+    return ac
 
 
 def evaluate_horizontal_glide(

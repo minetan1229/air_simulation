@@ -18,7 +18,7 @@ from physics.config_schema import (
     SimulationSettings,
     derived_properties,
 )
-from physics.flight_sim import FlightSimulator, flight_phase_metrics
+from physics.flight_sim import FlightSimulator, flight_phase_metrics, helmbold_cl_alpha
 from core.interfaces import (
     AircraftCandidate,
     BENCHMARK_SPEEDS,
@@ -79,6 +79,16 @@ def _build_aircraft_config(candidate: AircraftCandidate) -> AircraftConfig:
     except (TypeError, ValueError):
         wingspan = 0.18
 
+    raw_keel = getattr(geom, "keel_height_m", 0.015) if geom else 0.015
+    try:
+        keel_height_m = float(raw_keel)
+        if not math.isfinite(keel_height_m) or keel_height_m <= 0.0:
+            keel_height_m = 0.015
+        else:
+            keel_height_m = max(0.001, min(0.15, keel_height_m))
+    except (TypeError, ValueError):
+        keel_height_m = 0.015
+
     raw_ar = getattr(geom, "planform_aspect_ratio", None)
     if raw_ar is None and geom is not None:
         raw_ar = getattr(geom, "aspect_ratio", 2.16)
@@ -98,12 +108,15 @@ def _build_aircraft_config(candidate: AircraftCandidate) -> AircraftConfig:
             nose_x = float(getattr(geom, "nose_tip_x_m", 0.1485))
             cg_m = getattr(geom, "cg_m", (0.08, 0.0, 0.005))
             x_from_nose = nose_x - float(cg_m[0])
-            nominal_ac_from_nose = 0.35 * chord
+            nominal_ac_from_nose = 0.55 * chord
             raw_offset = x_from_nose - nominal_ac_from_nose
-            cg_offset_x = max(-0.05, min(0.05, float(raw_offset)))
-            static_margin = max(-0.20, min(0.30, float(-cg_offset_x / chord)))
+            bounded_offset = max(-0.05, min(0.05, float(raw_offset)))
+            static_margin = max(-0.20, min(0.30, float(-bounded_offset / chord)))
         except (TypeError, ValueError, AttributeError, IndexError):
             pass
+
+    cl_alpha = helmbold_cl_alpha(aspect_ratio, 0.70)
+    cm_alpha = max(-5.0, min(2.0, -static_margin * cl_alpha))
 
     ac = AircraftConfig(
         mass_kg=mass_kg,
@@ -115,6 +128,9 @@ def _build_aircraft_config(candidate: AircraftCandidate) -> AircraftConfig:
         cg_offset_x=cg_offset_x,
         static_margin=static_margin,
         low_re_enabled=True,
+        fold_trailing_deg=0.0,
+        keel_height_m=keel_height_m,
+        cm_alpha=cm_alpha,
     )
 
     props = derived_properties(ac)
@@ -162,6 +178,48 @@ def evaluate_horizontal_glide(
     diverged = bool(sim_metrics.get("diverged", False))
     landed = bool(sim_metrics.get("landed", False))
     status = str(sim_metrics.get("status", "unknown"))
+
+    # Extract bounce_count
+    raw_bounces = sim_metrics.get("bounce_count")
+    if raw_bounces is not None:
+        bounce_count = max(0, int(raw_bounces))
+    else:
+        raw_bc = getattr(sim, "_bounce_count", 0)
+        bounce_count = int(raw_bc) if isinstance(raw_bc, (int, float)) else 0
+
+    # Extract max_abs_roll_deg
+    raw_roll = sim_metrics.get("max_abs_roll_deg")
+    if raw_roll is not None:
+        max_abs_roll_deg = abs(float(raw_roll))
+    else:
+        max_abs_roll_deg = max(
+            (abs(float(getattr(s, "roll_deg", 0.0))) for s in samples),
+            default=0.0,
+        )
+    if not math.isfinite(max_abs_roll_deg):
+        max_abs_roll_deg = 0.0
+
+    # Extract ground_skim_fraction
+    raw_skim = sim_metrics.get("ground_skim_fraction")
+    if raw_skim is not None:
+        ground_skim_fraction = max(0.0, min(1.0, float(raw_skim)))
+    else:
+        airborne = [
+            s
+            for s in samples
+            if not getattr(s, "landed", False) and not getattr(s, "crashed", False)
+        ]
+        if airborne:
+            skim_count = sum(
+                1
+                for s in airborne
+                if float(getattr(s, "altitude_m", 1.0)) <= 0.08
+            )
+            ground_skim_fraction = skim_count / len(airborne)
+        else:
+            ground_skim_fraction = 0.0
+    if not math.isfinite(ground_skim_fraction):
+        ground_skim_fraction = 0.0
 
     steady_glide_fraction = (
         stable_duration / max(1.0e-3, flight_time) if flight_time > 0.0 else 0.0

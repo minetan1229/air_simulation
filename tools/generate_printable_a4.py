@@ -93,8 +93,8 @@ def resolve_canonical_crease_style(label: str, raw_mountain: bool = True) -> Tup
         # Folding wingtips upward from wing plane is valley fold
         return (False, "⑦", "翼端ウィングレット")
     elif "elevon" in key:
-        # Elevon upward reflex trim is valley fold
-        return (False, "⑧", "エレボントリム反り")
+        # Preserve actual elevon deflection sense (mountain vs valley) from genome
+        return (bool(raw_mountain), "⑧", "エレボントリム反り")
     elif "trailing" in key:
         return (False, "⑨", "後縁トリム")
     elif "camber" in key:
@@ -112,6 +112,20 @@ def load_candidate_data(json_path: Path) -> Dict[str, Any]:
 def build_folding_instructions(cand_data: Dict[str, Any]) -> List[Dict[str, str]]:
     metadata = cand_data.get("metadata", {})
     stored_macros = metadata.get("macro_steps")
+
+    config = cand_data.get("config", {}) if "config" in cand_data else cand_data
+    geometry = cand_data.get("geometry") or {}
+    nose = config.get("nose", {})
+    keel = config.get("keel", {})
+    wing = config.get("wing", {})
+
+    keel_depth_ratio = float(keel.get("keel_depth_ratio", 0.08))
+    raw_keel_height_m = geometry.get("keel_height_m")
+    if raw_keel_height_m is not None and float(raw_keel_height_m) > 0.0:
+        keel_mm = round(float(raw_keel_height_m) * 1000.0, 1)
+    else:
+        keel_mm = round(keel_depth_ratio * 210.0 * 0.5, 1)
+
     if stored_macros:
         badge_map = {1: "①", 2: "②", 3: "③", 4: "④", 5: "⑤", 6: "⑥", 7: "⑦", 8: "⑧", 9: "⑨", 10: "⑩"}
         instructions = []
@@ -119,22 +133,20 @@ def build_folding_instructions(cand_data: Dict[str, Any]) -> List[Dict[str, str]
             s_idx = m.get("step_index", 1)
             b_sym = badge_map.get(s_idx, f"({s_idx})")
             fold_type_str = "山折り (Mountain)" if m.get("mountain", False) else "谷折り (Valley)"
+            desc = m.get("desc", "")
+            title = desc.split("（")[0] if "（" in desc else m.get("name", "")
+            if m.get("name") == "wing_folds" and "mm" not in desc:
+                title = f"{title}（持ち手キール {keel_mm}mm）"
+                desc = desc.replace("持ち手キール", f"持ち手キール約{keel_mm}mm", 1) if "持ち手キール" in desc else f"{desc}（持ち手キール {keel_mm}mm）"
             instructions.append({
                 "step": b_sym,
                 "type": fold_type_str,
-                "title": m.get("desc", "").split("（")[0] if "（" in m.get("desc", "") else m.get("name", ""),
-                "desc": m.get("desc", ""),
+                "title": title,
+                "desc": desc,
             })
         return instructions
 
-    config = cand_data.get("config", {}) if "config" in cand_data else cand_data
-    nose = config.get("nose", {})
-    keel = config.get("keel", {})
-    wing = config.get("wing", {})
-
     taper = nose.get("taper_ratio", 0.65)
-    keel_depth_ratio = keel.get("keel_depth_ratio", 0.08)
-    keel_mm = round(keel_depth_ratio * 297.0 * 0.5, 1)
     dihedral = round(wing.get("dihedral_deg", 3.5), 1)
     winglet = round(wing.get("winglet_angle_deg", 45.0), 1)
     elevon = round(wing.get("elevon_left_deg", 2.0), 1)
@@ -227,7 +239,7 @@ def render_a4_printable_sheet(
     adapter = OrigamiAdapter()
     cand = adapter.compile_candidate(cfg, candidate_id=cid)
     genome = cand.raw_genome
-    instructions = build_folding_instructions(cand.metadata)
+    instructions = build_folding_instructions(cand.to_dict())
 
     # A4 dimensions in inches (210 x 297 mm)
     # Page 1: Printable Crease Pattern (Actual 1:1 scale for direct folding)
