@@ -19,7 +19,6 @@ def extract_airframe_geometry(
     or a dict representation. Uses real grip / keel dimensions when available.
     """
     if geometry_obj is None:
-        # Fallback conservative geometry
         return AirframeGeometry(
             mass_kg=default_mass_kg,
             wing_area_m2=0.015,
@@ -27,9 +26,11 @@ def extract_airframe_geometry(
             chord_m=0.12,
             aspect_ratio=2.16,
             cg_m=(0.08, 0.0, 0.005),
-            keel_height_m=0.012,
-            keel_length_m=0.060,
-            keel_layers=4,
+            keel_height_m=0.0,
+            keel_length_m=0.0,
+            keel_layers=0,
+            penetrations=999,
+            fold_valid=False,
             step_count=step_count,
         )
 
@@ -41,7 +42,6 @@ def extract_airframe_geometry(
         chord = float(getattr(geometry_obj, "chord_m", 0.12))
         cg = getattr(geometry_obj, "cg", (0.08, 0.0, 0.005))
         cg_tuple = (float(cg[0]), float(cg[1]), float(cg[2]))
-        total_layers = int(getattr(geometry_obj, "max_layers", 4))
     elif isinstance(geometry_obj, dict):
         mass = float(geometry_obj.get("mass_kg", default_mass_kg))
         wing_area = float(geometry_obj.get("wing_area_m2", 0.015))
@@ -49,35 +49,51 @@ def extract_airframe_geometry(
         chord = float(geometry_obj.get("chord_m", 0.12))
         cg = geometry_obj.get("cg", [0.08, 0.0, 0.005])
         cg_tuple = (float(cg[0]), float(cg[1]), float(cg[2]))
-        total_layers = int(geometry_obj.get("max_layers", 4))
     else:
         mass = default_mass_kg
         wing_area = 0.015
         span = 0.18
         chord = 0.12
         cg_tuple = (0.08, 0.0, 0.005)
-        total_layers = 4
 
     safe_area = max(1.0e-5, wing_area)
     aspect_ratio = (span * span) / safe_area
 
-    # Calculate actual grip / keel dimensions via evaluate_grip if GenomeGeometry
-    keel_height = max(0.008, chord * 0.10)
-    keel_length = max(0.030, chord * 0.50)
-    keel_layers = max(2, total_layers)
+    keel_height = 0.0
+    keel_length = 0.0
+    keel_layers = 0
+    fold_valid = True
 
-    try:
-        from physics.origami_genome import evaluate_grip
-        if hasattr(geometry_obj, "faces") and hasattr(geometry_obj, "pattern"):
-            report = evaluate_grip(geometry_obj)
-            if report.grip_height_m > 0.0:
-                keel_height = report.grip_height_m
-            if report.grip_length_m > 0.0:
-                keel_length = report.grip_length_m
-            if report.grip_layers > 0:
-                keel_layers = report.grip_layers
-    except Exception:
-        pass
+    if hasattr(geometry_obj, "faces") and hasattr(geometry_obj, "pattern"):
+        if geometry_obj.faces:
+            try:
+                from physics.origami_genome import evaluate_grip
+                report = evaluate_grip(geometry_obj)
+                if float(report.grip_length_m) <= 1.0e-9:
+                    keel_height = 0.0
+                    keel_length = 0.0
+                    keel_layers = 0
+                else:
+                    keel_height = float(report.grip_height_m)
+                    keel_length = float(report.grip_length_m)
+                    keel_layers = int(report.grip_layers)
+            except Exception:
+                keel_height = 0.0
+                keel_length = 0.0
+                keel_layers = 0
+                fold_valid = False
+        else:
+            keel_height = 0.0
+            keel_length = 0.0
+            keel_layers = 0
+            fold_valid = False
+    elif isinstance(geometry_obj, dict):
+        keel_height = float(geometry_obj.get("keel_height_m", 0.0))
+        keel_length = float(geometry_obj.get("keel_length_m", 0.0))
+        keel_layers = int(geometry_obj.get("keel_layers", 0))
+        fold_valid = bool(geometry_obj.get("fold_valid", False))
+    else:
+        fold_valid = False
 
     return AirframeGeometry(
         mass_kg=mass,
@@ -89,6 +105,7 @@ def extract_airframe_geometry(
         keel_height_m=keel_height,
         keel_length_m=keel_length,
         keel_layers=keel_layers,
+        fold_valid=fold_valid,
         step_count=step_count,
     )
 

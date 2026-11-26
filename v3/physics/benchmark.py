@@ -236,9 +236,9 @@ def evaluate_horizontal_glide(
     try:
         ground_skim_fraction = max(0.0, min(1.0, float(raw_skim)))
     except (TypeError, ValueError):
-        airborne = [s for s in samples if getattr(s, "altitude_m", 0.0) > 0.05]
+        airborne = [s for s in samples if not getattr(s, "landed", False) and not getattr(s, "crashed", False)]
         if airborne:
-            skim_count = sum(1 for s in airborne if getattr(s, "altitude_m", 0.0) < 0.25)
+            skim_count = sum(1 for s in airborne if float(getattr(s, "altitude_m", 1.0)) <= 0.08)
             ground_skim_fraction = skim_count / len(airborne)
         else:
             ground_skim_fraction = 0.0

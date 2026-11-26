@@ -87,11 +87,42 @@ class MAPElitesGridArchive:
             return False
         if bench.mid_speed.crashed or bench.mid_speed.diverged:
             return False
-        if candidate.metadata.get("tier0_valid") is False:
+        if candidate.metadata.get("tier0_valid") is not True:
             return False
-        if candidate.geometry is not None:
-            if not candidate.geometry.fold_valid or candidate.geometry.penetrations > 0:
+        if not (MIN_FOLD_STEPS <= candidate.step_count <= MAX_FOLD_STEPS):
+            return False
+        geom = candidate.geometry
+        if geom is None:
+            return False
+        if not bool(geom.fold_valid):
+            return False
+        try:
+            if isinstance(geom.penetrations, bool):
                 return False
+            pen_val = float(geom.penetrations)
+            if not math.isfinite(pen_val) or not pen_val.is_integer() or pen_val < 0.0 or pen_val > 0.0:
+                return False
+            if isinstance(geom.keel_height_m, bool):
+                return False
+            keel_h = float(geom.keel_height_m)
+            if not (math.isfinite(keel_h) and keel_h >= 0.008):
+                return False
+            if isinstance(geom.keel_length_m, bool):
+                return False
+            keel_l = float(geom.keel_length_m)
+            if not (math.isfinite(keel_l) and keel_l >= 0.030):
+                return False
+            if isinstance(geom.keel_layers, bool):
+                return False
+            keel_layers = float(geom.keel_layers)
+            if not (math.isfinite(keel_layers) and keel_layers >= 2.0):
+                return False
+        except (TypeError, ValueError):
+            return False
+        if not bool(getattr(geom, "thickness_limit_ok", True)):
+            return False
+        if not bool(getattr(geom, "flat_foldable_ok", True)):
+            return False
         return True
 
     def add_candidate(self, candidate: AircraftCandidate) -> bool:

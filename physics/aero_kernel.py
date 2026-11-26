@@ -2213,7 +2213,7 @@ def _values_match(xp: Any, fused: Any, eager: Any) -> bool:
     if fused.dtype == xp.bool_:
         return bool(xp.all(fused == eager))
     fused, eager = xp.broadcast_arrays(fused, eager)
-    equal = (fused == eager) | (xp.isnan(fused) & xp.isnan(eager))
+    equal = xp.isclose(fused, eager, rtol=1.0e-14, atol=1.0e-15, equal_nan=True)
     return bool(xp.all(equal))
 
 
@@ -2240,8 +2240,14 @@ def _fused_matches_eager(
             # Re-shape airframe bundle fields to probe_shape
             for b_idx in range(len(_CORE_BUNDLE_FIELDS)):
                 val = arguments[b_idx]
-                scalar_val = float(val.flat[0]) if hasattr(val, "flat") else float(val)
-                probe_arguments[b_idx] = xp.full(probe_shape, scalar_val, dtype=xp.float64)
+                is_bool = isinstance(val, bool) or getattr(getattr(val, 'dtype', None), 'kind', None) == 'b'
+                if hasattr(val, 'flat'):
+                    scalar_val = bool(val.flat[0]) if is_bool else float(val.flat[0])
+                else:
+                    scalar_val = bool(val) if is_bool else float(val)
+                probe_arguments[b_idx] = xp.full(
+                    probe_shape, scalar_val, dtype=xp.bool_ if is_bool else xp.float64
+                )
             for offset, value in enumerate(probe):
                 index = len(_CORE_BUNDLE_FIELDS) + offset
                 probe_arguments[index] = xp.full(probe_shape, value, dtype=xp.float64)

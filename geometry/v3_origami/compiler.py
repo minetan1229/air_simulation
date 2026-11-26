@@ -150,6 +150,9 @@ def validate_crease_pattern_physics(
             hit, pt = _segment_intersection_2d(p0, p1, q0, q1)
             if not hit:
                 continue
+            bmargin = 1.0e-4
+            if not (bmargin < pt[0] < SHEET_WIDTH_M - bmargin and bmargin < pt[1] < SHEET_LENGTH_M - bmargin):
+                continue
             vkey = (int(round(pt[0] / 5.0e-4)), int(round(pt[1] / 5.0e-4)))
             rays = vertex_rays.setdefault(vkey, [])
             sense_j = 1 if sj.mountain else -1
@@ -416,8 +419,8 @@ class ParametricOrigamiCompiler:
                     level=2,
                     groups=("flap_r",),
                     set_group="nose_cap_r",
+                )
             )
-        )
 
         # Wings and control surfaces (folded down from keel)
         wing_creases = [
@@ -470,17 +473,17 @@ class ParametricOrigamiCompiler:
                 ),
             ])
         wing_creases.extend([
-                Crease(
-                    key="elevon_l",
-                    p0=(0.0, elevon_v),
-                    p1=(1.0, elevon_v),
-                    angle_deg=abs(elevon_left),
-                    side=-1,
-                    up=elevon_left >= 0,
-                    level=0,
-                    groups=("wing_l", "winglet_l") if has_winglet else ("wing_l",),
-                    set_group="elevon_l",
-                ),
+            Crease(
+                key="elevon_l",
+                p0=(0.0, elevon_v),
+                p1=(1.0, elevon_v),
+                angle_deg=abs(elevon_left),
+                side=-1,
+                up=elevon_left >= 0,
+                level=0,
+                groups=("wing_l", "winglet_l") if has_winglet else ("wing_l",),
+                set_group="elevon_l",
+            ),
             Crease(
                 key="elevon_r",
                 p0=(0.0, elevon_v),
@@ -518,39 +521,40 @@ class ParametricOrigamiCompiler:
         creases.extend(wing_creases)
 
         target_count = 20
-        extra_count = max(0, target_count - len(creases))
-        for i in range(extra_count):
-            u_offset = 0.16 + 0.05 * (i // 2)
+        pair_count = max(0, (target_count - len(creases)) // 2)
+        for k in range(pair_count):
+            if len(creases) + 2 > MAX_FOLD_STEPS:
+                break
+            u_offset = 0.16 + 0.05 * k
             u_l = u_offset
             u_r = 1.0 - u_offset
-            if i % 2 == 0:
-                creases.append(
-                    Crease(
-                        key=f"camber_l_{i // 2 + 1}",
-                        p0=(u_l, 0.20),
-                        p1=(u_l, 0.85),
-                        angle_deg=2.0 + 0.5 * (i // 2),
-                        side=1,
-                        up=True,
-                        level=0,
-                        groups=("wing_l",),
-                        set_group=f"camber_l_{i // 2 + 1}",
-                    )
+            angle = 2.0 + 0.5 * k
+            creases.append(
+                Crease(
+                    key=f"camber_l_{k + 1}",
+                    p0=(u_l, 0.20),
+                    p1=(u_l, 0.85),
+                    angle_deg=angle,
+                    side=1,
+                    up=True,
+                    level=0,
+                    groups=("wing_l",),
+                    set_group=f"camber_l_{k + 1}",
                 )
-            else:
-                creases.append(
-                    Crease(
-                        key=f"camber_r_{i // 2 + 1}",
-                        p0=(u_r, 0.20),
-                        p1=(u_r, 0.85),
-                        angle_deg=2.0 + 0.5 * (i // 2),
-                        side=-1,
-                        up=True,
-                        level=0,
-                        groups=("wing_r",),
-                        set_group=f"camber_r_{i // 2 + 1}",
-                    )
+            )
+            creases.append(
+                Crease(
+                    key=f"camber_r_{k + 1}",
+                    p0=(u_r, 0.20),
+                    p1=(u_r, 0.85),
+                    angle_deg=angle,
+                    side=-1,
+                    up=True,
+                    level=0,
+                    groups=("wing_r",),
+                    set_group=f"camber_r_{k + 1}",
                 )
+            )
 
         g = genome_from_creases(creases, key="v3_origami")
         steps = list(g.steps)

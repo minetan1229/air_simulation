@@ -127,11 +127,22 @@ class TestTier0FilterFixes:
         """Test that validate_tier0 passes when no mesh penetration."""
         candidate = Mock(spec=AircraftCandidate)
         candidate.step_count = 12
+        candidate.metadata = {}
 
         mock_geom = Mock()
         mock_geom.keel_height_m = 0.012
         mock_geom.keel_length_m = 0.060
         mock_geom.keel_layers = 4
+        mock_geom.penetrations = 0
+        mock_geom.fold_valid = True
+        mock_geom.thickness_limit_ok = True
+        mock_geom.flat_foldable_ok = True
+        mock_geom.mass_kg = 0.005
+        mock_geom.wing_area_m2 = 0.015
+        mock_geom.wingspan_m = 0.18
+        mock_geom.chord_m = 0.12
+        mock_geom.planform_area_m2 = 0.015
+        mock_geom.cg_m = (0.08, 0.0, 0.005)
         candidate.geometry = mock_geom
 
         mock_genome = Mock()

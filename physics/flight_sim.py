@@ -2442,15 +2442,14 @@ class FlightSimulator:
             # a_body[2] = (force_body[2] + m * gravity_body[2] + m_add_z * (p * v_rel - q * u_rel)) / m_eff_z
             w_stall_val = float(getattr(result, "w_stall", 0.0) if hasattr(result, "w_stall") else (result.get("w_stall", 0.0) if isinstance(result, dict) else 0.0))
             munk_active = bool(getattr(self.aircraft, "munk_coupling_enabled", False))
-            # Symmetrically roll off both Coriolis and Munk post-stall to guarantee passivity dT/dt <= 0
-            kirchhoff_factor = max(1.0 - w_stall_val, 0.0) if munk_active else 1.0
+            munk_factor = max(1.0 - w_stall_val, 0.0) if munk_active else 0.0
 
             u_rel = float(body_relative[0])
             v_rel = float(body_relative[1])
             w_rel = float(body_relative[2])
-            f_cor_x = -float(omega[1]) * m_add_z * w_rel * kirchhoff_factor
-            f_cor_y = float(omega[0]) * m_add_z * w_rel * kirchhoff_factor
-            f_cor_z = m_add_z * (float(omega[0]) * v_rel - float(omega[1]) * u_rel) * kirchhoff_factor
+            f_cor_x = -float(omega[1]) * m_add_z * w_rel
+            f_cor_y = float(omega[0]) * m_add_z * w_rel
+            f_cor_z = m_add_z * (float(omega[0]) * v_rel - float(omega[1]) * u_rel) * munk_factor
 
             a_body = np.zeros(3, dtype=np.float64)
             a_body[0] = (force_body[0] + f_cor_x) / self._mass + gravity_body[0]
@@ -2468,7 +2467,6 @@ class FlightSimulator:
             # Munk moment: M_munk = - v_rel x P_A = [-v_rel * m_add_z * w_rel, u_rel * m_add_z * w_rel, 0]
             # Coupled passively inside generalized angular acceleration (Euler's equations).
             # Smoothly rolled off post-stall where potential flow suction breaks down.
-            munk_factor = max(1.0 - w_stall_val, 0.0) if munk_active else 0.0
             m_munk_x = -v_rel * m_add_z * w_rel * munk_factor
             m_munk_y = u_rel * m_add_z * w_rel * munk_factor
             munk_moment = np.array([m_munk_x, m_munk_y, 0.0], dtype=np.float64)

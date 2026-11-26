@@ -8,10 +8,21 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
 
-from physics.config_schema import AircraftConfig, EnvironmentConfig, LaunchConfig
+from physics.config_schema import AircraftConfig, EnvironmentConfig, LaunchConfig, SimulationSettings
 from physics.flight_sim import FlightSimulator
 from core.interfaces import AircraftCandidate, RobustnessReport
 from physics.benchmark.benchmark import _build_aircraft_config
+
+
+def _is_valid_glide(metrics: Dict[str, Any]) -> bool:
+    if bool(metrics.get("crashed", False)) or bool(metrics.get("diverged", False)):
+        return False
+    try:
+        flight_time = float(metrics.get("flight_time_s", 0.0) or 0.0)
+        distance_m = float(metrics.get("distance_m", 0.0) or 0.0)
+    except (TypeError, ValueError):
+        return False
+    return math.isfinite(flight_time) and math.isfinite(distance_m) and flight_time >= 0.8 and distance_m >= 2.0
 
 
 class RobustnessEvaluator:
@@ -45,6 +56,12 @@ class RobustnessEvaluator:
         keel_height_m = geom.keel_height_m if geom else 0.015
         aircraft.keel_height_m = keel_height_m
 
+        sim_settings = (
+            SimulationSettings(dt_max=float(self.dt_max), duration_s=self.duration_s, adaptive=True)
+            if self.dt_max is not None
+            else SimulationSettings(duration_s=self.duration_s, adaptive=True)
+        )
+
         rng = np.random.default_rng(self.seed)
         dryden_survivals, dryden_times = [], []
         dryden_runs: List[Dict[str, Any]] = []
@@ -67,11 +84,11 @@ class RobustnessEvaluator:
                 )
                 turb_launch = LaunchConfig(launch_speed=8.0, launch_angle_deg=0.0, launch_height_m=1.5)
                 try:
-                    sim = FlightSimulator(aircraft=aircraft, environment=turb_env, launch=turb_launch)
+                    sim = FlightSimulator(aircraft=aircraft, environment=turb_env, launch=turb_launch, settings=sim_settings)
                     sim.simulate(duration_s=self.duration_s)
                     m = sim.metrics()
                     ht = float(m.get("flight_time_s", 0.0) or 0.0)
-                    ok = not bool(m.get("crashed", False) or m.get("diverged", False))
+                    ok = _is_valid_glide(m)
                 except Exception:
                     ht = 0.0
                     ok = False
@@ -92,20 +109,21 @@ class RobustnessEvaluator:
 
         # Monte Carlo Dryden scenarios
         for k in range(mc_dryden_count):
+            w_dir_mc = float(rng.uniform(0.0, 360.0))
             turb_env = EnvironmentConfig(
                 wind_speed=float(rng.uniform(1.0, 3.5)),
-                wind_direction_deg=float(rng.uniform(0.0, 360.0)),
+                wind_direction_deg=w_dir_mc,
                 gust_intensity=float(rng.uniform(0.5, 1.2)),
                 turbulence_seed=int(self.seed * 1000 + k),
                 surface_roughness_m=0.01,
             )
             turb_launch = LaunchConfig(launch_speed=8.0, launch_angle_deg=0.0, launch_height_m=1.5)
             try:
-                sim = FlightSimulator(aircraft=aircraft, environment=turb_env, launch=turb_launch)
+                sim = FlightSimulator(aircraft=aircraft, environment=turb_env, launch=turb_launch, settings=sim_settings)
                 sim.simulate(duration_s=self.duration_s)
                 m = sim.metrics()
                 ht = float(m.get("flight_time_s", 0.0) or 0.0)
-                ok = not bool(m.get("crashed", False) or m.get("diverged", False))
+                ok = _is_valid_glide(m)
             except Exception:
                 ht = 0.0
                 ok = False
@@ -118,7 +136,7 @@ class RobustnessEvaluator:
                 dryden_times.append(0.0)
 
             dryden_runs.append({
-                "wind_direction_deg": float(rng.uniform(0.0, 360.0)),
+                "wind_direction_deg": w_dir_mc,
                 "turbulence_seed": int(self.seed * 1000 + k),
                 "survived": ok,
                 "flight_time_s": ht,
@@ -144,10 +162,10 @@ class RobustnessEvaluator:
                 launch_height_m=1.5,
             )
             try:
-                sim = FlightSimulator(aircraft=aircraft, environment=calm_env, launch=jitter_launch)
+                sim = FlightSimulator(aircraft=aircraft, environment=calm_env, launch=jitter_launch, settings=sim_settings)
                 sim.simulate(duration_s=self.duration_s)
                 m = sim.metrics()
-                ok = not bool(m.get("crashed", False) or m.get("diverged", False))
+                ok = _is_valid_glide(m)
             except Exception:
                 ok = False
 
@@ -172,10 +190,10 @@ class RobustnessEvaluator:
                 launch_height_m=float(np.clip(rng.normal(1.5, 0.15), 1.0, 2.0)),
             )
             try:
-                sim = FlightSimulator(aircraft=aircraft, environment=calm_env, launch=jitter_launch)
+                sim = FlightSimulator(aircraft=aircraft, environment=calm_env, launch=jitter_launch, settings=sim_settings)
                 sim.simulate(duration_s=self.duration_s)
                 m = sim.metrics()
-                ok = not bool(m.get("crashed", False) or m.get("diverged", False))
+                ok = _is_valid_glide(m)
             except Exception:
                 ok = False
 
@@ -189,13 +207,13 @@ class RobustnessEvaluator:
         )
         climb_metrics: Dict[str, Any] = {}
         try:
-            sim = FlightSimulator(aircraft=aircraft, environment=calm_env, launch=climb_launch)
+            sim = FlightSimulator(aircraft=aircraft, environment=calm_env, launch=climb_launch, settings=sim_settings)
             sim.simulate(duration_s=self.duration_s)
             m = sim.metrics()
             climb_metrics = m
-            crashed = bool(m.get("crashed", False) or m.get("diverged", False))
+            valid_glide = _is_valid_glide(m)
             stalled = bool(m.get("stalled", False))
-            climb_recoveries.append(1.0 if (not crashed and not stalled) else (0.5 if not crashed else 0.0))
+            climb_recoveries.append(1.0 if (valid_glide and not stalled) else (0.5 if valid_glide else 0.0))
         except Exception as exc:
             climb_recoveries.append(0.0)
             climb_metrics = {"error": f"{type(exc).__name__}: {exc}", "crashed": True}
@@ -209,12 +227,12 @@ class RobustnessEvaluator:
                 launch_height_m=1.5,
             )
             try:
-                sim = FlightSimulator(aircraft=aircraft, environment=calm_env, launch=climb_launch_mc)
+                sim = FlightSimulator(aircraft=aircraft, environment=calm_env, launch=climb_launch_mc, settings=sim_settings)
                 sim.simulate(duration_s=self.duration_s)
                 m = sim.metrics()
-                crashed = bool(m.get("crashed", False) or m.get("diverged", False))
+                valid_glide = _is_valid_glide(m)
                 stalled = bool(m.get("stalled", False))
-                climb_recoveries.append(1.0 if (not crashed and not stalled) else (0.25 if not crashed else 0.0))
+                climb_recoveries.append(1.0 if (valid_glide and not stalled) else (0.25 if valid_glide else 0.0))
             except Exception:
                 climb_recoveries.append(0.0)
 

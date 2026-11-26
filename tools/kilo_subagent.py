@@ -34,6 +34,8 @@ from tools.bridge_backends import (
     normalize_model,
     resolve_kilo_executable,
 )
+from tools.bridge_router import is_rate_limited
+from tools.proxy_config import ProxyRotator, format_proxy_summary, inject_proxy_to_env
 
 DEFAULT_WORKER_MODEL = "kilo/nvidia/nemotron-3-ultra-550b-a55b:free"
 
@@ -45,19 +47,17 @@ def get_kilo_bin() -> str:
     return exe
 
 
-def execute_kilo_worker(
+def _execute_kilo_attempt(
     prompt: str,
-    model: str = DEFAULT_WORKER_MODEL,
-    session_id: Optional[str] = None,
-    continue_session: bool = False,
-    auto_approve: bool = True,
-    output_file: Optional[Path] = None,
-    timeout: Optional[int] = None,
-    verbose: bool = False,
+    model: str,
+    session_id: Optional[str],
+    continue_session: bool,
+    auto_approve: bool,
+    timeout: Optional[int],
+    verbose: bool,
+    proxy: Optional[str],
 ) -> Dict[str, Any]:
-    """
-    Run Kilo Code as a worker and stream/collect its output.
-    """
+    """Execute a single attempt of Kilo Code worker."""
     exe = get_kilo_bin()
     cmd = [
         exe,
@@ -77,8 +77,12 @@ def execute_kilo_worker(
 
     cmd.extend(["--", prompt])
 
+    env = inject_proxy_to_env(explicit_proxy=proxy)
+    env["PYTHONIOENCODING"] = "utf-8"
+
     if verbose:
         print(f"[*] Starting Kilo Worker with model: {model}", file=sys.stderr)
+        print(f"[*] Proxy config: {format_proxy_summary(explicit_proxy=proxy)}", file=sys.stderr)
         print(f"[*] Command: {' '.join(cmd[:5])} ...", file=sys.stderr)
 
     start_time = time.time()
@@ -87,6 +91,7 @@ def execute_kilo_worker(
         cwd=str(PROJECT_ROOT),
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
+        env=env,
         text=True,
         encoding="utf-8",
         errors="replace",
@@ -143,6 +148,7 @@ def execute_kilo_worker(
             "text": "".join(collected_text),
             "events_count": len(events),
             "duration": time.time() - start_time,
+            "rate_limited": False,
         }
     except Exception as ex:
         proc.kill()
@@ -153,6 +159,7 @@ def execute_kilo_worker(
             "text": "".join(collected_text),
             "events_count": len(events),
             "duration": time.time() - start_time,
+            "rate_limited": False,
         }
 
     full_output = "".join(collected_text).strip()
@@ -162,13 +169,8 @@ def execute_kilo_worker(
     if proc.returncode != 0 and not error_message:
         error_message = stderr_content.strip() or f"Process exited with code {proc.returncode}"
 
-    success = proc.returncode == 0 and not error_message
-
-    if success and output_file:
-        output_file.parent.mkdir(parents=True, exist_ok=True)
-        output_file.write_text(full_output, encoding="utf-8")
-        if verbose:
-            print(f"\n[✓] Saved output to {output_file}", file=sys.stderr)
+    is_rl = is_rate_limited(full_output + "\n" + (error_message or "") + "\n" + stderr_content)
+    success = proc.returncode == 0 and not error_message and not is_rl
 
     return {
         "success": success,
@@ -179,7 +181,69 @@ def execute_kilo_worker(
         "stderr": stderr_content,
         "duration": duration,
         "events_count": len(events),
+        "rate_limited": is_rl,
     }
+
+
+def execute_kilo_worker(
+    prompt: str,
+    model: str = DEFAULT_WORKER_MODEL,
+    session_id: Optional[str] = None,
+    continue_session: bool = False,
+    auto_approve: bool = True,
+    output_file: Optional[Path] = None,
+    timeout: Optional[int] = None,
+    verbose: bool = False,
+    proxy: Optional[str] = None,
+    max_proxy_rotations: int = 3,
+) -> Dict[str, Any]:
+    """Run Kilo Code as a worker, rotating proxy if a 429 rate limit is encountered."""
+    rotator = ProxyRotator.from_config(explicit_proxy=proxy)
+    current_proxy = rotator.current or proxy
+    attempts = 0
+    max_attempts = max(1, min(max_proxy_rotations + 1, len(rotator) if len(rotator) > 1 else max_proxy_rotations + 1))
+
+    last_res: Dict[str, Any] = {}
+    while attempts < max_attempts:
+        attempts += 1
+        use_continue = continue_session if attempts == 1 else True
+        if session_id:
+            use_continue = False
+
+        res = _execute_kilo_attempt(
+            prompt=prompt,
+            model=model,
+            session_id=session_id,
+            continue_session=use_continue,
+            auto_approve=auto_approve,
+            timeout=timeout,
+            verbose=verbose,
+            proxy=current_proxy,
+        )
+        last_res = res
+        if res.get("session_id"):
+            session_id = res["session_id"]
+
+        if res.get("success") or not res.get("rate_limited"):
+            break
+
+        # 429 encountered: attempt proxy rotation if available
+        next_proxy = rotator.rotate()
+        if verbose:
+            print(
+                f"\n[!] 429 Rate limit encountered on proxy: {current_proxy or 'direct'}. "
+                f"Rotating to next proxy: {next_proxy or 'none'} (attempt {attempts}/{max_attempts})",
+                file=sys.stderr,
+            )
+        current_proxy = next_proxy
+
+    if last_res.get("success") and output_file:
+        output_file.parent.mkdir(parents=True, exist_ok=True)
+        output_file.write_text(last_res.get("text", ""), encoding="utf-8")
+        if verbose:
+            print(f"\n[✓] Saved output to {output_file}", file=sys.stderr)
+
+    return last_res
 
 
 def main():
@@ -194,12 +258,14 @@ def main():
     parser.add_argument("-v", "--verbose", action="store_true", help="Print streaming text to stdout/stderr")
     parser.add_argument("--list-models", action="store_true", help="List registered Kilo free models")
     parser.add_argument("--check", action="store_true", help="Check Kilo Code CLI availability and path")
+    parser.add_argument("--proxy", help="HTTP/HTTPS/SOCKS proxy URL to route Kilo Code traffic through")
 
     args = parser.parse_args()
 
     if args.check:
         exe = resolve_kilo_executable()
         print(f"Kilo Executable: {exe}")
+        print(f"Proxy Config: {format_proxy_summary(explicit_proxy=args.proxy)}")
         if exe and Path(exe).exists():
             print("Status: Available")
             sys.exit(0)
@@ -231,6 +297,7 @@ def main():
         continue_session=args.continue_session,
         output_file=args.output,
         verbose=args.verbose,
+        proxy=args.proxy,
     )
 
     if args.json:

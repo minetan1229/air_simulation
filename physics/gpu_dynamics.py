@@ -802,10 +802,14 @@ def _evaluate_state(
         u_rel_app = body_relative[:, 0]
         v_rel_app = body_relative[:, 1]
         w_rel_app = body_relative[:, 2]
-        munk_factor = xp.where(params.munk_active, xp.maximum(1.0 - xp.asarray(coefficients.get("w_stall", 0.0)), 0.0), 0.0) if getattr(params, "has_munk", False) else 0.0
+        w_stall_val = xp.asarray(coefficients.get("w_stall", 0.0))
+        if getattr(params, "has_munk", False):
+            munk_factor = xp.where(params.apparent_active & params.munk_active, xp.maximum(1.0 - w_stall_val, 0.0), 0.0)
+        else:
+            munk_factor = 0.0
         f_cor_x = -omega[:, 1] * m_add_z * w_rel_app
         f_cor_y = omega[:, 0] * m_add_z * w_rel_app
-        f_cor_z = munk_factor * m_add_z * (omega[:, 0] * v_rel_app - omega[:, 1] * u_rel_app)
+        f_cor_z = m_add_z * (omega[:, 0] * v_rel_app - omega[:, 1] * u_rel_app) * munk_factor
         a_body_0 = (force_body[:, 0] + f_cor_x) / params.mass + gravity_body[:, 0]
         a_body_1 = (force_body[:, 1] + f_cor_y) / params.mass + gravity_body[:, 1]
         a_body_2_app = (force_body[:, 2] + params.mass * gravity_body[:, 2] + f_cor_z) / m_eff_z
@@ -813,7 +817,10 @@ def _evaluate_state(
         a_body_1 = xp.where(params.apparent_active, a_body_1, (force_body[:, 1] / params.mass) + gravity_body[:, 1])
         a_body_z = xp.where(params.apparent_active, a_body_2_app, (force_body[:, 2] / params.mass) + gravity_body[:, 2])
         a_body = xp.stack((a_body_0, a_body_1, a_body_z), axis=-1)
-        acceleration = body_to_world_batch(xp, rotation, a_body)
+        acceleration_app = body_to_world_batch(xp, rotation, a_body)
+        force_world_std = body_to_world_batch(xp, rotation, force_body) + params.mass[:, xp.newaxis] * gravity_world
+        acceleration_std = force_world_std / params.mass[:, xp.newaxis]
+        acceleration = xp.where(params.apparent_active[:, xp.newaxis], acceleration_app, acceleration_std)
 
         eff_inertia_mat = xp.copy(params.inertia_matrix)
         add_xx = xp.where(params.apparent_active, added.get("added_inertia_xx_kgm2", 0.0), 0.0)
@@ -825,8 +832,9 @@ def _evaluate_state(
         eff_inertia_mat = xp.stack((r0, r1, r2), axis=1)
         eff_inertia_inv = _invert_3x3_batch(xp, eff_inertia_mat)
 
-        cur_mat = eff_inertia_mat
-        cur_inv = eff_inertia_inv
+        mask_mat = params.apparent_active[:, xp.newaxis, xp.newaxis]
+        cur_mat = xp.where(mask_mat, eff_inertia_mat, params.inertia_matrix)
+        cur_inv = xp.where(mask_mat, eff_inertia_inv, params.inertia_inv)
     else:
         force_world = body_to_world_batch(xp, rotation, force_body) + params.mass[:, xp.newaxis] * gravity_world
         acceleration = force_world / params.mass[:, xp.newaxis]
@@ -892,6 +900,7 @@ def _evaluate_state(
         "stall_margin": coefficients["stall_margin"],
         "altitude": altitude,
         "density": air["density_kgm3"],
+        "v_rel": relative,
     }
 
 
@@ -1013,7 +1022,7 @@ def _ground_stations(xp: Any, params: FlightParams, y: Any) -> Dict[str, Any]:
     }
 
 
-def _step_size(xp: Any, params: FlightParams, y: Any, core: Dict[str, Any], dt_max: float) -> Any:
+def _step_size(xp: Any, params: FlightParams, y: Any, core: Dict[str, Any], dt_max: float, wind: Any = None) -> Any:
     """Combine the CFL-style limits into one clamped step, per case."""
     omega = y[:, 10:13]
     rate = _norm(xp, omega)
@@ -1042,6 +1051,24 @@ def _step_size(xp: Any, params: FlightParams, y: Any, core: Dict[str, Any], dt_m
         limits,
         xp.where(positive_change, MAX_RATE_CHANGE_RADPS / safe_change, limits),
     )
+    if wind is not None:
+        y_rate_probe = xp.concatenate((y[:, :10], omega + (1.0 / math.sqrt(3.0))), axis=1)
+        pert_rate = _evaluate_state(xp, params, y_rate_probe, wind)
+        rate_stiffness = _norm(xp, pert_rate['angular_acceleration'] - core['angular_acceleration'])
+        has_airspeed = speed > 1.0e-6
+        safe_airspeed = xp.where(has_airspeed, speed, xp.ones_like(speed))
+        delta_v = 0.01 * xp.maximum(speed, 1.0)
+        v_rel = core['v_rel']
+        v_probe = y[:, 3:6] + (delta_v / safe_airspeed)[:, xp.newaxis] * v_rel
+        y_speed_probe = xp.concatenate((y[:, :3], v_probe, y[:, 6:13]), axis=1)
+        pert_speed = _evaluate_state(xp, params, y_speed_probe, wind)
+        raw_speed_stiffness = _norm(xp, pert_speed['acceleration'] - core['acceleration']) / delta_v
+        speed_stiffness = xp.where(has_airspeed, raw_speed_stiffness, xp.zeros_like(speed))
+        stiffness = xp.maximum(rate_stiffness, speed_stiffness)
+        stiffness = xp.where(xp.isfinite(stiffness) & (stiffness > 0.0), stiffness, xp.zeros_like(stiffness))
+        positive_stiffness = stiffness > 1.0e-9
+        safe_stiffness = xp.where(positive_stiffness, stiffness, xp.ones_like(stiffness))
+        limits = xp.minimum(limits, xp.where(positive_stiffness, RK4_STIFFNESS_SAFETY / safe_stiffness, limits))
     return xp.clip(limits, DT_MIN, float(dt_max))
 
 
@@ -1377,7 +1404,7 @@ def simulate_batch(
         """Advance the whole batch by one integration step, in place."""
         active = (~acc["landed"]) & (~acc["crashed"]) & (acc["time"] < duration)
         core = _evaluate_state(xp, params, y, wind)
-        size = _step_size(xp, params, y, core, dt_max)
+        size = _step_size(xp, params, y, core, dt_max, wind=wind)
         size = xp.minimum(size, xp.maximum(duration - acc["time"], 0.0))
         size = xp.where(active, size, xp.zeros_like(size))
         # The derivative of the pre-step state is the first RK4 stage, and

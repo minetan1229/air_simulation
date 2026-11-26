@@ -53,9 +53,10 @@ class ParametricOrigamiCompiler:
         keel_beta = _clamp(keel_depth_ratio * 40.0, 1.0, 15.0)
 
         span_ratio = _clamp(float(wing_cfg.wingspan_ratio), 0.5, 0.9)
-        wing_u = _clamp(0.50 - 0.20 * span_ratio, 0.30, 0.48)
+        wing_u = _clamp(0.30 + 0.18 * span_ratio, 0.30, 0.48)
         dihedral = _clamp(float(wing_cfg.dihedral_deg), -5.0, 15.0)
-        elevon = 0.5 * (_clamp(float(wing_cfg.elevon_left_deg), -10.0, 15.0) + _clamp(float(wing_cfg.elevon_right_deg), -10.0, 15.0))
+        elevon_left = _clamp(float(wing_cfg.elevon_left_deg), -15.0, 15.0)
+        elevon_right = _clamp(float(wing_cfg.elevon_right_deg), -15.0, 15.0)
         winglet_u = _clamp(0.08 * (1.0 - span_ratio * 0.2), 0.04, 0.12)
         winglet_angle = _clamp(float(wing_cfg.winglet_angle_deg), 10.0, 85.0)
 
@@ -69,7 +70,7 @@ class ParametricOrigamiCompiler:
         taper = _clamp(float(nose_cfg.taper_ratio), 0.40, 0.85)
         # Dynamic nose fold placement based on nose length and taper ratio
         base_v = 0.5 + (_HALF_LENGTH - _HALF_WIDTH) / SHEET_LENGTH_M
-        nose_v = _clamp(base_v + (0.28 - nose_len) * 0.4 + (taper - 0.65) * 0.15, 0.55, 0.72)
+        nose_v = _clamp(base_v - 0.01 + (0.28 - nose_len) * 0.4 + (taper - 0.65) * 0.15, 0.55, 0.64)
 
         crease_l = _corner_crease(nose_v)
         crease_r = _mirror_crease(crease_l)
@@ -92,8 +93,8 @@ class ParametricOrigamiCompiler:
             Crease(key="wing_r", p0=(1.0 - wing_u, 0.0), p1=(wing_r_nose, 1.0), angle_deg=wing_angle, side=-1, up=True, level=0, groups=("body_r",), set_group="wing_r"),
             Crease(key="winglet_l", p0=(winglet_u, 0.0), p1=(winglet_u, 1.0), angle_deg=winglet_angle, side=1, up=True, level=0, groups=("wing_l",), set_group="winglet_l"),
             Crease(key="winglet_r", p0=(1.0 - winglet_u, 0.0), p1=(1.0 - winglet_u, 1.0), angle_deg=winglet_angle, side=-1, up=True, level=0, groups=("wing_r",), set_group="winglet_r"),
-            Crease(key="elevon_l", p0=(0.0, elevon_v), p1=(1.0, elevon_v), angle_deg=abs(elevon), side=-1, up=False, level=0, groups=("wing_l", "winglet_l"), set_group="elevon_l"),
-            Crease(key="elevon_r", p0=(0.0, elevon_v), p1=(1.0, elevon_v), angle_deg=abs(elevon), side=-1, up=False, level=0, groups=("wing_r", "winglet_r"), set_group="elevon_r"),
+            Crease(key="elevon_l", p0=(0.0, elevon_v), p1=(1.0, elevon_v), angle_deg=abs(elevon_left), side=-1, up=(elevon_left >= 0), level=0, groups=("wing_l", "winglet_l"), set_group="elevon_l"),
+            Crease(key="elevon_r", p0=(0.0, elevon_v), p1=(1.0, elevon_v), angle_deg=abs(elevon_right), side=-1, up=(elevon_right >= 0), level=0, groups=("wing_r", "winglet_r"), set_group="elevon_r"),
             Crease(key="trailing_l", p0=(0.0, trailing_v), p1=(0.5, trailing_v), angle_deg=15.0, side=-1, up=False, level=0, groups=("elevon_l",), set_group="trailing_l"),
             Crease(key="trailing_r", p0=(0.5, trailing_v), p1=(1.0, trailing_v), angle_deg=15.0, side=-1, up=False, level=0, groups=("elevon_r",), set_group="trailing_r"),
         ]
@@ -113,7 +114,7 @@ class ParametricOrigamiCompiler:
             steps.append(
                 FoldStep(
                     step_index=len(steps) + 1,
-                    crease_line=((0.15, v), (0.35, v)),
+                    crease_line=((0.35, v), (0.15, v)),
                     fold_angle_deg=fold_ang,
                     symmetry="left",
                     layer_order="auto",

@@ -644,11 +644,11 @@ def test_unfolded_sheet_inertia_matches_analytic_thin_plate() -> None:
     assert geom.roll_inertia_kgm2 > 1.0e-8, "Roll inertia must include within-panel inertia"
     assert geom.yaw_inertia_kgm2 > 1.0e-8, "Yaw inertia must include within-panel inertia"
 
-    # Perpendicular axis theorem for flat 2D lamina in x-z plane:
-    # I_yy (perpendicular to lamina plane) must equal I_xx + I_zz
+    # Perpendicular axis theorem for flat 2D lamina in x-z plane (Y=up=Yaw):
+    # I_yaw (perpendicular to lamina plane) must equal I_roll + I_pitch
     assert math.isclose(
-        geom.pitch_inertia_kgm2,
-        geom.roll_inertia_kgm2 + geom.yaw_inertia_kgm2,
+        geom.yaw_inertia_kgm2,
+        geom.roll_inertia_kgm2 + geom.pitch_inertia_kgm2,
         rel_tol=1e-3,
     )
 

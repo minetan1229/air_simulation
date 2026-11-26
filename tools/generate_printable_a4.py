@@ -86,6 +86,10 @@ def resolve_canonical_crease_style(label: str, raw_mountain: bool = True) -> Tup
     elif "nose_reinforce" in key or "nose_rf" in key:
         # Nose flap reinforcement
         return (True, "⑤", "機首補強折り")
+    elif "keel_lock" in key:
+        return (False, "④", "キールロック折り")
+    elif "nose_cap" in key:
+        return (False, "③", "機首キャップ折り")
     elif "wing" in key and "winglet" not in key:
         # Folding wings downward from keel forms a mountain ridge at wing crease
         return (True, "⑥", "主翼折り下げ")
@@ -102,6 +106,22 @@ def resolve_canonical_crease_style(label: str, raw_mountain: bool = True) -> Tup
     else:
         # Fallback to raw mountain/valley
         return (raw_mountain, "", label)
+
+
+def _resolve_step_crease_style(
+    step_label: str,
+    step_mountain: bool,
+    wing_cfg: ParametricWingSpec,
+) -> Tuple[bool, str, str]:
+    """Resolve crease style for a FoldStep, aligning elevon sense with Page 2 instructions."""
+    raw_mtn = step_mountain
+    key = str(step_label).lower()
+    if "elevon" in key:
+        if key.endswith("_r"):
+            raw_mtn = float(wing_cfg.elevon_right_deg) < 0.0
+        else:
+            raw_mtn = float(wing_cfg.elevon_left_deg) < 0.0
+    return resolve_canonical_crease_style(step_label, raw_mtn)
 
 
 def load_candidate_data(json_path: Path) -> Dict[str, Any]:
@@ -149,7 +169,7 @@ def build_folding_instructions(cand_data: Dict[str, Any]) -> List[Dict[str, str]
     taper = nose.get("taper_ratio", 0.65)
     dihedral = round(wing.get("dihedral_deg", 3.5), 1)
     winglet = round(wing.get("winglet_angle_deg", 45.0), 1)
-    elevon = round(wing.get("elevon_left_deg", 2.0), 1)
+    elevon = round(0.5 * (float(wing.get("elevon_left_deg", 2.0)) + float(wing.get("elevon_right_deg", wing.get("elevon_left_deg", 2.0)))), 1)
 
     return [
         {
@@ -202,9 +222,9 @@ def build_folding_instructions(cand_data: Dict[str, Any]) -> List[Dict[str, str]
         },
         {
             "step": "⑧ & ⑨",
-            "type": "谷折り (Valley)",
+            "type": "山折り (Mountain)" if elevon < 0.0 else "谷折り (Valley)",
             "title": f"エレボントリム（仕上げ反り {elevon}°）",
-            "desc": f"主翼後縁（後ろ端）の青線⑧⑨を指先で約1〜2mm（{elevon}度）上向きに反らせます。",
+            "desc": f"主翼後縁（後ろ端）の{'赤線' if elevon < 0.0 else '青線'}⑧⑨を指先で約1〜2mm（{elevon}度）{'下向き' if elevon < 0.0 else '上向き'}に反らせます。",
         },
         {
             "step": "調整",
@@ -279,7 +299,7 @@ def render_a4_printable_sheet(
         x0, y0 = p0[0], p0[1]
         x1, y1 = p1[0], p1[1]
 
-        is_mtn, badge_num, fold_name = resolve_canonical_crease_style(step.label, step.mountain)
+        is_mtn, badge_num, fold_name = _resolve_step_crease_style(step.label, step.mountain, cfg.wing)
         color = "#dc2626" if is_mtn else "#2563eb"  # Red = mountain, Blue = valley
         ls = (0, (6, 4)) if is_mtn else (0, (3, 2, 1, 2))  # Dashed vs Dash-dot
         lw = 2.2 if "body" in step.label or "wing" in step.label or "corner" in step.label else 1.6
@@ -436,7 +456,7 @@ def render_a4_max_fullsize_sheet(
         x0, y0 = p0[0], p0[1]
         x1, y1 = p1[0], p1[1]
 
-        is_mtn, badge_num, fold_name = resolve_canonical_crease_style(step.label, step.mountain)
+        is_mtn, badge_num, fold_name = _resolve_step_crease_style(step.label, step.mountain, cfg.wing)
         color = "#dc2626" if is_mtn else "#2563eb"
         ls = (0, (8, 5)) if is_mtn else (0, (4, 3, 1, 3))
         lw = 2.4 if "body" in step.label or "wing" in step.label or "corner" in step.label else 1.8

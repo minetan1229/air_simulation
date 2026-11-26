@@ -23,7 +23,7 @@ from core.interfaces import (
 # Physics benchmark modules
 from physics.benchmark.benchmark import _build_aircraft_config as physics_build_aircraft_config
 from physics.benchmark.benchmark import evaluate_horizontal_glide as physics_evaluate_horizontal_glide
-from physics.flight_sim import FlightSimulator, helmbold_cl_alpha
+from physics.flight_sim import FlightLogSample, FlightSimulator, helmbold_cl_alpha
 from physics.config_schema import (
     AircraftConfig,
     EnvironmentConfig,
@@ -457,7 +457,7 @@ def test_f17_antichat_penalties_wired_to_benchmark(monkeypatch: pytest.MonkeyPat
                     }
 
             def history(self) -> List[Any]:
-                return []
+                return [FlightLogSample(time_s=0.5 * i, altitude_m=1.5 - 0.1 * i, speed_mps=5.0, vx_mps=5.0, vy_mps=0.0, vz_mps=0.2, alpha_deg=4.0, pitch_deg=-2.0, roll_deg=0.0, stalled=False) for i in range(9)]
 
         monkeypatch.setattr(bm, "FlightSimulator", CapturingSim)
 
