@@ -1,0 +1,11 @@
+{
+  "_comment": "Rename to proxy_config.json to enable explicit proxy or proxy pool failover for Kilo Code",
+  "proxies": [
+    "http://127.0.0.1:8080",
+    "http://127.0.0.1:8081",
+    "socks5://127.0.0.1:1080"
+  ],
+  "https_proxy": "http://127.0.0.1:8080",
+  "http_proxy": "http://127.0.0.1:8080",
+  "no_proxy": "localhost,127.0.0.1"
+}

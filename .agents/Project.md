@@ -15,9 +15,10 @@
 - [x] **GA2 最適化健全化 & パレート境界極値解保護**: `default_objective` の墜落機25%底上げ（報酬ハッキング要因）を排除し物理的ペナルティ関数へ是正。`archive.py` の `_trim` および `runner.py` の選択においてパレート境界極値解（`math.inf`）の優先保護ガードを実装。全29テストPASS。
 - [x] **フロントエンド ライフサイクル健全化**: `static/js/viewport.js` にテクスチャ再帰解放・WebGL `forceContextLoss` を含む完全な `dispose()` を実装。`static/js/app.js` に `_booted` / `_eventsBound` による二重バインド抑止を導入。全8フロントエンドテストPASS。
 - [x] **milcy 折り幾何学的破綻の完全根絶 & 2.5D逐次折りカーネル刷新**: (1) Sutherland-Hodgman半平面クリッピング＋剛体鏡映＋逆アフィン行列 $M_i^{-1}$ による自動UV展開図生成（2.5D逐次折りステートマシン `kernel_25d.py`）を導入 (2) 人間工学的大工程（MacroFoldStep: 6〜10工程）と物理計算用原子ステップ（Atomic FoldStep: 10〜16ステップ）のバイレベル分離 (3) 中心線突破X字交差・全幅エレボンスライス・水増し空中キャンバー・機首横腹貫通の4大破綻を幾何構造的（Correct-by-Construction）に完全根絶 (4) `tests/v3` (23/23 PASS), 空力テスト (397 PASS), 実機型紙PDF/SVG出力 (`tools/generate_printable_a4.py`) 完全整合。
+- [x] **milcy 収束監査完了（Iterations 1–4 & 厳密反証テスト44件）**: 6DoF物理・GPUバッチ(`apparent_active`マスク・`--fmad=false` 1-ULP検証・剛性dt安全制限)・2.5D折り紙コンパイラ・MAP-Elites・A4型紙/ビューアの監査指摘を全是正。44件の反証テスト（`test_milcy_audit_falsification.py` 27件 / `iter2` 8件 / `iter3` 9件）および `docs/physics_assumptions.md` / `docs/wontfix.md` を整備完了。
 
 ## 3. Loop State (現在のループ状態・引き継ぎメモリ)
 - **Current Phase**: Phase 6 [Finalize & Terminate]
-- **Verification Status**: 2.5D逐次折りステートマシン（`kernel_25d.py`）、MacroStep二層構造、Tier 0幾何ゲートキーパー、Parsimony Pressureの全配備完了。`tests/v3/` (24/24), `tests/test_origami_genome.py` (28/28), E2Eスモーク (14/14ステージ) 全PASS。
-- **Branch & Safety**: `mission/correct-by-construction-25d` を `master`（`de140a2`）へマージし、リモート `origin/master` へ push 完了。CIパイプライン稼働中。
-- **Next Action**: CI通過完了確認・HALT。
+- **Verification Status**: MILCY収束監査（Iterations 1–4）完了。反証テスト44件（`test_milcy_audit_falsification.py` / `iter2` / `iter3`）全PASS、厳密監査/抜け穴テスト（`test_milcy_rigorous_audit.py` 10件 / `test_milcy_loopholes_audit.py` 6件）整備、`docs/physics_assumptions.md` と `docs/wontfix.md` 作成完了。
+- **Branch & Safety**: 現作業ツリーにて MILCY 収束監査是正・ドキュメント整備・`.agents/` 同期完了（`Project.md <= 40行`, `Knowledge.md <= 80行`）。
+- **Next Action**: 最終検証（テスト・lint・型チェック）後に変更をコミットし HALT。

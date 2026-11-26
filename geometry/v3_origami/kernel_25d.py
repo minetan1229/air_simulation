@@ -208,6 +208,8 @@ class Sequential2DOrigamiKernel:
         uv_creases: List[Tuple[Vec2, Vec2]] = []
 
         max_z = max(p.z_index for p in self.polygons) if self.polygons else 0
+        min_z = min(p.z_index for p in self.polygons) if self.polygons else 0
+        moved_entries: List[Tuple[int, List[Vec2], bool, Mat3, str]] = []
 
         for poly in self.polygons:
             if group_filter is not None and poly.group != group_filter:
@@ -249,20 +251,22 @@ class Sequential2DOrigamiKernel:
                 new_affine = _matmul3(poly.uv_affine_inv, refl)
                 grp = target_group or poly.group
 
-                # Stack reflected piece on top or bottom
-                new_z = max_z + 1 if mountain else -abs(poly.z_index) - 1
+                moved_entries.append((poly.z_index, reflected_verts, not poly.face_up, new_affine, grp))
 
-                new_polygons.append(
-                    FoldedPolygon2D(
-                        fid=self.next_fid,
-                        vertices=reflected_verts,
-                        z_index=new_z,
-                        face_up=not poly.face_up,
-                        uv_affine_inv=new_affine,
-                        group=grp,
-                    )
+        moved_entries.sort(key=lambda item: -item[0] if mountain else item[0])
+        for rank, (_, verts, face_up, affine, grp) in enumerate(moved_entries):
+            new_z = (max_z + 1 + rank) if mountain else (min_z - 1 - rank)
+            new_polygons.append(
+                FoldedPolygon2D(
+                    fid=self.next_fid,
+                    vertices=verts,
+                    z_index=new_z,
+                    face_up=face_up,
+                    uv_affine_inv=affine,
+                    group=grp,
                 )
-                self.next_fid += 1
+            )
+            self.next_fid += 1
 
         self.polygons = new_polygons
         return uv_creases
@@ -297,7 +301,7 @@ def compile_macro_origami(
     keel_beta = max(1.0, min(15.0, keel_depth_ratio * 40.0))
 
     span_ratio = max(0.5, min(0.9, float(wing_cfg.wingspan_ratio)))
-    wing_u = max(0.30, min(0.48, 0.50 - 0.20 * span_ratio))
+    wing_u = max(0.30, min(0.48, 0.30 + 0.18 * span_ratio))
     dihedral = max(-5.0, min(15.0, float(wing_cfg.dihedral_deg)))
     elevon = 0.5 * (
         max(-10.0, min(15.0, float(wing_cfg.elevon_left_deg)))
@@ -426,7 +430,7 @@ def compile_macro_origami(
             line_p0=(winglet_u, elevon_v),
             line_p1=(wing_u, elevon_v),
             angle_deg=abs(elevon),
-            mountain=False,
+            mountain=(elevon < 0.0),
             desc=f"エレボントリム（主翼後縁を指先で約1〜2mm反らせる {elevon:.1f}°）",
         )
     )
@@ -446,7 +450,7 @@ def compile_macro_origami(
             Crease(key="nose_lock_l", p0=(0.40, tip_v), p1=(0.50, tip_v + 0.04), angle_deg=180.0, side=1, up=True, level=3, groups=("collar_l",), set_group="nose_tip_l")
         )
         creases.append(
-            Crease(key="nose_lock_r", p0=(0.60, tip_v), p1=(0.50, tip_v + 0.04), angle_deg=180.0, side=1, up=False, level=3, groups=("collar_r",), set_group="nose_tip_r")
+            Crease(key="nose_lock_r", p0=(0.60, tip_v), p1=(0.50, tip_v + 0.04), angle_deg=180.0, side=-1, up=False, level=3, groups=("collar_r",), set_group="nose_tip_r")
         )
 
     has_lock = bool(keel_cfg.has_lock_fold) and (float(keel_cfg.keel_depth_ratio) > 0.09 or float(keel_cfg.lock_fold_angle_deg) != 180.0)
@@ -454,10 +458,10 @@ def compile_macro_origami(
     if has_lock:
         lock_v = max(0.35, min(0.65, eff_nose_v - 0.14))
         creases.append(
-            Crease(key="keel_lock_l", p0=(0.44, lock_v), p1=(0.50, lock_v + 0.03), angle_deg=lock_angle, side=1, up=True, level=2, groups=("body_l",), set_group="keel_lock_l")
+            Crease(key="keel_lock_l", p0=(0.44, lock_v), p1=(0.50, lock_v + 0.03), angle_deg=lock_angle, side=1, up=True, level=2, groups=("flap_l",), set_group="keel_lock_l")
         )
         creases.append(
-            Crease(key="keel_lock_r", p0=(0.56, lock_v), p1=(0.50, lock_v + 0.03), angle_deg=lock_angle, side=1, up=False, level=2, groups=("body_r",), set_group="keel_lock_r")
+            Crease(key="keel_lock_r", p0=(0.56, lock_v), p1=(0.50, lock_v + 0.03), angle_deg=lock_angle, side=-1, up=False, level=2, groups=("flap_r",), set_group="keel_lock_r")
         )
 
     creases.extend([

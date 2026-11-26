@@ -203,6 +203,8 @@ class MCTSOrigamiGenerator:
 
         if not unique_results:
             fallback = self.adapter.compile_candidate(ParametricOrigamiConfig())
-            unique_results.append(fallback)
+            valid, _ = validate_tier0(fallback)
+            if valid and fallback.geometry is not None and (fallback.metadata.get("tier0_valid") is not False):
+                unique_results.append(fallback)
 
         return unique_results

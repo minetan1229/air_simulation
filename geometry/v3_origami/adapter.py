@@ -89,23 +89,18 @@ def detect_strict_self_intersections(
         for a, b in (adjacency or ())
     }
 
-    def _outline(face: FoldedFace) -> List[Vec3]:
-        if polygons is not None:
-            return polygons.get(face.fid, list(face.poly3d))
-        return list(face.poly3d)
-
     count = len(faces)
     for i in range(count):
         fi = faces[i]
-        pi = _outline(fi)
+        pi = list(fi.poly3d)
         if len(pi) < 3:
             continue
         for j in range(i + 1, count):
             fj = faces[j]
             pair_key = (min(fi.fid, fj.fid), max(fi.fid, fj.fid))
-            if pair_key in adjacent or (i, j) in adjacent or pair_key in seen_pairs:
+            if pair_key in adjacent or pair_key in seen_pairs:
                 continue
-            pj = _outline(fj)
+            pj = list(fj.poly3d)
             if len(pj) < 3:
                 continue
 
@@ -250,9 +245,10 @@ def extract_airframe_geometry(
     nose_tip_x = 0.1485
     penetrations_count = 0
     planform_area = max(1.0e-5, float(getattr(geometry_obj, "planform_area_m2", 0.0)))
-    keel_height = max(0.008, chord * 0.10)
-    keel_length = max(0.030, chord * 0.50)
-    keel_layers = max(2, total_layers)
+    fold_valid = True
+    keel_height = 0.0
+    keel_length = 0.0
+    keel_layers = 0
 
     if hasattr(geometry_obj, "faces") and hasattr(geometry_obj, "pattern"):
         faces = geometry_obj.faces
@@ -265,14 +261,19 @@ def extract_airframe_geometry(
             penetrations_count = len(strict_hits)
             try:
                 report = evaluate_grip(geometry_obj, penetrations=strict_hits)
-                if report.grip_height_m > 0.0:
-                    keel_height = report.grip_height_m
-                if report.grip_length_m > 0.0:
-                    keel_length = report.grip_length_m
-                if report.grip_layers > 0:
-                    keel_layers = report.grip_layers
+                keel_height = float(report.grip_height_m)
+                keel_length = float(report.grip_length_m)
+                keel_layers = int(report.grip_layers)
             except Exception:
-                pass
+                keel_height = 0.0
+                keel_length = 0.0
+                keel_layers = 0
+                fold_valid = False
+        else:
+            keel_height = 0.0
+            keel_length = 0.0
+            keel_layers = 0
+            fold_valid = False
 
     if planform_area <= 1.0e-5:
         planform_area = max(1.0e-5, min(wing_area, span * chord * 0.65))
@@ -294,7 +295,7 @@ def extract_airframe_geometry(
         planform_area_m2=planform_area,
         planform_aspect_ratio=planform_ar,
         penetrations=penetrations_count,
-        fold_valid=True,
+        fold_valid=fold_valid,
         thickness_limit_ok=thickness_limit_ok,
         flat_foldable_ok=flat_foldable_ok,
         nose_tip_x_m=nose_tip_x,
@@ -331,25 +332,63 @@ def validate_tier0(
         max_penetrations=0,
     )
 
-    if geom.keel_height_m < active_thresh.min_grip_height_m:
+    def _invalid_nonneg(value: Any) -> bool:
+        if value is None or isinstance(value, bool):
+            return True
+        try:
+            f = float(value)
+        except (TypeError, ValueError):
+            return True
+        if not math.isfinite(f) or f < 0.0:
+            return True
+        return False
+
+    if _invalid_nonneg(geom.keel_height_m):
+        reasons.append(
+            f"Invalid keel height value: {geom.keel_height_m!r}"
+        )
+    if _invalid_nonneg(geom.keel_length_m):
+        reasons.append(
+            f"Invalid keel length value: {geom.keel_length_m!r}"
+        )
+    if _invalid_nonneg(geom.keel_layers):
+        reasons.append(
+            f"Invalid keel layers value: {geom.keel_layers!r}"
+        )
+
+    if not _invalid_nonneg(geom.keel_height_m) and geom.keel_height_m < active_thresh.min_grip_height_m:
         reasons.append(
             f"Keel height {geom.keel_height_m * 1000.0:.1f}mm < required {active_thresh.min_grip_height_m * 1000.0:.1f}mm"
         )
-    if geom.keel_length_m < active_thresh.min_grip_length_m:
+    if not _invalid_nonneg(geom.keel_length_m) and geom.keel_length_m < active_thresh.min_grip_length_m:
         reasons.append(
             f"Keel length {geom.keel_length_m * 1000.0:.1f}mm < required {active_thresh.min_grip_length_m * 1000.0:.1f}mm"
         )
-    if geom.keel_layers < active_thresh.min_grip_layers:
+    if not _invalid_nonneg(geom.keel_layers) and geom.keel_layers < active_thresh.min_grip_layers:
         reasons.append(
             f"Keel layers {geom.keel_layers} < required {active_thresh.min_grip_layers}"
         )
-    pen_count = getattr(geom, "penetrations", 0)
-    try:
-        pen_count = int(pen_count)
-    except (TypeError, ValueError):
-        pen_count = 0
-
-    if pen_count > active_thresh.max_penetrations:
+    pen_raw = getattr(geom, "penetrations", None)
+    pen_count: Optional[int] = None
+    pen_invalid = False
+    if pen_raw is None or isinstance(pen_raw, bool):
+        pen_invalid = True
+    else:
+        try:
+            pen_f = float(pen_raw)
+        except (TypeError, ValueError):
+            pen_invalid = True
+            pen_f = None
+        if pen_f is not None:
+            if not math.isfinite(pen_f) or pen_f < 0.0 or pen_f != int(pen_f):
+                pen_invalid = True
+            else:
+                pen_count = int(pen_f)
+    if pen_invalid:
+        reasons.append(
+            f"Invalid penetrations value: {pen_raw!r}"
+        )
+    elif pen_count is not None and pen_count > active_thresh.max_penetrations:
         reasons.append(
             f"Self-intersection detected: {pen_count} penetration(s) > max allowed {active_thresh.max_penetrations}"
         )
@@ -359,25 +398,54 @@ def validate_tier0(
         reasons.append("Flat-foldability theorem violation (Kawasaki/Maekawa)")
 
     try:
-        if not (
-            math.isfinite(float(geom.mass_kg))
-            and math.isfinite(float(geom.wing_area_m2))
-            and math.isfinite(float(geom.planform_area_m2))
-            and math.isfinite(float(geom.wingspan_m))
-            and float(geom.mass_kg) > 0.0
-            and float(geom.planform_area_m2) > 1.0e-5
-        ):
-            reasons.append("Non-finite or degenerate physical geometry dimensions")
+        dims = {
+            "mass_kg": geom.mass_kg,
+            "wing_area_m2": geom.wing_area_m2,
+            "planform_area_m2": geom.planform_area_m2,
+            "wingspan_m": geom.wingspan_m,
+            "chord_m": geom.chord_m,
+        }
+        dims_ok = True
+        for name, val in dims.items():
+            if val is None or isinstance(val, bool):
+                dims_ok = False
+                reasons.append(f"Invalid {name} value: {val!r}")
+                continue
+            try:
+                fv = float(val)
+            except (TypeError, ValueError):
+                dims_ok = False
+                reasons.append(f"Invalid {name} value: {val!r}")
+                continue
+            if not math.isfinite(fv):
+                dims_ok = False
+                reasons.append(f"Non-finite {name} value: {val!r}")
+        if dims_ok:
+            if not (float(dims["mass_kg"]) > 0.0):
+                reasons.append("Degenerate mass_kg (must be > 0)")
+            if not (float(dims["wing_area_m2"]) > 0.0):
+                reasons.append("Degenerate wing_area_m2 (must be > 0)")
+            if not (float(dims["wingspan_m"]) > 0.0):
+                reasons.append("Degenerate wingspan_m (must be > 0)")
+            if not (float(dims["chord_m"]) > 0.0):
+                reasons.append("Degenerate chord_m (must be > 0)")
+            if not (float(dims["planform_area_m2"]) > 1.0e-5):
+                reasons.append("Degenerate planform_area_m2 (must be > 1.0e-5)")
     except (TypeError, ValueError, AttributeError):
-        pass
+        reasons.append("Non-finite or degenerate physical geometry dimensions")
 
     # 4. Mesh penetration check (self-intersection)
     # Use the penetration count from the grip report or detect_penetrations if available
     if candidate.raw_genome is not None:
         try:
             genome = candidate.raw_genome
-            if hasattr(genome, "faces") and genome.faces:
-                hits = detect_penetrations(genome.faces)
+            if hasattr(genome, "faces") and genome.faces is not None:
+                if isinstance(getattr(getattr(genome, "pattern", None), "faces", None), (list, tuple)):
+                    adj = adjacent_panel_pairs(genome.pattern)
+                    sep = _separated_polygons(genome)
+                    hits = detect_penetrations(genome.faces, adjacency=adj, polygons=sep)
+                else:
+                    hits = detect_penetrations(genome.faces)
                 if len(hits) > 0:
                     reasons.append(
                         f"Mesh self-penetration detected: {len(hits)} face pairs intersect"
@@ -385,19 +453,32 @@ def validate_tier0(
             else:
                 geometry_obj = fold_genome(genome, paper_gsm=getattr(candidate.config, "paper_gsm", 100.0))
                 report = evaluate_grip(geometry_obj)
-                p_count = getattr(report, "penetrations", 0)
-                try:
-                    p_count = int(p_count)
-                except (TypeError, ValueError):
-                    p_count = len(p_count) if isinstance(p_count, (list, tuple)) else 0
-                if p_count > 0:
+                p_raw = getattr(report, "penetrations", None)
+                p_invalid = False
+                p_count: Optional[int] = None
+                if p_raw is None or isinstance(p_raw, bool):
+                    p_invalid = True
+                else:
+                    try:
+                        p_f = float(p_raw)
+                    except (TypeError, ValueError):
+                        p_invalid = True
+                        p_f = None
+                    if p_f is not None:
+                        if not math.isfinite(p_f) or p_f < 0.0 or p_f != int(p_f):
+                            p_invalid = True
+                        else:
+                            p_count = int(p_f)
+                if p_invalid:
+                    reasons.append(
+                        f"Invalid penetrations from grip report: {p_raw!r}"
+                    )
+                elif p_count is not None and p_count > 0:
                     reasons.append(
                         f"Mesh self-penetration detected: {p_count} face pairs intersect"
                     )
         except Exception:
-            # If fold evaluation fails, don't block on penetration check
-            # (the candidate will be marked invalid by other checks)
-            pass
+            reasons.append("Penetration re-validation failed during mesh evaluation")
 
     return (len(reasons) == 0), reasons
 
@@ -427,11 +508,31 @@ class OrigamiAdapter:
             strategy="v3_parametric",
         )
 
+        raw_nose_fold_count = config.nose.fold_count
+        try:
+            _fc_f = float(raw_nose_fold_count)
+        except (TypeError, ValueError):
+            _fc_f = float("nan")
+        if math.isfinite(_fc_f):
+            clamped_nose_fold_count = int(max(3.0, min(6.0, _fc_f)))
+        else:
+            clamped_nose_fold_count = 6
+
+        raw_nose_length_ratio = config.nose.nose_length_ratio
+        try:
+            _nlr_f = float(raw_nose_length_ratio)
+        except (TypeError, ValueError):
+            _nlr_f = float("nan")
+        if math.isfinite(_nlr_f):
+            clamped_nose_length_ratio = max(0.20, min(0.35, _nlr_f))
+        else:
+            clamped_nose_length_ratio = 0.20
+
         foldability = validate_crease_pattern_physics(
             steps=steps,
             paper_gsm=config.paper_gsm,
-            nose_fold_count=config.nose.fold_count,
-            nose_length_ratio=config.nose.nose_length_ratio,
+            nose_fold_count=clamped_nose_fold_count,
+            nose_length_ratio=clamped_nose_length_ratio,
         )
 
         geometry: Optional[AirframeGeometry] = None

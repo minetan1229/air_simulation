@@ -32,7 +32,7 @@ from core.interfaces import (
 )
 from geometry.v3_origami.adapter import OrigamiAdapter
 from geometry.origami_genome import step_meshes
-from tools.generate_printable_a4 import resolve_canonical_crease_style
+from tools.generate_printable_a4 import _resolve_step_crease_style
 
 
 def load_elites(marathon_dir: Path) -> List[Dict[str, Any]]:
@@ -84,7 +84,7 @@ def load_elites(marathon_dir: Path) -> List[Dict[str, Any]]:
                     # Extract 2D crease lines with canonical mountain/valley types for vector drawing
                     for step in cand.raw_genome.steps:
                         p0, p1 = step.crease_line
-                        is_mtn, badge_num, fold_name = resolve_canonical_crease_style(step.label, step.mountain)
+                        is_mtn, badge_num, fold_name = _resolve_step_crease_style(step.label, step.mountain, cfg.wing)
                         crease_lines_data.append({
                             "step": step.step_index,
                             "p0": [round(float(p0[0]), 4), round(float(p0[1]), 4)],
@@ -875,16 +875,16 @@ def build_viewer_html(elites: List[Dict[str, Any]]) -> str:
         const pos = nextStepData.positions;
         const idxs = nextStepData.indices;
         // Project points: X is nose(+0.1485) to tail(-0.1485) -> map to Y
-        // Z is left(+0.105) to right(-0.105) -> map to X
+        // Z is left(-0.105, u=0) to right(+0.105, u=1) -> map to X
         // Normalise by A4 half width (0.105m) and half length (0.1485m)
         let triSvg = "";
         for (let i = 0; i < idxs.length; i += 3) {{
           const i0 = idxs[i], i1 = idxs[i+1], i2 = idxs[i+2];
-          const x0 = w/2 - (pos[i0*3 + 2] / 0.105) * (drawW / 2);
+          const x0 = w/2 + (pos[i0*3 + 2] / 0.105) * (drawW / 2);
           const y0 = margin + (0.1485 - pos[i0*3]) / 0.297 * drawH;
-          const x1 = w/2 - (pos[i1*3 + 2] / 0.105) * (drawW / 2);
+          const x1 = w/2 + (pos[i1*3 + 2] / 0.105) * (drawW / 2);
           const y1 = margin + (0.1485 - pos[i1*3]) / 0.297 * drawH;
-          const x2 = w/2 - (pos[i2*3 + 2] / 0.105) * (drawW / 2);
+          const x2 = w/2 + (pos[i2*3 + 2] / 0.105) * (drawW / 2);
           const y2 = margin + (0.1485 - pos[i2*3]) / 0.297 * drawH;
           triSvg += `<polygon points="${{x0.toFixed(1)}},${{y0.toFixed(1)}} ${{x1.toFixed(1)}},${{y1.toFixed(1)}} ${{x2.toFixed(1)}},${{y2.toFixed(1)}}" fill="rgba(56, 189, 248, 0.22)" stroke="#38bdf8" stroke-width="0.75" stroke-linejoin="round"/>`;
         }}
@@ -907,7 +907,7 @@ def build_viewer_html(elites: List[Dict[str, Any]]) -> str:
         const x0 = margin + cl.p0[0] * drawW;
         const y0 = margin + (1.0 - cl.p0[1]) * drawH;
         const x1 = margin + cl.p1[0] * drawW;
-        const y1 = margin + cl.p1[1] * drawH;
+        const y1 = margin + (1.0 - cl.p1[1]) * drawH;
         svg += `<line x1="${{x0.toFixed(1)}}" y1="${{y0.toFixed(1)}}" x2="${{x1.toFixed(1)}}" y2="${{y1.toFixed(1)}}" stroke="#475569" stroke-width="1.2" stroke-dasharray="2,2" opacity="0.6"/>`;
       }});
 
@@ -1024,7 +1024,7 @@ def build_viewer_html(elites: List[Dict[str, Any]]) -> str:
       buildTrajectory(elite);
 
       // 2. Populate Specs Grid
-      const compScore = bench.composite_score ? bench.composite_score.toFixed(4) : "0.1909";
+      const compScore = bench.composite_score != null ? bench.composite_score.toFixed(4) : "0.1909";
       const maxLD = Math.max(low.max_ld_ratio || 0, mid.max_ld_ratio || 0).toFixed(2);
       const flightTime = Math.max(low.flight_time_s || 0, mid.flight_time_s || 0).toFixed(2);
       const survival = (robust.dryden_survival_rate !== undefined ? robust.dryden_survival_rate * 100 : 100).toFixed(0);
@@ -1037,12 +1037,12 @@ def build_viewer_html(elites: List[Dict[str, Any]]) -> str:
       `;
 
       // 3. Populate Geometry Grid
-      const elevon = cfg.wing ? (cfg.wing.elevon_left_deg || 0).toFixed(2) : "-3.81";
-      const dihedral = cfg.wing ? (cfg.wing.dihedral_deg || 0).toFixed(2) : "5.29";
-      const spanCm = geom.wingspan_m ? (geom.wingspan_m * 100).toFixed(1) : "10.9";
-      const massG = geom.mass_kg ? (geom.mass_kg * 1000).toFixed(2) : "6.24";
-      const planformAR = geom.planform_aspect_ratio ? geom.planform_aspect_ratio.toFixed(2) : (geom.wingspan_m ? ((geom.wingspan_m * geom.wingspan_m) / (geom.wingspan_m * (geom.chord_m || 0.28) * 0.52)).toFixed(2) : "0.74");
-      const planformAreaCm2 = geom.planform_area_m2 ? (geom.planform_area_m2 * 10000).toFixed(0) : (geom.wingspan_m ? (geom.wingspan_m * (geom.chord_m || 0.28) * 0.52 * 10000).toFixed(0) : "162");
+      const elevon = cfg.wing ? (cfg.wing.elevon_left_deg ?? 0).toFixed(2) : "-3.81";
+      const dihedral = cfg.wing ? (cfg.wing.dihedral_deg ?? 0).toFixed(2) : "5.29";
+      const spanCm = geom.wingspan_m != null ? (geom.wingspan_m * 100).toFixed(1) : "10.9";
+      const massG = geom.mass_kg != null ? (geom.mass_kg * 1000).toFixed(2) : "6.24";
+      const planformAR = geom.planform_aspect_ratio != null ? geom.planform_aspect_ratio.toFixed(2) : (geom.wingspan_m != null ? (geom.wingspan_m > 0 ? ((geom.wingspan_m * geom.wingspan_m) / (geom.wingspan_m * ((geom.chord_m != null && geom.chord_m > 0) ? geom.chord_m : 0.28) * 0.52)).toFixed(2) : "0.00") : "0.74");
+      const planformAreaCm2 = geom.planform_area_m2 != null ? (geom.planform_area_m2 * 10000).toFixed(0) : (geom.wingspan_m != null ? (geom.wingspan_m * (geom.chord_m ?? 0.28) * 0.52 * 10000).toFixed(0) : "162");
 
       document.getElementById('geom-grid-container').innerHTML = `
         <div class="spec-box"><div class="spec-label">最適エレボン反り</div><div class="spec-value">${{elevon}}°</div></div>
@@ -1054,10 +1054,10 @@ def build_viewer_html(elites: List[Dict[str, Any]]) -> str:
       `;
 
       // 4. Detailed Step-by-Step Folding Manual (Dynamically populated per elite genome)
-      const keelDepthMm = geom.keel_height_m ? (geom.keel_height_m * 1000).toFixed(0) : "12";
-      const wingletDeg = cfg.wing ? (cfg.wing.winglet_angle_deg || 50.3).toFixed(1) : "50.3";
-      const elevonDeg = cfg.wing ? Math.abs(cfg.wing.elevon_left_deg || 3.9).toFixed(1) : "3.9";
-      const dihedralDeg = cfg.wing ? (cfg.wing.dihedral_deg || 4.4).toFixed(1) : "4.4";
+      const keelDepthMm = geom.keel_height_m != null ? (geom.keel_height_m * 1000).toFixed(0) : "12";
+      const wingletDeg = cfg.wing ? (cfg.wing.winglet_angle_deg ?? 50.3).toFixed(1) : "50.3";
+      const elevonDeg = cfg.wing ? Math.abs(cfg.wing.elevon_left_deg ?? 3.9).toFixed(1) : "3.9";
+      const dihedralDeg = cfg.wing ? (cfg.wing.dihedral_deg ?? 4.4).toFixed(1) : "4.4";
 
       const manualSteps = elite.folding_steps_3d || [];
       const creaseData = elite.crease_lines || [];
@@ -1138,7 +1138,7 @@ def build_viewer_html(elites: List[Dict[str, Any]]) -> str:
     const listContainer = document.getElementById('elite-list-container');
     elitesData.forEach((elite, idx) => {{
       const b = elite.data.benchmark || {{}};
-      const score = b.composite_score ? b.composite_score.toFixed(4) : "0.1909";
+      const score = b.composite_score != null ? b.composite_score.toFixed(4) : "0.1909";
       const card = document.createElement('div');
       card.className = `elite-card ${{idx === 0 ? 'active' : ''}}`;
       card.innerHTML = `

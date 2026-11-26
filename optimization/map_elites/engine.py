@@ -103,17 +103,19 @@ class MAPElitesEngine:
             default_cand = self.adapter.compile_candidate(
                 ParametricOrigamiConfig(), candidate_id="init-seed-001"
             )
-            self.benchmark.evaluate_candidate(default_cand)
-            if self.archive.add_candidate(default_cand) and default_cand.descriptor is not None:
-                b_idx = self.archive.get_bin_index(default_cand.descriptor)
-                self._islands[0][b_idx] = default_cand
+            valid, _ = validate_tier0(default_cand)
+            if valid and default_cand.geometry is not None and (default_cand.metadata.get("tier0_valid") is not False):
+                self.benchmark.evaluate_candidate(default_cand)
+                if self.archive.add_candidate(default_cand) and default_cand.descriptor is not None:
+                    b_idx = self.archive.get_bin_index(default_cand.descriptor)
+                    self._islands[0][b_idx] = default_cand
 
     def run_iterations(
         self,
         iterations: int = 50,
         progress_callback: Optional[Callable[[int, float, int], None]] = None,
         mutation_rate: Optional[float] = None,
-    ) -> AircraftCandidate:
+    ) -> Optional[AircraftCandidate]:
         """Execute illumination iterations with island migration and adaptive mutation."""
         if not self.archive.cells:
             self.bootstrap_population(count=3)
@@ -168,10 +170,15 @@ class MAPElitesEngine:
 
         global_best = self.archive.get_global_best()
         if global_best is None:
-            global_best = self.adapter.compile_candidate(
+            fallback = self.adapter.compile_candidate(
                 ParametricOrigamiConfig(),
                 candidate_id="fallback-elite-001",
             )
-            self.benchmark.evaluate_candidate(global_best)
-            self.archive.add_candidate(global_best)
+            valid, _ = validate_tier0(fallback)
+            if not valid or fallback.geometry is None or (fallback.metadata.get("tier0_valid") is False):
+                return None
+            self.benchmark.evaluate_candidate(fallback)
+            if self.archive.add_candidate(fallback):
+                return fallback
+            return self.archive.get_global_best()
         return global_best

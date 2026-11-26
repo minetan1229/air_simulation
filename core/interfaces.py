@@ -30,7 +30,7 @@ BENCHMARK_SPEEDS: Tuple[float, float] = (SPEED_LOW_MPS, SPEED_MID_MPS)
 
 # Minimum & Maximum step requirements for parametric origami (physical fold steps)
 MIN_FOLD_STEPS: int = 6
-MAX_FOLD_STEPS: int = 16
+MAX_FOLD_STEPS: int = 24
 
 
 # ============================================================================

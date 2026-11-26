@@ -1005,8 +1005,8 @@ def fold_genome(
         cg=cg,
         inertia_tensor_kgm2=tensor,
         roll_inertia_kgm2=max(tensor[0][0], 1.0e-12),
-        pitch_inertia_kgm2=max(tensor[1][1], 1.0e-12),
-        yaw_inertia_kgm2=max(tensor[2][2], 1.0e-12),
+        pitch_inertia_kgm2=max(tensor[2][2], 1.0e-12),
+        yaw_inertia_kgm2=max(tensor[1][1], 1.0e-12),
         wing_area_m2=wing_area,
         span_m=span,
         length_m=length,
@@ -1328,15 +1328,114 @@ def _centroid(points: Sequence[Vec3]) -> Vec3:
 # --------------------------------------------------------------------------
 # The grip filter
 # --------------------------------------------------------------------------
-def adjacent_panel_pairs(pattern: CreasePattern) -> List[Tuple[int, int]]:
-    """The panel pairs that share a crease and therefore touch legitimately."""
+def adjacent_panel_pairs(pattern: CreasePattern | Sequence[FoldedFace]) -> List[Tuple[int, int]]:
+    """The panel pairs that share a crease and therefore touch legitimately.
+
+    Also detects flat-sheet shared collinear edge segments (T-junctions,
+    split faces, symmetric creases) across all face pairs in pattern.faces.
+    """
+    faces = list(pattern.faces) if hasattr(pattern, 'faces') else list(pattern)
     pairs: set = set()
-    for face in pattern.faces:
-        for link in face.links:
+    for face in faces:
+        for link in getattr(face, "links", ()):
             if link.neighbour_fid >= 0:
                 pairs.add(
                     (min(face.fid, link.neighbour_fid), max(face.fid, link.neighbour_fid))
                 )
+
+    n = len(faces)
+    if n < 2:
+        return sorted(pairs)
+
+    tol = 1.0e-6
+    tol_edge = 1.0e-9
+    tol_seg = 1.0e-6
+
+    flat_coords: List[List[Tuple[float, float]]] = []
+    aabbs = []
+    for face in faces:
+        poly = face.poly3d
+        if len(poly) < 2:
+            flat_coords.append([])
+            aabbs.append((math.inf, math.inf, -math.inf, -math.inf))
+            continue
+        r = getattr(face, "rot", None)
+        t = getattr(face, "trans", None)
+        if r is None or t is None:
+            flat_coords.append([])
+            aabbs.append((math.inf, math.inf, -math.inf, -math.inf))
+            continue
+        r00, r10, r20 = r[0][0], r[1][0], r[2][0]
+        r02, r12, r22 = r[0][2], r[1][2], r[2][2]
+        t0, t1, t2 = t[0], t[1], t[2]
+        pts2d = []
+        min_x = math.inf
+        min_z = math.inf
+        max_x = -math.inf
+        max_z = -math.inf
+        for pt in poly:
+            dx = pt[0] - t0
+            dy = pt[1] - t1
+            dz = pt[2] - t2
+            lx = r00 * dx + r10 * dy + r20 * dz
+            lz = r02 * dx + r12 * dy + r22 * dz
+            pts2d.append((lx, lz))
+            if lx < min_x:
+                min_x = lx
+            if lx > max_x:
+                max_x = lx
+            if lz < min_z:
+                min_z = lz
+            if lz > max_z:
+                max_z = lz
+        flat_coords.append(pts2d)
+        aabbs.append((min_x, min_z, max_x, max_z))
+
+    for i in range(n):
+        fi = faces[i]
+        poly_i = flat_coords[i]
+        if len(poly_i) < 2:
+            continue
+        min_x_i, min_z_i, max_x_i, max_z_i = aabbs[i]
+        for j in range(i + 1, n):
+            fj = faces[j]
+            fid_pair = (min(fi.fid, fj.fid), max(fi.fid, fj.fid))
+            if fid_pair in pairs:
+                continue
+            min_x_j, min_z_j, max_x_j, max_z_j = aabbs[j]
+            if (max_x_i + tol < min_x_j or max_x_j + tol < min_x_i or
+                max_z_i + tol < min_z_j or max_z_j + tol < min_z_i):
+                continue
+            poly_j = flat_coords[j]
+            if len(poly_j) < 2:
+                continue
+            found = False
+            for a_idx in range(len(poly_i)):
+                a0 = poly_i[a_idx]
+                a1 = poly_i[(a_idx + 1) % len(poly_i)]
+                ux = a1[0] - a0[0]
+                uz = a1[1] - a0[1]
+                len_a = math.hypot(ux, uz)
+                if len_a <= tol_edge:
+                    continue
+                dx = ux / len_a
+                dz = uz / len_a
+                for b_idx in range(len(poly_j)):
+                    b0 = poly_j[b_idx]
+                    b1 = poly_j[(b_idx + 1) % len(poly_j)]
+                    if abs(dx * (b0[1] - a0[1]) - dz * (b0[0] - a0[0])) > tol:
+                        continue
+                    if abs(dx * (b1[1] - a0[1]) - dz * (b1[0] - a0[0])) > tol:
+                        continue
+                    t0 = dx * (b0[0] - a0[0]) + dz * (b0[1] - a0[1])
+                    t1 = dx * (b1[0] - a0[0]) + dz * (b1[1] - a0[1])
+                    overlap = min(len_a, max(t0, t1)) - max(0.0, min(t0, t1))
+                    if overlap > tol_seg:
+                        pairs.add(fid_pair)
+                        found = True
+                        break
+                if found:
+                    break
     return sorted(pairs)
 
 
@@ -1546,9 +1645,9 @@ def genome_to_aircraft_config(
     config.roll_inertia_kgm2 = max(float(geometry.roll_inertia_kgm2) * fit4, 1.0e-12)
     config.pitch_inertia_kgm2 = max(float(geometry.pitch_inertia_kgm2) * fit4, 1.0e-12)
     config.yaw_inertia_kgm2 = max(float(geometry.yaw_inertia_kgm2) * fit4, 1.0e-12)
-    config.inertia_xy_kgm2 = float(geometry.inertia_tensor_kgm2[0][1]) * fit4
-    config.inertia_xz_kgm2 = float(geometry.inertia_tensor_kgm2[0][2]) * fit4
-    config.inertia_yz_kgm2 = float(geometry.inertia_tensor_kgm2[1][2]) * fit4
+    config.inertia_xy_kgm2 = float(geometry.inertia_tensor_kgm2[0][2]) * fit4
+    config.inertia_xz_kgm2 = -float(geometry.inertia_tensor_kgm2[0][1]) * fit4
+    config.inertia_yz_kgm2 = -float(geometry.inertia_tensor_kgm2[1][2]) * fit4
     return config
 
 

@@ -70,12 +70,16 @@ from .payload_contract import empty_payload, normalize_payload
 from .aero_domain import elevon_effects, helmbold_cl_alpha
 from . import gpu_dynamics
 from .gpu_dynamics import release_gpu_memory_pool
+from .atmosphere_domain import air_density as moist_air_density
 from .stress_domain import (
     ALLOWABLE_BASE_PA,
     ALLOWABLE_GSM_EXPONENT,
     ALLOWABLE_STIFFNESS_GAIN,
     ALLOWABLE_STIFFNESS_OFFSET,
     paper_allowable_stress,
+    peak_root_stress_pa,
+    root_chord_batch,
+    te_fold_chord_scale,
     stress_field,
 )
 from .wind_domain import wind_direction_unit, wind_flow_components
@@ -523,8 +527,11 @@ def isa_air_density(
     exponent = gravity / (lapse * R_AIR) if lapse > 0.0 else -gravity * altitude / (R_AIR * temperature)
     pressure = float(env.sea_level_pressure_Pa) * (temperature / t0) ** exponent
     pressure = clamp(pressure, 1.0e3, 3.0e5)
-    density = pressure / (R_AIR * temperature)
-    density *= 1.0 - 0.378 * clamp(float(env.humidity_rel), 0.0, 1.0)
+    density = moist_air_density(
+        temperature_K=temperature,
+        pressure_Pa=pressure,
+        humidity_rel=clamp(float(env.humidity_rel), 0.0, 1.0),
+    )
     return clamp(density, 1.0e-3, 10.0)
 
 
@@ -619,11 +626,14 @@ def evaluate_flight_surrogate(
 
     # --- ground effect on induced drag ------------------------------------
     glide_height = max(float(lau.launch_height_m), 0.0)
-    hb = glide_height / max(span, 1.0e-6)
-    ground_ratio = (16.0 * hb * hb) / (1.0 + 16.0 * hb * hb) if ground_effect_enabled else 0.0
+    hb_eff = max(glide_height / max(span, 1.0e-6), 0.05)
+    ratio = 16.0 * hb_eff * hb_eff
+    sigma_ground = (0.20 + 0.80 * (ratio / (1.0 + ratio))) if ground_effect_enabled else 1.0
 
     # --- best glide condition ---------------------------------------------
-    cl_glide = math.sqrt(cd0 * math.pi * oswald * aspect)
+    # In ground effect, effective induced drag factor is sigma * (1 / (pi * e * AR))
+    # Optimal glide L/D increases as 1 / sqrt(sigma)
+    cl_glide = math.sqrt(cd0 * math.pi * oswald * aspect / max(sigma_ground, 0.20))
     alpha_zero_elevon = (cl_glide - float(air.cL0)) / max(cl_alpha, 1.0e-6)
     # Elevon deflection adds camber -> less geometric incidence is needed.
     alpha_trim = alpha_zero_elevon + 0.25 * deg2rad(float(air.elevon_deg))
@@ -631,7 +641,7 @@ def evaluate_flight_surrogate(
     alpha_trim_deg = clamp(math.degrees(alpha_trim), -30.0, 45.0)
     stall_margin = clamp(alpha_stall - alpha_trim_deg, -30.0, 60.0)
 
-    ld_finite = 0.5 * math.sqrt(math.pi * oswald * aspect / cd0) * (1.0 + 0.12 * ground_ratio)
+    ld_finite = 0.5 * math.sqrt(math.pi * oswald * aspect / (cd0 * max(sigma_ground, 0.20)))
     ld_ratio = clamp(ld_finite * lift_scale, 0.05, 120.0)
 
     # --- airspeed, wind and stall speed -----------------------------------
@@ -676,12 +686,29 @@ def evaluate_flight_surrogate(
                          max(density * area * airspeed * airspeed, 1.0e-9), 0.0)
     load_factor = clamp(safe_div(cl_flight * dynamic_pressure * area,
                                  max(mass * gravity, 1.0e-9), 1.0), 0.0, 40.0)
-    stress_pa = 0.5 * dynamic_pressure * area * span * (1.0 + 0.15 * load_factor)
-    # The stress index is the *utilisation* sigma / sigma_allow against the
-    # airframe's own allowable fold stress.  The former fixed 120 kPa
-    # reference was 54.5x the allowable stress of the default stock, so the
-    # same payload reported 0.0113 (6-DoF) and 1.50 (GPU) for one flight.
-    allowable_pa = max(paper_allowable_stress(air.paper_gsm, air.paper_stiffness), 1.0e-9)
+    from .aero_kernel import ScalarMath
+    thickness_m = max(float(air.paper_gsm) * 1.0e-3 / 800.0, 1.0e-6)
+    from .stress_domain import effective_paper_stiffness, Z_SCALE_OFFSET, Z_SCALE_GAIN
+    stiffness_val = max(effective_paper_stiffness(air), 0.0)
+    z_gain_val = max(Z_SCALE_OFFSET + Z_SCALE_GAIN * stiffness_val, 1.0e-12)
+    root_c = root_chord_batch(ScalarMath, area, span, taper)
+    chord_sc = te_fold_chord_scale(ScalarMath, float(air.fold_trailing_deg))
+    tip_fac = abs(math.sin(deg2rad(float(air.fold_tip_deg))))
+    stress_pa = float(peak_root_stress_pa(
+        ScalarMath,
+        load_factor=load_factor,
+        mass_kg=mass,
+        gravity=gravity,
+        span_m=span,
+        taper_ratio=taper,
+        root_chord_m=root_c,
+        thickness_m=thickness_m,
+        z_gain=z_gain_val,
+        dihedral_rad=deg2rad(float(air.dihedral_deg)),
+        chord_scale=chord_sc,
+        tip_factor=tip_fac,
+    ))
+    allowable_pa = max(paper_allowable_stress(air.paper_gsm, stiffness_val), 1.0e-9)
     stress_index = clamp(stress_pa / allowable_pa, 0.0, 1.0)
 
     # --- static / dynamic stability index ----------------------------------
@@ -1294,8 +1321,10 @@ def gpu_ensemble_simulation(
         s_z = xp.zeros(N, dtype=xp.float64)
 
         # Roll dynamics: torque from dihedral, roll damping and asymmetry
+        # Dihedral restoring torque scales with dynamic pressure, area, and span:
+        dihedral_restoring_torque = q_dyn * area * span * (0.25 * dihedral_rad * phi)
         roll_torque_coeff = cl_asym - roll_damping * (p_rate * span / (2.0 * speed_safe))
-        roll_accel = (q_dyn * area * span * roll_torque_coeff - 0.25 * dihedral_rad * phi) / max(mass * span * span * 0.1, 1e-6)
+        roll_accel = (q_dyn * area * span * roll_torque_coeff - dihedral_restoring_torque) / max(mass * span * span * 0.1, 1e-6)
         p_rate = xp.clip(p_rate + roll_accel * dt, -15.0, 15.0)
         phi = xp.clip(phi + p_rate * dt, -math.pi / 2.5, math.pi / 2.5)
 
@@ -1836,12 +1865,17 @@ def evaluate_cases_on_device(
         # At typical minimum dt ~ 1e-3 to 2e-3, steps scale proportionally to flight duration.
         calculated_steps = min(max(int(max_dur / 1.5e-3) + 1000, 2500), 40000)
         is_gpu = hasattr(xp, "__name__") and "cupy" in xp.__name__
+        dt_max_val = 2.0e-2
+        for i in members:
+            case_dt = cases[i].get("settings", {}).get("dt_max") if isinstance(cases[i].get("settings"), dict) else getattr(cases[i].get("settings"), "dt_max", None)
+            if case_dt is not None:
+                dt_max_val = min(dt_max_val, max(float(case_dt), 1.0e-4))
         batch = gpu_dynamics.simulate_batch(
             xp,
             params,
             initial,
             xp.asarray(group_durations, dtype=xp.float64),
-            2.0e-2,
+            dt_max_val,
             max_steps=calculated_steps,
             max_steps_per_case=calculated_steps,
             capture_timeout_s=10.0,
@@ -1856,6 +1890,10 @@ def evaluate_cases_on_device(
         max_g = _to_host(xp, batch["peak_load_factor"])
         max_q = _to_host(xp, batch["peak_dynamic_pressure_pa"])
         max_ld = _to_host(xp, batch["max_ld_ratio"])
+        max_alt = _to_host(xp, batch.get("max_altitude_m", abs(state[:, 2])))
+        max_spd = _to_host(xp, batch.get("max_speed_mps", xp.zeros(len(members))))
+        diverged_batch = _to_host(xp, batch.get("diverged", xp.zeros(len(members), dtype=bool)))
+        stall_events = _to_host(xp, batch.get("stall_events", xp.zeros(len(members))))
         stability = _to_host(xp, batch["stability"])
         landed = _to_host(xp, batch["landed"])
         crashed = _to_host(xp, batch["crashed"])
@@ -1871,7 +1909,10 @@ def evaluate_cases_on_device(
             t_val = min(float(flight_time[position]), duration)
             is_crashed = bool(crashed[position])
             is_landed = bool(landed[position])
-            if is_crashed:
+            is_diverged = bool(diverged_batch[position])
+            if is_diverged:
+                status_str = "diverged"
+            elif is_crashed:
                 status_str = "crashed"
             elif is_landed:
                 status_str = "landed"
@@ -1903,6 +1944,9 @@ def evaluate_cases_on_device(
                 float(last_x[position]) - float(initial_host[position, 0]),
                 float(last_y[position]) - float(initial_host[position, 1]),
             )
+            measured_max_spd = float(max_spd[position])
+            if measured_max_spd <= 0.0:
+                measured_max_spd = float(launches[index].launch_speed)
             entry = {
                 "distance_m": float(distance[position]),
                 "flight_time_s": float(t_val),
@@ -1910,8 +1954,8 @@ def evaluate_cases_on_device(
                 "landing_distance_m": horizontal_range,
                 "range_x_m": range_x,
                 "range_y_m": range_y,
-                "max_altitude_m": abs(float(state[position, 2])),
-                "max_speed_mps": round(float(launches[index].launch_speed), 4),
+                "max_altitude_m": max(float(max_alt[position]), abs(float(state[position, 2]))),
+                "max_speed_mps": round(measured_max_spd, 4),
                 "launch_speed_mps": round(float(launches[index].launch_speed), 4),
                 "max_ld_ratio": float(max_ld[position]),
                 "max_stress_index": float(stress_index[position]),
@@ -1919,10 +1963,10 @@ def evaluate_cases_on_device(
                 "max_g_load": float(max_g[position]),
                 "stability": float(stability[position]),
                 "stall_margin": float(stall_margin[position]),
-                "stalled": bool(stress_index[position] >= 1.0),
+                "stalled": bool(stall_events[position] > 0),
                 "landed": is_landed,
                 "crashed": is_crashed,
-                "diverged": False,
+                "diverged": is_diverged,
                 "status": status_str,
                 "backend": backend,
                 "device_name": device_name,

@@ -281,6 +281,18 @@ def prandtl_glauert(mach: float) -> float:
     return float(aero_kernel.prandtl_glauert(_SCALAR, value))
 
 
+def _low_re_factors(cfg: AircraftConfig, reynolds: float) -> Dict[str, float]:
+    if not getattr(cfg, 'low_re_enabled', False):
+        return {'cl_alpha': 1.0, 'stall': 1.0, 'cl_max': 1.0, 'cd0': 1.0}
+    x = float(aero_kernel._log_Re(_SCALAR, reynolds))
+    return {
+        'cl_alpha': clamp(1.0 - _finite(getattr(cfg, 'low_re_cl_alpha_gain', 0.04), 0.04) * x, 0.90, 1.05),
+        'stall': clamp(1.0 - _finite(getattr(cfg, 'low_re_stall_gain', 0.10), 0.10) * x, 0.75, 1.05),
+        'cl_max': clamp(1.0 - _finite(getattr(cfg, 'low_re_cl_max_gain', 0.12), 0.12) * x, 0.70, 1.05),
+        'cd0': clamp(1.0 + _finite(getattr(cfg, 'low_re_cd0_gain', 0.03), 0.03) * x, 1.0, 1.12),
+    }
+
+
 def lift_slope_per_rad(
     cfg: AircraftConfig,
     compressible: bool = True,
@@ -294,8 +306,7 @@ def lift_slope_per_rad(
     else:
         slope = helmbold_cl_alpha(geom["aspect_ratio"], geom["taper_ratio"])
     comp = prandtl_glauert(mach) if compressible else 1.0
-    if getattr(cfg, "low_re_enabled", False):
-        slope *= float(aero_kernel.re_cl_alpha_factor(_SCALAR, reynolds))
+    slope *= _low_re_factors(cfg, reynolds)['cl_alpha']
     return slope * comp
 
 
@@ -481,6 +492,7 @@ def lift_coefficient(
     compressible: bool = True,
     mach: float = 0.0,
     cl_offset: float = 0.0,
+    reynolds: float = RE_REFERENCE,
 ) -> float:
     """Lift coefficient including the stall break, elevon offset and gust-free flow.
 
@@ -502,16 +514,19 @@ def lift_coefficient(
     params = replace(
         aero_kernel.params_from_aircraft(cfg), compressible=bool(compressible)
     )
-    slope = params.lift_slope(_SCALAR, mach)
+    factors = _low_re_factors(cfg, reynolds)
+    slope = params.lift_slope(_SCALAR, mach) * factors['cl_alpha']
+    stall_eff = abs(params.stall_alpha_deg) * factors['stall']
+    cl_max_eff = max(abs(params.cl_max), 1.0e-6) * factors['cl_max']
     return float(
         aero_kernel.lift_coefficient(
             _SCALAR,
             alpha_deg,
             params.cL0,
             slope,
-            params.stall_alpha_deg,
+            stall_eff,
             params.stall_sharpness,
-            cl_max=params.cl_max,
+            cl_max=cl_max_eff,
             polhamus_kp=params.polhamus_kp,
             polhamus_kv=params.polhamus_kv,
             cl_offset=cl_offset,
@@ -540,12 +555,13 @@ def separated_pressure_drag_coefficient(
 
     Thin wrapper around :func:`physics.aero_kernel.separated_pressure_drag_coefficient`.
     """
+    factors = _low_re_factors(cfg, reynolds)
     return float(
         aero_kernel.separated_pressure_drag_coefficient(
             _SCALAR,
             alpha_deg,
-            effective_stall_alpha_deg(cfg),
-            parasite_drag_coefficient(cfg, reynolds),
+            effective_stall_alpha_deg(cfg) * factors['stall'],
+            parasite_drag_coefficient(cfg, reynolds) * factors['cd0'],
         )
     )
 
@@ -571,7 +587,10 @@ def drag_coefficient(
     published polar's numeric contract is stable across versions.
     """
     te_fold = trailing_edge_fold_effects(cfg)
-    cl = lift_coefficient(alpha_deg, cfg, compressible=compressible, mach=mach, cl_offset=cl_offset)
+    factors = _low_re_factors(cfg, reynolds)
+    cl = lift_coefficient(
+        alpha_deg, cfg, compressible=compressible, mach=mach, cl_offset=cl_offset, reynolds=reynolds
+    )
     kv = max(_finite(getattr(cfg, "polhamus_kv", 0.0), 0.0), 0.0)
     vortex_cd = polhamus_vortex_drag(alpha_deg, cfg)
     alpha_rad = deg2rad(_finite(alpha_deg))
@@ -582,10 +601,10 @@ def drag_coefficient(
     cl_pot = cl - cl_vortex if kv > 0.0 else cl
     induced_pot = cl_pot * cl_pot / _polar_constant(cfg)
     factor = 1.0 if ground_height_m is None else ground_effect_factor(ground_height_m, _span(cfg), True)
-    parasite = parasite_drag_coefficient(cfg, reynolds) + te_fold["dcd"]
+    parasite = parasite_drag_coefficient(cfg, reynolds) * factors["cd0"] + te_fold["dcd"]
     attached_drag = parasite + induced_pot * factor + vortex_cd
 
-    stall_alpha = effective_stall_alpha_deg(cfg)
+    stall_alpha = effective_stall_alpha_deg(cfg) * factors["stall"]
     alpha_norm = (alpha_deg + 180.0) % 360.0 - 180.0
     rad_a = math.radians(alpha_norm)
     separated_drag = 2.0 * (math.sin(rad_a) ** 2) + parasite * max(math.cos(rad_a), 0.0)
@@ -669,6 +688,37 @@ def trim_alpha_from_elevon(cfg: AircraftConfig, elevon_deg: float, speed_mps: fl
         cp_shift_val,
         stall_val,
         env_ground,
+        bool(getattr(cfg, 'low_re_enabled', False)),
+        round(_finite(getattr(cfg, 'low_re_cl_alpha_gain', 0.04)), 6),
+        round(_finite(getattr(cfg, 'low_re_stall_gain', 0.10)), 6),
+        round(_finite(getattr(cfg, 'low_re_cl_max_gain', 0.12)), 6),
+        round(_finite(getattr(cfg, 'low_re_lsb_gain', 0.15)), 6),
+        round(_finite(getattr(cfg, 'low_re_cd0_gain', 0.03)), 6),
+        round(_finite(getattr(cfg, 'elevon_chord_ratio', 0.22)), 6),
+        round(_finite(getattr(cfg, 'aspect_ratio', 0.0)), 6),
+        round(_finite(getattr(cfg, 'wingspan_m', 0.20)), 6),
+        round(_finite(getattr(cfg, 'wing_area_m2', 0.015)), 7),
+        round(_finite(getattr(cfg, 'taper_ratio', 0.70)), 6),
+        round(_finite(getattr(cfg, 'cg_offset_x', 0.0)), 6),
+        bool(getattr(env, 'ground_effect_enabled', True)) if env is not None else True,
+        bool(getattr(env, 'compressibility_enabled', True)) if env is not None else True,
+        round(_finite(getattr(cfg, "cLalpha_per_rad", 0.0)), 6),
+        round(_finite(getattr(cfg, "polhamus_kp", 0.0)), 6),
+        round(_finite(getattr(cfg, "polhamus_kv", 0.0)), 6),
+        round(_finite(getattr(cfg, "cd0", 0.02)), 6),
+        round(_finite(getattr(cfg, "re_cd0_exponent", 0.15)), 6),
+        round(_finite(getattr(cfg, "oswald_e", 0.75)), 6),
+        round(_finite(getattr(cfg, "cl_max", 0.90)), 6),
+        round(_finite(getattr(cfg, "stall_sharpness", 1.40)), 6),
+        bool(getattr(cfg, "low_ar_stall_delay_enabled", False)),
+        round(_finite(getattr(cfg, "step_trip_ratio", 0.0)), 6),
+        round(_finite(getattr(cfg, "ground_cushion_lift", 0.0)), 6),
+        round(_finite(getattr(cfg, "ground_pitch_coupling", 0.0)), 6),
+        round(_finite(getattr(cfg, "ref_area_m2", 0.0)), 7),
+        round(_finite(getattr(cfg, "ref_length_m", 0.0)), 6),
+        round(_finite(getattr(cfg, "ref_span_m", 0.0)), 6),
+        round(_finite(getattr(env, "lift_scale", 1.0)), 6) if env is not None else 1.0,
+        round(_finite(getattr(env, "drag_scale", 1.0)), 6) if env is not None else 1.0,
     )
     if cache_key in _GLOBAL_TRIM_CACHE:
         _GLOBAL_TRIM_CACHE.move_to_end(cache_key)
@@ -806,9 +856,10 @@ def drag_polar_minima(
     """
     constant = _polar_constant(cfg)
     te_fold = trailing_edge_fold_effects(cfg)
-    cd0 = parasite_drag_coefficient(cfg, reynolds) + te_fold["dcd"]
+    factors = _low_re_factors(cfg, reynolds)
+    cd0 = parasite_drag_coefficient(cfg, reynolds) * factors["cd0"] + te_fold["dcd"]
     zero_lift = _finite(cfg.cL0) if cl_zero_lift is None else _finite(cl_zero_lift)
-    slope = lift_slope_per_rad(cfg) if slope_per_rad is None else _finite(slope_per_rad)
+    slope = lift_slope_per_rad(cfg, reynolds=reynolds) if slope_per_rad is None else _finite(slope_per_rad)
     cl_at_ld_max = math.sqrt(max(cd0, 0.0) * constant)
     return {
         "cd_min": cd0,
@@ -843,7 +894,7 @@ def drag_polar(
     step = (high - low) / (count - 1)
     alphas: List[float] = [high if index == count - 1 else low + step * index for index in range(count)]
 
-    slope = lift_slope_per_rad(cfg)
+    slope = lift_slope_per_rad(cfg, reynolds=reynolds)
     te_fold = trailing_edge_fold_effects(cfg)
     elevon = elevon_effects(cfg.elevon_deg, cfg)
     total_cl_offset = elevon["dcl"] + te_fold["dcl"]
@@ -851,7 +902,7 @@ def drag_polar(
     cols_cd: List[float] = []
     cols_ld: List[float] = []
     for alpha in alphas:
-        cl = lift_coefficient(alpha, cfg, compressible=False, mach=0.0, cl_offset=total_cl_offset)
+        cl = lift_coefficient(alpha, cfg, compressible=False, mach=0.0, cl_offset=total_cl_offset, reynolds=reynolds)
         cd = drag_coefficient(alpha, cfg, reynolds=reynolds, ground_height_m=None, cl_offset=total_cl_offset)
         cols_cl.append(cl)
         cols_cd.append(cd)
@@ -1261,7 +1312,7 @@ def evaluate_aero(
         cfg,
         reynolds=re_value,
         cl_zero_lift=zero_lift,
-        slope_per_rad=lift_slope_per_rad(cfg, compressible=False),
+        slope_per_rad=lift_slope_per_rad(cfg, compressible=False, reynolds=re_value),
     )
 
     ld_ratio = safe_div(cl, cd, 0.0) if cd > _CD_FLOOR else 0.0

@@ -55,6 +55,12 @@ Kilo Code CLI（`kilo`）を Antigravity のサブエージェント（Tier 2 �
    python tools/kilo_subagent.py "前回の回答の2点目を詳しく解説して" -s <session_id>
    ```
 
+7. **プロキシ経由での実行 (HTTP/HTTPS/SOCKS)**:
+   ```bash
+   python tools/kilo_subagent.py "タスク指示" --proxy "http://127.0.0.1:8080"
+   ```
+   ※環境変数（`HTTPS_PROXY`, `HTTP_PROXY`, `ALL_PROXY`, `KILO_PROXY`）または `tools/proxy_config.json`（雛形: `tools/proxy_config.json.example`）が設定されている場合は自動適用されます。
+
 ---
 
 ## 3. Python スクリプトからの直接呼出

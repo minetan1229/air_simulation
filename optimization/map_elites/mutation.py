@@ -74,16 +74,16 @@ def mutate_parametric_config(
 
     new_dihedral = wing.dihedral_deg
     if r.random() < mutation_rate:
-        new_dihedral = _clamp(wing.dihedral_deg + r.gauss(0.0, 1.0), -2.0, 10.0)
+        new_dihedral = _clamp(wing.dihedral_deg + r.gauss(0.0, 1.0), 0.0, 8.0)
 
     new_elevon_l = wing.elevon_left_deg
     new_elevon_r = wing.elevon_right_deg
     if r.random() < mutation_rate:
         delta_e = r.gauss(0.0, 1.2)
-        new_elevon_l = _clamp(wing.elevon_left_deg + delta_e, -5.0, 12.0)
+        new_elevon_l = _clamp(wing.elevon_left_deg + delta_e, -4.0, 8.0)
         # Keep symmetric by default with occasional slight trim
         new_elevon_r = new_elevon_l if (r.random() > 0.15) else _clamp(
-            wing.elevon_right_deg + delta_e + r.gauss(0.0, 0.3), -5.0, 12.0
+            wing.elevon_right_deg + delta_e + r.gauss(0.0, 0.3), -4.0, 8.0
         )
 
     new_winglet = wing.winglet_angle_deg

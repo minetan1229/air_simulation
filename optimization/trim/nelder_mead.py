@@ -10,7 +10,7 @@ from core.interfaces import (
     ParametricWingSpec,
     TrimResult,
 )
-from geometry.v3_origami.adapter import OrigamiAdapter
+from geometry.v3_origami.adapter import OrigamiAdapter, validate_tier0
 from physics.benchmark.benchmark import DeterministicFlightBenchmark
 
 
@@ -93,6 +93,11 @@ class NelderMeadTrimOptimizer:
             new_cfg,
             candidate_id=f"{base_candidate.candidate_id}-trim",
         )
+        tier0_ok, tier0_reasons = validate_tier0(cand)
+        if not tier0_ok or cand.geometry is None or cand.metadata.get("tier0_valid") is False:
+            cand.metadata["tier0_valid"] = False
+            cand.metadata["tier0_reasons"] = list(tier0_reasons)
+            return (1.0 + barrier_penalty, (clamped_e, clamped_d), cand)
         bench = self.benchmark.evaluate_candidate(cand)
         cand.benchmark = bench
         score = (
@@ -246,30 +251,36 @@ class NelderMeadTrimOptimizer:
             global_best = simplex[0]
 
         _, final_v, final_cand = global_best
+        final_ok, final_reasons = validate_tier0(final_cand)
+        final_tier0_valid = final_ok and final_cand.geometry is not None and (final_cand.metadata.get("tier0_valid") is not False)
         final_score = (
             float(final_cand.benchmark.composite_score)
-            if (final_cand.benchmark and final_cand.benchmark.valid)
+            if (final_tier0_valid and final_cand.benchmark and final_cand.benchmark.valid)
             else 0.0
         )
         clamped_best_elevon = _clamp(final_v[0], self.elevon_bounds[0], self.elevon_bounds[1])
         clamped_best_dihedral = _clamp(final_v[1], self.dihedral_bounds[0], self.dihedral_bounds[1])
 
-        if final_score > initial_score:
+        if final_tier0_valid and final_score > initial_score:
             candidate.config = final_cand.config
             candidate.geometry = final_cand.geometry
             candidate.benchmark = final_cand.benchmark
-            candidate.raw_genome = final_cand.raw_genome
+            candidate.step_count = final_cand.step_count
+            candidate.metadata["tier0_valid"] = True
+            candidate.metadata["tier0_reasons"] = list(final_reasons)
+            if getattr(final_cand, "raw_genome", None) is not None:
+                candidate.raw_genome = final_cand.raw_genome
             if candidate.geometry and candidate.benchmark:
                 try:
                     stability = min(
                         float(candidate.benchmark.low_speed.stability),
                         float(candidate.benchmark.mid_speed.stability),
                     )
-                    candidate.descriptor = candidate.geometry.compute_behavior_descriptor(stability=stability)
+                    candidate.descriptor = candidate.geometry.compute_behavior_descriptor(stability=stability, use_planform=True)
                 except Exception:
-                    candidate.descriptor = final_cand.descriptor
+                    candidate.descriptor = getattr(final_cand, "descriptor", None)
             else:
-                candidate.descriptor = final_cand.descriptor
+                candidate.descriptor = getattr(final_cand, "descriptor", None)
 
         return TrimResult(
             candidate_id=candidate.candidate_id,

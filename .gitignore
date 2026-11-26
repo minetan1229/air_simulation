@@ -11,6 +11,8 @@ package-lock.json
 # Kilo Code local MCP runtime artefacts
 .kilo/mcp/memory.jsonl
 .kilo/mcp/playwright/
+tools/proxy_config.json
+.proxy_config.json
 
 # Imported 3D assets and cached models
 models/

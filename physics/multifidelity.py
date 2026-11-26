@@ -17,7 +17,8 @@ def build_calibrated_rans_aircraft_config(air_cfg: Dict[str, Any]) -> Dict[str, 
     cfg["residual_cl"] = max(float(cfg.get("residual_cl", 0.0)), 0.05)
     cfg["apparent_inertia_enabled"] = True
     cfg["dynamic_damping_enabled"] = True
-    cfg["fidelity_mode"] = "standard"
+    if cfg.get("fidelity_mode") not in ("improved_medium", "multifidelity"):
+        cfg["fidelity_mode"] = "standard"
     return cfg
 
 

@@ -34,6 +34,7 @@ try:
         AgentBackend,
         StreamEvent,
     )
+    from tools.proxy_config import ProxyRotator, inject_proxy_to_env
 except ImportError:  # pragma: no cover - direct script execution
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
     from tools.bridge_backends import (
@@ -44,6 +45,7 @@ except ImportError:  # pragma: no cover - direct script execution
         AgentBackend,
         StreamEvent,
     )
+    from tools.proxy_config import ProxyRotator, inject_proxy_to_env
 
 STRONG_RATE_LIMIT_PATTERNS = (
     r"too\s*many\s*requests",
@@ -117,6 +119,7 @@ class BridgeRequest:
     continue_session: bool = False
     timeout: Optional[float] = None
     on_process: Optional[Callable[[Optional[Any]], None]] = None
+    proxy: Optional[str] = None
 
 
 @dataclass
@@ -213,6 +216,7 @@ class BridgeRouter:
             continue_session=False,
             timeout=request.timeout,
             on_process=request.on_process,
+            proxy=request.proxy,
         )
         fallback_outcome = await self._run_backend(fallback_request, on_event)
         fallback_outcome.fallback_used = True
@@ -242,6 +246,8 @@ class BridgeRouter:
         session_id = request.session_id
         retries = 0
         attempts = 0
+        rotator = ProxyRotator.from_config(explicit_proxy=request.proxy)
+        current_proxy = rotator.current or request.proxy
         outcome: BridgeOutcome
 
         while True:
@@ -257,6 +263,7 @@ class BridgeRouter:
                 session_id=use_session,
                 continue_session=use_continue,
                 timeout=request.timeout,
+                proxy=current_proxy,
             )
             outcome = await self._invoke(backend, attempt_request, on_event, carried_text)
             carried_text = outcome.text
@@ -270,6 +277,12 @@ class BridgeRouter:
                 )
                 break
             retries += 1
+            next_proxy = rotator.rotate()
+            proxy_msg = ""
+            if len(rotator) > 1 and next_proxy != current_proxy:
+                proxy_msg = f" [プロキシ切替: {current_proxy or 'direct'} → {next_proxy}]"
+                current_proxy = next_proxy
+
             delay = backoff_delay(retries, self.backoff_base, self.backoff_cap)
             await self._emit(
                 on_event,
@@ -277,7 +290,7 @@ class BridgeRouter:
                     kind="status",
                     text=(
                         f"⏳ レート制限 (HTTP 429) 検出 — {delay:.1f} 秒待機後に "
-                        f"`continue` で再開します (再試行 {retries}/{self.max_rate_limit_retries})"
+                        f"`continue` で再開します (再試行 {retries}/{self.max_rate_limit_retries}){proxy_msg}"
                     ),
                 ),
             )
@@ -302,7 +315,7 @@ class BridgeRouter:
             session_id=request.session_id,
             continue_session=request.continue_session,
         )
-        env = os.environ.copy()
+        env = inject_proxy_to_env(explicit_proxy=request.proxy)
         env["PYTHONIOENCODING"] = "utf-8"
 
         accumulated = carried_text
