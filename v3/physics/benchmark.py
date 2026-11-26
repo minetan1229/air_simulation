@@ -216,6 +216,8 @@ def evaluate_horizontal_glide(
     # Extract bounce_count
     raw_bounces = sim_metrics.get("bounce_count")
     try:
+        if raw_bounces is None:
+            raise TypeError
         bounce_count = max(0, int(raw_bounces))
     except (TypeError, ValueError):
         bounce_count = max(0, int(getattr(sim, "_bounce_count", 0)))
@@ -223,6 +225,8 @@ def evaluate_horizontal_glide(
     # Extract max_abs_roll_deg
     raw_roll = sim_metrics.get("max_abs_roll_deg")
     try:
+        if raw_roll is None:
+            raise TypeError
         max_abs_roll_deg = abs(float(raw_roll))
     except (TypeError, ValueError):
         max_abs_roll_deg = max(
@@ -234,6 +238,8 @@ def evaluate_horizontal_glide(
     # Extract ground_skim_fraction
     raw_skim = sim_metrics.get("ground_skim_fraction")
     try:
+        if raw_skim is None:
+            raise TypeError
         ground_skim_fraction = max(0.0, min(1.0, float(raw_skim)))
     except (TypeError, ValueError):
         airborne = [s for s in samples if not getattr(s, "landed", False) and not getattr(s, "crashed", False)]

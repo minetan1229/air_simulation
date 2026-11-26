@@ -282,7 +282,7 @@ class OrigamiAdapter:
 
         candidate.metadata["foldability_reasons"] = list(foldability.reasons)
 
-        if fold_failed:
+        if fold_failed or geometry_obj is None:
             candidate.metadata["fold_failed"] = True
             candidate.metadata["fold_error"] = fold_error
             candidate.metadata["tier0_valid"] = False
