@@ -1,4 +1,7 @@
 # Agent Core Protocol（常駐コア + 参照索引）
+
+> **リポジトリ責務分離（2026-11-27）**: MILCY（折り紙形態創発・MAP-Elites）は [`minetan1229/Milcy-algorithm`](https://github.com/minetan1229/Milcy-algorithm) へ分離済みです。本リポジトリの 6DoF 物理（`physics/aero_kernel.py`）は `v1-frozen`（`docs/PHYSICS_FREEZE.md`）として凍結し、保存則違反・最適化チート・Sim-to-Real 反証以外の経験式追加を禁止します。
+
 <!--
 正本: 本規約=常駐最小 / .agents/Knowledge.md=過去知見 / .agents/Project.md=現在地・LoopState / .agents/skills/*=定型手順 / docs/SPECIFICATION.md=詳細仕様
 常駐は本ファイルのみ。詳細・手順・過去知見は .agents/ から遅延オンデマンド参照（全文読込禁止）。
