@@ -105,9 +105,6 @@ def test_i2_05_a4_elevon_page1_page2_consistency_and_symmetric_lock_styles(
                 recorded.append((label, raw_mountain, res[0]))
             return res
 
-        import pytest
-        pytest.importorskip("matplotlib")
-
         monkeypatch.setattr("tools.generate_printable_a4.resolve_canonical_crease_style", spy_resolve)
         render_a4_max_fullsize_sheet(cand_data, tmp_path / f"full_{elevon_deg}.png", dpi=72)
         assert len(recorded) >= 2
