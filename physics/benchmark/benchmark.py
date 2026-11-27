@@ -66,13 +66,18 @@ def _build_aircraft_config(candidate: AircraftCandidate) -> AircraftConfig:
     cfg = candidate.config
 
     mass_kg = float(getattr(geom, "mass_kg", 0.005)) if geom else 0.005
-    raw_area = getattr(geom, "planform_area_m2", None)
-    if raw_area is None and geom is not None:
-        raw_area = getattr(geom, "wing_area_m2", 0.015)
-    try:
-        wing_area = float(raw_area) if raw_area is not None else 0.015
-    except (TypeError, ValueError):
-        wing_area = 0.015
+    wing_area = 0.015
+    if geom is not None:
+        for attr in ("planform_area_m2", "wing_area_m2"):
+            raw_area = getattr(geom, attr, None)
+            if raw_area is not None:
+                try:
+                    val = float(raw_area)
+                    if math.isfinite(val) and val > 0.0:
+                        wing_area = val
+                        break
+                except (TypeError, ValueError):
+                    continue
 
     try:
         wingspan = float(getattr(geom, "wingspan_m", 0.18)) if geom else 0.18
@@ -89,16 +94,32 @@ def _build_aircraft_config(candidate: AircraftCandidate) -> AircraftConfig:
     except (TypeError, ValueError):
         keel_height_m = 0.015
 
-    raw_ar = getattr(geom, "planform_aspect_ratio", None)
-    if raw_ar is None and geom is not None:
-        raw_ar = getattr(geom, "aspect_ratio", 2.16)
-    try:
-        aspect_ratio = float(raw_ar) if raw_ar is not None else 2.16
-    except (TypeError, ValueError):
-        aspect_ratio = 2.16
+    aspect_ratio = 2.16
+    if geom is not None:
+        for attr in ("planform_aspect_ratio", "aspect_ratio"):
+            raw_ar = getattr(geom, attr, None)
+            if raw_ar is not None:
+                try:
+                    val = float(raw_ar)
+                    if math.isfinite(val) and val > 0.0:
+                        aspect_ratio = val
+                        break
+                except (TypeError, ValueError):
+                    continue
 
-    dihedral_deg = cfg.wing.dihedral_deg
-    elevon_deg = 0.5 * (cfg.wing.elevon_left_deg + cfg.wing.elevon_right_deg)
+    def _safe_clamp(val: Any, lo: float, hi: float, default: float = 0.0) -> float:
+        try:
+            fv = float(val)
+        except (TypeError, ValueError):
+            return default
+        if not math.isfinite(fv):
+            return default
+        return max(lo, min(hi, fv))
+
+    dihedral_deg = _safe_clamp(cfg.wing.dihedral_deg, -5.0, 15.0, 0.0)
+    elevon_l = _safe_clamp(cfg.wing.elevon_left_deg, -15.0, 15.0, 0.0)
+    elevon_r = _safe_clamp(cfg.wing.elevon_right_deg, -15.0, 15.0, 0.0)
+    elevon_deg = 0.5 * (elevon_l + elevon_r)
 
     cg_offset_x = 0.0
     static_margin = 0.12
@@ -197,7 +218,8 @@ def evaluate_horizontal_glide(
             default=0.0,
         )
     if not math.isfinite(max_abs_roll_deg):
-        max_abs_roll_deg = 0.0
+        diverged = True
+        status = "diverged"
 
     # Extract ground_skim_fraction
     raw_skim = sim_metrics.get("ground_skim_fraction")
@@ -219,7 +241,8 @@ def evaluate_horizontal_glide(
         else:
             ground_skim_fraction = 0.0
     if not math.isfinite(ground_skim_fraction):
-        ground_skim_fraction = 0.0
+        diverged = True
+        status = "diverged"
 
     steady_glide_fraction = (
         stable_duration / max(1.0e-3, flight_time) if flight_time > 0.0 else 0.0
@@ -277,6 +300,32 @@ class DeterministicFlightBenchmark:
 
     def evaluate_candidate(self, candidate: AircraftCandidate) -> FlightBenchmarkResult:
         """Evaluate a candidate at both 6.0 m/s and 10.0 m/s."""
+        if candidate.geometry is None:
+            def _failed_metric(spd: float) -> EvaluationMetric:
+                return EvaluationMetric(
+                    speed_mps=float(spd),
+                    flight_time_s=0.0,
+                    max_ld_ratio=0.0,
+                    steady_glide_fraction=0.0,
+                    stability=0.0,
+                    distance_m=0.0,
+                    max_altitude_m=0.0,
+                    landed=False,
+                    crashed=True,
+                    diverged=False,
+                    status="failed",
+                )
+
+            res = FlightBenchmarkResult(
+                low_speed=_failed_metric(SPEED_LOW_MPS),
+                mid_speed=_failed_metric(SPEED_MID_MPS),
+                composite_score=0.0,
+                valid=False,
+                rejection_reason="Missing geometry (fold failed)",
+            )
+            candidate.benchmark = res
+            return res
+
         aircraft_cfg = _build_aircraft_config(candidate)
 
         low_metric = evaluate_horizontal_glide(

@@ -135,11 +135,7 @@ class MAPElitesGridArchive:
         bench = candidate.benchmark
         assert bench is not None
 
-        desc = candidate.descriptor
-        if desc is None:
-            if candidate.geometry is None:
-                self.rejected_evaluations += 1
-                return False
+        if candidate.geometry is not None:
             conservative_stability = min(
                 float(bench.low_speed.stability),
                 float(bench.mid_speed.stability),
@@ -149,6 +145,11 @@ class MAPElitesGridArchive:
                 use_planform=self.use_planform_bd,
             )
             candidate.descriptor = desc
+        else:
+            desc = candidate.descriptor
+            if desc is None:
+                self.rejected_evaluations += 1
+                return False
 
         if not desc.is_finite():
             self.rejected_evaluations += 1

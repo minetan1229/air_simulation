@@ -65,6 +65,9 @@ class EvaluationMetric:
             and math.isfinite(self.max_ld_ratio)
             and math.isfinite(self.steady_glide_fraction)
             and math.isfinite(self.stability)
+            and math.isfinite(self.distance_m)
+            and math.isfinite(self.max_abs_roll_deg)
+            and math.isfinite(self.ground_skim_fraction)
         ):
             return 0.0
         if self.flight_time_s <= 0.0 or self.max_ld_ratio <= 0.0:

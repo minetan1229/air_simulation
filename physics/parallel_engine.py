@@ -207,22 +207,21 @@ def _vector_drag_coefficient(
     the polar of this path is the polar of the reference path.  The kernel
     works in degrees; the caller works in radians.
     """
-    from .aero_kernel import separated_pressure_drag_coefficient
+    from .aero_kernel import _smoothstep01
 
-    alpha_deg = xp.rad2deg(xp.asarray(alpha, dtype=xp.float64))
-    stall_alpha_deg = xp.rad2deg(xp.asarray(stall_alpha_rad, dtype=xp.float64))
-    separated = separated_pressure_drag_coefficient(
+    alpha_deg = (xp.rad2deg(xp.asarray(alpha, dtype=xp.float64)) + 180.0) % 360.0 - 180.0
+    stall_alpha_deg = xp.abs(xp.rad2deg(xp.asarray(stall_alpha_rad, dtype=xp.float64)))
+    cd0_arr = xp.asarray(cd0, dtype=xp.float64)
+    attached_drag = (
+        cd0_arr + xp.asarray(k_induced, dtype=xp.float64) * (cl ** 2) * ge_factor
+    )
+    angle = xp.deg2rad(alpha_deg)
+    separated_drag = 2.0 * (xp.sin(angle) ** 2) + cd0_arr * xp.maximum(xp.cos(angle), 0.0)
+    w_drag = _smoothstep01(
         xp,
-        alpha_deg,
-        stall_alpha_deg,
-        xp.asarray(cd0, dtype=xp.float64),
-        blend_deg=blend_deg,
+        (xp.abs(alpha_deg) - stall_alpha_deg) / max(float(blend_deg), 1.0),
     )
-    return (
-        xp.asarray(cd0, dtype=xp.float64)
-        + xp.asarray(k_induced, dtype=xp.float64) * (cl ** 2) * ge_factor
-        + separated
-    )
+    return (1.0 - w_drag) * attached_drag + w_drag * separated_drag
 
 
 def get_gpu_info() -> Dict[str, Any]:
@@ -1973,12 +1972,27 @@ def evaluate_cases_on_device(
                 "duration_s": round(float(duration), 4),
                 **_rigid_body_model_metadata("rigid_body_6dof_batch"),
             }
+            ac_case = aircrafts[index]
+            unsupported_limitations: List[str] = []
+            if abs(float(getattr(ac_case, "aeroelastic_compliance", 0.0) or 0.0)) > 0.0:
+                unsupported_limitations.append("gpu_rigid_body_ignores_aeroelastic_compliance")
+            if abs(float(getattr(ac_case, "aeroelastic_flex", 0.0) or 0.0)) > 0.0:
+                unsupported_limitations.append("gpu_rigid_body_ignores_aeroelastic_flex")
+            if abs(float(getattr(ac_case, "aeroelastic_twist", 0.0) or 0.0)) > 0.0:
+                unsupported_limitations.append("gpu_rigid_body_ignores_aeroelastic_twist")
+            if bool(getattr(ac_case, "unsteady_aero_enabled", False)):
+                unsupported_limitations.append("gpu_rigid_body_ignores_unsteady_aero_enabled")
+            if bool(getattr(ac_case, "dynamic_damping_enabled", False)):
+                unsupported_limitations.append("gpu_rigid_body_ignores_dynamic_damping_enabled")
+            if str(getattr(ac_case, "fidelity_mode", "fast_rigid") or "fast_rigid") == "improved_medium":
+                unsupported_limitations.append("gpu_rigid_body_ignores_fidelity_mode_improved_medium")
+            is_approx = len(unsupported_limitations) > 0
             results[index] = normalize_payload(
                 entry,
                 model=RIGID_BODY_MODEL_TAG,
-                approximate=False,
-                physics_verification_eligible=True,
-                limitations=[],
+                approximate=is_approx,
+                physics_verification_eligible=not is_approx,
+                limitations=unsupported_limitations,
             )
         completed += len(members)
         if progress_cb is not None:

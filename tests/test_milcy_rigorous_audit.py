@@ -360,8 +360,8 @@ def test_stage2_tiebreak_epsilon_and_ground_skim_anti_hack() -> None:
         ),
         descriptor=BehaviorDescriptor(0.15, 0.85, 0.25),
         benchmark=FlightBenchmarkResult(
-            low_speed=_make_metric(stability=0.75),
-            mid_speed=_make_metric(speed_mps=10.0, stability=0.75),
+            low_speed=_make_metric(stability=0.90),
+            mid_speed=_make_metric(speed_mps=10.0, stability=0.90),
             composite_score=5.000000001,
             valid=True,
         ),

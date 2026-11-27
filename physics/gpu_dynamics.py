@@ -1567,8 +1567,46 @@ def simulate_batch(
         # reported an impact speed of 0 m/s for every flight.  The crash test
         # was consequently never armed in the batch path and a steep impact
         # was reported as a landing while the 6-DoF path reported a crash.
-        impact_speed = xp.maximum(
-            xp.where(crossing, velocity_interp[:, 2], y_next[:, 5]), 0.0
+        # Compute contact-point vertical impact speed including rotational
+        # lever arm v_point = v + omega x r across the five ground stations
+        # (matching physics/flight_sim.py::_station_v_normal).
+        rot_touch = quaternion_to_matrix_batch(
+            xp, quaternion_normalize_batch(xp, y_next[:, 6:10])
+        )
+        alt_touch = _station_altitudes(xp, params, y_next[:, 2], rot_touch)
+        mac_touch = xp.maximum(params.chord, 1.0e-3)
+        semispan_touch = params.span * 0.5
+        keel_depth_touch = (
+            xp.full_like(mac_touch, GROUND_KEEL_DEPTH_M)
+            if params.keel_height_m is None
+            else xp.broadcast_to(
+                xp.maximum(xp.asarray(params.keel_height_m, dtype=xp.float64), 1.0e-3),
+                mac_touch.shape,
+            )
+        )
+        touch_stations = (
+            xp.stack((0.5 * mac_touch, xp.zeros_like(mac_touch), xp.zeros_like(mac_touch)), axis=-1),
+            xp.stack((-0.3 * mac_touch, -semispan_touch, xp.zeros_like(mac_touch)), axis=-1),
+            xp.stack((-0.3 * mac_touch, semispan_touch, xp.zeros_like(mac_touch)), axis=-1),
+            xp.stack((-0.7 * mac_touch, xp.zeros_like(mac_touch), keel_depth_touch), axis=-1),
+            xp.stack((xp.zeros_like(mac_touch), xp.zeros_like(mac_touch), keel_depth_touch), axis=-1),
+        )
+        omega_body_touch = y_next[:, 10:13]
+        vz_cg_touch = y_next[:, 5]
+        impact_speed = xp.zeros_like(vz_cg_touch)
+        any_station_touch = xp.zeros(vz_cg_touch.shape, dtype=bool)
+        for st_idx, r_body_st in enumerate(touch_stations):
+            st_on_ground = alt_touch[:, st_idx] <= 1.0e-6
+            any_station_touch = any_station_touch | st_on_ground
+            omega_x_r_world = body_to_world_batch(
+                xp, rot_touch, xp.cross(omega_body_touch, r_body_st)
+            )
+            v_normal_st = xp.maximum(vz_cg_touch + omega_x_r_world[:, 2], 0.0)
+            impact_speed = xp.where(
+                st_on_ground, xp.maximum(impact_speed, v_normal_st), impact_speed
+            )
+        impact_speed = xp.where(
+            any_station_touch, impact_speed, xp.maximum(vz_cg_touch, 0.0)
         )
         impact_g = 1.0 + impact_speed * impact_speed / (2.0 * params.gravity * 0.031)
         impact_stress = peak_root_stress_pa(

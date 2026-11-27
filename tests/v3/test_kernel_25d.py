@@ -184,7 +184,7 @@ def test_parsimony_pressure_tie_break():
     assert added_a is True
 
     # Insert candidate B with same score: Parsimony Pressure must replace A with simpler B
-    bin_idx = grid.get_bin_index(desc)
+    bin_idx = grid.get_bin_index(cand_a.descriptor)
     assert grid.cells[bin_idx][1].candidate_id == "cand-complex"
 
     added_b = grid.add_candidate(cand_b)

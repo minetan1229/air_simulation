@@ -1866,8 +1866,8 @@ def _collar_crease(corner_p0: Vec2, corner_p1: Vec2) -> Tuple[Vec2, Vec2]:
         edge = (1.0, 0.0)
     else:
         edge = (edge[0] / norm, edge[1] / norm)
-    nose = (0.0, -1.0) if tip[1] <= 0.0 else (0.0, 1.0)
-    to_edge = (-edge[0], -edge[1])
+    nose = (0.0, -1.0) if other[1] <= tip[1] else (0.0, 1.0)
+    to_edge = edge
     to_centre = nose
     bisector = (to_edge[0] + to_centre[0], to_edge[1] + to_centre[1])
     norm = math.hypot(*bisector)

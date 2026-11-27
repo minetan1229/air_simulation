@@ -174,8 +174,14 @@ class FoldStep:
             "step_index": int(self.step_index),
             "crease_line": [list(self.crease_line[0]), list(self.crease_line[1])],
             "crease_line_mm": [
-                [self.crease_line[0][0] * SHEET_WIDTH_M, self.crease_line[0][1] * SHEET_LENGTH_M],
-                [self.crease_line[1][0] * SHEET_WIDTH_M, self.crease_line[1][1] * SHEET_LENGTH_M],
+                [
+                    self.crease_line[0][0] * SHEET_WIDTH_M * 1000.0,
+                    self.crease_line[0][1] * SHEET_LENGTH_M * 1000.0,
+                ],
+                [
+                    self.crease_line[1][0] * SHEET_WIDTH_M * 1000.0,
+                    self.crease_line[1][1] * SHEET_LENGTH_M * 1000.0,
+                ],
             ],
             "fold_angle_deg": float(self.fold_angle_deg),
             "fold_angle_magnitude_deg": self.angle_magnitude_deg,
@@ -1198,6 +1204,7 @@ def detect_penetrations(
     adjacency: Optional[Iterable[Tuple[int, int]]] = None,
     tolerance: float = 1.0e-6,
     polygons: Optional[Dict[int, List[Vec3]]] = None,
+    check_edge_piercing: bool = True,
 ) -> List[Dict[str, Any]]:
     """Find the panels that pass through each other.
 
@@ -1255,15 +1262,25 @@ def detect_penetrations(
             )
             if distance > radius[i] + radius[j] + tolerance:
                 continue
-            if _panels_intersect(face_i, face_j, poly_i, poly_j, tolerance):
-                hits.append(
-                    {
-                        "face_a": int(face_i.fid),
-                        "face_b": int(face_j.fid),
-                        "group_a": face_i.group,
-                        "group_b": face_j.group,
-                    }
-                )
+            hit_kind = _panels_intersect_kind(
+                face_i,
+                face_j,
+                poly_i,
+                poly_j,
+                tolerance,
+                check_edge_piercing=check_edge_piercing,
+                has_external_polygons=(polygons is not None),
+            )
+            if hit_kind is not None:
+                entry: Dict[str, Any] = {
+                    "face_a": int(face_i.fid),
+                    "face_b": int(face_j.fid),
+                    "group_a": face_i.group,
+                    "group_b": face_j.group,
+                }
+                if hit_kind == "edge_piercing_face":
+                    entry["type"] = "edge_piercing_face"
+                hits.append(entry)
     return hits
 
 
@@ -1294,6 +1311,78 @@ def _segment_pierces_polygon(
     return False
 
 
+def _is_small_layer_offset(raw_poly: Sequence[Vec3], sep_poly: Sequence[Vec3]) -> bool:
+    """Return True when sep_poly is a small layer-pitch translation of raw_poly."""
+    if len(raw_poly) != len(sep_poly) or not raw_poly:
+        return False
+    max_shift = 6.0 * LAYER_PITCH_M
+    max_shift_sq = max_shift * max_shift
+    for p, q in zip(raw_poly, sep_poly):
+        dx = q[0] - p[0]
+        dy = q[1] - p[1]
+        dz = q[2] - p[2]
+        if dx * dx + dy * dy + dz * dz > max_shift_sq:
+            return False
+    return True
+
+
+def _edge_pierces_pair(
+    poly_a: Sequence[Vec3],
+    normal_a: Vec3,
+    poly_b: Sequence[Vec3],
+    normal_b: Vec3,
+    tolerance: float,
+) -> bool:
+    na = len(poly_a)
+    for k in range(na):
+        if _segment_pierces_polygon(
+            poly_a[k], poly_a[(k + 1) % na], poly_b, normal_b, tolerance
+        ):
+            return True
+    nb = len(poly_b)
+    for k in range(nb):
+        if _segment_pierces_polygon(
+            poly_b[k], poly_b[(k + 1) % nb], poly_a, normal_a, tolerance
+        ):
+            return True
+    return False
+
+
+def _panels_intersect_kind(
+    face_a: FoldedFace,
+    face_b: FoldedFace,
+    poly_a: Sequence[Vec3],
+    poly_b: Sequence[Vec3],
+    tolerance: float,
+    *,
+    check_edge_piercing: bool = True,
+    has_external_polygons: bool = False,
+) -> Optional[str]:
+    """Return intersection kind ('containment' or 'edge_piercing_face') or None."""
+    for point in poly_a:
+        if _point_in_polygon3d(point, poly_b, face_b.normal, tolerance):
+            return "containment"
+    for point in poly_b:
+        if _point_in_polygon3d(point, poly_a, face_a.normal, tolerance):
+            return "containment"
+    if check_edge_piercing and _edge_pierces_pair(
+        poly_a, face_a.normal, poly_b, face_b.normal, tolerance
+    ):
+        # Guard against synthetic hinge-piercing created solely by _separated_polygons
+        # layer-pitch offsets between non-coplanar faces that do not pierce in raw poly3d.
+        if (
+            has_external_polygons
+            and _is_small_layer_offset(face_a.poly3d, poly_a)
+            and _is_small_layer_offset(face_b.poly3d, poly_b)
+            and not _edge_pierces_pair(
+                face_a.poly3d, face_a.normal, face_b.poly3d, face_b.normal, tolerance
+            )
+        ):
+            return None
+        return "edge_piercing_face"
+    return None
+
+
 def _panels_intersect(
     face_a: FoldedFace,
     face_b: FoldedFace,
@@ -1301,19 +1390,8 @@ def _panels_intersect(
     poly_b: Sequence[Vec3],
     tolerance: float,
 ) -> bool:
-    """Does one panel pass through the other?
-
-    The unambiguous test is **containment**: a corner of one panel that lies
-    strictly inside the other panel means the paper of the first one is
-    inside the second one, which no pair of hands can produce.
-    """
-    for point in poly_a:
-        if _point_in_polygon3d(point, poly_b, face_b.normal, tolerance):
-            return True
-    for point in poly_b:
-        if _point_in_polygon3d(point, poly_a, face_a.normal, tolerance):
-            return True
-    return False
+    """Does one panel pass through the other (vertex containment or edge piercing)?"""
+    return _panels_intersect_kind(face_a, face_b, poly_a, poly_b, tolerance) is not None
 
 
 def _centroid(points: Sequence[Vec3]) -> Vec3:
@@ -1474,6 +1552,7 @@ def evaluate_grip(
             faces,
             adjacent_panel_pairs(geometry.pattern),
             polygons=_separated_polygons(geometry),
+            check_edge_piercing=False,
         )
     )
 

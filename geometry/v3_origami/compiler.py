@@ -42,7 +42,13 @@ PAPER_BULK_DENSITY_KGM3: float = 800.0
 
 
 def _clamp(v: float, low: float, high: float) -> float:
-    return max(low, min(high, v))
+    try:
+        fv = float(v)
+    except (TypeError, ValueError):
+        return float(low)
+    if not math.isfinite(fv):
+        return float(low)
+    return max(low, min(high, fv))
 
 
 def paper_thickness_m(paper_gsm: float) -> float:
@@ -476,7 +482,7 @@ class ParametricOrigamiCompiler:
             Crease(
                 key="elevon_l",
                 p0=(0.0, elevon_v),
-                p1=(1.0, elevon_v),
+                p1=(0.5, elevon_v),
                 angle_deg=abs(elevon_left),
                 side=-1,
                 up=elevon_left >= 0,
@@ -486,7 +492,7 @@ class ParametricOrigamiCompiler:
             ),
             Crease(
                 key="elevon_r",
-                p0=(0.0, elevon_v),
+                p0=(0.5, elevon_v),
                 p1=(1.0, elevon_v),
                 angle_deg=abs(elevon_right),
                 side=-1,

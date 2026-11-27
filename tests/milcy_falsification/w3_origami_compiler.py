@@ -75,7 +75,8 @@ def test_f08_bilateral_crease_side_self_intersection() -> None:
     steps0 = compiler.compile_steps(cfg_zero_elev)
     geom0 = fold_genome(OrigamiGenome(steps=steps0))
     adj0 = adjacent_panel_pairs(geom0.pattern)
-    assert len(detect_strict_self_intersections(geom0.faces, adjacency=adj0)) == 0
+    sep0 = _separated_polygons(geom0)
+    assert len(detect_strict_self_intersections(geom0.faces, adjacency=adj0, polygons=sep0)) == 0
 
     macro_steps, macro_fold_steps = compile_macro_origami(cfg_default)
     macro_geom = fold_genome(OrigamiGenome(steps=macro_fold_steps))
@@ -87,7 +88,8 @@ def test_f08_bilateral_crease_side_self_intersection() -> None:
     macro_steps0, macro_fold_steps0 = compile_macro_origami(cfg_zero_elev)
     macro_geom0 = fold_genome(OrigamiGenome(steps=macro_fold_steps0))
     macro_adj0 = adjacent_panel_pairs(macro_geom0.pattern)
-    assert len(detect_strict_self_intersections(macro_geom0.faces, adjacency=macro_adj0)) == 0
+    macro_sep0 = _separated_polygons(macro_geom0)
+    assert len(detect_strict_self_intersections(macro_geom0.faces, adjacency=macro_adj0, polygons=macro_sep0)) == 0
 
     cfg_neg_elev = ParametricOrigamiConfig(
         nose=ParametricNoseSpec(fold_count=6),

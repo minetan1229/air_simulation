@@ -719,6 +719,11 @@ def trim_alpha_from_elevon(cfg: AircraftConfig, elevon_deg: float, speed_mps: fl
         round(_finite(getattr(cfg, "ref_span_m", 0.0)), 6),
         round(_finite(getattr(env, "lift_scale", 1.0)), 6) if env is not None else 1.0,
         round(_finite(getattr(env, "drag_scale", 1.0)), 6) if env is not None else 1.0,
+        round(_finite(getattr(env, "altitude_m", 0.0)), 4) if env is not None else 0.0,
+        round(_finite(getattr(env, "temperature_K", 288.15)), 4) if env is not None else 288.15,
+        round(_finite(getattr(env, "pressure_Pa", 101325.0)), 2) if env is not None else 101325.0,
+        round(_finite(getattr(env, "humidity_rel", 0.0)), 4) if env is not None else 0.0,
+        bool(getattr(env, "isa_mode", False)) if env is not None else False,
     )
     if cache_key in _GLOBAL_TRIM_CACHE:
         _GLOBAL_TRIM_CACHE.move_to_end(cache_key)
@@ -737,12 +742,13 @@ def trim_alpha_from_elevon(cfg: AircraftConfig, elevon_deg: float, speed_mps: fl
     cm_alpha_per_deg = cm_alpha * (math.pi / 180.0)
     if abs(cm_alpha_per_deg) < 1.0e-12:
         cm_alpha_per_deg = -0.01
-    # Use the provided speed for Reynolds number and dynamic pressure consistency
-    reynolds = speed_mps * _chord(trimmed_cfg) / 1.5e-5
-    mach = speed_mps / 340.0
+    # Use the provided speed and env's real atmospheric state for Re, Mach, and density
+    atmo = atmosphere_state(env, speed_mps, reference_chord_m=_chord(trimmed_cfg))
+    reynolds = float(atmo["reynolds"])
+    mach = float(atmo["mach"])
     # Use env's ground effect settings for consistency with final evaluate_aero
     ground_height = 1.0
-    density = 1.225
+    density = float(atmo["density_kgm3"])
     params = aero_kernel.params_from_config(trimmed_cfg, env)
     for _ in range(50):
         coefficients = aero_kernel.evaluate_coefficients(
@@ -895,9 +901,11 @@ def drag_polar(
     alphas: List[float] = [high if index == count - 1 else low + step * index for index in range(count)]
 
     slope = lift_slope_per_rad(cfg, reynolds=reynolds)
-    te_fold = trailing_edge_fold_effects(cfg)
+    te_fold = aero_kernel._guard_fold_increment(
+        _SCALAR, trailing_edge_fold_effects(cfg), _finite(cfg.cl_max, 0.90)
+    )
     elevon = elevon_effects(cfg.elevon_deg, cfg)
-    total_cl_offset = elevon["dcl"] + te_fold["dcl"]
+    total_cl_offset = elevon["dcl"] + float(te_fold["dcl"])
     cols_cl: List[float] = []
     cols_cd: List[float] = []
     cols_ld: List[float] = []

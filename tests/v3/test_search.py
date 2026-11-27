@@ -29,10 +29,31 @@ def test_grid_archive_add_and_coverage():
     """Verify adding candidate updates grid and increases coverage."""
     grid = MAPElitesGridArchive(bins=(4, 4, 4))
 
+    from v3.interfaces import AirframeGeometry
+
     cand = AircraftCandidate(
         candidate_id="cand-test",
         config=ParametricOrigamiConfig(),
         step_count=20,
+        geometry=AirframeGeometry(
+            mass_kg=0.005,
+            wing_area_m2=0.020,
+            wingspan_m=0.155,
+            chord_m=0.13,
+            aspect_ratio=1.20,
+            cg_m=(0.08, 0.0, 0.005),
+            keel_height_m=0.012,
+            keel_length_m=0.050,
+            keel_layers=4,
+            step_count=20,
+            planform_area_m2=0.020,
+            planform_aspect_ratio=1.20,
+            penetrations=0,
+            fold_valid=True,
+            thickness_limit_ok=True,
+            flat_foldable_ok=True,
+        ),
+        metadata={"tier0_valid": True},
     )
     cand.descriptor = BehaviorDescriptor(wing_loading_kg_m2=0.25, static_stability=0.50, aspect_ratio=1.20)
 

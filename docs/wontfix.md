@@ -44,3 +44,11 @@ This document records deliberate design decisions confirmed during the MILCY con
 
 - The `client()` fixture and API endpoint tests (`from app import app`) require `flask`, which is an optional web-layer dependency not required for headless physics/geometry execution.
 - **Why intentional:** Keeps core simulation and optimization packages free of mandatory web-server dependencies; API tests execute in environments where `flask` is installed.
+
+---
+
+## 5. GPU Batch Rigid-Body Scope (`evaluate_cases_on_device`)
+**Location:** `physics/parallel_engine.py` (`evaluate_cases_on_device`) & `physics/gpu_dynamics.py`
+
+- The batched GPU/device integrator implements the rigid-body 6-DoF aerodynamic model (`fast_rigid`) and does not port aeroelasticity (`aeroelastic_compliance`, `aeroelastic_flex`, `aeroelastic_twist`), unsteady aerodynamics (`unsteady_aero_enabled`), dynamic damping (`dynamic_damping_enabled`), or `fidelity_mode="improved_medium"`.
+- **Why intentional:** Keeping the device kernel strictly rigid-body avoids state-vector expansion and preserves CUDA-Graph throughput. Cases requesting any unsupported flag are explicitly flagged with `approximate=True`, `physics_verification_eligible=False`, and itemized `limitations` rather than silently reporting `approximate=False`.

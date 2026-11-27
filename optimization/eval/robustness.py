@@ -50,6 +50,19 @@ class RobustnessEvaluator:
 
     def evaluate_candidate(self, candidate: AircraftCandidate) -> RobustnessReport:
         """Run Dryden turbulence, jitter, and high-pitch throw stress tests with Monte Carlo."""
+        if candidate.geometry is None:
+            report = RobustnessReport(
+                candidate_id=candidate.candidate_id,
+                dryden_survival_rate=0.0,
+                dryden_mean_hangtime_s=0.0,
+                jitter_robustness_score=0.0,
+                high_pitch_recovery_rate=0.0,
+                overall_robustness_score=0.0,
+                details={"error": "Missing geometry (fold failed)"},
+            )
+            candidate.robustness = report
+            return report
+
         # 折り紙ジオメトリ由来の完全な AircraftConfig を構築（CG/慣性欠落を解消）
         aircraft = _build_aircraft_config(candidate)
         geom = candidate.geometry

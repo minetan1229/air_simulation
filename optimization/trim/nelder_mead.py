@@ -149,8 +149,17 @@ class NelderMeadTrimOptimizer:
             self.dihedral_bounds[0],
             self.dihedral_bounds[1],
         )
+        orig_score = (
+            float(candidate.benchmark.composite_score)
+            if (
+                candidate.benchmark is not None
+                and candidate.benchmark.valid
+                and math.isfinite(float(candidate.benchmark.composite_score))
+            )
+            else 0.0
+        )
         simplex = self._build_simplex(e0, d0, scale=0.12, base_candidate=candidate)
-        initial_score = max(0.0, -(simplex[0][0]))
+        initial_score = max(0.0, -(simplex[0][0]), orig_score)
 
         alpha = 1.0
         gamma = 2.0

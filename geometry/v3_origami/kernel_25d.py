@@ -304,8 +304,8 @@ def compile_macro_origami(
     wing_u = max(0.30, min(0.48, 0.30 + 0.18 * span_ratio))
     dihedral = max(-5.0, min(15.0, float(wing_cfg.dihedral_deg)))
     elevon = 0.5 * (
-        max(-10.0, min(15.0, float(wing_cfg.elevon_left_deg)))
-        + max(-10.0, min(15.0, float(wing_cfg.elevon_right_deg)))
+        max(-15.0, min(15.0, float(wing_cfg.elevon_left_deg)))
+        + max(-15.0, min(15.0, float(wing_cfg.elevon_right_deg)))
     )
     winglet_u = max(0.04, min(0.12, 0.08 * (1.0 - span_ratio * 0.2)))
     winglet_angle = max(10.0, min(85.0, float(wing_cfg.winglet_angle_deg)))
@@ -407,19 +407,20 @@ def compile_macro_origami(
         )
     )
 
-    # Winglets
-    macro_steps.append(
-        MacroFoldStep(
-            step_index=len(macro_steps) + 1,
-            name="winglet_folds",
-            fold_type="bilateral_symmetric",
-            line_p0=(winglet_u, 0.0),
-            line_p1=(winglet_u, winglet_v_max),
-            angle_deg=winglet_angle,
-            mountain=False,
-            desc=f"翼端ウィングレット（両端を斜め上 {winglet_angle:.1f}° に谷折り立ち上げ）",
+    # Winglets (only when enabled)
+    if bool(wing_cfg.has_winglet):
+        macro_steps.append(
+            MacroFoldStep(
+                step_index=len(macro_steps) + 1,
+                name="winglet_folds",
+                fold_type="bilateral_symmetric",
+                line_p0=(winglet_u, 0.0),
+                line_p1=(winglet_u, winglet_v_max),
+                angle_deg=winglet_angle,
+                mountain=False,
+                desc=f"翼端ウィングレット（両端を斜め上 {winglet_angle:.1f}° に谷折り立ち上げ）",
+            )
         )
-    )
 
     # Elevons / Reflex trim
     macro_steps.append(

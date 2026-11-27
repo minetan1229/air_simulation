@@ -92,7 +92,7 @@ def detect_strict_self_intersections(
     count = len(faces)
     for i in range(count):
         fi = faces[i]
-        pi = list(fi.poly3d)
+        pi = list(polygons[fi.fid]) if (polygons is not None and fi.fid in polygons) else list(fi.poly3d)
         if len(pi) < 3:
             continue
         for j in range(i + 1, count):
@@ -100,7 +100,7 @@ def detect_strict_self_intersections(
             pair_key = (min(fi.fid, fj.fid), max(fi.fid, fj.fid))
             if pair_key in adjacent or pair_key in seen_pairs:
                 continue
-            pj = list(fj.poly3d)
+            pj = list(polygons[fj.fid]) if (polygons is not None and fj.fid in polygons) else list(fj.poly3d)
             if len(pj) < 3:
                 continue
 
@@ -115,6 +115,20 @@ def detect_strict_self_intersections(
                         pierced = True
                         break
 
+            if pierced and polygons is not None:
+                from geometry.origami_genome import _is_small_layer_offset
+                if _is_small_layer_offset(fi.poly3d, pi) and _is_small_layer_offset(fj.poly3d, pj):
+                    raw_i = list(fi.poly3d)
+                    raw_j = list(fj.poly3d)
+                    raw_pierced = any(
+                        _segment_pierces_polygon_3d(raw_i[k], raw_i[(k + 1) % len(raw_i)], raw_j, fj.normal, tolerance)
+                        for k in range(len(raw_i))
+                    ) or any(
+                        _segment_pierces_polygon_3d(raw_j[k], raw_j[(k + 1) % len(raw_j)], raw_i, fi.normal, tolerance)
+                        for k in range(len(raw_j))
+                    )
+                    if not raw_pierced:
+                        pierced = False
             if pierced:
                 seen_pairs.add(pair_key)
                 hits.append(
@@ -261,9 +275,14 @@ def extract_airframe_geometry(
             penetrations_count = len(strict_hits)
             try:
                 report = evaluate_grip(geometry_obj, penetrations=strict_hits)
-                keel_height = float(report.grip_height_m)
-                keel_length = float(report.grip_length_m)
-                keel_layers = int(report.grip_layers)
+                if float(report.grip_length_m) <= 1.0e-9:
+                    keel_height = 0.0
+                    keel_length = 0.0
+                    keel_layers = 0
+                else:
+                    keel_height = float(report.grip_height_m)
+                    keel_length = float(report.grip_length_m)
+                    keel_layers = int(report.grip_layers)
             except Exception:
                 keel_height = 0.0
                 keel_length = 0.0
@@ -308,6 +327,44 @@ def validate_tier0(
 ) -> Tuple[bool, List[str]]:
     """Validate aircraft candidate against strict Tier 0 geometric & physics filter."""
     reasons: List[str] = []
+
+    # Fail-closed validation of continuous config parameters (C-12)
+    cfg = getattr(candidate, "config", None)
+    if cfg is not None:
+        def _check_param(name: str, val: Any, lo: float, hi: float) -> None:
+            if val is None or isinstance(val, bool):
+                reasons.append(f"Invalid config parameter {name}: {val!r}")
+                return
+            try:
+                fv = float(val)
+            except (TypeError, ValueError):
+                reasons.append(f"Invalid config parameter {name}: {val!r}")
+                return
+            if not math.isfinite(fv):
+                reasons.append(f"Non-finite config parameter {name}: {val!r}")
+                return
+            if fv < lo or fv > hi:
+                reasons.append(f"Config parameter {name}={fv} out of physical range [{lo}, {hi}]")
+
+        _check_param("paper_gsm", getattr(cfg, "paper_gsm", None), 20.0, 400.0)
+        wing_cfg = getattr(cfg, "wing", None)
+        if wing_cfg is not None:
+            _check_param("wing.elevon_left_deg", getattr(wing_cfg, "elevon_left_deg", None), -15.0, 15.0)
+            _check_param("wing.elevon_right_deg", getattr(wing_cfg, "elevon_right_deg", None), -15.0, 15.0)
+            _check_param("wing.dihedral_deg", getattr(wing_cfg, "dihedral_deg", None), -5.0, 15.0)
+            _check_param("wing.winglet_angle_deg", getattr(wing_cfg, "winglet_angle_deg", None), 0.0, 90.0)
+            _check_param("wing.wingspan_ratio", getattr(wing_cfg, "wingspan_ratio", None), 0.30, 1.00)
+        nose_cfg = getattr(cfg, "nose", None)
+        if nose_cfg is not None:
+            _check_param("nose.nose_length_ratio", getattr(nose_cfg, "nose_length_ratio", None), 0.15, 0.45)
+            _check_param("nose.taper_ratio", getattr(nose_cfg, "taper_ratio", None), 0.20, 0.95)
+            _check_param("nose.fold_count", getattr(nose_cfg, "fold_count", None), 3.0, 6.0)
+        keel_cfg = getattr(cfg, "keel", None)
+        if keel_cfg is not None:
+            _check_param("keel.keel_depth_ratio", getattr(keel_cfg, "keel_depth_ratio", None), 0.03, 0.25)
+            _check_param("keel.crease_offset_u", getattr(keel_cfg, "crease_offset_u", None), 0.40, 0.60)
+            _check_param("keel.lock_fold_angle_deg", getattr(keel_cfg, "lock_fold_angle_deg", None), 0.0, 180.0)
+
     if candidate.step_count < MIN_FOLD_STEPS:
         reasons.append(
             f"Step count {candidate.step_count} is below minimum requirement {MIN_FOLD_STEPS}"
