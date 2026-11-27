@@ -87,6 +87,9 @@ jobs:
           python -m pip install --upgrade pip
           pip install pytest pytest-cov
           if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+          # Optional test extras aligned with verify.yml so printable A4 and
+          # discord bridge tests run consistently across the CI matrix.
+          pip install "discord.py>=2.7.1,<3.0" "psutil>=7.2.2" "matplotlib>=3.8"
 
       - name: Run Unit Tests with Coverage
         run: pytest tests -q --tb=short
