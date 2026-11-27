@@ -14,6 +14,7 @@ Implements:
 
 # Note: `phase`, `agent`, `parallel`, `log` are injected by Antigravity's
 # `/run-workflow` runtime (https://antigravity.google/docs/dynamic-workflows/).
+# ruff: noqa: F821
 
 TICKET_SCHEMA = {
     "type": "object",
