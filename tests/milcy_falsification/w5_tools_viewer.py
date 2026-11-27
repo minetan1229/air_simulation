@@ -38,6 +38,8 @@ def test_f12_printable_a4_folding_instructions_uses_candidate_config(tmp_path, m
     monkeypatch.setattr("tools.generate_printable_a4.render_a4_max_fullsize_sheet", mock_render_max_fullsize)
     monkeypatch.setattr("tools.generate_printable_a4.render_a4_step_manual", mock_render_step_manual)
 
+    pytest.importorskip("matplotlib")
+
     render_a4_printable_sheet(cand_data, tmp_path / "pattern.png", include_manual_page=True, dpi=72)
 
     adapter = OrigamiAdapter()
