@@ -6,6 +6,8 @@ import itertools
 from pathlib import Path
 from typing import List, Tuple
 
+import pytest
+
 from core.interfaces import (
     MAX_FOLD_STEPS,
     ParametricKeelSpec,
@@ -62,6 +64,7 @@ def test_i2_05_a4_elevon_page1_page2_consistency_and_symmetric_lock_styles(
     tmp_path: Path, monkeypatch
 ) -> None:
     """Page 1 SVG creases, Page 2 fallback instructions, and lock/cap crease styles must be consistent."""
+    pytest.importorskip("matplotlib")
     # 1. Symmetric styling for keel_lock and nose_cap regardless of raw_mountain
     assert (
         resolve_canonical_crease_style("keel_lock_l", True)[0]
@@ -101,6 +104,9 @@ def test_i2_05_a4_elevon_page1_page2_consistency_and_symmetric_lock_styles(
             if "elevon" in str(label).lower():
                 recorded.append((label, raw_mountain, res[0]))
             return res
+
+        import pytest
+        pytest.importorskip("matplotlib")
 
         monkeypatch.setattr("tools.generate_printable_a4.resolve_canonical_crease_style", spy_resolve)
         render_a4_max_fullsize_sheet(cand_data, tmp_path / f"full_{elevon_deg}.png", dpi=72)

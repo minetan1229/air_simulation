@@ -1,21 +1,25 @@
 ---
 name: process-hygiene
-description: メモリ圧迫時、テスト・ワーカープロセスの残存確認時、および不要なバックグラウンドプロセスを停止・回収する際に使用する。
+description: 常駐プロセス（pytest・開発サーバ・kiloワーカー・孤児MCP/ブラウザ）の使用中判定と回収を行う際に使用する。他セッション保護とセッション限定回収を含む。
 ---
 
-# Skill: Process Hygiene（常駐プロセスの使用中判定と回収）
+# Skill: Process Hygiene (常駐プロセスの使用中判定と回収)
 
-## Trigger (読み込み条件)
-- メモリ圧迫・応答遅延・コアダンプ増加の検知時、またはバックグラウンドタスク停止要求時。
-- セッション終了時や不要ワーカーの回収時。
+## 1. 判定軸（正本: `tools/process_hygiene.py`）
+- **K1 ホスト / K2 ホスト所有**: セッション基盤（`kilo serve` / IDE）と所有 MCP プール・ブラウザを保護。
+- **K3 明示指定 & アクティブセッション保護（並列安全）**:
+  - `--keep-pid` / `--keep-since` に加え、`~/.cache/air_simulation/active_sessions/*.json` に登録された**生存中セッションの PID・子孫プロセス・およびその `worktree_path` を含むプロセスを自動保護**する。
+  - これにより、あるセッションで `--apply` を実行しても同時進行中の他セッションの `pytest` やサーバを誤殺しない。
+- **S1–S5 停止対象**: 孤児ワーカー・オーケストレータ・孤児 MCP・所有セッション不在の残存実行物・孤児ブラウザ。
 
-## Procedure (最小手順)
-1. **判定**: `python tools/process_hygiene.py --list`（KEEP/STOP と理由・実測値の一括表示）
-2. **事前記録**: 停止対象PIDと理由を記録（不可逆操作の事前記録）
-3. **回収**: `python tools/process_hygiene.py --apply --json`
-4. **検証**: `--list` 再実行で STOP=0、IDEや主要ホストプロセスが無傷であることを確認
+## 2. 推奨コマンド
+```bash
+# 全体一覧（ドライラン）
+python tools/process_hygiene.py --list
 
-## Verification Criteria (事前合否基準)
-- **成功**: 停止対象 0 件、解放メモリが期待値と一致、IDE・ホストが生存。
-- **失敗**: IDE またはホストが停止、STOP判定が解消しない。
-- **禁止**: ユーザー実ブラウザ・IDE・自己祖先プロセスの停止。
+# 自セッションの worktree 配下の孤児のみ安全に回収
+python tools/process_hygiene.py --session <session_id> --apply
+
+# 全体回収（他アクティブセッションは自動保護）
+python tools/process_hygiene.py --apply --json
+```

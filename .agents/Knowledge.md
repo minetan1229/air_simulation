@@ -1,67 +1,30 @@
-# Knowledge Base (On-Demand Reference)
-<!-- 警告: 全文読み込み禁止。grepやキーワード検索で必要な箇所のみ部分抽出すること。 -->
-<!-- 記述形式: ## [Category] Topic / 検証済みの確定事実のみを簡潔に記述 -->
-## [Architecture & Specs]
-- ルート `AGENTS.md` は「常駐コア+参照索引」。詳細仕様は `docs/SPECIFICATION.md`、過去知見・現在地・手順は `.agents/` 配下。MCP 5サーバー（context7/sequential-thinking/fetch/memory/playwright）を local stdio 登録、`tools/verify_mcp_servers.py` 全件 PASS。GPUバッチは非GPU環境で `parallel_evaluate` フォールバック、同一スキーマ返却。世界座標系は NED(+z下)、風場(+z上)変換 $v_{rel}=v_{aircraft}-wind_{ned}$ 整合。外部メッシュ `validate_url_safe` はプライベートIP/メタデータ/非標準ポート遮断。APIエラーはスタックトレース非公開、`error_id` のみ返却。
-## [Verified Solutions & Troubleshooting]
-- CI GPU非搭載時は NumPy/CPU フォールバック必須。GitHub Actions Windows は `defaults: run: shell: bash` 必須。全監査課題(#28-37)完了、新規10件+既存700+件全パス、master `82d48ea` 反映済み。W13台帳再判定で P0-5〜P0-9 全解消: ①API認証 `app.py:19` `dotenv.load_dotenv()` (commit `09aa40e`) ②軌跡ロック `api/core.py:258` `SIMULATION_TRAJECTORY_LOCK` (commit `c4b9286`) ③死んだDOM id `templates/index.html` 統一 (commit `7639895`) ④採用ボタン `store.set(section,key,value,origin)` 4引数化 (commit `7639895`) ⑤Guinness同義反復 `performance_validated:False` + UI明示 (commit `d287af2`)。
-## [Paper-Conformance Audit & Fixes] (2026-10-19→2026-10-20, commit 60fdef6→9538f8b)
-- 正本 `PHYSICS_PAPER_CONFORMANCE_AUDIT.md` §0.0 進捗表、残課題 `no-finish.md`。P0〜P3完了(commit `9538f8b`)。失速後揚力ノッチ解消(Hoerner平板極限へ単調遷移、α≥45°完全一致)・翼端/負側失速対称化・接地インパルス化(J_n=-(1+e)m_eff v_n、Coulomb円錐、キール線接触、翼端反発係数廃止→`tip_restitution`)・応力尺度単一化(`paper_allowable_stress`のみ 2.2kPa)・慣性テンソル平行軸項復元・modelタグ2種(`rigid_body_6dof`/`reduced_surrogate`)・風符号1つ・Helmbold式1つ・失速後ブレンド非対称バグ修正・Polhamus `K_v`項偶関数・CuPy非互換2件・最適化器実行不能判定(`INFEASIBLE_SCORE` -1e12)修正。回帰: `test_paper_conformance_p0_p1.py`/`test_ga_physics_readiness.py`。
-## [Discord Bridge] (2026-10-19→2026-10-22, commit 9e4b24c→50f5330)
-- 2バックエンド化: `tools/bridge_backends.py` (Antigravity+Kilo Code)/`bridge_router.py`(429自動継続+フォールバック)/`bridge_quota.py`/`bridge_monitor.py`。Antigravity残量は `agy -p "/quota"` `/credits` で読取専用取得。Kilo Code CLIは `resolve_kilo_executable()` で版数依存解決。`kilo run --format json --auto` は NDJSON で `sessionID`/`cost/tokens`/実解決モデル返却。429検出・指数バックオフ・Kilo Code自動フォールバック実装済(回帰 `test_bridge_agents.py`)。正本 `docs/discord-bridge.md`、ルーティング `.agents/skills/discord-bridge-routing.md`。
-## [Paper Registry Pipeline] (2026-10-20, commit a578f08→b2cbfc4)
-- 学術論文2000件(5カテゴリ×400)を `search/` に構造化収録、Crossref+DataCite(arXiv 240件含む)、実在確認済み。選定「標題コア語+(コア語2以上or補完語2以上)」。検証 `search/validation_report.json` 2000/2000解決・構造エラー0。仕様 `docs/PAPER_REGISTRY_PIPELINE.md`。
-## [Origami Geometry] (2026-10-20)
-- 正本 `physics/origami_domain.py`。用紙非正方形→(u,v)法線3Dで折り目に直交せず実寸210×297mm再構築。折り目は現在位置軸回転(`T'=F∘T`)、groupスコープ分離。Z-Fighting排除: 面インデックス=平行投影重なりクラスタ最長路、≥1レイヤーピッチ(0.42mm)離隔。折れ目3次ベジエロール。A4斜辺45°でなく紙面角度で定義。テスト39件。crease交点特異点修正: 幾何学境界判定へ(`CREASE_DEGENERATE_ANGLE_RAD=1e-3`/`DENOM=1e-6`)、コミット `7639895`、回帰 `test_bezier_crease_no_spike_across_parameter_sweep`。
-## [Genetic-Project Phase & Branch Guard] (2026-10-20→2026-10-21)
-- `genetic-project` ブランチ隔離フェーズ、`master` 非汚染確認(`7c87b1b` 2026-10-19)。保護 `tools/branch_guard.py`、`PAPER_AIRCRAFT_BRANCH_GUARD=off|warn` 緩和可。CI検出時 `warn`、両WF明示。`smoke_test.py` 14ステージ。`flight_sim._local_aero` 削除済、6DoF空力は upstream `aero_domain` 単一、失敗時即 `RuntimeError`。固定刻み収束: 検証済み刻み 0.0025/0.00125/0.000625s で差分単調減少。最適化器最終候補は 6DoF 再検証(`revalidate_candidate_6dof`)。
-## [Shared Physics Kernel] (2026-10-20→2026-10-21)
-- `physics/aero_kernel.py`(係数・力・モーメント)と `stress_domain.peak_root_stress_pa` 統一、`aero_domain`/`parallel_engine` GPU経路も委譲。ScalarMath/NumPy/CuPy 2バックエンド同一式。カーネル並列ビット一致: 9856状態×8構成、最大相対差 0.0 (`pitching_nm` 5.875e-16)。NumPy 0-d配列経由で 6DoF 30倍遅延、`ScalarMath` 専用。GPU batch/6DoF 実測一致: `max_stress_pa` 比1.000、距離差≤1.4%、時間差≤0.4%。参照経路 `max_ld_ratio` 接地汚染修正済。GPU launch overhead 支配(Win/WDDM 100µs→GPU遅い、Linux CI 有利)。6DoFカオス性(λ≈33/s)→軌道ビット同一不可、発散前段量で厳密Parity。大気メモ履歴依存(1mm量子化)修正 `8a41586` で量子化撤去→warm/cold/並列ビット一致(rel 0.0)。後縁フォールド空力接続復元済。
-## [Wind Altitude Convention] (2026-10-21)
-- 風プロファイル高度規約1つ: **地表面からの高度**(`z_up=-z_ned`)でサンプル。6DoF/GPUバッチ同一規約必須。欠陥: バッチが `ground_level_m - z_ned` 世界原点基準で 35%不一致→`z_up=-z_ned`修正。回帰 `test_wind_height_parity.py` 3 passed(commit `8a41586`)。「バッチ実効AGL 502m」は真因でなく大気メモ履歴依存。
-## [Infeasible Status Forwarding] (2026-10-21)
-- 失敗評価を飛行偽装禁止: `parallel_engine.gpu_batch_evaluate_cases` CPUフォールバックが `error→timeout` `failed→crashed` リラベル。`optimizer_domain.is_infeasible_flight` は status文字列判定(`INFEASIBLE_STATUSES=("error","failed")`)。status無変換転送。回帰 `test_a_failed_evaluation_keeps_its_failure_status_in_the_batch_fallback`。
-## [Procedural Origami Genome] (2026-10-20→2026-10-21)
-- 遺伝子=折り操作シーケンス(`FoldStep`: crease_line/fold_angle_deg/symmetry/layer_order/target_face_ids)。3D空間で順次切断回転。世代0: `families` 24%合格、`free` ほぼ0%→アーキタイプ(dart/nakamura/sky_king)でシード。持ち手フィルタ: 中央帯|z|≤12mmをstation切り、≥2枚被さりでgrip。自己貫通=点含み判定のみ、層は `LAYER_PITCH` 分離。レシピ出力: steps/Markdown/SVG/step_meshes。遺伝子往復欠陥修正: `fold_type` 文字列 `"mountain"/"valley"` を `bool()` 評価で谷折り反転→明示解析で修正。回帰 `test_origami_genome_roundtrip.py`。
-## [GA Research Engine] (2026-10-21)
-- 正本 `physics/ga_domain.py`/`ga_cma.py`/`ga_config.py`(正規設定、PyYAML非依存)/`config/genetic_research.yaml`/`tools/run_ga_research.py`/`api/routes/ga_research.py`。目的関数分離(distance/airtime)、世界記録レジストリで正規化(距離88.318m/滞空29.2s=適合度1.0)。試行回数ハードコードなし、全て `ga_config.py` 宣言。ジャーナル1行1JSON。審査verdict=REJECT(P0 4件)→**全解消済み**(commit `d287af2`): ①重みなし積 ②来歴4キー保持 ③代理経路公開遮断 ④世代0全評価。回帰 `test_ga_engine.py` 51 passed。旧成果物 `artifacts/ga_audit/**` 不整合→再生成必要。
-## [Research Console] (2026-10-21)
-- 実装 `static/js/ga_research.js`/`ga-research.css`/`index.html`/`app/origami/api/state/viewport.js`。シミュ⇔GA切替、動的パラメータ表、3連動折りビューア(3Dスライダ⇔展開図SVG⇔手順カード)、CG/キールマーカー、世代チャート、島多様性、ライブジャーナル、チェックポイント保存/再開。G9-4修正: レシピMarkdown/SVG表示未実装→折り紙パネルに実装(`no-finish.md` §4.6 G9-4)。
-## [Front-End Console Integrity] (2026-10-22)
-- ESモジュールは module goal 解析必須(`node --check` script goal で `const` 重複見逃し)。`telemetry.js` `const scale` 2重宣言でアプリ全体無効化→`.mjs`複製 `node --check` 検知(`tools/check_js_modules.py`/`test_js_modules.py`)。JS死=DOM描画だが操作/計測一切動かず→`window.consoleApp` 有無で判定。`.console` grid列明示必須(暗黙列=最広行min-content→112px横溢れ)、`minmax(0,1fr)`で列縮め。トップレール3契約: ①`.toprail-readouts` 縮小不可 ②`.toprail-actions` `justify-content:safe flex-end` ③幅予算1280px下限。狭幅900px以下レール退避→常時可視トリガ `btn-rail-left/right` 設置。視認性下限: 文字9px未満禁、コントラストWCAG AA 4.5:1、塗り/文字色別トークン。静的ガード `tools/check_ui_css.py`/`tests/test_ui_css.py`。
-## [Remaining Work Ledger] (2026-10-20→2026-10-21)
-- 正本 `no-finish.md`(ルート): A=未解決/B=仕様是正/C=解決済限定(§C-1 12件)/D=次フェーズ繰延/E=マルチエージェントレビュー由来/F=あえて解決せず/§9=統合推奨順序。台帳行削除せず。D要点: H-11/H-19/M-30 いずれも論文根拠なし/trim未確定→据置き。未特定フレーク: `test_tunneling_ccd.py` 1件CPU競合下1回失敗。G9残存: G9-2/G9-5未解決、G9-1閾値推定値、G9-3/4解決済。検証ベースライン: `ruff/mypy/pytest` 全通過(1264 passed)。W13同期: §4.7-4.9 P0-1〜P0-9 全解消済更新、§C-1新設、§4.10制約R-1〜R-4新設(R-1=6DoFカオス性/R-2=KAPPA_SIGMA/G-17出典未取得/R-3=旧stress尺度再導入禁止/R-4=G-17仕様存在確認)。§7.1 P0-4〜P0-9 再判定→全件解消済(コミット付記)。
-## [Process Hygiene / 常駐プロセス回収] (2026-10-21)
-- 正本 `.agents/skills/process-hygiene.md`、実装 `tools/process_hygiene.py`。KEEP=K1セッション基盤/K2ホストMCP/K3明示指定、STOP=S1並列ワーカー/S2オーケストレータ/S3孤児MCP/S4残存実行物/S5孤児ブラウザ。4軸(所有/進行/冗長/接続)機械実測、理由に実測値付与。`--policy=in-use-stop|keep`。観測: 5世代MCPプール並存(≒500MB)、`kilo run --auto` ワーカー5本(≒700MB×5)、pytest/GA/app.py 計8本以上残存(≒11.7GB)。回収3巡: 1巡目 103プロセス/13.6GB停止、2巡目 79プロセス/11.5GB停止(進行中pytest含む)、最終 STOP=0/KEEP=19、空闲13.0→16.5GB。基準欠陥2件修正: ①MCPマーカー区切り正規化でPlaywright保護 ②`--keep-pid` 子孫保護追加。回帰 `test_process_hygiene.py` 16件。3巡目: 進捗ゼロMCPプール4本のみ停止(≒400MB)、KEEP=進行中pytest/app.py/chromium 9本/playwright MCP。`kilo mcp list` 5サーバー全件 connected。
-## [GA v2: 超大規模GA・マルチGPU DNS/FSI] (2026-10-21)
-- 正本 `physics/ga2/`(scaling/genome/stage0-3/lbm/archive/surrogate/vram/checkpoint/runner)、仕様 `docs/GA_V2_ARCHITECTURE.md`。物理コア共用、予算のみ変更(ScalingProfile 3ティア: small_long 1万個体/5M格子・workstation 3万/25M・cluster_20m 10万/1.5億、4-8 GPU=1 GPU 1個体タスク並列、MPI禁止)。CUDA Graph 3条件: ①H2D転送禁止 ②cuBLAS禁止(`xp.einsum`→要素wise化) ③`begin_capture(mode=2)`。1ステップ再生 eager比≈80倍。D3Q19重み w0=1/3・6軸=1/18・12稜=1/36。衝突→流れ順、固体移動バウンスバック、格子速度0.1。紙面座標→格子: 弦=流れ方向、三角形重心座標ラスタライズ。構造1曲げ+1ねじりモード。`stage0.py` `_segments_overlap()` 平行判定のみ→共線性検査追加で解消(commit `8a41586`)。`test_ga2_stages.py` 14 passed。残存: tear判定出典(`MAX_FOLDS_AT_ONE_SPOT`/`HOT_SPOT_RADIUS_M` 根拠)。
-## [Mojibake Repair / 文字化け] (2026-10-21)
-- 文字化け署名4種: ①U+FFFD ②漢字間Latin 'E'(CP932 trail 0x45残骸) ③CP932 trail側希少漢字 ④外部スクリプト断片(ハングル/キリル)。検出 `tools/check_mojibake.py`、回帰 `tests/test_no_mojibake.py` 除外0件。`physics/records_domain.py` 日本語93行ギネス原文から再記述済み。cp932往復再現許す変換追加せず。
-## [Console Control Unification] (2026-10-21)
-- 操作1箇所1個: 発射=`btn-top-launch`、再生/一時停止=`tp-play`、最初へ=`tp-reset`、100機一括=`btn-top-gpu-ensemble`。旧: 発射3/再生3(死んだボタン含)/リセット2/一括2。フローティングドック撤去。投げ方パラメータ正=左レール「投擲・発射設定」1箇所(`data-host="throw"`)。旧ドックスライダ二重書き込みで物理不伝達、`champ-btn-adopt` は `_clampLaunchParam()` でストア直書き。`data-host` 中身は `panels.js` 置換→外側静的マークアップのみ生存。旧 `btn-mode-calibrated/raw` 内側で消滅→容器入替で復帰。要素id重複解消: `release_pitch_deg`/`ga-objective` 重複0件。
-## [Orchestration Ops]
-- ①kilo CLI 実体パス版数依存(`kilocode.kilo-code-<ver>-win32-x64/bin/kilo.exe`)、ハードコード禁止、古パスで出力ゼロexit0誤判定。②中断試行の `kilo.exe` 子孤児生存(≒550MB×20=12.6GB)→親ラッパ回収。③レポートインクリメンタル書込、完了マーカー後書き。④台帳同期は「解消済み(コミット:<hash>)」形式、行削除せず、`no-finish.md` §10運用ルール。判定は file:line+再現コマンド+テスト結果 3点裏取り、`git log -S`/`git blame` でコミット特定。**偶然動作完了認定禁止**(AGENTS.md §1.2)。⑤台帳 `file:line` は監査時点ツリー行番号、削除済みコードは `git show <commit>:<path>` で実測。台帳内部相互参照も追従、現存しない行番号断定不使用。⑥台帳は §0.1正本(チェックリスト)と §7.xスナップショット二重存在、矛盾時はコード/テスト/`git log -S` で再判定(W13で解消)。ヘッダ書換で行番号ずれ→相互参照一括再採番。UI系は「静的一致合」: JS参照idとHTML宣言id差分数え(未宣言0件=死んだidなし)。
-## [Physics Enhancements & Calibration] (2026-11-02)
-- 単一実装集約 `physics/aero_kernel.py`: ①失速後残留揚力 `residual_cl` 追加、Hoerner平板から急落防ぎ C⁰/C¹ 連続性(`residual_cl=0`で従来値ビット一致) ②GPUバッチに 3x3慣性テンソル/Euler方程式 `ω̇=I⁻¹(M-ω×Iω)`/RK4風場サンプリング反映 ③準静的空力弾性に 1次遅れ `first_order_lag`(時定数 τ)適用、動圧急変振動抑制 ④薄板平板付加質量 `compute_added_mass`({add,z}=π/4 ρS c̄, {add,yy}=π/128 ρS c̄³)と無次元質量比 `compute_mass_ratio`(μ<5.0でwarning)単一関数化 ⑤Polhamus `K_v` 平面形から自動推定 `estimate_polhamus_kv` ⑥Mach/Re/迎角/質量比統合 `evaluate_model_validity` ⑦実機飛行データから Nelder-Mead RMSE 最小化同定 `tools/calibrate_flight_data.py` 配備。回帰 `test_physics_enhancements.py` 8 passed。
-## [Physics Approximations & Real-world Aerodynamics] (2026-11-02)
-- 非定常・LSB・付加質量・動的弾性・実験校正 5点確定: ①非定常循環遅れ Wagner/Beddoes-Leishman型 `unsteady_circulation_lag`(τ=k_circ·c/2V) ②動的空力弾性 粘弾性緩和時間 `aeroelastic_tau_s`+1次遅れ `first_order_lag`、受動構造減衰で無動力滑空 dE/dt≤0 ③LSBヒステリシス: 低Re(10³≤Re≤5×10⁴)層流剥離泡動的失速シフト `lsb_dynamic_stall_shift`、動的ピッチアップで失速角遅延/ピッチダウンで再付着遅延、∮C_L dα>0、定常で静的極線復元、`tanh(α̇/5)`平滑化 ④付加質量完全化: 法線{zz}=π/4 ρS c̄、ピッチング{yy,add}=π/128 ρS c̄³、ローリング{xx,add}=π/48 ρ b³ c̄ を `compute_added_mass` 集約、6DoF剛体回転方程式 `angular_acceleration_body` 完全結合、法線運動式 a_z=(F_z+m_dry g_z)/(m_dry+m_add,z) で重力二重加算排除 ⑤飛行データ校正: `tools/calibrate_flight_data.py` 実測軌道対 有界非線形最小二乗({D0,e, elevon,τ_struct,κ_lsb,k_circ})。回帰 `test_physics_enhancements.py` 12 passed。学術レジストリに Blevins-Newman(1979)/Wagner-Beddoes-Leishman(1925)/McCroskey-Leishman(1981) 登録。
-## [Multi-Fidelity Realistic Pipeline] (2026-11-02)
-- 中忠実度(2.00x実行コスト): 5ステーション・ストリップモデル、LSB動的失速ヒステリシス、3DoF薄板付加質量回転項(I_yy,add=π/128 ρS c̄³)、非線形動的減衰導入。代数式(1.02x)→物理的ストリップ積分拡張で実測2.00x(要求2-5倍内)達成。力学的エネルギー単調減少(dE/dt≤0)検証、接地前クランプ排除し真の鉛直変位で厳密計算。多忠実度パレート再評価: GA探索は中忠実度でパレート探索、最終候補のみ定常RANS/実験校正サロゲート(RK4 dt=0.005s)で再検証し `verified_pareto_front` 生成。CuPy CUDA Graph capture: stream capture中 cuBLAS setStream NotImplementedError→3x3慣性テンソル積に `xp.matmul` 使わず `_contract3`(要素wise積和)使用で完全保証。
-## [Aerodynamic Coefficient Model Audit & Physical Conformance] (2026-11-02)
-- Polhamus渦揚力反対称性: LEV吸出項 sin²α cosα が sgn(sinα)考慮せず負迎角で上向き揚力発生→`copysign(·,sinα)` で C_L(-α)=-C_L(α) 厳密保証。失速後CL天井クランプ整合性: 線形揚力が CL,max到達後失速角へ向かう際、ポスト失速基準値 `linear_at_stall` を `_clamp(linear_at_stall,-ceiling,ceiling)` とし双峰性排除。寄生抗力非負性ガード: `safe_cd0=xp.maximum(cd0,0.0)` 防御常設。モーメント基準点・無次元化整合性: 基準長MAC c̄、参照点AC 0.25c/CG cg、トルク=qScC_M+x_cg L、β=0時ロール・ヨー厳密ゼロ(~10⁻¹⁶ N·m)・数値微分有界性 `test_aero.py` 確認。
-## [Physical Consistency & Numerical Robustness Fixes] (2026-11-02)
-- 付加慣性・剛性・風軸直交性(#84,#85,#86): ヨー付加慣性 Izz,add=(π/128)ρh c⁴ 次元統一。対気相対速度方向差分摂動で風中ゼロ対地速度時も剛性推定。全3D流向・特異点で厳密右手正規直交系保持。ピッチ減衰・Re数外挿・失速後抗力(#76,#74,#73): cm_q主減衰項、cm_pitch_rate行列対角項規定、物理減衰方向保持。Re数外挿clamp解除しべき乗則連続外挿、model_valid/re_okフラグ通知。失速後抗力CD0/CDi二重計上廃止、smoothstep凸結合で平板極限CD=2.0収束。直交異方性・エラスティカ大たわみ(P-27,P-63): 繊維配向剛性比1.8反映、エラスティカ修正で半翼幅長L超えない物理的飽和。5点Boole積分とスパン方向モーメント(#75): 5ステーション y∈{0,±0.22b,±0.44b}(7:32:12:32:7/90)は有効翼半幅0.44b(全幅88%)区間等間隔Boole則、翼端特異点回避・翼端渦散逸意図、ロール減衰寄与理論比(0.88)²~77.4%安定減衰数理・テスト検証確定。Stage1適応刻み途中打ち切り防止(#78): `ga2/stage1.py` `_integrate` dt<dt_max適応縮小時ステップ枯渇誤timeout防止、ステップ数予算 `min(max_steps,nominal_steps*3)` 拡張し早期脱出連携完走保証。物理法則・保存則厳密化(2026-11-12): ①静止時(V=0)pushoverトルク0消衰し角運動量保存 ②Polhamus渦抗力地面効果二重低減排除 ③第一原理平板失速後ピッチングモーメント CM=-0.5sin(α)導入 ④Kirchhoff見かけの力・Munkモーメント符号整合で仕事率恒等ゼロ(F_app·v+M_app·ω≡0)数学的保証(`test_physics_first_principles.py`, Parity 0.0/1.077e-14)。抗力係数フロア・エネルギー保存則保証(P-AERO-06,2026-11-18): 後縁フォールド等トリム操舵面増分によるトータル C_D<0(負抗力・永動機的挙動)数理的完全遮断のため `MIN_DRAG_COEFFICIENT=0.0` 新設、`evaluate_coefficients`/`drag_coefficient` 合算値にフロア制約導入(`drag_scale==0`時厳密ゼロ維持)。回帰 `test_drag_coefficient_floor_non_negative` 検証確定。
-## [Added-Mass Passivity & Benchmark Audit] (2026-11-19)
-- Kirchhoff付加質量Munk連成受動的定式化(Issue #194): 従来外力項陽的代入でハミルトン構造破綻・人工的エネルギー成長→一般化質量系 M_total=diag(M+M_A,I+I_A) 内部連成項として角運動量方程式 `(I+I_A)ω̇=M_ext-ω×((I+I_A)ω)-v_rel×P_A` 解くことで内部Coriolis/Munk項仕事率 v·F_app+ω·M_munk≡0(厳密スキュー対称性・受動性)完全保証。CPU/GPUビット精度パリティ確立(`test_issue194_munk_coupling.py`/`test_added_mass_parity.py`)。外部ベンチマーク定量回帰テスト(Issue #178): Princeton Stengel PaperPlane.m 標準滑空条件(V₀=3.55m/s,γ₀=-0.18rad,h₀=2.0m,m=3g)で滑空比L/D≈3.0-7.0/沈下率/Phugoid周期理論解合致定量アサート。Pelletier&Mueller(2000)低Re風洞/NASA TN D-3767 Polhamus渦揚力理論値一致自動回帰(`test_external_benchmarks.py`)。架空コミットクローズ監査是正: Issue #194/#193/#195/#197/#178 未解決実態あぶり出し、GitHub再オープン後第一原理修正し正式クローズ完了。
-## [Modular Layered Architecture & Package Separation] (2026-11-20)
-- God Package `physics/` 5層責務分離: (1) `core/`(契約・スキーマ・数学基盤・規約) (2) `physics/`(純粋空力・大気・応力・6DoF運動方程式) (3) `geometry/`(折り紙・メッシュ・3D生成) (4) `optimization/`(GA・CMA-ES・MAP-Elites・自動調査) (5) `infrastructure/`(ジョブキュー・永続化・記録DB)。透過的スタブとアンスコ属性フォワーディング: 既存143テスト/ツール互換性維持、`physics/`内に `globals()[_k]=_v` re-exportスタブ配置、プライベート関数含む全属性アクセス互換性完全維持。milcyアルゴリズム正規統合・文献レジストリ移行: 旧v3非GA系列(20工程折り紙MCTS+3D MAP-Elites+Nelder-Meadトリム+多次元頑健性グリッド)を「milcyアルゴリズム」再定義、`milcy/`/`core.interfaces`/`geometry.milcy_origami`/`physics.benchmark`/`optimization.cli` 完全統合。`search/`(2000件論文データ)→`docs/research/` 体系的再配置。
-## [Physics Stability & CI Infrastructure] (2026-11-22)
-- 薄翼付加質量Munk連成とピッチ安定性(Issue #194,#211): 循環揚力/ピッチングモーメント持つ薄翼に非循環Kirchhoff Munkモーメント(-v_rel×P_A)外生付加で前縁吸込力モーメント相殺欠きピッチ発散誘発→Munk連成 `AircraftConfig.munk_coupling_enabled` 明示オプトイン化、既定では有効質量/対角慣性のみ受動的定式化(Issue #131)維持し中忠実度滑空比率(1.91x)と長期安定性両立。CPU/GPUビットパリティ維持。論文レジストリJSONL追跡とCIクラッシュ防止(Issue #213): `.gitignore` `*.jsonl`除外で脱落していた `docs/research/papers/**/*.jsonl`(40ファイル)追跡指定(`!docs/...`)、CI論文構造テスト15件全パス保証。`tools/run_ci_tests.py` `xdist`オプトイン化併せCI堅牢性確立。
-## [MILCY Convergence Audit (Iterations 1–4)] (2026-11-26)
-- 監査完了: Iterations 1–4 完了、6DoF物理/GPUバッチ/2.5D折り紙コンパイラ/アダプタ/MAP-Elites/A4&ビューアツール対象。偽造テスト44件でロック: `test_milcy_audit_falsification.py` 27件、`test_milcy_audit_iter2_falsification.py` 8件、`test_milcy_audit_iter3_falsification.py` 9件、`test_milcy_rigorous_audit.py` 10件、`test_milcy_loopholes_audit.py` 6件。ポリシードキュメント `docs/physics_assumptions.md` と `docs/wontfix.md` 追加。
-- Kilo CLI 委譲: ファイル編集非対話的に `kilo.exe run --model ... --pure --auto --format json -- ...` 実行(`resolve_kilo_executable()` が版数依存パス解決)。Kiloワーカー内で pytest 実行禁止。孤児 `kilo.exe` プロセス回収。
-- GPU `apparent_active` マスキング(`physics/gpu_dynamics.py`): 異種バッチで `munk_factor`(`apparent_active & munk_active`)、`a_body`、`acceleration`、`eff_inertia_mat`/`eff_inertia_inv` を `params.apparent_active` でマスクし、無効機体がアクティブ隣接から付加質量/Munk結合継承しないよう保証。
-- `Mock` `.pattern` ガード(`geometry/v3_origami/adapter.py`): `adjacent_panel_pairs(genome.pattern)` を `isinstance(getattr(getattr(genome,"pattern",None),"faces",None),(list,tuple))` でガードし、具象faceリストなし `unittest.mock.Mock` ゲノムが `detect_penetrations(genome.faces)` へクリーンフォールバック。
-- `--fmad=false` vs Eager 1-ULP許容(`physics/aero_kernel.py`): `_fma_contraction_disabled()` が CuPyコンパイラへ `--fmad=false` 渡し、`_values_match` が fused vs eager `_coefficient_core` を `rtol=1e-14, atol=1e-15`(1-ULP許容)で検証、ブールフィールド(`low_re_enabled`)をプローブチェックで保持。
-- gpu_dynamics._step_size 剛性パリティ(`physics/gpu_dynamics.py`): 風渡し時 `_step_size` が角速度・大気速度の有限差分剛性を RK4_STIFFNESS_SAFETY/stiffness でプローブし CPU FlightSimulator._stiffness_estimate と一致(`w_iter3_physics.py`で検証)。
-- `_GLOBAL_TRIM_CACHE` キー完全性(`physics/aero_domain.py`): `trim_alpha_from_elevon` cache_key に空力/幾何/環境全パラメータ(cLalpha_per_rad, polhamus_kp/kv, cd0, oswald_e, cl_max, stall_sharpness, ref_*, lift_scale, drag_scale 等)を含め古いキャッシュ衝突を防止。
+# Knowledge Base Index（常駐圧縮版 ≤80行 / 全文履歴: `.agents/archive/Knowledge_archive_2026.md`）
+<!--
+運用規約: 本ファイルは 80行以内を維持する。並列セッションは直接編集せず `.agents/knowledge.d/` へ出力し、
+統合ゲートで `tools/distill_agents_state.py` により蒸留する。過去の全詳細履歴は `.agents/archive/Knowledge_archive_2026.md` を grep 抽出すること。
+-->
+
+## 1. 物理・6DoF・空力の不変知見（P0 優先）
+- **座標系・風高度パリティ**: 風場(+z上)⇔NED(+z下)は $w_{NED}=-w_{wind}$。高度は `z_up=-z_ned` で 6DoF CPU 経路と GPU バッチ経路を統一。
+- **エネルギー非増加性**: 無風・無推力滑空時の $dE/dt \le 0$ 維持。接地クーロン摩擦の `dt` 依存性・地中貫通（`min_alt<-0.05`）・CCD 補間・翼端渦散逸上限を厳守。
+- **慣性・空力整合**: デルタ翼ロール慣性 $b^2/24$、$I_{xz}$ テンソルパリティ、Kirchhoff 付加質量/Munk 結合、キール二重減衰排除、失速後抗力ブレンド、ARゼロ除算防護。
+- **多忠実度構成**: 探索時は中忠実度（5ステーションストリップ＋LSBヒステリシス＋非線形減衰、コスト ~2.0x）、最終候補のみ高忠実度再評価。
+
+## 2. 折り紙幾何・milcy・最適化の不変知見
+- **2.5D逐次折り（`geometry/v3_origami/kernel_25d.py`）**: Sutherland-Hodgman クリッピング＋剛体鏡映＋逆アフィン行列で UV 展開図と 3D メッシュを整合。中心線突破・自己貫通・A4原紙面積超過を構造的に禁止。
+- **報酬ハッキング封鎖**: 墜落機スコア底上げ禁止、失敗評価の `timeout`/`crashed` リラベル禁止、パレート境界極値解（`math.inf`）保護、GA既定値は `physics/ga_config.py` に集約。
+- **Red-Teaming 反転監査**: LLM目視全件スキャンではなく、`milcy` 自身をバグファインダーとして回し5観点サニティ異常機体のみ隔離→悪役 JSON（`tests/adversarial_cases/`）＋最小失敗 `pytest` で根本修正。
+
+## 3. インフラ・CI・フロントエンド・並列運用の罠
+- **CI / 文字コード**: GitHub Actions の run は `shell: bash` 必須。Windows PowerShell の `Get/Set-Content` での UTF-8 破壊禁止（Python/UTF-8 明示で編集）。
+- **ブランチ保護**: `master` 上のローカル `pytest` は `tools/branch_guard.py` により停止する（作業は必ず `mission/*` ブランチ＋隔離 worktree）。CI では `PAPER_AIRCRAFT_BRANCH_GUARD=warn`。
+- **フロントエンド WebGL**: `static/js/viewport.js` の `dispose()`（テクスチャ再帰解放＋`forceContextLoss`）と `app.js` の二重バインド抑止（`_booted` / `_eventsBound`）を維持。
+- **429 / 並列安全**: 429 は失敗扱いにせず共有冷却（`rate_limit_guard.py`）＋バックオフ継続、不可時は Kilo 無料枠へフォールバック。`process_hygiene.py` はアクティブセッション台帳配下を保護。
+
+## 4. アーカイブ検索キーワード索引（`.agents/archive/Knowledge_archive_2026.md`）
+詳細経緯・コミットハッシュ・過去デバッグログが必要な時のみ以下キーワードで grep 抽出すること：
+- `Paper-Conformance Audit` / `Added-Mass Passivity` / `Aerodynamic Coefficient Model Audit` / `Physical Consistency`
+- `Origami Geometry` / `Procedural Origami Genome` / `MILCY Convergence Audit`
+- `GA Research Engine` / `GA v2` / `Infeasible Status Forwarding` / `Wind Altitude Convention`
+- `Discord Bridge` / `Process Hygiene` / `Mojibake Repair` / `Front-End Console Integrity` / `Branch Guard`
+- `Modular Layered Architecture` / `Physics Stability & CI Infrastructure` / `Paper Registry Pipeline`

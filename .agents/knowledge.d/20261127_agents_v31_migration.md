@@ -1,0 +1,1 @@
+- **v3.1 エージェント基盤刷新**: ルートAGENTS.md≤80行・階層3ドメインAGENTS.md≤30行・3層モデル体制・Red-Teaming反転監査・悪役ベンチマーク(`tests/adversarial_cases/`)・最低探索バジェット付きFREEZE_PASS・並列セッション隔離(`session_manager.py`/`gpu_lock.py`/`rate_limit_guard.py`/`process_hygiene.py`誤殺防止)を統合。
