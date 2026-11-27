@@ -55,6 +55,10 @@ from .config_schema import (
 
 __all__ = [
     "AeroParams",
+    "CoreAeroParams",
+    "CORE_AERO_FIELDS",
+    "INTERNAL_AERO_FIELDS",
+    "ABLATION_CANDIDATE_AERO_FIELDS",
     "ScalarMath",
     "RE_REFERENCE",
     "STALL_BLEND_ORDER",
@@ -1611,11 +1615,21 @@ class AeroParams:
     @classmethod
     def frozen_profile(cls, core: CoreAeroParams, **internal_overrides: Any) -> "AeroParams":
         """Build a v1-frozen AeroParams bundle with all 21 ablation-candidate fields disabled."""
+        invalid = set(internal_overrides) - set(INTERNAL_AERO_FIELDS)
+        if invalid:
+            raise ValueError(
+                f"frozen_profile only accepts INTERNAL_AERO_FIELDS overrides, got: {sorted(invalid)}"
+            )
         kwargs = {name: getattr(core, name) for name in CORE_AERO_FIELDS}
         kwargs.update(internal_overrides)
         kwargs.update(
             compressible=False,
             low_re_enabled=False,
+            low_re_cl_alpha_gain=0.0,
+            low_re_stall_gain=0.0,
+            low_re_cl_max_gain=0.0,
+            low_re_lsb_gain=0.0,
+            low_re_cd0_gain=0.0,
             cm_roll_rate=0.0,
             cm_yaw_rate=0.0,
             cl_pitch_rate=0.0,

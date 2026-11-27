@@ -1,9 +1,9 @@
 """Ablation check for AeroParams freeze profile (48 -> 14 core fields).
 
-Compares full AeroParams evaluation against AeroParams.frozen_profile() (where
-all 21 ablation-candidate C-group fields are disabled/zeroed) across a suite of
-representative paper-airplane configurations and verifies Spearman rank
-correlation and aerodynamic polar stability.
+Compares full AeroParams evaluation (including realistic non-zero C-group terms
+across multiple flight regimes: nominal glide, low-Re near-ground, and nonzero
+angular rates) against AeroParams.frozen_profile() where all 21 ablation
+candidates are explicitly disabled/zeroed.
 """
 
 from __future__ import annotations
@@ -48,43 +48,70 @@ def run_ablation() -> Dict[str, object]:
         ("wide_delta", CoreAeroParams(area=0.019, chord=0.13, span=0.15, aspect=1.18, oswald=0.75, cL0=0.04, cl_alpha=1.95, cl_max=0.92, stall_alpha_deg=16.0, cd0=0.023, cm0=0.015, cm_alpha=-0.15, cm_q=-1.5, elevon_deg=1.8)),
     ]
 
-    alpha_deg = 6.0
-    speed = 8.0
-    mach = speed / 340.3
-    reynolds = 5.0e4
+    # Realistic active C-group perturbations (compressible, low-Re, cross-coupling, ground cushion)
+    c_group_active = dict(
+        compressible=True,
+        low_re_enabled=True,
+        cm_roll_rate=0.02,
+        cm_yaw_rate=0.01,
+        cl_pitch_rate=0.02,
+        cl_yaw_rate=0.02,
+        cn_roll_rate=-0.02,
+        cn_pitch_rate=0.01,
+        polhamus_kv=0.3,
+        re_cd0_exponent=0.10,
+        ground_cushion_lift=0.05,
+        ground_pitch_coupling=0.02,
+    )
 
-    ld_full: List[float] = []
-    ld_frozen: List[float] = []
-    max_rel_diff = 0.0
+    ld_full_nom: List[float] = []
+    ld_frozen_nom: List[float] = []
+    ld_full_edge: List[float] = []
+    ld_frozen_edge: List[float] = []
+    cm_deltas: List[float] = []
 
-    for name, core in archetypes:
-        p_full = AeroParams.from_core(core, compressible=True)
+    for _, core in archetypes:
+        p_full = AeroParams.from_core(core, **c_group_active)
         p_frozen = AeroParams.frozen_profile(core)
 
+        # Regime 1: Nominal mid-flight glide
         c_full = evaluate_coefficients(
-            np, p_full, alpha_deg=alpha_deg, beta_deg=0.0, p_rate=0.0, q_rate=0.0, r_rate=0.0,
-            speed=speed, reynolds=reynolds, mach=mach, ground_height_m=1.5,
+            np, p_full, alpha_deg=6.0, beta_deg=0.0, p_rate=0.0, q_rate=0.0, r_rate=0.0,
+            speed=8.0, reynolds=5.0e4, mach=8.0 / 340.3, ground_height_m=1.5,
         )
         c_frozen = evaluate_coefficients(
-            np, p_frozen, alpha_deg=alpha_deg, beta_deg=0.0, p_rate=0.0, q_rate=0.0, r_rate=0.0,
-            speed=speed, reynolds=reynolds, mach=mach, ground_height_m=1.5,
+            np, p_frozen, alpha_deg=6.0, beta_deg=0.0, p_rate=0.0, q_rate=0.0, r_rate=0.0,
+            speed=8.0, reynolds=5.0e4, mach=8.0 / 340.3, ground_height_m=1.5,
         )
-        r_full = float(c_full["cl"]) / max(float(c_full["cd"]), 1e-9)
-        r_frozen = float(c_frozen["cl"]) / max(float(c_frozen["cd"]), 1e-9)
-        ld_full.append(r_full)
-        ld_frozen.append(r_frozen)
-        rel = abs(r_full - r_frozen) / max(abs(r_full), 1e-9)
-        max_rel_diff = max(max_rel_diff, rel)
+        ld_full_nom.append(float(c_full["cl"]) / max(float(c_full["cd"]), 1e-9))
+        ld_frozen_nom.append(float(c_frozen["cl"]) / max(float(c_frozen["cd"]), 1e-9))
 
-    rho = _spearman_rank_corr(ld_full, ld_frozen)
+        # Regime 2: Low-Re, near-ground, non-zero angular rates
+        e_full = evaluate_coefficients(
+            np, p_full, alpha_deg=10.0, beta_deg=2.0, p_rate=1.0, q_rate=1.0, r_rate=0.5,
+            speed=5.0, reynolds=1.5e4, mach=5.0 / 340.3, ground_height_m=0.10,
+        )
+        e_frozen = evaluate_coefficients(
+            np, p_frozen, alpha_deg=10.0, beta_deg=2.0, p_rate=1.0, q_rate=1.0, r_rate=0.5,
+            speed=5.0, reynolds=1.5e4, mach=5.0 / 340.3, ground_height_m=0.10,
+        )
+        ld_full_edge.append(float(e_full["cl"]) / max(float(e_full["cd"]), 1e-9))
+        ld_frozen_edge.append(float(e_frozen["cl"]) / max(float(e_frozen["cd"]), 1e-9))
+        cm_deltas.append(abs(float(e_full["cm"]) - float(e_frozen["cm"])))
+
+    rho_nom = _spearman_rank_corr(ld_full_nom, ld_frozen_nom)
+    rho_edge = _spearman_rank_corr(ld_full_edge, ld_frozen_edge)
+    max_rel_nom = max(abs(a - b) / max(abs(a), 1e-9) for a, b in zip(ld_full_nom, ld_frozen_nom))
     return {
         "core_count": len(CORE_AERO_FIELDS),
         "internal_count": len(INTERNAL_AERO_FIELDS),
         "ablation_count": len(ABLATION_CANDIDATE_AERO_FIELDS),
-        "spearman_rho": rho,
-        "max_ld_rel_diff": max_rel_diff,
-        "ld_full": ld_full,
-        "ld_frozen": ld_frozen,
+        "spearman_rho": rho_nom,
+        "spearman_rho_edge": rho_edge,
+        "max_ld_rel_diff": max_rel_nom,
+        "max_cm_abs_diff_edge": max(cm_deltas),
+        "ld_full": ld_full_nom,
+        "ld_frozen": ld_frozen_nom,
     }
 
 
@@ -95,6 +122,6 @@ if __name__ == "__main__":
         f"ablation={res['ablation_count']}"
     )
     print(
-        f"Spearman rank correlation (full vs frozen): {res['spearman_rho']:.6f}, "
-        f"max L/D rel diff: {res['max_ld_rel_diff']:.6e}"
+        f"Spearman rank corr: nominal={res['spearman_rho']:.4f}, edge={res['spearman_rho_edge']:.4f} | "
+        f"nominal max L/D rel diff={res['max_ld_rel_diff']:.4f}, edge max |dCm|={res['max_cm_abs_diff_edge']:.4f}"
     )

@@ -22,7 +22,6 @@ JA_DOCS = [
     "docs/PHYSICS_ROADMAP.md",
     "docs/api.md",
     "docs/development.md",
-    "docs/MILCY_PROJECT_GUIDE.md",
     "docs/CFD_ROADMAP.md",
     "docs/discord-bridge.md",
     "README.md",
