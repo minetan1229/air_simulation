@@ -60,7 +60,7 @@ class RobustnessEvaluator:
                 overall_robustness_score=0.0,
                 details={"error": "Missing geometry (fold failed)"},
             )
-            candidate.robustness = report
+            candidate.metadata["robustness_report"] = report.to_dict()
             return report
 
         # 折り紙ジオメトリ由来の完全な AircraftConfig を構築（CG/慣性欠落を解消）

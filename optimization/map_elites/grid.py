@@ -135,6 +135,7 @@ class MAPElitesGridArchive:
         bench = candidate.benchmark
         assert bench is not None
 
+        desc: Optional[BehaviorDescriptor]
         if candidate.geometry is not None:
             conservative_stability = min(
                 float(bench.low_speed.stability),
