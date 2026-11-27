@@ -521,6 +521,10 @@ def _after(iso: str, cutoff: str) -> bool:
     return a >= b
 
 
+def _norm_path(val: str) -> str:
+    return val.replace("\\", "/").rstrip("/").lower()
+
+
 def classify(
     procs: list[Proc],
     live: set[int],
@@ -528,14 +532,40 @@ def classify(
     keep_since: str | None,
     evidence: dict[int, Evidence] | None = None,
     policy: str = POLICY_IN_USE_STOP,
+    active_sessions: list[dict] | None = None,
+    session_scope: str | None = None,
 ) -> list[Verdict]:
     by_pid = {p.pid: p for p in procs}
     decided: dict[int, tuple[str, str]] = {}
 
+    # アクティブセッション保護（他セッションのPID・子孫・worktree配下を誤殺防止）
+    session_keep_pids: set[int] = set()
+    session_keep_worktrees: list[tuple[str, str]] = []
+    target_scope_worktree = ""
+    for sess in active_sessions or []:
+        sid = str(sess.get("session_id", ""))
+        wt = _norm_path(str(sess.get("worktree_path", "")))
+        if session_scope and sid == session_scope:
+            target_scope_worktree = wt
+            continue
+        spid = int(sess.get("pid", 0) or 0)
+        if spid > 0:
+            session_keep_pids.add(spid)
+        if wt:
+            session_keep_worktrees.append((sid, wt))
+
     # 第1段: 基盤・ワーカー・オーケストレータ（所有関係の根）
     for p in procs:
+        norm_cmd = _norm_path(p.cmd)
+        matched_wt = next((sid for sid, wt in session_keep_worktrees if wt in norm_cmd), None)
         if p.pid in keep_pids:
             decided[p.pid] = ("KEEP", "K3 明示指定 (--keep-pid)")
+        elif p.pid in session_keep_pids:
+            decided[p.pid] = ("KEEP", "K3 アクティブセッション保護 (PID)")
+        elif matched_wt is not None:
+            decided[p.pid] = ("KEEP", f"K3 アクティブセッション保護 (worktree={matched_wt})")
+        elif session_scope and target_scope_worktree and target_scope_worktree not in norm_cmd:
+            decided[p.pid] = ("OUT", f"対象外 (--session={session_scope} スコープ外)")
         elif p.is_host:
             owner = by_pid.get(p.ppid)
             if owner is not None and (owner.is_task or owner.is_orchestrator):
@@ -547,22 +577,24 @@ def classify(
         elif p.is_orchestrator:
             decided[p.pid] = ("STOP", "S2 オーケストレータ/監視スクリプト")
 
-    # 第1.5段: K3 明示指定は子孫にも継承する（ラッパー指定で子孫まで保護する）
-    if keep_pids:
+    # 第1.5段: K3 明示指定およびアクティブセッションPIDは子孫にも継承する
+    all_keep_roots = set(keep_pids) | session_keep_pids
+    if all_keep_roots:
         children: dict[int, list[int]] = {}
         for p in procs:
             children.setdefault(p.ppid, []).append(p.pid)
-        stack = [pid for pid in keep_pids]
-        seen: set[int] = set(stack)
+        stack = [(pid, pid in session_keep_pids) for pid in all_keep_roots]
+        seen: set[int] = set(all_keep_roots)
         while stack:
-            pid = stack.pop()
+            pid, is_sess = stack.pop()
             for child in children.get(pid, []):
                 if child in seen:
                     continue
                 seen.add(child)
-                stack.append(child)
+                stack.append((child, is_sess))
                 if child not in decided:
-                    decided[child] = ("KEEP", "K3 明示指定 (子孫)")
+                    reason = "K3 アクティブセッション保護 (子孫)" if is_sess else "K3 明示指定 (子孫)"
+                    decided[child] = ("KEEP", reason)
 
     # 第2段: MCP ツールプール（所有者の判定を継承）
     def resolve_mcp(proc: Proc, depth: int = 0) -> tuple[str, str]:
@@ -783,6 +815,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--apply", action="store_true", help="STOP 判定されたプロセスを停止する")
     parser.add_argument("--keep-pid", type=int, action="append", default=[], help="使用中として保護するPID")
     parser.add_argument("--keep-since", default="", help="この時刻以降に起動したプロセスを保護する (ISO8601)")
+    parser.add_argument("--session", default="", help="指定セッションのworktree配下のみを回収対象に限定する")
     parser.add_argument(
         "--policy",
         choices=POLICIES,
@@ -800,6 +833,13 @@ def main(argv: list[str] | None = None) -> int:
 
     procs, live = collect(set(args.keep_pid), args.keep_since or None)
     evidence = collect_evidence(procs, window_s=max(0.0, args.progress_window))
+    try:
+        from tools.session_manager import load_active_sessions
+
+        active_sessions = load_active_sessions(alive_only=True)
+    except Exception:
+        active_sessions = []
+
     verdicts = classify(
         procs,
         live,
@@ -807,6 +847,8 @@ def main(argv: list[str] | None = None) -> int:
         args.keep_since or None,
         evidence=evidence,
         policy=args.policy,
+        active_sessions=active_sessions,
+        session_scope=args.session or None,
     )
 
     usage = _working_set_mb([v.proc.pid for v in verdicts])
