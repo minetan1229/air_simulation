@@ -1,103 +1,50 @@
-# Agent Core Protocol（常駐コア + 参照索引）
-
-> **リポジトリ責務分離（2026-11-27）**: MILCY（折り紙形態創発・MAP-Elites）は [`minetan1229/Milcy-algorithm`](https://github.com/minetan1229/Milcy-algorithm) へ分離済みです。本リポジトリの 6DoF 物理（`physics/aero_kernel.py`）は `v1-frozen`（`docs/PHYSICS_FREEZE.md`）として凍結し、保存則違反・最適化チート・Sim-to-Real 反証以外の経験式追加を禁止します。
-
+# AGENTS.md — air_simulation（v3.1: 3層並列ループ × Red-Teaming監査 × Freeze収束）
 <!--
-正本: 本規約=常駐最小 / .agents/Knowledge.md=過去知見 / .agents/Project.md=現在地・LoopState / .agents/skills/*=定型手順 / docs/SPECIFICATION.md=詳細仕様
-常駐は本ファイルのみ。詳細・手順・過去知見は .agents/ から遅延オンデマンド参照（全文読込禁止）。
+根拠: 肥大・概要記載は推論コスト+20%超 (arXiv:2602.11988) / 簡潔なコマンド・DoDは実行時間-28.6% (arXiv:2601.20404) /
+タスク適合ルーティング＋中央検証がエラー伝播を抑止 (arXiv:2512.08296) / 最低探索バジェット付きFreeze宣言とRed-Teaming反転でP0収束。80行以内厳守。
 -->
 
-## 0. 参照マップ（.agents 連携ハブ）
-| 目的 | 参照先（正本） | 読み方・連携トリガー |
-|---|---|---|
-| 現在地・ゴール・Loop State | `.agents/Project.md` | §1〜§3（毎ループPhase 1で確認・Phase 5で更新） |
-| 過去知見・既知不具合・回避策 | `.agents/Knowledge.md` | キーワードgrep抽出（全文読込禁止・確定事実追記） |
-| 段階的検証 & CI/CD 手順 | `.agents/skills/verify-and-test.md` | Phase 4, 6 実行時（テスト順序・Git・CI確認） |
-| Discord Webhook 通知 | `.agents/skills/notify-webhook.md` | フェーズ開始/完了/警告時（カラー・レポート連携） |
-| サブエージェント役割分担 | `.agents/skills/subagent-delegation.md` | 並列作業・委譲時（Tier分離・担当境界表） |
-| Discord×Agent ルーティング | `.agents/skills/discord-bridge-routing.md` | 429継続・フォールバック・監視報告の正本 |
-| 常駐プロセスの使用中判定と回収 | `.agents/skills/process-hygiene.md` | メモリ圧迫・残存タスク確認時（`tools/process_hygiene.py`） |
-| コンテキスト圧縮・状態引き継ぎ | `.agents/skills/loop-handover.md` | コンテキスト肥大・セッション終了時 |
-| 詳細物理・API・アーキテクチャ | `docs/SPECIFICATION.md` | 実装・設計変更時（該当章のみ抽出） |
-| ツール・タスク別スキル / MCP | `skill/README.md` / `.kilo/kilo.jsonc` | 該当スキル利用時 / MCP利用時 |
+## 1. タスクルーティング & 3層エージェント体制
+- **単体実行（逐次・小規模・強依存）**: 1〜2ファイル修正や逐次デバッグは Main 単体で最小変更・検証（過剰協調を回避）。
+- **会社組織型並列（分解可能・マルチドメイン）**: 下表3層で実行し、全成果物を中央ゲート（Main + Watchdog）で検証。
 
----
+| 階層・役職 | モデル / Effort | 主責務（DoD指向） | 禁止事項 |
+|---|---|---|---|
+| **Tier 1: Main（経営・PM）** | Antigravity `gemini-4-hydrogen` (`medium`) | 全体Plan・方針・排他境界指示・中央検証・単一コミッター・Freeze判定 | 分解済みタスクの微細実装介入 |
+| **Tier 2: `team-lead`（現場）** | Subagent `gemini-4-hydrogen` (`low`) | WBS分解・タスク別Plan/方針/根本修正・単体セルフチェック | 境界外編集・共有状態ファイル直編集 |
+| **Tier 2-QA: `qa-watchdog`** | Subagent `gemini-4-hydrogen` (`low`) | 必須1枠。差分監査・P0抜け穴/報酬ハッキング検知・`FREEZE_PASS`判定 | 実務コード実装・根拠なきP2掘り起こし |
+| **Tier 3: `principal-advisor`** | `claude-opus-4-6-thinking` / `gemini-4-hydrogen` (`xhigh`) | 2回連続失敗・隔離機体の物理原因特定・横断設計判断のみ回答（読取専用） | 定型作業・直接編集への消費 |
+| **Fallback** | Kilo Code CLI（無料モデル） | 429継続失敗・障害時の業務継続 | 監査スキップでの無条件採用 |
 
-## 1. Core Protocol（自律ループ連携）
-- **1.1 コンテキスト最小化**: 常駐は本ファイルのみ。`.agents/` 配下は必要時のみ部分抽出。ログ/ソースの全文出力禁止。`memory` MCPは検索索引（長文二重保管禁止）。
-- **1.2 テキサスの狙撃兵の誤謬排除**: 事前に仮説と反証可能な合否基準を明文化。後付け変更や偶然動作での完了認定を禁止。不一致時は仮説棄却・因果特定。値は物理的な値を使用し、意図的に調整された値（報酬ハッキング用の据置き定数）にしない。
-- **1.4 規約統治**: ユーザー明示指示・監査合意なき本ファイル改変禁止。仕様は `docs/SPECIFICATION.md`、知見は `.agents/Knowledge.md` に集約。
-- **1.5 エージェント体制（上限完全撤廃・無制限並列）**:
-  1. サブエージェントの生成数・同時実行数の上限を**完全に撤廃（無制限化）**する。基本編成（Watchdog、物理、折り紙、探索、トリム/評価、CLI/テスト等）および必要に応じた動的増設を無制限に許可する。
-  2. 必須1枠として**監視（Watchdog/Monitor）エージェント**を常時配置し、システム稼働状態、コード差分監査、GA失態防止を専任で担当する。
-  3. 各サブエージェントが配下に起動する **`kilocode` CLI ワーカー（モデル: `Nemotron 3 Ultra high`）の同時起動台数・生成数についても上限を完全に撤廃（無制限並列実行を許可）**する。
-- **1.6 Discord×Agent ルーティング**: 主エージェントは Antigravity。APIエラー・タイムアウト・残りレート0・429の継続失敗のいずれかで**Kilo Code（既定無料モデル）へ自動フォールバック**し、処理を中断しない。429はバックオフ後に`continue`で自動継続する。監視エージェントが切替を報告する（正本: `.agents/skills/discord-bridge-routing.md`）。
+## 2. クローズド・ループ & Red-Teaming 監査規約
+1. **Sync & Plan**: `git fetch origin` → 隔離 worktree（`tools/session_manager.py start` / `workspace: branch`）で `mission/<slug>[-<issue>]` 作成 → 仮説・DoD・**やらないこと（許容近似）**を明文化。
+2. **Red-Teaming 反転監査（目視全件スキャン禁止）**: コード全件をLLM目視監査せず、3層ベンチマーク＋`milcy` をバグファインダーとして回し、**5観点サニティ（エネルギー生成・面積超過・CPU/GPU乖離・微擾乱崩壊・幾何破綻）**に引っかかった上位異常機体のみ隔離・解剖する。
+3. **Evidence-First & 根本修正**: 全 P0/P1 指摘は必ず**最小失敗 `pytest` または悪役機体 JSON（`tests/adversarial_cases/`）**とセットで資産化。対症療法ペナルティ（怪しい形状の報酬削減）を禁止し、根本の物理式・制約を修正する。
+4. **Escalate (2-Strike) & Freeze 収束**: 2回連続失敗・物理数理疑義は `tools/ask_advisor.py` で Tier 3 顧問へ相談。Watchdog は **「最低 Red-Teaming 探索バジェット消化＋既存 `tests/adversarial_cases/` 全 PASS＋新規 P0/P1 0件」** をすべて満たした場合のみ `VERDICT: FREEZE_PASS` を宣言してループ終了（早期 Freeze 禁止・P2 無限深掘り禁止）。
+5. **Distill & Serial Integrate**: 進行中は `.agents/sessions/`・`.agents/knowledge.d/` へ分離出力（共有ファイル直編集禁止）。`master` マージは PR/CI 通過後、直列統合ゲートで `tools/distill_agents_state.py` 実行後に実施。
 
----
+## 3. P0 vs P2 優先度定義・非標準ガードレール
+- **P0（最優先封鎖）vs P2（凍結）**: **P0**＝最適化器が悪用できる抜け穴（エネルギー生成・面積超過・CPU/GPU乖離・微擾乱崩壊・幾何自己貫通・評価リラベル）。**P2**＝現行準定常モデルの許容近似範囲内の精度差（フルCFD/FSIとの微差等）は Non-Goal として現行ループで掘らない。
+- **厳格完了・実装安全**: 事前仮説なき変更・現状挙動アサートのみのテスト完了・制約追記のみクローズ・未解決Issueへの重複クローズ・`TODO`/`...`/空関数・無許可削除・`master`直作業を禁止。
+- **並列・環境・物理トラップ**: 横断コア（`core/`, `app.py`, `AGENTS.md`）同時1セッション制限。GPU は `tools/gpu_lock.py` 経由、テスト一時領域は `session_manager.py pytest`（OS自動適合）で分離、Flask は動的ポート（`PORT=0`）。CI は `shell: bash` 必須。風場(+z上)⇔NED(+z下)は $w_{NED}=-w_{wind}$・高度 `z_up=-z_ned` 統一。429 は共有冷却（`rate_limit_guard.py`）＋バックオフ継続。
 
-## 2. Guardrails（常駐制約）
-- **Strict Rules**: ユーザー明示許可なきファイル削除禁止。事前仮説・合否基準なしの変更/実行禁止。偶然動作での完了禁止。ファイル/ログの全文読込・出力禁止。
-- **Plan & Todo 先行の原則（必須）**: いかなる作業・コード変更・調査・検証も、着手前に**必ず Plan（方針・全体像）と Todo リスト（細分化された具体的タスク）を策定・明示してから実行**すること。Todo を経ない即興的な変更や手順飛ばしを禁止する。
-- **Issue 完了・クローズ厳格条件（形式的完了・未解決クローズの厳禁）**:
-  1. *テスト追加のみでの完了禁止*: 物理モデル・数値アルゴリズムの未実装や欠陥に対し、現状挙動をアサートするテストを追加しただけで Issue を完了（Completed）にしてはならない。
-  2. *ドキュメント明記のみでの完了禁止*: 「制約として仕様書・レポートに追記した」「未実装であることを明記した」ことのみを理由に Issue をクローズしてはならない（制約の明記は「現状記録」であり「問題の解決」ではない）。
-  3. *未着手課題への重複集約禁止*: 統合先・重複先とされる Issue が未解決・未着手（Open）の場合、課題を未着手のまま閉じるのではなく、統合先 Issue との親子関係（sub-issue/blocked-by）を明示するか、実質的解決がマージされるまでクローズしてはならない。
-  4. *クローズ合否照合*: Issue 本文に記載された「完了条件」「調査・対応」の全項目が物理的・工学的に満たされ、独立参照解または実測値との比較が成立していること。
-- **Governance**:
-  - *Zero-Placeholder*: `TODO`・`...`・空関数等の省略完全禁止。実動コードのみ記述。
-  - *Single Committer*: サブエージェント委譲時もリポジトリ変更・コミットは親に一元化（`.agents/skills/subagent-delegation.md`）。
-  - *Subagent Cap*: 上限完全撤廃（サブエージェント無制限、配下の kilocode CLI Nemotron 3 Ultra high ワーカー無制限並列実行許可）。ただし監視（Watchdog）エージェント1枠は常時必須。
-  - *Branch Governance*: `genetic-project` 開発フェーズ完了により成果物を `master` へ統合。`master` を単一正本運用ブランチとし、ローカル・CI双方で `PAPER_AIRCRAFT_BRANCH_GUARD=warn|off` により保護を解除・運用する。
-  - *Mission Branch & Sync Mandatory*: **すべての開発・ミッション着手前に必ず GitHub リモート最新を取得（`git fetch origin` / ベースの同期）し、専用ブランチを作成してその上で取り組むこと**。着手時に `mission/<slug>`（Issue番号がある場合は `mission/<slug>-<issue番号>`）を切り替え、ブランチ作成なしの作業・直接コミットを禁止。ミッション完了時のみ master へマージする。
-  - *Git & Discord*: ブランチ運用、フェーズ毎通知（`.agents/skills/notify-webhook.md`）。
-- **Critical Traps（詳細・回避策は `.agents/Knowledge.md` 参照）**:
-  - *CI Runner / 文字コード*: Actions の run は `defaults: run: shell: bash` 必須。PowerShell の `Get/Set-Content` でのUTF-8破壊禁止（Python/専用ツールで編集）。
-  - *座標系・風高度・境界接地*: 風場(+z上向き)⇔世界NED(+z下向き)の符号変換（$w_{NED}=-w_{wind}$）。風は地表面からの高度（`z_up=-z_ned`）でサンプル（6DoF参照経路とGPUバッチ経路は同一規約）。水平100km制限・地中即死(`min_alt<-0.05`)・CCD補間・翼端散逸上限。
-  - *評価status / GA既定値*: 失敗した評価を`timeout`/`crashed`等へ**リラベル**しない（パレート前線・incumbentへの混入＝報酬ハッキング経路）。試行回数・目的関数の既定値は`physics/ga_config.py`へ集約し、探索ロジックにハードコードしない。
-  - *429 / フォールバック*: レート制限を失敗扱いせず、バックオフ＋`continue`で自動継続。Antigravity不可時はKilo Code(無料)へ自動切替し、監視エージェントが報告する（正本: `.agents/skills/discord-bridge-routing.md`）。
-  - *既知の物理乖離*: `PHYSICS_PAPER_CONFORMANCE_AUDIT.md` §0.0（P0〜P3は完了）と `no-finish.md` が正本。
+## 4. 検証・運用コマンド（Windows / Linux 両対応）
+```bash
+python tools/session_manager.py start --slug <name> [--issue <num>]       # 隔離worktree開始
+python tools/session_manager.py pytest -- tests -q                        # OS適合basetemp分離pytest
+python tools/ask_advisor.py --model opus4.6 --topic "<slug>" --question "<質問>"
+python tools/check_agents_hygiene.py && ruff check . && python -m compileall physics api tools app.py
+python tools/redteam_sanity_screen.py --input-dir output/v3 --min-budget 20       # 5観点サニティ&Freeze判定
+python tools/company_loop.py --goal "<目標>" --dry-run                            # 閉ループ状態機械(--liveで実稼働)
+python tools/gpu_lock.py --timeout 600 -- python scripts/smoke_test.py
+```
 
----
-
-## 3. Autonomous Execution Loop (自律実行ループ)
-1. *Plan & Todo (Observe)*: **GitHub最新状態の同期（必須）**。着手直前に `git fetch origin`（必要に応じてベースブランチの最新差分を pull/rebase）を行い、未解決 Issue/PR の最新現況（`python tools/check_issues.py` / `python tools/check_runs.py`）を照合する。その上で現状分析と課題・ゴールを整理し、**必ず Plan（方針・全体像）と Todo リスト（細分化された具体的タスク）を策定・明示**する。`.agents/Project.md` の Loop State 確認。残タスク無ければPhase 6へ。あれば最小サブタスク定義。
-2. *Hypothesize*: 事前仮説・合否基準を宣言。
-3. *Execute*: Todo に従って最小変更・検証を1つずつ実行（不可逆操作は先行記録、単一コミッター原則）。進捗に応じて Todo を消化・更新。
-4. *Verify*: 合否照合（`.agents/skills/verify-and-test.md`）。不一致時はロールバックしPhase 2へ（上限3回）。
-5. *Distill & Loop*: 確定事実は `.agents/Knowledge.md`、現在地は `.agents/Project.md` へ記録。残りの Todo を見直し、肥大時は `.agents/skills/loop-handover.md` 実行。
-6. *Finalize & Terminate*: Todo 完遂確認 → ローカル全通過 → master へマージ&push → CI完了確認 → Issue確認クローズ後HALT。
-
-## 3.1 Proactive Improvement Proposal (積極的提案ルール)
-- 現行の係数ベース準定常モデルの枠内で、数値安定性・一貫性の修正を優先しつつ、LSBヒステリシスの簡易追加・付加質量の回転項・動的減衰の強化・実験校正の導入など、現実の紙飛行機挙動に近づけるための改善案を積極的に提案せよ。
-- 大きなアーキテクチャ変更（フルCFD・フルFSI・非定常RANSなど）は計算コストを明示した上で「オプション」として提案し、ユーザーが選択できるようにせよ。
-- 「より現実に近づける」「最高の現実的構成」などの観点で、多忠実度アプローチ（最適化は現行モデル、最終確認のみ高忠実度）を標準的な提案候補として含めよ。
-
----
-
-## 4. コマンド早見（常駐）
-| 目的 | コマンド / 手順正本 |
+## 5. 段階的開示マップ（Progressive Disclosure — 必要時のみ読込）
+| 必要なタイミング | 正本パス |
 |---|---|
-| 構文 / 静的解析・型 | `python -m compileall physics api tools app.py scripts/smoke_test.py` / `ruff check .` / `mypy physics api app.py scripts/smoke_test.py` |
-| 単体・監査 / E2E | `python -m pytest tests -q` / `python scripts/smoke_test.py`（詳細: `.agents/skills/verify-and-test.md`） |
-| Discord通知 | `python tools/notify_discord.py <status> "<title>" "<summary>"`（詳細: `.agents/skills/notify-webhook.md`） |
-| Discordブリッジ / クォータ / 監視 | `python tools/discord_bridge.py` / 応答チャンネル `!quota` `!monitor` `!backend` `!model`（正本: `.agents/skills/discord-bridge-routing.md`） |
-| MCP確認 / 呼出 | `python tools/verify_mcp_servers.py` / `python tools/mcp_call.py <server> <tool> --arg k=v` |
-| CI点検 / Issue | `python tools/check_runs.py` / `python tools/check_issues.py` / `close_resolved_issue.py` |
-| 常駐プロセス回収 / UI検証 | `python tools/process_hygiene.py --list` / `--apply`（判定基準: `.agents/skills/process-hygiene.md`）/ `python tools/capture_ui.py`（実ブラウザはplaywright MCP） |
-
----
-
-## 5. 正本維持規約（.agents 同期ルール）
-- **配置**: 過去確定事実→`.agents/Knowledge.md` / 現在地・進捗→`.agents/Project.md` / 定型手順→`.agents/skills/` / 詳細仕様→`docs/SPECIFICATION.md`。
-- **行数上限**: 本ファイル 100行目安 / `Knowledge.md` 80行以内 / `Project.md` 40行以内。`.agents/` や `docs/` に正本がある内容（手順・役割分担表・詳細知見・物理定数・ルーティング規則）は本ファイルに直書きせず、参照リンクに留める。
-
----
-
-## 6. MCP 使い分け（基盤: `.kilo/kilo.jsonc`）
-1. `context7`: ライブラリ/外部API実装前の最新一次仕様取得。 2. `sequential-thinking`: 6DoF数値破綻・接地散逸・姿勢発散等の多段推論。 3. `fetch`: 論文・外部技術Markdown取得（内部IP遮断/robots.txt準拠）。 4. `memory`: セッション跨ぎ知識の検索索引（正本は `.agents/Knowledge.md`、長文二重保管禁止）。 5. `playwright`: UI/Three.jsの実ブラウザ描画・コンソールエラー検証。
-※定型処理（ファイル編集、pytest等）にMCPを浪費しないこと。失敗時は `tools/verify_mcp_servers.py`。
-
----
-
-## 8. 物理調査・高忠実度化プロトコル
-9. 物理関連の調査時は、現行モデルの改善余地と現実的な高忠実度化オプション（コスト付き）を積極的に調査・提案せよ。
+| 役職別サブエージェント | `.agents/agents/{team-lead,qa-watchdog,principal-advisor}.md` |
+| Red-Teaming監査 / 委譲 / 顧問相談 | `.agents/skills/{redteam-audit-loop,subagent-delegation,escalation-advisor}/SKILL.md` |
+| 検証 / 回収 / 引継 / 通知 | `.agents/skills/{verify-and-test,process-hygiene,loop-handover,notify-webhook,discord-bridge-routing}/SKILL.md` |
+| 階層ドメイン規約（自動読込） | `physics/AGENTS.md` / `geometry/AGENTS.md` / `optimization/AGENTS.md` |
+| 閉ループワークフロー / テレメトリ | `.agents/workflows/company_loop_workflow.py` / `.agents/telemetry/loop_history.jsonl` |
+| 悪役資産 / 状態 / 知見 / 仕様 | `tests/adversarial_cases/` / `.agents/sessions/` / `.agents/Knowledge.md`(grepのみ) / `docs/SPECIFICATION.md` |

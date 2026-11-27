@@ -23,6 +23,9 @@ from typing import Any, Dict, List, Optional, Tuple
 WORKSPACE_DIR = Path(__file__).resolve().parent.parent
 
 ANTIGRAVITY_MODELS: Dict[str, str] = {
+    "gemini-4-hydrogen-low": "Gemini 4 Hydrogen (Low - Subagent / Fast)",
+    "gemini-4-hydrogen-medium": "Gemini 4 Hydrogen (Medium - Main PM)",
+    "gemini-4-hydrogen-xhigh": "Gemini 4 Hydrogen (XHigh - Principal Advisor)",
     "gemini-3.8-flash-low": "Gemini 3.8 Flash (Low - High Speed)",
     "gemini-3.8-flash-medium": "Gemini 3.8 Flash (Medium)",
     "gemini-3.8-flash-high": "Gemini 3.8 Flash (High)",

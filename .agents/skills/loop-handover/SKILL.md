@@ -5,14 +5,11 @@ description: 会話コンテキストが長くなった時、セッションの�
 
 # Skill: Loop Handover (コンテキスト圧縮・状態引き継ぎ)
 
-## Trigger (読み込み条件)
-- チャット履歴（コンテキスト）が長くなった時、またはユーザーからセッション引き継ぎ・コンテキスト圧縮の指示があった時。
-
-## Procedure (最小手順)
-1. 確定した知見は `.agents/Knowledge.md` へ1〜2行で簡潔に蒸留・追記する。
-2. `.agents/Project.md` の `Loop State`（完了タスク、棄却された仮説、次のアクション）を更新する。
-3. ユーザーに「蒸留完了。新セッションで『AGENTS.mdに従いループ再開せよ』と指示願います」と提示して終了する。
-
-## Verification Criteria (事前合否基準)
-- **成功**: 新セッションで `AGENTS.md`、`.agents/context.md`、`.agents/Project.md` を読むだけで文脈損失なく再開できること。
-- **失敗**: 未記録の前提条件や検証中仮説がチャット履歴内に取り残されていること。
+## Procedure
+1. **知見の分離出力**: 確定した事実・回避策・顧問（Opus 4.6 / Hydrogen XHigh）の設計判断を `.agents/knowledge.d/<YYYYMMDD>_<session_id>.md` へ簡潔に出力する（`.agents/Knowledge.md` は直編集せず統合ゲートで `tools/distill_agents_state.py` により蒸留）。
+2. **セッション状態の更新**: `.agents/sessions/<session_id>.md` に以下を記録する：
+   - 現在の Phase・ブランチ・worktree パス
+   - 完了済み／未完了 WBS タスクと Non-Goals（P2凍結範囲）
+   - 棄却された仮説・顧問相談ログ（`.agents/consultations/<file>.md`）
+   - 登録済み悪役ケース（`tests/adversarial_cases/`）と次のアクション
+3. **引き継ぎ宣言**: ユーザーに「状態保存完了。新セッション（Hydrogen Medium）で『AGENTS.md に従いセッション `<session_id>` を再開せよ』と指示願います」と提示して終了する。
