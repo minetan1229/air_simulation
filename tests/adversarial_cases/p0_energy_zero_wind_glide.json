@@ -1,0 +1,14 @@
+{
+  "case_id": "p0_energy_zero_wind_glide",
+  "discovered_by": "physics-audit-baseline",
+  "sanity_violation_type": "energy_generation",
+  "root_cause": "Unpowered zero-wind 6DoF glide must satisfy monotonic mechanical energy non-increase (dE/dt <= 0) without artificial thrust or added-mass passivity violation.",
+  "linked_test": "tests/test_physical_laws_audit.py",
+  "genome_or_payload": {
+    "preset": "dart",
+    "launch_speed_mps": 12.0,
+    "launch_pitch_deg": 5.0,
+    "wind_mps": [0.0, 0.0, 0.0],
+    "max_duration_s": 5.0
+  }
+}
