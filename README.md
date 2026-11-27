@@ -1,5 +1,8 @@
 # 3D Paper Airplane Simulator
 
+> **アーキテクチャ分離のお知らせ**: 折り紙形態創発パイプライン（**MILCY / MAP-Elites**）は専用リポジトリ [`minetan1229/Milcy-algorithm`](https://github.com/minetan1229/Milcy-algorithm) へ分離されました。本リポジトリ（`air_simulation`）は軽量 6DoF 飛行シミュレータ＆可視化ツールとして物理モデルを凍結（[`docs/PHYSICS_FREEZE.md`](docs/PHYSICS_FREEZE.md)）して保守します。
+
+
 6自由度（6DoF）の飛行力学シミュレーションをWebGLで可視化するプロジェクトです。紙飛行機特有の低レイノルズ数領域（Re ~ 10³〜10⁵）における非線形空力現象を、学術的な根拠に基づくモデルで再現しています。
 
 FlaskのREST APIとThree.jsを組み合わせ、ブラウザ上でリアルタイムに飛行軌跡・姿勢・気流を表示できます。GPU並列計算（CuPy）と遺伝的アルゴリズムによる最適化探索にも対応しています。

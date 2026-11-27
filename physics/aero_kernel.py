@@ -1463,6 +1463,49 @@ def center_of_pressure_fraction(
 # --------------------------------------------------------------------------
 # 5. Parameter bundle
 # --------------------------------------------------------------------------
+CORE_AERO_FIELDS: Tuple[str, ...] = (
+    "area", "chord", "span", "aspect",
+    "oswald", "cL0", "cl_alpha", "cl_max", "stall_alpha_deg", "cd0",
+    "cm0", "cm_alpha", "cm_q", "elevon_deg",
+)
+
+INTERNAL_AERO_FIELDS: Tuple[str, ...] = (
+    "cl_beta", "cl_roll_rate", "cn_beta", "cn_yaw_rate", "cy_beta",
+    "aileron_deg", "rudder_deg", "elevon_authority", "stall_sharpness",
+    "ground_effect_enabled", "lift_scale", "drag_scale", "asymmetry_cl",
+)
+
+ABLATION_CANDIDATE_AERO_FIELDS: Tuple[str, ...] = (
+    "compressible",
+    "low_re_enabled", "low_re_cl_alpha_gain", "low_re_stall_gain",
+    "low_re_cl_max_gain", "low_re_lsb_gain", "low_re_cd0_gain",
+    "cm_roll_rate", "cm_yaw_rate", "cl_pitch_rate", "cl_yaw_rate",
+    "cn_roll_rate", "cn_pitch_rate",
+    "polhamus_kp", "polhamus_kv", "fold_trailing_deg", "re_cd0_exponent",
+    "cg_offset_x", "cp_shift_gain", "ground_cushion_lift", "ground_pitch_coupling",
+)
+
+
+@dataclass
+class CoreAeroParams:
+    """Slim 14-field public aerodynamic surface for the v1-frozen 6DoF simulator."""
+
+    area: Any = 0.015
+    chord: Any = 0.075
+    span: Any = 0.2
+    aspect: Any = 2.667
+    oswald: Any = 0.75
+    cL0: Any = 0.0
+    cl_alpha: Any = 0.0
+    cl_max: Any = 0.90
+    stall_alpha_deg: Any = 14.0
+    cd0: Any = 0.02
+    cm0: Any = 0.0
+    cm_alpha: Any = 0.0
+    cm_q: Any = 0.0
+    elevon_deg: Any = 0.0
+
+
 @dataclass
 class AeroParams:
     """Per-airframe aerodynamic parameters.
@@ -1557,6 +1600,38 @@ class AeroParams:
         compressible = xp.asarray(self.compressible)
         factor = xp.where(compressible, prandtl_glauert(xp, mach), 1.0)
         return slope * factor
+
+    @classmethod
+    def from_core(cls, core: CoreAeroParams, **overrides: Any) -> "AeroParams":
+        """Build an AeroParams bundle from the 14-field CoreAeroParams surface."""
+        kwargs = {name: getattr(core, name) for name in CORE_AERO_FIELDS}
+        kwargs.update(overrides)
+        return cls(**kwargs)
+
+    @classmethod
+    def frozen_profile(cls, core: CoreAeroParams, **internal_overrides: Any) -> "AeroParams":
+        """Build a v1-frozen AeroParams bundle with all 21 ablation-candidate fields disabled."""
+        kwargs = {name: getattr(core, name) for name in CORE_AERO_FIELDS}
+        kwargs.update(internal_overrides)
+        kwargs.update(
+            compressible=False,
+            low_re_enabled=False,
+            cm_roll_rate=0.0,
+            cm_yaw_rate=0.0,
+            cl_pitch_rate=0.0,
+            cl_yaw_rate=0.0,
+            cn_roll_rate=0.0,
+            cn_pitch_rate=0.0,
+            polhamus_kp=0.0,
+            polhamus_kv=0.0,
+            fold_trailing_deg=0.0,
+            re_cd0_exponent=0.0,
+            cg_offset_x=0.0,
+            cp_shift_gain=0.0,
+            ground_cushion_lift=0.0,
+            ground_pitch_coupling=0.0,
+        )
+        return cls(**kwargs)
 
 
 # --------------------------------------------------------------------------
