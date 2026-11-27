@@ -30,3 +30,10 @@ description: LLMの目視全件スキャンを廃止し、3層ベンチマーク
    - 隔離機体を `tests/adversarial_cases/<case_id>.json` に登録し、最小失敗 `pytest` を作成してから物理式・制約の根本修正を実装・全 PASS を確認する。
 5. **Freeze 判定（収束）**:
    - (a) 最低探索バジェットを消化済み、(b) 既存 `tests/adversarial_cases/` 全 PASS、(c) 5観点サニティで新規 P0/P1 異常機体が **0件** の3条件を満たしたら、`qa-watchdog` が **`VERDICT: FREEZE_PASS`** を宣言して現行フェーズを凍結・終了する。
+
+## 実行ハーネス（決定論的コマンド）
+```bash
+python tools/redteam_sanity_screen.py --input-dir output/v3 --min-budget 20 --json
+python tools/company_loop.py --goal "P0抜け穴封鎖" --live --max-iterations 5
+```
+- Antigravity 内で並列起動する場合は `.agents/workflows/company_loop_workflow.py` を `/run-workflow` から実行する。

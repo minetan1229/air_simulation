@@ -34,6 +34,8 @@ python tools/session_manager.py start --slug <name> [--issue <num>]       # 隔�
 python tools/session_manager.py pytest -- tests -q                        # OS適合basetemp分離pytest
 python tools/ask_advisor.py --model opus4.6 --topic "<slug>" --question "<質問>"
 python tools/check_agents_hygiene.py && ruff check . && python -m compileall physics api tools app.py
+python tools/redteam_sanity_screen.py --input-dir output/v3 --min-budget 20       # 5観点サニティ&Freeze判定
+python tools/company_loop.py --goal "<目標>" --dry-run                            # 閉ループ状態機械(--liveで実稼働)
 python tools/gpu_lock.py --timeout 600 -- python scripts/smoke_test.py
 ```
 
@@ -44,4 +46,5 @@ python tools/gpu_lock.py --timeout 600 -- python scripts/smoke_test.py
 | Red-Teaming監査 / 委譲 / 顧問相談 | `.agents/skills/{redteam-audit-loop,subagent-delegation,escalation-advisor}/SKILL.md` |
 | 検証 / 回収 / 引継 / 通知 | `.agents/skills/{verify-and-test,process-hygiene,loop-handover,notify-webhook,discord-bridge-routing}/SKILL.md` |
 | 階層ドメイン規約（自動読込） | `physics/AGENTS.md` / `geometry/AGENTS.md` / `optimization/AGENTS.md` |
+| 閉ループワークフロー / テレメトリ | `.agents/workflows/company_loop_workflow.py` / `.agents/telemetry/loop_history.jsonl` |
 | 悪役資産 / 状態 / 知見 / 仕様 | `tests/adversarial_cases/` / `.agents/sessions/` / `.agents/Knowledge.md`(grepのみ) / `docs/SPECIFICATION.md` |
