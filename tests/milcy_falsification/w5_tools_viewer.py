@@ -5,6 +5,7 @@ import pytest
 
 
 def test_f12_printable_a4_folding_instructions_uses_candidate_config(tmp_path, monkeypatch):
+    pytest.importorskip("matplotlib")
     from tools.generate_printable_a4 import (
         render_a4_printable_sheet,
         build_folding_instructions,

@@ -6,6 +6,8 @@ import itertools
 from pathlib import Path
 from typing import List, Tuple
 
+import pytest
+
 from core.interfaces import (
     MAX_FOLD_STEPS,
     ParametricKeelSpec,
@@ -62,6 +64,7 @@ def test_i2_05_a4_elevon_page1_page2_consistency_and_symmetric_lock_styles(
     tmp_path: Path, monkeypatch
 ) -> None:
     """Page 1 SVG creases, Page 2 fallback instructions, and lock/cap crease styles must be consistent."""
+    pytest.importorskip("matplotlib")
     # 1. Symmetric styling for keel_lock and nose_cap regardless of raw_mountain
     assert (
         resolve_canonical_crease_style("keel_lock_l", True)[0]
