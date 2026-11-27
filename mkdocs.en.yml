@@ -111,7 +111,6 @@ nav:
       - OpenAPI (Swagger UI): api.md
   - Development & Ops:
       - Development Guide: development.md
-      - MILCY Project Guide (JA): MILCY_PROJECT_GUIDE.md
       - GA V2 Architecture (JA): GA_V2_ARCHITECTURE.md
       - CFD Roadmap: CFD_ROADMAP.md
       - Paper Registry Pipeline (JA): PAPER_REGISTRY_PIPELINE.md

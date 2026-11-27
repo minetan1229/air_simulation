@@ -493,7 +493,7 @@ milcy はただ多様なだけでなく、人間のように賢く折って飛�
 4. **実戦バッチ評価**
    - 乱気流や突風の中でも安定して飛べるかを本物そっくりの6DoF物理エンジンで検証！
 
-👉 詳しいストーリーと動かし方は、専用ガイド [高校生でもわかる！AI紙飛行機研究所「milcy」完全入門](MILCY_FOR_HIGH_SCHOOL.md) を読んでみてね！
+👉 詳しいストーリーと動かし方は、専用ガイド [高校生でもわかる！AI紙飛行機研究所「milcy」完全入門](https://github.com/minetan1229/Milcy-algorithm/blob/main/docs/MILCY_FOR_HIGH_SCHOOL.md) を読んでみてね！
 
 ---
 
@@ -531,8 +531,8 @@ milcy はただ多様なだけでなく、人間のように賢く折って飛�
 ## さらに詳しく知りたい人へ
 
 - **航空・計算科学大用語集（完全版・全281項目）**: [docs/HIGH_SCHOOL_GLOSSARY_MASTER.md](HIGH_SCHOOL_GLOSSARY_MASTER.md)
-- **milcy完全入門（高校生向け）**: [docs/MILCY_FOR_HIGH_SCHOOL.md](MILCY_FOR_HIGH_SCHOOL.md)
-- **milcy実践ガイド**: `docs/MILCY_PROJECT_GUIDE.md`
+- **milcy完全入門（高校生向け）**: [docs/https://github.com/minetan1229/Milcy-algorithm/blob/main/docs/MILCY_FOR_HIGH_SCHOOL.md](https://github.com/minetan1229/Milcy-algorithm/blob/main/docs/MILCY_FOR_HIGH_SCHOOL.md)
+- **milcy実践ガイド**: `https://github.com/minetan1229/Milcy-algorithm/blob/main/docs/MILCY_PROJECT_GUIDE.md`
 - **技術仕様書**: `docs/GA_ALGORITHM.md` （数式・コード参照付き）
 - **設定の全て**: `physics/ga_config.py` （単一正本）
 - **実装コード**: `physics/ga_domain.py` （エンジン本体）

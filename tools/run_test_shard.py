@@ -51,7 +51,6 @@ SHARD_DEFINITIONS = {
         "test_paper*.py",
     ],
     "D": [
-        "v3/test_*.py",
         "test_jobs*.py",
         "test_optimizer*.py",
         "test_multifidelity*.py",

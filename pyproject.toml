@@ -43,6 +43,6 @@ remote = [
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["api*", "physics*", "tools*", "core*", "geometry*", "optimization*", "milcy*", "v3*"]
+include = ["api*", "physics*", "tools*", "core*", "geometry*", "optimization*"]
 exclude = ["tests*", "docs*", "static*", "templates*", "archive*", "skill*", "config*", "search*"]
 

@@ -55,7 +55,6 @@ TEST_BUNDLES: Dict[str, Dict[str, Any]] = {
     },
     "Worker-7-V3-Smoke": {
         "commands": [
-            [sys.executable, "-m", "pytest", "tests/v3", "-q"],
             [sys.executable, "scripts/smoke_test.py"],
         ],
         "kilo_prompt": "v3 MCTS + 3D MAP-Elites パイプラインおよび 14 ステージ E2E スモークテストの総合合格判定を100文字以内で評価してください。",
