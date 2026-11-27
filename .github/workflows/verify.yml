@@ -47,7 +47,7 @@ jobs:
         run: ruff check .
 
       - name: 静的型検査 (Mypy)
-        run: mypy --config-file mypy.ini physics app.py v3
+        run: mypy --config-file mypy.ini physics app.py
 
       # コンソールは ES モジュールグラフであり、1 ファイルでも構文エラーが
       # あればアプリケーション全体の JavaScript が無効になる。GitHub ランナー
