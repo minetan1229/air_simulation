@@ -67,4 +67,4 @@ This document summarizes common issues and solutions during environment setup, l
 
 ---
 
-[Back to README](../README.md)
+[Back to README](https://github.com/minetan1229/air_simulation/blob/master/README.md)

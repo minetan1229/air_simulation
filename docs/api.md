@@ -252,7 +252,7 @@ curl -X POST http://127.0.0.1:5000/api/v1/optimizer/run \
   -d '{"algorithm":"nsga2","objectives":["max_distance"],"population_size":24,"generations":10}'
 ```
 
-詳細は [examples/quick_simulation.py](../examples/quick_simulation.py) を参照。
+詳細は [examples/quick_simulation.py](https://github.com/minetan1229/air_simulation/blob/master/examples/quick_simulation.py) を参照。
 
 ---
 
@@ -265,4 +265,4 @@ curl -X POST http://127.0.0.1:5000/api/v1/optimizer/run \
 
 ---
 
-[README に戻る](../README.md)
+[README に戻る](https://github.com/minetan1229/air_simulation/blob/master/README.md)

@@ -97,5 +97,5 @@ python tools/check_aero_kernel_parity.py
 
 - [docs/SPECIFICATION.md](./SPECIFICATION.md) Technical Specifications Canonical
 - [docs/PHYSICS_MODELS.md](./PHYSICS_MODELS.md) Coefficients & Formulas Canonical
-- [PHYSICS_PAPER_CONFORMANCE_AUDIT.md](../PHYSICS_PAPER_CONFORMANCE_AUDIT.md) Paper Conformance Audit Records
+- [PHYSICS_PAPER_CONFORMANCE_AUDIT.md](https://github.com/minetan1229/air_simulation/blob/master/PHYSICS_PAPER_CONFORMANCE_AUDIT.md) Paper Conformance Audit Records
 - [docs/development.md](./development.md) Test Execution Procedures

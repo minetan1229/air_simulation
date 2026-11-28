@@ -9,11 +9,15 @@ if hasattr(sys.stderr, "reconfigure"):
     sys.stderr.reconfigure(encoding="utf-8")
 
 def run(cmd):
-    res = subprocess.run(cmd, shell=True, capture_output=True, text=True, encoding="utf-8")
+    res = subprocess.run(cmd, shell=False, capture_output=True, text=True, encoding="utf-8")
     return res.stdout, res.stderr, res.returncode
 
 def main():
-    out, err, code = run("gh issue list --state closed --limit 300 --repo minetan1229/air_simulation --json number,title,closedAt,comments,body")
+    out, err, code = run([
+        "gh", "issue", "list", "--state", "closed", "--limit", "300",
+        "--repo", "minetan1229/air_simulation",
+        "--json", "number,title,closedAt,comments,body",
+    ])
     if code != 0:
         print("Error:", err)
         return
@@ -36,7 +40,7 @@ def main():
         real_shas = []
         fake_shas = []
         for s in set(shas):
-            _, _, rc = run(f"git cat-file -e {s}")
+            _, _, rc = run(["git", "cat-file", "-e", s])
             if rc == 0:
                 real_shas.append(s)
             else:

@@ -1,5 +1,5 @@
 # リモート計算資源（GPU環境）構築・保守手順書
-> [← README に戻る](../README.md) / [docs 索引](./README.md)
+> [← README に戻る](https://github.com/minetan1229/air_simulation/blob/master/README.md) / [docs 索引](index.md)
 
 > **この文書の役割:** リモート GPU 計算機の構築・保守・連携手順の記録。
 > **認証情報はリポジトリ直下の `.env`（gitignore 済み）にある `REMOTE_SSH_HOST` / `REMOTE_SSH_USER` / `REMOTE_SSH_PASSWORD` から読みます。`.env.example` にテンプレートあり。本書に平文を残さないこと。**

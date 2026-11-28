@@ -1,6 +1,6 @@
 # Documentation Index (docs Index)
 
-> [← Back to README](../README.md)
+> [← Back to README](https://github.com/minetan1229/air_simulation/blob/master/README.md)
 
 Document list in this directory. Canonical sources are consolidated into 3 documents:
 
@@ -68,7 +68,7 @@ Others are categorized by role. File names follow historical inheritance (lowerc
 | Document | When to Read | Status |
 | :--- | :--- | :--- |
 | [CODE_REVIEW_FINDINGS.md](./CODE_REVIEW_FINDINGS.md) | Past reviews (374 items / 69 re-aggregated) records | History (911 lines, with TOC) |
-| [`../PHYSICS_PAPER_CONFORMANCE_AUDIT.md`](../PHYSICS_PAPER_CONFORMANCE_AUDIT.md) | Paper conformance audit records (P0–P3 completion ledger) | History (placed at repo root) |
+| [`../PHYSICS_PAPER_CONFORMANCE_AUDIT.md`](https://github.com/minetan1229/air_simulation/blob/master/PHYSICS_PAPER_CONFORMANCE_AUDIT.md) | Paper conformance audit records (P0–P3 completion ledger) | History (placed at repo root) |
 | [`../archive/`](../archive/) | Legacy audit/repair records (3 items) | Archive |
 
 ## 6. Agent Protocols & Legacy Wiki (Development Foundation)
@@ -97,4 +97,4 @@ Others are categorized by role. File names follow historical inheritance (lowerc
 
 ---
 
-[Back to README](../README.md)
+[Back to README](https://github.com/minetan1229/air_simulation/blob/master/README.md)

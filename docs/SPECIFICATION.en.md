@@ -1,5 +1,5 @@
 # 3D Paper Airplane High-Performance 6DoF Flight Simulator & Aero-Structural Engine Specification
-> [← Back to README](../README.md) / [docs Index](./README.md)
+> [← Back to README](https://github.com/minetan1229/air_simulation/blob/master/README.md) / [docs Index](index.md)
 
 > **Role of This Document**: Canonical source for this project's technical specifications, physics laws, constants, and API. Individual formula provenance and applicability limits are in [PHYSICS_MODELS.md](./PHYSICS_MODELS.md); future 3D CFD plans in [CFD_ROADMAP.md](./CFD_ROADMAP.md).
 > **Read First**: [architecture.md](./architecture.md) (overview) → [PHYSICS_MODELS.md](./PHYSICS_MODELS.md) (physics canonical per quantity)

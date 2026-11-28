@@ -1,5 +1,5 @@
 # 3D Paper Airplane High-Performance 6DoF Flight Simulator & Aero-Structural Engine Specification
-> [← README に戻る](../README.md) / [docs 索引](./README.md)
+> [← README に戻る](https://github.com/minetan1229/air_simulation/blob/master/README.md) / [docs 索引](index.md)
 
 > **この文書の役割:** 本プロジェクトの技術仕様・物理法則・定数・API の**正本**。数式の個別典拠と適用限界は [PHYSICS_MODELS.md](./PHYSICS_MODELS.md) が、将来の 3D CFD 計画は [CFD_ROADMAP.md](./CFD_ROADMAP.md) が受け持つ。
 > **先に読む:** [architecture.md](./architecture.md)（全体俯瞰）→ [PHYSICS_MODELS.md](./PHYSICS_MODELS.md)（物理量ごとの正本）

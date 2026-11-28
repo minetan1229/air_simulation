@@ -1,7 +1,7 @@
 """Auto-Investigate domain for the 3D Paper Airplane CFD Simulator.
 
 This module provides backwards compatibility with all previous imports
-by re-exporting the modularised components from :mod:`physics.investigate`.
+by re-exporting the modularised components from :mod:`optimization.investigate`.
 """
 
 from __future__ import annotations

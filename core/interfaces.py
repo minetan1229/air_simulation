@@ -453,24 +453,3 @@ class RobustnessEvaluatorProtocol(Protocol):
     """Evaluates top candidates under turbulence and throw perturbations."""
 
     def evaluate_candidate(self, candidate: AircraftCandidate) -> RobustnessReport: ...
-
-
-# ============================================================================
-# 8. MILCY ALGORITHM (FORMERLY V3) COMPREHENSIVE PIPELINE PROTOCOL
-# ============================================================================
-@runtime_checkable
-class MilcyPipelineProtocol(Protocol):
-    """Protocol for the milcy algorithm pipeline (MAP-Elites + MCTS + Nelder-Mead)."""
-
-    def run(
-        self,
-        iterations: int = ...,
-        seed: int = ...,
-        output_dir: str = ...,
-    ) -> Sequence[AircraftCandidate]: ...
-
-
-# Type Aliases for milcy algorithm
-MilcyAlgorithmProtocol = MilcyPipelineProtocol
-V3PipelineProtocol = MilcyPipelineProtocol
-
