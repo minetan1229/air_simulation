@@ -56,9 +56,11 @@ def main() -> int:
         cmd.extend(["-m", marker])
 
     cmd.extend([
+        "--cov=core",
         "--cov=physics",
         "--cov=geometry",
         "--cov=optimization",
+        "--cov=infrastructure",
         "--cov=api",
         "--cov-report=term-missing:skip-covered",
     ])

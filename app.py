@@ -168,13 +168,25 @@ def _check_authentication() -> Optional[Tuple[Response, int]]:
 def _is_origin_allowed(origin: str) -> bool:
     if not origin:
         return False
-    # Standard local origins
+    from urllib.parse import urlparse
+
+    try:
+        parsed = urlparse(origin)
+        port = parsed.port
+    except ValueError:
+        return False
+
+    # Strict local-origin check (scheme + exact hostname + optional valid port, no credentials/path)
     if (
-        origin.startswith("http://127.0.0.1:")
-        or origin.startswith("http://localhost:")
-        or origin.startswith("https://127.0.0.1:")
-        or origin.startswith("https://localhost:")
-        or origin in ("http://127.0.0.1", "http://localhost")
+        parsed.scheme in ("http", "https")
+        and parsed.hostname in ("127.0.0.1", "localhost")
+        and parsed.username is None
+        and parsed.password is None
+        and parsed.path in ("", "/")
+        and not parsed.params
+        and not parsed.query
+        and not parsed.fragment
+        and (port is None or 1 <= port <= 65535)
     ):
         return True
 
@@ -307,6 +319,16 @@ def main() -> None:
     except Exception as exc:
         log.warning("GPU warmup thread skipped: %s", exc)
 
+    if (
+        os.environ.get("ENV", "").strip().lower() == "production"
+        and args.host not in ("127.0.0.1", "localhost", "::1")
+        and not os.environ.get("API_KEY", "").strip()
+    ):
+        log.warning(
+            "Running in production on non-loopback host '%s' without API_KEY configured; "
+            "set API_KEY and prefer a WSGI server (e.g. gunicorn).",
+            args.host,
+        )
     log.info("starting on http://%s:%d", args.host, args.port)
     app.run(host=args.host, port=args.port, debug=args.debug, threaded=True)
 

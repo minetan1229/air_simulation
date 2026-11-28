@@ -1085,7 +1085,7 @@ class Island:
             "history": list(self.history),
             "max_fold_steps": int(self.max_fold_steps),
             "micro_flaps": bool(self.micro_flaps),
-            "rng_state": _encode_pickle(self.rng.getstate()),
+            "rng_state": _encode_rng_state(self.rng.getstate()),
         }
 
     @classmethod
@@ -1094,7 +1094,7 @@ class Island:
         rng = random.Random(seed)
         state = payload.get("rng_state")
         if state:
-            rng.setstate(_decode_pickle(state))
+            rng.setstate(_decode_rng_state(state))
         cma = CMAES.from_dict(dict(payload["cma"]))
         fitness = payload.get("best_fitness")
         island = cls(
@@ -1114,20 +1114,29 @@ class Island:
         return island
 
 
-def _encode_pickle(value: Any) -> str:
-    """Encode a python object as a base64 string (for the JSON checkpoint)."""
-    import base64
-    import pickle
+def _encode_rng_state(state: Any) -> Dict[str, Any]:
+    """Encode ``random.Random.getstate()`` as pure JSON-safe primitives."""
+    version, internal_state, gauss_next = state
+    return {
+        "version": int(version),
+        "state": [int(x) for x in internal_state],
+        "gauss_next": float(gauss_next) if gauss_next is not None else None,
+    }
 
-    return base64.b64encode(pickle.dumps(value)).decode("ascii")
 
-
-def _decode_pickle(value: str) -> Any:
-    """The inverse of :func:`_encode_pickle`."""
-    import base64
-    import pickle
-
-    return pickle.loads(base64.b64decode(value.encode("ascii")))
+def _decode_rng_state(value: Any) -> Tuple[int, Tuple[int, ...], Optional[float]]:
+    """Decode a JSON-serialized ``random.Random`` state without using pickle."""
+    if not isinstance(value, dict) or "version" not in value or "state" not in value:
+        raise ValueError("unsupported rng_state format; pickle deserialization is disabled")
+    raw_state = value["state"]
+    if not isinstance(raw_state, list):
+        raise ValueError("invalid rng_state.state; expected list of integers")
+    gauss_next = value.get("gauss_next")
+    return (
+        int(value["version"]),
+        tuple(int(x) for x in raw_state),
+        float(gauss_next) if gauss_next is not None else None,
+    )
 
 
 # --------------------------------------------------------------------------

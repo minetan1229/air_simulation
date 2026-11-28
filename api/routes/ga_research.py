@@ -147,22 +147,37 @@ def _state(run_id: str) -> GARunState:
 
 
 def _safe_ga_path(path_str: str, param_name: str, base_dir: Optional[str] = None) -> str:
-    """Validate that path_str does not traverse outside the allowed directory."""
+    """Validate that path_str stays strictly inside an allowed directory.
+
+    Both relative and absolute paths are confined to ``base_dir`` (defaulting to
+    the current working directory) or any directory explicitly allowlisted via
+    the ``GA_ALLOWED_DIRS`` environment variable (os.pathsep-separated).
+    """
     if not path_str or not isinstance(path_str, str):
         raise BadRequest(f"invalid path for '{param_name}'")
     from pathlib import Path
     if ".." in path_str.replace("\\", "/").split("/"):
         raise BadRequest(f"path '{path_str}' for '{param_name}' contains parent-directory reference '..'")
+    root = Path(base_dir or os.getcwd()).resolve()
+    allowed_roots = [root]
+    extra_dirs = os.environ.get("GA_ALLOWED_DIRS", "").strip()
+    if extra_dirs:
+        for entry in extra_dirs.split(os.pathsep):
+            entry = entry.strip()
+            if entry:
+                allowed_roots.append(Path(entry).resolve())
     p = Path(path_str)
-    if not p.is_absolute():
-        root = Path(base_dir or os.getcwd()).resolve()
+    try:
+        candidate = p.resolve() if p.is_absolute() else (root / p).resolve()
+    except RuntimeError as exc:
+        raise BadRequest(f"path '{path_str}' for '{param_name}' could not be resolved: {exc}") from exc
+    for allowed_root in allowed_roots:
         try:
-            candidate = (root / p).resolve()
-            candidate.relative_to(root)
-        except (ValueError, RuntimeError) as exc:
-            raise BadRequest(f"path '{path_str}' for '{param_name}' escapes the allowed directory: {exc}") from exc
-        return str(candidate)
-    return str(p.resolve())
+            candidate.relative_to(allowed_root)
+            return str(candidate)
+        except ValueError:
+            continue
+    raise BadRequest(f"path '{path_str}' for '{param_name}' escapes the allowed directory")
 
 
 def _overrides_from_payload(payload: Dict[str, Any]) -> Dict[str, Any]:

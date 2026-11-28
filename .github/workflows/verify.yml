@@ -2,11 +2,14 @@ name: Python Code Verification
 
 on:
   push:
-    # The genetic-project and v3 branches are isolated from master, so they
-    # have to be verified too.
-    branches: [ "master", "genetic-project", "v3" ]
-  pull_request:
-    branches: [ "master", "v3" ]
+    # Run coverage & automated issue lifecycle on master pushes only;
+    # PRs and feature branches are already verified by CI Pipeline (ci.yml).
+    branches: [ "master" ]
+  workflow_dispatch:
+
+concurrency:
+  group: verify-${{ github.ref }}
+  cancel-in-progress: true
 
 # The branch guard refuses to run the suite on a protected branch.  Inside CI
 # the checkout is the triggering ref - ``actions/checkout`` creates a local
@@ -21,12 +24,13 @@ jobs:
   verify:
     name: Lint, Type Check & Test
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     permissions:
       contents: read
       issues: write
     steps:
       - name: リポジトリのコードを取得
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Python 3.11 環境のセットアップ
         uses: actions/setup-python@v6
@@ -47,7 +51,7 @@ jobs:
         run: ruff check .
 
       - name: 静的型検査 (Mypy)
-        run: mypy --config-file mypy.ini physics app.py
+        run: mypy --config-file mypy.ini core physics geometry optimization infrastructure api app.py
 
       # コンソールは ES モジュールグラフであり、1 ファイルでも構文エラーが
       # あればアプリケーション全体の JavaScript が無効になる。GitHub ランナー
@@ -68,14 +72,14 @@ jobs:
         run: python scripts/smoke_test.py
 
       - name: テスト失敗時のIssue起票
-        if: failure() && steps.pytest_step.outcome == 'failure'
+        if: failure() && steps.pytest_step.outcome == 'failure' && github.event_name == 'push' && github.ref == 'refs/heads/master'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TEST_SUMMARY_FILE: pytest_failure_summary.txt
         run: python tools/create_failure_issue.py
 
       - name: テスト成功時の解決済みIssue自動クローズ
-        if: success()
+        if: success() && github.event_name == 'push' && github.ref == 'refs/heads/master'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: python tools/close_resolved_issue.py --yes

@@ -13,7 +13,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: リポジトリのコードを取得
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
       - name: 依存関係の変更を確認
         uses: actions/dependency-review-action@v5
         with:

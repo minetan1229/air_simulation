@@ -97,5 +97,5 @@ python tools/check_aero_kernel_parity.py
 
 - [docs/SPECIFICATION.md](./SPECIFICATION.md) 技術仕様の正本
 - [docs/PHYSICS_MODELS.md](./PHYSICS_MODELS.md) 係数・式の正本
-- [PHYSICS_PAPER_CONFORMANCE_AUDIT.md](../PHYSICS_PAPER_CONFORMANCE_AUDIT.md) 論文一致度監査の記録
+- [PHYSICS_PAPER_CONFORMANCE_AUDIT.md](https://github.com/minetan1229/air_simulation/blob/master/PHYSICS_PAPER_CONFORMANCE_AUDIT.md) 論文一致度監査の記録
 - [docs/development.md](./development.md) テスト実行手順
